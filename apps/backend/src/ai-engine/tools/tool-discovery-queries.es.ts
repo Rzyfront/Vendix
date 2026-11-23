@@ -1,3 +1,11 @@
+import { DOCUMENTS_DISCOVERY_QUERIES_ES } from './domains/documents.discovery.es';
+import { CRM_CUSTOMERS_DISCOVERY_QUERIES_ES } from './domains/crm-customers.discovery.es';
+import { CRM_PIPELINE_DISCOVERY_QUERIES_ES } from './domains/crm-pipeline.discovery.es';
+import { CRM_SEGMENTS_DISCOVERY_QUERIES_ES } from './domains/crm-segments.discovery.es';
+import { CRM_TAGS_DISCOVERY_QUERIES_ES } from './domains/crm-tags.discovery.es';
+import { HELP_DISCOVERY_QUERIES_ES } from './domains/help.discovery.es';
+import { CRM_TASKS_CAMPAIGNS_DISCOVERY_QUERIES_ES } from './domains/crm-tasks-campaigns.discovery.es';
+
 /**
  * Consultas sintéticas versionadas (español colombiano) con las que un comerciante pide
  * lo que hace cada herramienta. Generadas OFFLINE una sola vez con LLM (2026-10-19,
@@ -526,6 +534,16 @@ export const TOOL_DISCOVERY_QUERIES_ES: Readonly<
     'Necesito dar de baja unas unidades vencidas',
     'Hazme la corrección de conteo porque faltan unidades en esa sede',
   ],
+  create_stock_transfer: [
+    'Pásame 10 cargadores, 5 audífonos y 3 forros de la bodega principal a la tienda',
+    'Mueve ya estos productos a la otra bodega, varios de una',
+    'Traslada a la sede norte 2 camisetas talla M y 3 talla L',
+    'Oe, haz un traslado masivo de la bodega a la tienda del centro',
+    'Prepara una transferencia con remisión para mandar mercancía a la otra sede',
+    'Deja lista una orden de traslado pendiente de aprobar con estos productos',
+    'Saca esta mercancía para un cliente externo con su remisión de salida',
+    'Necesito pasar inventario entre bodegas, son como veinte referencias',
+  ],
   create_store_role: [
     'Necesito crear un rol nuevo para los vendedores de la tienda',
     'Quiero armar un perfil de cajero con permisos específicos',
@@ -657,6 +675,14 @@ export const TOOL_DISCOVERY_QUERIES_ES: Readonly<
     "Muéstrame los proveedores que coincidan con 'Lácteos'",
     'Lista mis proveedores',
     '¿Qué proveedores tengo registrados?',
+  ],
+  find_transfer_products: [
+    '¿Cuántos cargadores tengo en la bodega para pasar a la tienda?',
+    'Busca estos productos en la bodega principal antes de trasladarlos',
+    '¿Qué variantes de la camiseta hay disponibles para mover a la otra sede?',
+    'Mira si alcanza el stock en bodega para mandar estos productos a la tienda',
+    'Oe, cuánto hay disponible de esto en origen y en destino',
+    'Antes del traslado dime qué hay de cada producto en la bodega',
   ],
   fire_kitchen_order: [
     'Manda esos platos a la cocina ya',
@@ -1463,6 +1489,16 @@ export const TOOL_DISCOVERY_QUERIES_ES: Readonly<
     'qué documentos tengo subidos en este chat',
     'muéstrame los archivos que te mandé',
     'necesito ver los adjuntos que ya te pasé',
+  ],
+  read_attachment: [
+    'lee el excel que te subí',
+    'qué dice el archivo que adjunté',
+    'muéstrame las filas de la hoja que te mandé',
+    'revisa el CSV que subí y dime cuántas filas tiene',
+    'abre el documento de Word que te pasé',
+    'dame las siguientes filas del archivo',
+    'léeme el PDF que adjunté',
+    'analiza la hoja de cálculo que subí al chat',
   ],
   list_available_permissions: [
     'qué permisos existen',
@@ -3011,6 +3047,24 @@ export const TOOL_DISCOVERY_QUERIES_ES: Readonly<
     'Dame el total de cartera vencida',
     'Necesito un indicador de stock bajo',
   ],
+  vex_render_timeline: [
+    'Muéstrame la línea de tiempo de esta orden',
+    'Hazme un historial de eventos del pedido',
+    'Oe, ponme la cronología de los pagos',
+    'Quiero ver la secuencia de cambios de estado',
+    'Parce, muéstrame el historial en línea de tiempo',
+    'Necesito una línea de tiempo de la auditoría',
+    'Dame la cronología de lo que pasó con esa factura',
+  ],
+  vex_render_list: [
+    'Muéstrame una lista de tarjetas con los pedidos pendientes',
+    'Hazme una lista con los clientes y su estado',
+    'Oe, ponme las alertas en una lista',
+    'Quiero ver los registros como tarjetas',
+    'Parce, muéstrame una lista con detalle de cada cliente',
+    'Necesito una lista de los pedidos con su estado',
+    'Dame una lista de las órdenes atrasadas',
+  ],
   vex_render_table: [
     'Muéstrame una tabla de ventas por día',
     'Hazme una tabla con los productos de stock bajo',
@@ -3108,6 +3162,34 @@ export const TOOL_DISCOVERY_QUERIES_ES: Readonly<
     'Chequee que los roles del flujo sí existan en la tienda',
     'Qué errores tiene la definición del flujo 12',
   ],
+  // F7/T48 — cálculo exacto (escritas a mano, sin datos de clientes).
+  compute: [
+    '¿Cuánto creció este mes frente al anterior en porcentaje?',
+    'Calcula el margen de ganancia con estos ingresos y costos',
+    'Qué porcentaje representa esto del total',
+    'Hazme una proyección simple del próximo mes',
+    'Saca el promedio y la variación de estas cifras',
+    'Cuánto es el 19% de esa cifra',
+  ],
+  // F9/T52 — análisis estadístico con código Python en Lambda aislada.
+  run_analysis: [
+    'Proyecta las ventas del próximo mes con mis últimos 12 meses',
+    'Haz una regresión lineal o tendencia de ventas por mes',
+    'Calcula la correlación entre descuentos y volumen de ventas',
+    'Segmenta mis clientes por frecuencia de compra y ticket promedio',
+    'Analiza con Python y pandas esta tabla de ventas históricas',
+    'Corre un análisis estadístico avanzado sobre los bloques de esta conversación',
+  ],
+  // F1/T5 — sugerencia de seguimiento (escritas a mano, sin datos de clientes).
+  suggest_followup: [
+    'El viernes llamo al proveedor para cuadrar el pedido',
+    'Quedamos en que el cliente pasa a pagar el martes',
+    'Mañana tengo que revisar si llegó la mercancía',
+    'Le dije a la distribuidora que le confirmaba la otra semana',
+    'Acordamos con el proveedor un descuento por pronto pago',
+    'Hay que volver a mirar ese precio en quince días',
+    'El contador me pidió los soportes antes del lunes',
+  ],
   // QUI-580 — bitácora personal de recordatorios (escritas a mano, sin datos de clientes).
   complete_reminder: [
     'Ya revisé el stock, marca ese recordatorio como hecho',
@@ -3146,4 +3228,13 @@ export const TOOL_DISCOVERY_QUERIES_ES: Readonly<
     'Quítale la fecha a ese recordatorio',
     'Cámbiale el título al recordatorio de las ventas',
   ],
+  // QUI-1042: CRM family. Pure data files next to each tool factory, written
+  // by hand with the same colloquial register (no customer data).
+  ...CRM_CUSTOMERS_DISCOVERY_QUERIES_ES,
+  ...CRM_TAGS_DISCOVERY_QUERIES_ES,
+  ...HELP_DISCOVERY_QUERIES_ES,
+  ...CRM_SEGMENTS_DISCOVERY_QUERIES_ES,
+  ...CRM_PIPELINE_DISCOVERY_QUERIES_ES,
+  ...CRM_TASKS_CAMPAIGNS_DISCOVERY_QUERIES_ES,
+  ...DOCUMENTS_DISCOVERY_QUERIES_ES,
 };

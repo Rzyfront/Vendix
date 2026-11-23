@@ -102,9 +102,12 @@ describe('module-industries — parity and map invariants', () => {
     }
   });
 
-  it('QUI-1001: scheduled orders and add-ons (option groups) are restaurant-only vertical keys, always enforced', () => {
+  it('QUI-1001: add-ons are restaurant-only and scheduled orders restaurant + manufacturing, always enforced', () => {
+    expect(MODULE_INDUSTRIES['products_option_groups']).toEqual(['restaurant']);
+    expect(MODULE_INDUSTRIES['orders_scheduled']).toEqual(['restaurant', 'manufacturing']);
+    expect(industryAllowsKey('orders_scheduled', ['manufacturing'])).toBe(true);
+    expect(industryAllowsKey('products_option_groups', ['manufacturing'])).toBe(false);
     for (const key of ['orders_scheduled', 'products_option_groups']) {
-      expect(MODULE_INDUSTRIES[key]).toEqual(['restaurant']);
       expect(VERTICAL_MODULE_KEYS).toContain(key);
       expect(industryAllowsKey(key, ['restaurant'])).toBe(true);
       expect(industryAllowsKey(key, ['retail', 'restaurant'])).toBe(true);
@@ -112,5 +115,19 @@ describe('module-industries — parity and map invariants', () => {
       expect(isIndustryAlwaysEnforced(key)).toBe(true);
       expect(ENFORCED_INDUSTRY_KEYS).toContain(key);
     }
+  });
+
+  it('QUI-1001: Producción and KDS are restaurant-only vertical keys under the restaurant group the legacy lane hides', () => {
+    for (const key of ['restaurant_ops_production', 'restaurant_ops_kds']) {
+      expect(MODULE_INDUSTRIES[key]).toEqual(['restaurant']);
+      expect(VERTICAL_MODULE_KEYS).toContain(key);
+      expect(industryAllowsKey(key, ['restaurant'])).toBe(true);
+      expect(industryAllowsKey(key, ['retail', 'restaurant'])).toBe(true);
+      expect(industryAllowsKey(key, ['retail'])).toBe(false);
+      expect(industryAllowsKey(key, ['manufacturing'])).toBe(false);
+    }
+    // The sidebar group "Operaciones de Restaurante" hides in audit mode too.
+    expect(MODULE_INDUSTRIES.restaurant_ops).toEqual(['restaurant']);
+    expect(LEGACY_INDUSTRY_GATED_KEYS).toContain('restaurant_ops');
   });
 });

@@ -61,6 +61,12 @@ export interface PromotionQuoteInput {
    */
   manual_promotion_ids?: number[];
   /**
+   * Aditivo. Restringe la cotización a estas promociones (ignora el resto de
+   * automáticas). Lo usa la validación de una promoción puntual para obtener
+   * su descuento con exactamente el mismo cálculo del cobro.
+   */
+  only_promotion_ids?: number[];
+  /**
    * Aditivo. Al RE-cotizar una orden ya persistida, los usos que esa misma
    * orden registró (`order_promotions` y su parte de `usage_count`) no cuentan
    * contra `per_customer_limit` ni `usage_limit`. Sin la opción, el
@@ -254,6 +260,17 @@ export interface ActiveProductPromotion {
   /** Short label that the UI badge can show ("-20% OFF", "$5.000 OFF"). */
   badge_label: string;
   priority: number;
+  /**
+   * Flat promos only. Cap of the discount over the WHOLE scoped total (not
+   * per unit); `null` when the promotion has no cap. Lets a client estimate
+   * a multi-unit total with the same rule `quoteDiscounts` charges.
+   */
+  max_discount_amount?: number | null;
+  /**
+   * Flat promos only. Minimum cart subtotal `quoteDiscounts` requires; the
+   * listing does NOT evaluate it (no cart here). `null` when not required.
+   */
+  min_purchase_amount?: number | null;
   /**
    * `true` ONLY for `quantity_tiered` promos. Lets the frontend branch on
    * the rule type without re-deriving it from `promotion_quantity_tiers`.

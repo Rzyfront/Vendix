@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { Component, computed, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
 
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
@@ -8,7 +8,7 @@ import { ScheduledOrdersSettingsForm } from '../components/scheduled-orders-sett
 import { CreditRemindersSettingsForm } from '../components/credit-reminders-settings-form/credit-reminders-settings-form.component';
 import { PromotionsSettingsForm } from '../components/promotions-settings-form/promotions-settings-form.component';
 import { SettingsSectionComponent } from '../components/settings-section/settings-section.component';
-import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import { MenuFilterService } from '../../../../../../core/services/menu-filter.service';
 import { GeneralSettingsStore } from '../services/general-settings.store';
 
 /**
@@ -76,7 +76,7 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
           (settingsChange)="store.onSectionChange('credit_reminders', $event)" />
       </app-settings-section>
 
-      @if (authFacade.isRestaurant()) {
+      @if (scheduledOrdersAvailable()) {
         <!-- Pedidos programados y Adiciones -->
         <app-settings-section
           anchorId="section-scheduled-orders"
@@ -146,6 +146,13 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
 })
 export class SalesSettingsPage {
   protected readonly store = inject(GeneralSettingsStore);
-  /** QUI-1001: Pedidos programados y Adiciones are restaurant-only. */
-  protected readonly authFacade = inject(AuthFacade);
+  private readonly menuFilter = inject(MenuFilterService);
+  /**
+   * QUI-1001: Pedidos programados (and its Adiciones toggles) follow the
+   * `orders_scheduled` industry rule, restaurant only, through the same helper
+   * as the sidebar. Hiding the section never touches the stored settings.
+   */
+  protected readonly scheduledOrdersAvailable = computed(() =>
+    this.menuFilter.industryAllowsModule('orders_scheduled'),
+  );
 }

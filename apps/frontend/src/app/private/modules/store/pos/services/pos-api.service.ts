@@ -173,9 +173,17 @@ export class PosApiService {
     customerId?: number,
     productIds?: number[],
     categoryIds?: number[],
-    items?: Array<{ product_id?: number; category_ids?: number[]; line_total: number }>,
+    items?: Array<{
+      product_id?: number;
+      category_ids?: number[];
+      line_total: number;
+      quantity?: number;
+      unit_price?: number;
+    }>,
   ): Observable<any> {
-    return this.http.post(`${this.apiUrl}/store/coupons/validate`, {
+    // Casilla única: valida un cupón o, si no hay cupón con ese código, una
+    // promoción con ese código (mismo permiso y mismo cuerpo que cupones).
+    return this.http.post(`${this.apiUrl}/store/promotions/discount-code/validate`, {
       code,
       cart_subtotal: cartSubtotal,
       customer_id: customerId,

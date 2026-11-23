@@ -9,7 +9,9 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
 import { DialogService } from '../../../../../../shared/components/dialog/dialog.service';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import {
+  CreateReminderPayload,
   Reminder,
+  ReminderLinkOption,
   RemindersList,
   RemindersService,
   UpdateReminderPayload,
@@ -96,13 +98,35 @@ describe('reminders-log util', () => {
   });
 });
 
+const SEARCH_RESULTS: ReminderLinkOption[] = [
+  { type: 'product', type_label: 'Producto', id: 9, label: 'Leche entera', url: '/admin/products/9' },
+  { type: 'supplier', type_label: 'Proveedor', id: 4, label: 'Lácteos del Valle', url: '/admin/inventory/suppliers/4' },
+];
+
 class FakeRemindersService {
   items: Reminder[] = [];
+  creates: CreateReminderPayload[] = [];
   updates: { id: number; payload: UpdateReminderPayload }[] = [];
+  searches: string[] = [];
+
+  searchLinks(q: string): Observable<ReminderLinkOption[]> {
+    this.searches.push(q);
+    return of(SEARCH_RESULTS);
+  }
 
   list(status: 'pending' | 'done' | 'all'): Observable<RemindersList> {
     const items = status === 'all' ? this.items : this.items.filter((r) => r.status === status);
     return of({ items, timezone: 'America/Bogota' });
+  }
+
+  create(payload: CreateReminderPayload): Observable<Reminder> {
+    this.creates.push(payload);
+    const created = reminder(100 + this.creates.length, {
+      title: payload.title,
+      note: payload.note ?? null,
+    });
+    this.items = [...this.items, created];
+    return of(created);
   }
 
   update(id: number, payload: UpdateReminderPayload): Observable<Reminder> {
@@ -128,6 +152,56 @@ describe('RemindersLogComponent (dashboard Bitácora)', () => {
     );
   }
 
+  async function settle(): Promise<void> {
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+  }
+
+  function buttonByText(text: string): HTMLButtonElement {
+    const button = Array.from(root().querySelectorAll<HTMLButtonElement>('button')).find(
+      (el) => el.textContent?.trim() === text,
+    );
+    if (!button) throw new Error(`Button "${text}" is not rendered`);
+    return button;
+  }
+
+  /** The reminder form fields as the user sees them (real DOM elements). */
+  function formFields(): {
+    title: HTMLInputElement;
+    note: HTMLTextAreaElement;
+    remindAt: HTMLInputElement;
+  } {
+    const form = root().querySelector('form');
+    if (!form) throw new Error('Reminder form is not rendered');
+    return {
+      title: form.querySelector<HTMLInputElement>('input[placeholder^="Ej: Llamar"]')!,
+      note: form.querySelector<HTMLTextAreaElement>('textarea')!,
+      remindAt: form.querySelector<HTMLInputElement>('input[type="datetime-local"]')!,
+    };
+  }
+
+  function typeInto(el: HTMLInputElement | HTMLTextAreaElement, value: string): void {
+    el.value = value;
+    el.dispatchEvent(new Event('input'));
+  }
+
+  /** Types in the link search box and waits for its debounce (300 ms). */
+  async function searchLinkFor(text: string): Promise<void> {
+    const box = root().querySelector<HTMLInputElement>(
+      'input[aria-label="Buscar un registro para vincular"]',
+    );
+    if (!box) throw new Error('Link search box is not rendered');
+    typeInto(box, text);
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    await settle();
+  }
+
+  /** America/Bogota is UTC-5 all year (no DST): its wall clock is a fixed shift. */
+  function bogotaWallClock(isoInstant: string): string {
+    return new Date(Date.parse(isoInstant) - 5 * HOUR).toISOString().slice(0, 16);
+  }
+
   beforeEach(async () => {
     api = new FakeRemindersService();
     const now = Date.now();
@@ -135,10 +209,19 @@ describe('RemindersLogComponent (dashboard Bitácora)', () => {
       reminder(1, {
         title: 'Sin fecha',
         note: 'Nota oculta en la fila',
-        link: { type: 'product', id: 9, label: 'Leche entera', url: '/admin/products/9' },
+        link: {
+          type: 'product',
+          type_label: 'Producto',
+          id: 9,
+          label: 'Leche entera',
+          available: true,
+          url: '/admin/products/9',
+        },
       }),
       reminder(2, {
         title: 'Lejano',
+        // Deleted, or the user may not read orders: the server answers it unavailable.
+        link: { type: 'order', type_label: 'Orden', id: 77, label: 'Orden ORD-77', available: false, url: null },
         remind_at: new Date(now + 6 * DAY + HOUR).toISOString(),
         created_at: new Date(now - 2 * DAY).toISOString(),
         bucket: 'upcoming',
@@ -183,12 +266,26 @@ describe('RemindersLogComponent (dashboard Bitácora)', () => {
 
   afterEach(() => fixture.destroy());
 
-  it('lists only title and date, ordered from the soonest due date', () => {
+  it('lists title, date and linked record, ordered from the soonest due date', () => {
     expect(rowTitles()).toEqual(['Vencido', 'Lejano', 'Sin fecha']);
     const list = root().querySelector('[data-testid="reminders-list"]')!;
     expect(list.textContent).not.toContain('Nota oculta en la fila');
-    expect(list.textContent).not.toContain('Leche entera');
     expect(list.querySelectorAll('[data-testid="reminder-detail-button"]').length).toBe(3);
+    expect(list.querySelectorAll('[data-testid="reminder-link"]').length).toBe(2);
+  });
+
+  it('the linked record opens from the list; an unavailable one says so and is not a link', () => {
+    const links = Array.from(root().querySelectorAll<HTMLElement>('[data-testid="reminder-link"]'));
+    const [unavailable, available] = links; // rows: Vencido, Lejano, Sin fecha
+
+    expect(available.tagName).toBe('A');
+    expect(available.textContent).toContain('Producto · Leche entera');
+    expect(available.getAttribute('href')).toBe('/admin/products/9');
+
+    expect(unavailable.tagName).not.toBe('A');
+    expect(unavailable.querySelector('a')).toBeNull();
+    expect(unavailable.textContent).toContain('Orden · Orden ORD-77');
+    expect(unavailable.textContent).toContain('(no disponible)');
   });
 
   it('renders an accessible progress bar only for dated reminders', () => {
@@ -240,5 +337,193 @@ describe('RemindersLogComponent (dashboard Bitácora)', () => {
     expect(api.updates).toEqual([{ id: 3, payload: { status: 'done' } }]);
     // The pending list no longer has it ("Ver hechos" is off), so the detail closes.
     expect(component.detailOpen()).toBe(false);
+  });
+
+  it('creates the reminder with what the user typed in the form', async () => {
+    buttonByText('Nuevo').click();
+    await settle();
+
+    const fields = formFields();
+    typeInto(fields.title, 'Llamar al proveedor de lácteos');
+    typeInto(fields.note, 'Pedir leche y queso');
+    typeInto(fields.remindAt, '2026-11-18T09:00');
+    await settle();
+
+    buttonByText('Guardar').click();
+    await settle();
+
+    expect(api.creates).toEqual([
+      {
+        title: 'Llamar al proveedor de lácteos',
+        note: 'Pedir leche y queso',
+        remind_at: '2026-11-18T09:00',
+      },
+    ]);
+    expect(root().textContent).not.toContain('El título es obligatorio');
+    expect(fixture.componentInstance.modalOpen()).toBe(false);
+    expect(rowTitles()).toContain('Llamar al proveedor de lácteos');
+  });
+
+  it('an invoice link keeps its query string, in the list and in the detail', async () => {
+    const invoiceUrl = '/admin/invoicing/invoices?invoiceId=91';
+    api.items = [
+      ...api.items,
+      reminder(4, {
+        title: 'Cobrar factura',
+        link: { type: 'invoice', type_label: 'Factura', id: 91, label: 'FV-91', available: true, url: invoiceUrl },
+      }),
+    ];
+    buttonByText('Ver hechos').click();
+    await settle();
+
+    const chip = Array.from(
+      root().querySelectorAll<HTMLAnchorElement>('a[data-testid="reminder-link"]'),
+    ).find((a) => a.textContent?.includes('FV-91'));
+    expect(chip?.getAttribute('href')).toBe(invoiceUrl);
+
+    fixture.componentInstance.openDetail(api.items[3]);
+    await settle();
+    expect(document.querySelector('[data-testid="reminder-detail-link"]')?.getAttribute('href')).toBe(
+      invoiceUrl,
+    );
+  });
+
+  it('links the record picked in the search and sends it on create', async () => {
+    buttonByText('Nuevo').click();
+    await settle();
+    typeInto(formFields().title, 'Pedir leche');
+
+    await searchLinkFor('l');
+    expect(api.searches).toEqual([]);
+
+    await searchLinkFor('leche');
+    expect(api.searches).toEqual(['leche']);
+    const options = root().querySelectorAll<HTMLButtonElement>('[data-testid="reminder-link-option"]');
+    expect(Array.from(options).map((o) => o.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
+      'Producto Leche entera',
+      'Proveedor Lácteos del Valle',
+    ]);
+
+    options[1].click();
+    await settle();
+    expect(root().querySelector('[data-testid="reminder-link-selected"]')!.textContent).toContain(
+      'Proveedor · Lácteos del Valle',
+    );
+
+    buttonByText('Guardar').click();
+    await settle();
+
+    expect(api.creates).toEqual([
+      { title: 'Pedir leche', note: null, remind_at: null, link_type: 'supplier', link_id: 4 },
+    ]);
+  });
+
+  it('removing the link on edit sends it as null', async () => {
+    const sinFecha = api.items.find((r) => r.id === 1)!;
+    fixture.componentInstance.openEdit(sinFecha);
+    await settle();
+    expect(root().querySelector('[data-testid="reminder-link-selected"]')!.textContent).toContain(
+      'Producto · Leche entera',
+    );
+
+    buttonByText('Quitar').click();
+    await settle();
+    expect(root().querySelector('[data-testid="reminder-link-selected"]')).toBeNull();
+
+    buttonByText('Guardar').click();
+    await settle();
+
+    expect(api.updates).toEqual([
+      {
+        id: 1,
+        payload: {
+          title: 'Sin fecha',
+          note: 'Nota oculta en la fila',
+          remind_at: null,
+          link_type: null,
+          link_id: null,
+        },
+      },
+    ]);
+  });
+
+  it('still blocks saving without a title and shows the error', async () => {
+    buttonByText('Nuevo').click();
+    await settle();
+
+    buttonByText('Guardar').click();
+    await settle();
+
+    expect(api.creates).toEqual([]);
+    expect(fixture.componentInstance.modalOpen()).toBe(true);
+    expect(root().querySelector('form')!.textContent).toContain('El título es obligatorio');
+  });
+
+  it('prefills the edit form and sends the edited values in the PATCH', async () => {
+    const vencido = api.items.find((r) => r.id === 3)!;
+    root().querySelectorAll<HTMLButtonElement>('[data-testid="reminder-detail-button"]')[0].click();
+    await settle();
+    buttonByText('Editar').click();
+    await settle();
+
+    const fields = formFields();
+    expect(fields.title.value).toBe('Vencido');
+    expect(fields.note.value).toBe('Pagar al proveedor');
+    expect(fields.remindAt.value).toBe(bogotaWallClock(vencido.remind_at!));
+
+    typeInto(fields.title, 'Pagar al proveedor de lácteos');
+    typeInto(fields.remindAt, '2026-11-21T09:30');
+    await settle();
+
+    buttonByText('Guardar').click();
+    await settle();
+
+    expect(api.updates).toEqual([
+      {
+        id: 3,
+        payload: {
+          title: 'Pagar al proveedor de lácteos',
+          note: 'Pagar al proveedor',
+          remind_at: '2026-11-21T09:30',
+        },
+      },
+    ]);
+    expect(api.creates).toEqual([]);
+  });
+
+  it('el recordatorio del calendario tributario abre la obligación del periodo y se identifica como tal', async () => {
+    api.items = [
+      reminder(9, {
+        title: 'IVA bimestral sep-oct 2026 · vence 24 nov',
+        source: 'fiscal',
+        remind_at: new Date(Date.now() + 5 * DAY).toISOString(),
+        bucket: 'upcoming',
+        link: {
+          type: 'fiscal_obligation',
+          type_label: 'Obligación fiscal',
+          id: 42,
+          label: 'IVA bimestral sep-oct 2026',
+          available: true,
+          url: '/admin/fiscal/obligations?obligationId=42',
+        },
+      }),
+    ];
+    fixture = TestBed.createComponent(RemindersLogComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const link = root().querySelector<HTMLAnchorElement>('a[data-testid="reminder-link"]');
+    expect(link?.textContent).toContain('Obligación fiscal · IVA bimestral sep-oct 2026');
+    // El enlace conserva el `?obligationId=` que arma el backend.
+    expect(link?.getAttribute('href')).toBe('/admin/fiscal/obligations?obligationId=42');
+
+    fixture.componentInstance.openDetail(api.items[0]);
+    await settle();
+    const detail = document.querySelector('[data-testid="reminder-detail"]');
+    expect(detail?.textContent).toContain('Del calendario tributario');
+    expect(detail?.querySelector('[data-testid="reminder-detail-link"]')?.getAttribute('href')).toBe(
+      '/admin/fiscal/obligations?obligationId=42',
+    );
   });
 });

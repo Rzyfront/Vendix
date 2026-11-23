@@ -213,6 +213,11 @@ describe('RefundFlowService — refund overhaul invariants', () => {
       // customer_id is null → wallet credit path skipped
       await service.createRefund(1, dto as any);
 
+      // Explicit budget for the refund transaction (the 5 s default expired).
+      expect(mockPrisma.$transaction).toHaveBeenCalledWith(
+        expect.any(Function), { timeout: 20_000, maxWait: 5_000 },
+      );
+
       const refundCompleted = eventEmitter.emit.mock.calls.find(
         ([name]) => name === 'refund.completed',
       );

@@ -1,6 +1,3 @@
-import { HttpException } from '@nestjs/common';
-import { plainToInstance } from 'class-transformer';
-import { validateSync } from 'class-validator';
 import { order_state_enum } from '@prisma/client';
 import { generateSlug, slugLookupCandidates } from '@common/utils/slug.util';
 import {
@@ -8,8 +5,14 @@ import {
   DOCUMENT_TYPE_RULES,
   DocumentTypeCode,
 } from '@common/constants/document-types';
-import { VendixHttpException } from '../../../common/errors';
+import { ErrorCodes, VendixHttpException } from '../../../common/errors';
 import { RegisteredTool, ToolPreview } from '../interfaces/tool.interface';
+import {
+  cleanString,
+  describeError,
+  toPositiveInt,
+  toValidatedDto,
+} from './tool-write-helpers';
 import {
   buildDiscrepancySignal,
   DISCREPANCY_ACK_PARAMETERS,
@@ -186,74 +189,6 @@ function toolError(message: string, nextStep?: string): string {
   });
 }
 
-/**
- * Valida un DTO ya construido como lo haría el `ValidationPipe` global del
- * HTTP (`whitelist` + `forbidNonWhitelisted`): las tools llaman a los
- * servicios directo, sin pasar por el pipe, así que sin esto un payload
- * inválido llegaba hasta Prisma y volvía como un error opaco post-aprobación.
- * Devuelve la instancia transformada —la misma que recibiría el servicio por
- * HTTP— o el mensaje en español para el `{error, next_step}`.
- */
-function toValidatedDto<T extends object>(
-  DtoClass: new () => T,
-  plain: Record<string, unknown>,
-): { ok: true; dto: T } | { ok: false; message: string } {
-  const dto = plainToInstance(DtoClass, plain, {
-    enableImplicitConversion: true,
-  });
-  const errors = validateSync(dto, {
-    whitelist: true,
-    forbidNonWhitelisted: true,
-  });
-  if (!errors.length) return { ok: true, dto };
-  const details = errors
-    .flatMap((entry) => Object.values(entry.constraints ?? {}))
-    .join('; ');
-  return {
-    ok: false,
-    message: `Los datos no pasaron la validación: ${details || 'revisa los campos enviados'}.`,
-  };
-}
-
-/**
- * Traduce una excepción del dominio a texto que el modelo pueda narrar.
- * Mismo criterio que `ProductsBulkEditService.extractErrorInfo`.
- */
-function describeError(error: unknown): { code?: string; message: string } {
-  if (error instanceof VendixHttpException) {
-    const response = error.getResponse() as { message?: string } | string;
-    const message =
-      typeof response === 'string'
-        ? response
-        : (response?.message ?? error.message);
-    return { code: error.errorCode, message };
-  }
-  if (error instanceof HttpException) {
-    const response = error.getResponse() as
-      | { message?: unknown; error_code?: string }
-      | string;
-    if (typeof response === 'string') return { message: response };
-    const raw = response?.message;
-    const message = Array.isArray(raw)
-      ? raw.join('; ')
-      : typeof raw === 'string'
-        ? raw
-        : error.message;
-    return {
-      ...(response?.error_code && { code: response.error_code }),
-      message,
-    };
-  }
-  if (error instanceof Error) return { message: error.message };
-  return { message: 'Error desconocido' };
-}
-
-function toPositiveInt(value: unknown): number | null {
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) return null;
-  return parsed;
-}
-
 function toNumberOrNull(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;
   const parsed = Number(value);
@@ -262,13 +197,6 @@ function toNumberOrNull(value: unknown): number | null {
 
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
-}
-
-/** Texto limpio o `undefined`. Nunca cadena vacía: eso confunde a los DTOs. */
-function cleanString(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  return trimmed.length ? trimmed : undefined;
 }
 
 function fullName(user: {
@@ -840,6 +768,15 @@ interface PriceTarget {
   taxRate: number;
 }
 
+/** State kept by `update_product_price.compensate.capture`. */
+interface PriceUndoSnapshot {
+  product_id: number;
+  variant_id: number | null;
+  field: PriceField;
+  previous: number;
+  applied: number;
+}
+
 const PRICE_FIELD_LABELS: Record<PriceField, string> = {
   base_price: 'Precio base (sin impuestos)',
   sale_price: 'Precio de oferta (sin impuestos)',
@@ -1395,6 +1332,76 @@ export function createProductWriteTools(
             `No se pudo cambiar el precio${code ? ` (${code})` : ''}: ${message}`,
           );
         }
+      },
+      // T36 "Deshacer": honest inverse only for the normal price of a product
+      // (`base_price`) or of a variant (`price_override`) that HAD its own
+      // value. The sale price toggles `is_on_sale` too, and a variant without
+      // override inherits the product price: restoring those would invent
+      // state, so they stay "no reversible desde Vex" (capture returns null).
+      compensate: {
+        label: 'Restaurar el precio anterior',
+        capture: async (args, context) => {
+          const resolved = await resolvePriceTarget(args, context.store_id);
+          if (!resolved.ok) return null;
+          const target = resolved.value;
+          if (target.field === 'sale_price') return null;
+          let previous: number | null = target.currentPrice;
+          if (target.field === 'price_override') {
+            const product: any =
+              await productsService.findProductForPriceChangeForAgent(
+                target.productId,
+              );
+            const variant = (product?.product_variants ?? []).find(
+              (row: any) => row.id === target.variantId,
+            );
+            previous = toNumberOrNull(variant?.price_override);
+          }
+          if (previous === null) return null;
+          return {
+            product_id: target.productId,
+            variant_id: target.variantId,
+            field: target.field,
+            previous,
+            applied: target.newPrice,
+          } satisfies PriceUndoSnapshot;
+        },
+        undo: async ({ snapshot }) => {
+          const snap = snapshot as PriceUndoSnapshot;
+          const product: any =
+            await productsService.findProductForPriceChangeForAgent(
+              snap.product_id,
+            );
+          const variant = snap.variant_id
+            ? (product?.product_variants ?? []).find(
+                (row: any) => row.id === snap.variant_id,
+              )
+            : null;
+          const current = snap.variant_id
+            ? toNumberOrNull(variant?.price_override)
+            : toNumberOrNull(product?.base_price);
+          if (current === null || round2(current) !== round2(snap.applied)) {
+            throw new VendixHttpException(
+              ErrorCodes.SYS_CONFLICT_001,
+              'El valor cambió después del lote; no lo revertí.',
+            );
+          }
+          if (snap.variant_id) {
+            const checked = toValidatedDto(UpdateProductVariantDto, {
+              price_override: snap.previous,
+            });
+            if (!checked.ok) throw new Error(checked.message);
+            await productsService.updateVariant(snap.variant_id, checked.dto);
+          } else {
+            const checked = toValidatedDto(UpdateProductDto, {
+              base_price: snap.previous,
+            });
+            if (!checked.ok) throw new Error(checked.message);
+            await productsService.update(snap.product_id, checked.dto, {
+              lean: true,
+            });
+          }
+          return `Precio restaurado a ${snap.previous}.`;
+        },
       },
     },
 

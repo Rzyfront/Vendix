@@ -1642,3 +1642,52 @@ describe('AnthropicCompatibleProvider native tool search (F7)', () => {
     );
   });
 });
+
+describe('AnthropicCompatibleProvider responseSchema (ai-ingest, opt-in por config)', () => {
+  const rs = { name: 'rows', schema: { type: 'object', properties: { a: { type: 'string' } } } };
+  const build = (settings?: Record<string, any>) =>
+    new AnthropicCompatibleProvider({
+      provider: 'Anthropic',
+      sdkType: 'anthropic_compatible',
+      apiKey: 'k',
+      modelId: 'm',
+      ...(settings && { settings }),
+    } as AIProviderConfig);
+
+  it('sin supports_json_schema no fuerza herramienta', async () => {
+    const provider = build();
+    const create = jest.fn().mockResolvedValue({
+      content: [{ type: 'text', text: '{"a":"x"}' }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+    (provider as any).client.messages.create = create;
+
+    const res = await provider.chat([{ role: 'user', content: 'x' }], { responseSchema: rs });
+
+    expect(create.mock.calls[0][0]).not.toHaveProperty('tools');
+    expect(create.mock.calls[0][0]).not.toHaveProperty('tool_choice');
+    expect(res.content).toBe('{"a":"x"}');
+  });
+
+  it('con supports_json_schema fuerza emit_result y devuelve su input como contenido', async () => {
+    const provider = build({ supports_json_schema: true });
+    const create = jest.fn().mockResolvedValue({
+      content: [{ type: 'tool_use', id: 't1', name: 'emit_result', input: { a: 'x' } }],
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+    (provider as any).client.messages.create = create;
+
+    const res = await provider.chat([{ role: 'user', content: 'x' }], { responseSchema: rs });
+
+    const payload = create.mock.calls[0][0];
+    expect(payload.tool_choice).toEqual({ type: 'tool', name: 'emit_result' });
+    expect(payload.tools).toEqual([
+      expect.objectContaining({ name: 'emit_result', input_schema: rs.schema }),
+    ]);
+    expect(res.content).toBe('{"a":"x"}');
+    expect(res.tool_calls).toBeUndefined();
+    expect(res.finish_reason).toBe('stop');
+  });
+});

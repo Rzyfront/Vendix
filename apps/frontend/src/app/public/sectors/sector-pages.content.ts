@@ -7,8 +7,9 @@ import { MarketingPageMetadata } from '../marketing-page-metadata';
  * (registro editorial y claims-register):
  * - Solo se escribe lo que tiene evidencia (`evidence`): demo en pantalla o código.
  *   Lo que todavía no tiene demo no entra (propina, QR de mesa, comanda impresa…).
- * - Todas van en `noindex` y sin canonical hasta la firma de Producto y Ventas (G4).
- * - Las rutas y el interruptor viven en `sector-pages.config.ts` (apagado en producción).
+ * - Una página nueva va en `noindex` y sin canonical hasta la firma de Producto y Ventas (G4).
+ *   Las tres actuales se aprobaron el 17-nov-2026 y son indexables con canonical propio.
+ * - Las rutas y el interruptor viven en `sector-pages.config.ts` (encendido en producción).
  */
 export interface EvidencedText {
   text: string;
@@ -65,8 +66,8 @@ const RESTAURANTES: SectorPageContent = {
     title: 'Software para restaurantes en Colombia | Vendix',
     description:
       'Abre mesas, envía comandas a la pantalla de cocina y controla cada cuenta. Mira el recorrido de Vendix con datos de prueba y agenda una demostración.',
-    robots: 'noindex, follow',
-    canonicalPath: null,
+    robots: 'index, follow',
+    canonicalPath: '/sectores/restaurantes',
   },
   label: 'Restaurantes',
   h1: 'Organiza mesas, comandas y cobro de tu restaurante',
@@ -217,8 +218,8 @@ const SOFTWARE_POS: SectorPageContent = {
     title: 'Software POS para comercios en Colombia | Vendix',
     description:
       'Vende desde el navegador, aplica cupones y precios especiales, y cuadra tu caja al cerrar el turno. Mira cómo funciona el POS de Vendix y sus límites.',
-    robots: 'noindex, follow',
-    canonicalPath: null,
+    robots: 'index, follow',
+    canonicalPath: '/soluciones/software-pos',
   },
   label: 'Punto de venta',
   h1: 'Vende, cobra y cierra tu caja desde el navegador',
@@ -352,8 +353,8 @@ const MIGRACION: SectorPageContent = {
     title: 'Migra tu catálogo a Vendix: formatos y requisitos',
     description:
       'Qué datos puedes importar a Vendix desde Excel o CSV, cómo preparar las plantillas, qué no se transfiere y cómo revisar errores antes de empezar a vender.',
-    robots: 'noindex, follow',
-    canonicalPath: null,
+    robots: 'index, follow',
+    canonicalPath: '/migracion',
   },
   label: 'Migración de datos',
   h1: 'Trae tu catálogo a Vendix sin empezar de cero',

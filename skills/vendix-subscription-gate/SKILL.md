@@ -5,7 +5,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.2"
+  version: "2.3"
   scope: [root]
   auto_invoke:
     - "Adding feature gates or paywalls backed by subscription state"
@@ -93,8 +93,10 @@ Important nuance: GET/HEAD/OPTIONS requests bypass `StoreOperationsGuard`, so re
 Feature resolution order:
 
 1. Base `subscription_plans.ai_feature_flags`.
-2. Partner override as restriction-only: boolean AND, cap min, tool intersection.
-3. Promotional overlay as union-of-max: boolean OR, cap max, tool union.
+2. Partner override as restriction-only: boolean AND, cap min.
+3. Promotional overlay as union-of-max: boolean OR, cap max.
+
+`tools_allowed` is **not** carried into the merged result: it is inert (the plan screen tolerates a stored value but never validates or applies it).
 
 Call `SubscriptionAccessService.invalidateCache(storeId)` synchronously after subscription state, plan, partner override, or promo overlay changes.
 
@@ -119,6 +121,18 @@ Inline layer:
 
 Do not consume quota before provider success.
 
+## AI Entitlements Model (per agent)
+
+The plan has **no tool list and no action quota**. The user's ROLE permissions are the only limit on which tools an agent may run (`requiredPermissions` on each tool, see `vendix-ai-agent-tools`). `tools_allowed` and `monthly_tool_calls_cap` in `ai_feature_flags` are legacy and must not be offered or documented as plan levers (`tools_allowed` is inert; `monthly_tool_calls_cap` is still metered by `consumeToolCallQuota` in `ai-agent.service.ts` until it is retired).
+
+What a plan gives is **per agent** (Vex, Vexi) in `plan_ai_entitlements(plan_id, agent_key, capability_key, enabled, cap_value, on_limit)`:
+
+- a switch (`capability_key = 'agent'`), capabilities, and three caps: messages per day, tokens per month and voice-readout seconds per month. `cap_value` **`NULL` = unlimited, `0` = nothing**.
+- The catalog (`AI_CAPABILITIES`) lives in three byte-identical copies, guarded by `ai-capabilities.spec.ts`: `libs/shared-types/ai-capabilities.ts` (canonical), `apps/backend/src/domains/store/subscriptions/types/ai-capabilities.ts`, `apps/frontend/src/app/shared/constants/ai-capabilities.ts`. Edit all three in the same change.
+- `AI_ENTITLEMENTS_MODE` (`services/ai-entitlements-mode.ts`): `shadow` (default, anything else including unset) keeps the legacy `ai_feature_flags` JSON as the decider and only compares it with the rows (per-agent voice rows may restrict); `enforce` makes the rows decide and the legacy JSON is not read. Flip per environment only after the shadow report stays at zero differences.
+- `async_queue` is engine configuration, not a commercial lever: it has no capability and no editor; a new plan gets it from `AI_ENGINE_PLAN_DEFAULTS` (`services/ai-engine-plan-defaults.ts`).
+- Per-agent usage/caps resolve in `services/agent-quota.service.ts` (messages, tokens, voice readout); the store only sees its switches, usage bars and history, never agentic config.
+
 ## Quota Keys
 
 `consumeAIQuota()` uses Redis Lua with request-id dedupe (`ai:quota:{storeId}:{feature}:{period}`, UTC periods, TTL 48h daily / 40d monthly). The AI engine passes the request context id or a synthetic `internal-${randomUUID()}`. Rules: `vendix-redis-quota`.
@@ -135,6 +149,8 @@ Store `core/store/subscription/`, interceptor `core/interceptors/subscription-pa
 - Do not skip `sub:features:{storeId}` invalidation after subscription state or plan/override changes.
 - Do not document frontend paywall as status-code-only; it is error-code-driven.
 - Do not claim `cancelled` is allowed by `canUseModule()` unless the backend mapping is changed.
+- Do not gate or limit tools by plan (`tools_allowed`, `monthly_tool_calls_cap`): the role is the only tool limit.
+- Do not edit one of the three `ai-capabilities.ts` copies alone; the parity spec fails.
 
 ## Related Skills
 

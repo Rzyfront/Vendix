@@ -16,8 +16,14 @@ import {
   HttpCode,
   HttpStatus,
   forwardRef,
+  Optional,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+import { AiJobMonitorService } from '@common/ai-scan-jobs/ai-job-monitor.service';
+import { LEGACY_AI_SOURCES } from '@common/ai-scan-jobs/ai-scan-sources';
+import type { ReceiptScanJob } from './receipt-scan-job.interface';
 import { memoryStorage } from 'multer';
 import type { Response } from 'express';
 import { DispatchNotesService } from './dispatch-notes.service';
@@ -73,6 +79,11 @@ export class DispatchNotesController {
     @Inject(forwardRef(() => PrintGatewayService))
     private readonly printGatewayService: PrintGatewayService,
     private readonly responseService: ResponseService,
+    @Optional()
+    @InjectQueue('receipt-scan')
+    private readonly receiptScanQueue?: Queue<ReceiptScanJob>,
+    @Optional()
+    private readonly aiMonitor?: AiJobMonitorService,
   ) {}
 
   @Get()
@@ -335,8 +346,23 @@ export class DispatchNotesController {
   @Get('receipt-scan/:jobId')
   @Permissions('store:dispatch_notes:create')
   async receiptScanStatus(@Param('jobId') job_id: string) {
-    const result =
+    const status =
       await this.dispatchNotesService.getReceiptScanJobStatus(job_id);
+    // QUI-1020: additive AI-job meta. The service already validated the
+    // tenant (404 for another store's job), so this never widens access.
+    const job = await this.receiptScanQueue?.getJob(job_id);
+    const result = job
+      ? {
+          ...status,
+          ...(await this.aiMonitor?.describe(
+            job,
+            status.status,
+            LEGACY_AI_SOURCES.receiptScan,
+            job.data?.context,
+            this.receiptScanQueue,
+          )),
+        }
+      : status;
     return this.responseService.success(
       result,
       'Estado del escaneo de recibo obtenido',

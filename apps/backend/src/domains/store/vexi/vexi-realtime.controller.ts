@@ -2,20 +2,13 @@ import { Body, Controller, Post, UseGuards } from '@nestjs/common';
 
 import { VexiRealtimeService } from './vexi-realtime.service';
 import { ResponseService } from '../../../common/responses/response.service';
-import {
-  AiAccessGuard,
-  RequireAIFeature,
-} from '../subscriptions/guards/ai-access.guard';
+import { ErrorCodes, VendixHttpException } from '../../../common/errors';
 import { SkipSubscriptionGate } from '../subscriptions/decorators/skip-subscription-gate.decorator';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { UserRole } from '../../auth/enums/user-role.enum';
 
-import {
-  CloseRealtimeSessionDto,
-  CreateRealtimeSessionDto,
-  RealtimeToolCallDto,
-} from './dto';
+import { CloseRealtimeSessionDto, RealtimeToolCallDto } from './dto';
 
 /**
  * Vexi realtime voice.
@@ -37,12 +30,16 @@ export class VexiRealtimeController {
     private readonly responseService: ResponseService,
   ) {}
 
+  /**
+   * N5: realtime voice is retired. New sessions are refused with a typed error
+   * before any guard, DTO validation or provider work, so the answer is the same
+   * for every plan and payload. `tool-call` and `session/close` below stay alive
+   * for sessions opened before the deploy. `VexiRealtimeService.createSession`
+   * is kept for the feature's return.
+   */
   @Post('session')
-  @UseGuards(AiAccessGuard)
-  @RequireAIFeature('realtime_voice')
-  async createSession(@Body() dto: CreateRealtimeSessionDto) {
-    const grant = await this.realtime.createSession(dto);
-    return this.responseService.success(grant, 'Realtime session granted');
+  createSession(): never {
+    throw new VendixHttpException(ErrorCodes.VEXI_REALTIME_UNAVAILABLE);
   }
 
   /**

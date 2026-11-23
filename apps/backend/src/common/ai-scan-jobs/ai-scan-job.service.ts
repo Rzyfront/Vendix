@@ -1,3 +1,4 @@
+import { withJobOrigin } from '../queue/job-origin';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -12,8 +13,15 @@ import {
   AiScanJobStatus,
   AiScanKind,
 } from './interfaces/ai-scan-job.interface';
+import { AiJobMonitorService } from './ai-job-monitor.service';
+import { aiScanSource } from './ai-scan-sources';
 
 type EnqueueFile = Express.Multer.File | AiScanFile;
+
+/** Completed results stay 2 h: enough to re-attach after a reload. */
+export const AI_SCAN_KEEP_COMPLETED_SECONDS = 2 * 60 * 60;
+/** Failures stay a day: the user (and support) can still read why. */
+export const AI_SCAN_KEEP_FAILED_SECONDS = 24 * 60 * 60;
 
 @Injectable()
 export class AiScanJobService {
@@ -22,6 +30,7 @@ export class AiScanJobService {
   constructor(
     @InjectQueue('ai-scan') private readonly queue: Queue,
     private readonly s3Service: S3Service,
+    private readonly monitor: AiJobMonitorService,
   ) {}
 
   async enqueue(
@@ -75,11 +84,14 @@ export class AiScanJobService {
     }
 
     const job: AiScanJob = { kind, context, file_keys, params };
-    const added = await this.queue.add(kind, job, {
+    const added = await this.queue.add(kind, withJobOrigin(job, `http:escaneo-ia/${kind}`), {
       attempts: 2,
       backoff: { type: 'exponential', delay: 2000 },
-      removeOnComplete: 100,
-      removeOnFail: 50,
+      // QUI-1020: the web re-attaches to the job after a reload, so the result
+      // must outlive a busy hour. Count-only retention (100 / 50, shared by
+      // every tenant) evicted it in minutes and the poll answered 404.
+      removeOnComplete: { age: AI_SCAN_KEEP_COMPLETED_SECONDS, count: 1000 },
+      removeOnFail: { age: AI_SCAN_KEEP_FAILED_SECONDS, count: 1000 },
     });
     return { job_id: String(added.id) };
   }
@@ -121,7 +133,17 @@ export class AiScanJobService {
           throw notFound();
       }
 
-      const out: AiScanJobStatus = { status };
+      const out: AiScanJobStatus = {
+        status,
+        kind: (job.data as AiScanJob).kind,
+        ...(await this.monitor.describe(
+          job,
+          state,
+          aiScanSource((job.data as AiScanJob).kind),
+          owner,
+          this.queue,
+        )),
+      };
       if (status === 'completed') out.result = job.returnvalue;
       if (status === 'failed') out.error = job.failedReason;
       return out;

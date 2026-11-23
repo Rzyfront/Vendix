@@ -48,6 +48,8 @@ export interface Video {
     icon?: string | null;
   };
   related_videos?: Video[];
+  /** Admin list only: the published text is too short for Vex to find the video. */
+  search_text_insufficient?: boolean;
 }
 
 export interface VideoStats {

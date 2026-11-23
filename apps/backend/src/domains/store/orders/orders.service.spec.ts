@@ -107,7 +107,13 @@ describe('OrdersService', () => {
     order_promotions: {
       createMany: jest.fn(),
       deleteMany: jest.fn(),
+      // Auditoría de promociones: el editor lee las promociones previas de la
+      // orden para ajustar `usage_count` solo por las que entran o salen.
+      findMany: jest.fn().mockResolvedValue([]),
     },
+    promotions: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+    // Categorías reales de cada producto para cotizar promos por categoría.
+    product_categories: { findMany: jest.fn().mockResolvedValue([]) },
     coupons: {
       update: jest.fn(),
       // Round 3.5 · ERR-10 spec. `updateMany` is the ONLY idempotent
@@ -249,6 +255,9 @@ describe('OrdersService', () => {
     forceOrderState: jest.fn(),
   };
   const mockPromotionEngine = {
+    // Casilla única de código: por defecto ningún código es de promoción.
+    resolveDiscountCode: jest.fn().mockResolvedValue({ kind: 'none' }),
+    quoteWithPromotionCode: jest.fn(),
     quoteDiscounts: jest.fn(async () => ({
       subtotal: 100,
       total_discount: 0,
@@ -1282,6 +1291,85 @@ describe('OrdersService', () => {
       expect(item.line_total_gross).toBe(50);
       expect(item.unit_price).toBe(50);
       expect(item.total_price).toBe(50);
+    });
+
+    it('hotfix promos mesa — el detalle expone el desglose PERSISTIDO por línea y los totales por tipo de impuesto', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue({
+        id: 9,
+        order_number: 'ORD009',
+        discount_amount: 16666.67,
+        tax_amount: 3911.11,
+        shipping_cost: 0,
+        tip_amount: 0,
+        grand_total: 52800,
+        order_items: [
+          {
+            id: 90,
+            product_id: null,
+            unit_price: 27777.78,
+            quantity: 2,
+            total_price: 55555.56,
+            discount_amount: 16666.67,
+            cancelled_at: null,
+            order_item_taxes: [
+              {
+                tax_name: 'INC 8%',
+                tax_rate: 0.08,
+                tax_type: 'inc',
+                tax_amount: 3111.11,
+              },
+            ],
+            products: {},
+          },
+          {
+            id: 91,
+            product_id: null,
+            unit_price: 10000,
+            quantity: 1,
+            total_price: 10000,
+            discount_amount: 0,
+            cancelled_at: null,
+            order_item_taxes: [
+              {
+                tax_name: 'INC 8%',
+                tax_rate: 0.08,
+                tax_type: 'inc',
+                tax_amount: 800,
+              },
+            ],
+            products: {},
+          },
+        ],
+        order_promotions: [],
+        coupon_uses: [],
+      });
+
+      const result = (await service.findOne(9)) as any;
+
+      expect(result.order_items[0].line_breakdown).toEqual({
+        base: 55555.56,
+        discount: 16666.67,
+        taxes: [
+          { name: 'INC 8%', rate: 0.08, tax_type: 'inc', amount: 3111.11 },
+        ],
+        tax_total: 3111.11,
+        total: 42000,
+        total_before_discount: 60000,
+      });
+      // La base persistida no cambia de magnitud para el lector viejo.
+      expect(result.order_items[0].total_price).toBe(55555.56);
+      expect(result.totals_breakdown).toEqual({
+        subtotal_base: 65555.56,
+        discount: 16666.67,
+        taxes: [
+          { name: 'INC 8%', rate: 0.08, tax_type: 'inc', amount: 3911.11 },
+        ],
+        tax_total: 3911.11,
+        shipping: 0,
+        tip: 0,
+        grand_total: 52800,
+        reconciles: true,
+      });
     });
   });
 
@@ -2967,6 +3055,50 @@ describe('OrdersService', () => {
         expect(
           mockStockLevelManager.releaseReservationsByReference,
         ).not.toHaveBeenCalled();
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    it('orden creada (no borrador): reserva las líneas nuevas resolviendo la bodega con la tx del editor', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        arrangeEditableDraft();
+        mockPrismaService.orders.findFirst
+          .mockReset()
+          .mockResolvedValueOnce({ ...draftOrder, state: 'created' } as any)
+          .mockResolvedValue({ ...persistedOrder, state: 'created' } as any);
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1,
+          name: 'Test product',
+          product_type: 'simple',
+          product_variants: [],
+        } as any);
+        mockPrismaService.order_items.findMany.mockResolvedValue([
+          {
+            id: 1,
+            product_id: 1,
+            product_variant_id: null,
+            quantity: 1,
+            stock_units_consumed: null,
+            products: { id: 1, track_inventory: true },
+          },
+        ] as any);
+
+        await service.updateOrderFromEditor(500, fullDto);
+
+        // Sin `tx` la consulta pide otra conexión del pool con la transacción
+        // del editor abierta: bajo carga el pool se agota y el editor vence.
+        expect(mockStockLevelManager.getDefaultLocationForProduct).toHaveBeenCalledWith(
+          1, undefined, mockPrismaService,
+        );
+        // La reserva sigue cayendo en esa bodega, dentro de la misma tx.
+        expect(mockStockLevelManager.reserveStock).toHaveBeenCalledWith(
+          1, undefined, 1, 1, 'order', 500,
+          expect.anything(), true, mockPrismaService,
+          undefined, false, undefined, false,
+        );
       } finally {
         contextSpy.mockRestore();
       }

@@ -46,6 +46,8 @@ export interface DianResolutionScanResult {
   /** Razones por las que la extracción no se puede usar tal cual. */
   blocking_issues: string[];
   extraction_notes: string | null;
+  /** Avisos de lectura en español (páginas sin leer, documento leído en partes…). */
+  warnings?: string[];
 }
 
 export interface ResolutionScanApiResponse {

@@ -87,6 +87,32 @@ export class ChatStreamReplay<T extends Frame> {
     private readonly now = () => Date.now(),
   ) {}
 
+  /**
+   * Borrado de una conversación: aborta y descarta el búfer de reanudación de
+   * sus streams. Devuelve cuántas sesiones se descartaron.
+   */
+  evictConversation(storeId: number, conversationId: number): number {
+    let evicted = 0;
+    for (const [id, value] of this.sessions) {
+      let scope: Partial<ChatReplayScope> | null = null;
+      try {
+        scope = JSON.parse(value.scope) as Partial<ChatReplayScope>;
+      } catch {
+        scope = null;
+      }
+      if (
+        scope?.conversation_id === conversationId &&
+        scope.store_id === storeId
+      ) {
+        value.abort.abort();
+        this.wake(value);
+        this.sessions.delete(id);
+        evicted++;
+      }
+    }
+    return evicted;
+  }
+
   async *open(
     streamId: string,
     scope: ChatReplayScope,

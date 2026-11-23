@@ -5,6 +5,7 @@ import {
   toDianPersonType,
 } from './platform-tenants.service';
 import { enrichAcquirerForStandard } from './acquirer-standard';
+import { withVendixUser } from '@common/utils/vendix-user.util';
 
 /**
  * Precarga completa del adquiriente del riel plataforma (customers/search y
@@ -347,6 +348,28 @@ describe('PlatformTenantsService', () => {
       expect(findFirst.mock.calls[0][0].include.addresses.where).toEqual({
         OR: [{ type: 'billing' }, { type: 'legal', is_primary: true }],
       });
+    });
+
+    it('la búsqueda ofrece solo usuarios de Vendix (no clientes finales)', async () => {
+      const findMany = jest.fn().mockResolvedValue([]);
+      await service.searchTenants({ users: { findMany } }, {
+        organizationId: 1, kind: 'user', q: 'juan',
+      });
+      const where = findMany.mock.calls[0][0].where;
+      expect(where).toEqual(withVendixUser(where.AND[1]));
+      expect(where.AND[1].OR).toEqual(
+        expect.arrayContaining([
+          { first_name: { contains: 'juan', mode: 'insensitive' } },
+        ]),
+      );
+    });
+
+    it('la resolución por id no se acota: destinatarios ya emitidos siguen resolviendo', async () => {
+      const findFirst = jest.fn().mockResolvedValue({ id: 7, username: 'juan', addresses: [] });
+      await service.getTenantByKindAndId({ users: { findFirst } }, {
+        organizationId: 3, kind: 'user', id: 7,
+      });
+      expect(findFirst.mock.calls[0][0].where).toEqual({ id: 7 });
     });
 
     it('JURIDICA → 1; sin régimen ni responsabilidades → tax_regime_code null', () => {

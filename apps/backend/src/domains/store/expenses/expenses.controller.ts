@@ -1,3 +1,4 @@
+import { withJobOrigin } from '../../../common/queue/job-origin';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
@@ -16,9 +17,17 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import { AiJobMonitorService } from '../../../common/ai-scan-jobs/ai-job-monitor.service';
+import { LEGACY_AI_SOURCES } from '../../../common/ai-scan-jobs/ai-scan-sources';
 import { ExpensesService } from './expenses.service';
 import { ExpenseFlowService } from './expense-flow/expense-flow.service';
 import { ExpenseScannerService } from './expense-scanner.service';
+import { S3Service } from '../../../common/services/s3.service';
+import {
+  discardQueuedDocument,
+  stashQueuedDocument,
+} from '../../../common/ai-ingest/documents/queued-document';
+import { EXPENSE_SCAN_MAX_BYTES } from './expense-ingest.profile';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import {
   ExpenseScanJob,
@@ -43,6 +52,8 @@ export class ExpensesController {
     @InjectQueue('expense-scan')
     private readonly expense_scan_queue: Queue<ExpenseScanJob>,
     private readonly response_service: ResponseService,
+    private readonly ai_monitor: AiJobMonitorService,
+    private readonly s3_service: S3Service,
   ) {}
 
   @Get()
@@ -117,25 +128,30 @@ export class ExpensesController {
   @UseInterceptors(FileInterceptor('file'))
   async scanInvoice(@UploadedFile() file: Express.Multer.File) {
     if (!file) throw new VendixHttpException(ErrorCodes.INV_SCAN_NO_FILE);
-    const allowed = [
-      'image/jpeg',
-      'image/png',
-      'image/webp',
-      'application/pdf',
-    ];
-    if (!allowed.includes(file.mimetype))
-      throw new VendixHttpException(ErrorCodes.INV_SCAN_INVALID_FILE);
+    // ia-cargas F5a: tipo REAL por firma (no el mimetype del cliente) y tope
+    // de tamaño antes de encolar; un archivo que no sirve es un problema del
+    // documento (`AI_INGEST_INVALID_FILE`), no un incidente.
+    if (file.size > EXPENSE_SCAN_MAX_BYTES) {
+      throw new VendixHttpException(
+        ErrorCodes.AI_INGEST_INVALID_FILE,
+        'La factura debe pesar como máximo 10 MB.',
+      );
+    }
+    const detected = this.expense_scanner_service.assertValidScanFile(file);
 
-    // Preprocesamiento sharp en el ENQUEUE: el buffer multer solo existe en el
-    // request, así que la imagen se serializa aquí como data URI y se encola.
-    // El OCR pesado corre en el worker (`ExpenseScanProcessor`).
-    const { dataUri, mimeType } =
-      await this.expense_scanner_service.prepareImage(file);
-
+    // El buffer multer solo existe en el request: el original va a S3 (mismo
+    // patrón que la cola `ai-scan`) y el job lleva solo la key. El worker lo
+    // lee por páginas (`ExpenseScanProcessor`).
     const context = RequestContextService.getContext();
+    const document = await stashQueuedDocument(this.s3_service, {
+      kind: 'expense',
+      file,
+      detected,
+      organizationId: context?.organization_id,
+      storeId: context?.store_id,
+    });
     const payload: ExpenseScanJob = {
-      dataUri,
-      mimeType,
+      ...document,
       context: {
         store_id: context?.store_id,
         organization_id: context?.organization_id,
@@ -145,7 +161,7 @@ export class ExpensesController {
     };
 
     try {
-      const job = await this.expense_scan_queue.add('scan', payload, {
+      const job = await this.expense_scan_queue.add('scan', withJobOrigin(payload, 'http:gastos/escanear-recibo'), {
         attempts: 3,
         backoff: { type: 'exponential', delay: 2000 },
         removeOnComplete: { count: 100 },
@@ -156,6 +172,8 @@ export class ExpensesController {
         'Escaneo de factura de gasto encolado',
       );
     } catch {
+      // Nothing will read the S3 copy: drop it (best effort).
+      await discardQueuedDocument(this.s3_service, document);
       throw new VendixHttpException(ErrorCodes.AI_QUEUE_001);
     }
   }
@@ -186,7 +204,17 @@ export class ExpensesController {
       result: job.returnvalue ?? undefined,
       error: job.failedReason ?? undefined,
     };
-    return this.response_service.success(status);
+    // QUI-1020: additive AI-job meta (progress, timestamps, stall, failure class).
+    return this.response_service.success({
+      ...status,
+      ...(await this.ai_monitor.describe(
+        job,
+        state,
+        LEGACY_AI_SOURCES.expenseScan,
+        job.data?.context,
+        this.expense_scan_queue,
+      )),
+    });
   }
 
   // --- Parameter Routes (MUST be last) ---

@@ -162,6 +162,11 @@ export const reportsRoutes: Routes = [
           { path: 'purchase-by-supplier',  data: { reportId: 'purchase-by-supplier' },  loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           { path: 'purchase-trends',       data: { reportId: 'purchase-trends' },       loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           { path: 'payable-aging',         data: { reportId: 'payable-aging' },         loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          // Documentos soporte — página propia (filtros de tipo/estado/proveedor, totales soporte vs ajuste).
+          {
+            path: 'support-documents',
+            loadComponent: () => import('./pages/support-documents/support-documents-report-page.component').then(c => c.SupportDocumentsReportPageComponent),
+          },
         ],
       },
       {
@@ -190,7 +195,10 @@ export const reportsRoutes: Routes = [
             data: { categoryId: 'dispatch' },
           },
           { path: 'dispatch-remisiones',  data: { reportId: 'dispatch-remisiones' },  loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
-          { path: 'dispatch-planillas',   data: { reportId: 'dispatch-planillas' },   loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          // QUI-1024: la URL canónica es `dispatch-rutas`; el reportId se
+          // conserva (lo comparte el catálogo de reportes de Vexi en backend).
+          { path: 'dispatch-rutas',       data: { reportId: 'dispatch-planillas' },   loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'dispatch-planillas', pathMatch: 'full', redirectTo: 'dispatch-rutas' },
           { path: 'dispatch-vehiculos',   data: { reportId: 'dispatch-vehiculos' },   loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
         ],
       },

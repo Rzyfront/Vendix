@@ -1,12 +1,14 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
-import { Job, UnrecoverableError } from 'bullmq';
+import { Job } from 'bullmq';
 import { randomUUID } from 'crypto';
 import { InvoiceScannerService } from './invoice-scanner.service';
 import { mimeFromKey } from './invoice-revalidate.processor';
 import { S3Service } from '@common/services/s3.service';
 import { RequestContextService } from '@common/context/request-context.service';
-import { VendixHttpException, ErrorCodes } from '@common/errors';
+import { AiJobMonitorService } from '@common/ai-scan-jobs/ai-job-monitor.service';
+import { LEGACY_AI_SOURCES } from '@common/ai-scan-jobs/ai-scan-sources';
+import { toAiJobFailure } from '@common/ai-scan-jobs/ai-job-failure.util';
 import { InvoiceScanJob } from './interfaces/invoice-scan-job.interface';
 import { InvoiceScanResult } from './dto/scan-invoice.dto';
 
@@ -27,6 +29,7 @@ export class InvoiceScanProcessor extends WorkerHost {
   constructor(
     private readonly invoiceScanner: InvoiceScannerService,
     private readonly s3Service: S3Service,
+    private readonly monitor: AiJobMonitorService,
   ) {
     super();
   }
@@ -61,11 +64,26 @@ export class InvoiceScanProcessor extends WorkerHost {
               'No se pudo leer el documento guardado. Intenta de nuevo.',
             );
           }
-          return this.invoiceScanner.scanInvoiceFromBuffer(
-            buffer,
-            mimeFromKey(data.scan_attachment_key, buffer),
-            data.order_type,
-            data.scan_attachment,
+          return this.monitor.runAiWork(job, LEGACY_AI_SOURCES.invoiceScan, () =>
+            this.invoiceScanner.scanInvoiceFromBuffer(
+              buffer,
+              mimeFromKey(data.scan_attachment_key, buffer),
+              data.order_type,
+              data.scan_attachment,
+              {
+                // ia-cargas F3 — progreso real por páginas. `at`: un job que
+                // sigue reportando está vivo, no atascado (QUI-1020).
+                reportProgress: async (progress) => {
+                  try {
+                    await job.updateProgress({ ...progress, at: Date.now() });
+                  } catch (err: any) {
+                    this.logger.warn(
+                      `[InvoiceScan] job=${job.id} progress not stored: ${err?.message ?? err}`,
+                    );
+                  }
+                },
+              },
+            ),
           );
         },
       );
@@ -73,19 +91,17 @@ export class InvoiceScanProcessor extends WorkerHost {
       this.logger.error(
         `[InvoiceScan] job=${job.id} failed: ${error?.message ?? error}`,
       );
-      // `failedReason` llega al usuario: se propaga el CODIGO (no el devMessage
-      // en ingles); el frontend lo traduce con `ERROR_MESSAGES`
-      // (core/utils/error-messages.ts).
-      if (error instanceof VendixHttpException) {
-        if (
-          error.errorCode === ErrorCodes.INV_SCAN_PARSE_FAIL.code ||
-          error.errorCode === ErrorCodes.INV_SCAN_INCOMPLETE.code
-        ) {
-          throw new UnrecoverableError(error.errorCode);
-        }
-        throw new Error(error.errorCode); // reintentable
-      }
-      throw error; // BullMQ reintenta
+      // `failedReason` reaches the user: the Vendix error CODE is propagated
+      // (the frontend maps it with `ERROR_MESSAGES`). A 4xx (unreadable or
+      // incomplete response) is final; anything else is retried.
+      throw toAiJobFailure(error);
     }
+  }
+
+  /** QUI-1020: a final, non-document failure alerts Vendix once. */
+  @OnWorkerEvent('failed')
+  async onFailed(job: Job<InvoiceScanJob> | undefined): Promise<void> {
+    if (!job) return;
+    await this.monitor.onFailed(job, LEGACY_AI_SOURCES.invoiceScan, job.data);
   }
 }

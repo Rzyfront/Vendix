@@ -9,6 +9,11 @@ import { VexiVoiceSafetyService } from '../../../../../core/services/vexi-voice-
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import type { VexMessage } from '../models/vex.models';
 
+/** Lets every promise chain queued by the store settle (intent -> stream subscription). */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 12; i++) await Promise.resolve();
+}
+
 describe('VexChatStore voice mode, mic input and on-demand listen', () => {
   let store: VexChatStore;
   let api: jasmine.SpyObj<VexApiService>;
@@ -57,12 +62,24 @@ describe('VexChatStore voice mode, mic input and on-demand listen', () => {
     stream$ = new Subject<VexStreamChunk>();
     api = jasmine.createSpyObj('VexApiService', [
       'listConversations',
+      'getConversation',
       'createStreamIntent',
       'streamConversation',
       'synthesizeSpeech',
     ]);
     api.listConversations.and.returnValue(
       of({ data: [], meta: { total: 0, page: 1, limit: 50, totalPages: 0 } }),
+    );
+    api.getConversation.and.callFake((id: number) =>
+      of({
+        id,
+        title: `Chat ${id}`,
+        status: 'active',
+        metadata: { agent_key: 'vex' },
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        messages: [],
+      } as any),
     );
     api.createStreamIntent.and.returnValue(of('stream-1'));
     api.streamConversation.and.returnValue(stream$.asObservable());
@@ -137,7 +154,7 @@ describe('VexChatStore voice mode, mic input and on-demand listen', () => {
   it('mic input sends text-only when voice_mode is OFF and spoken when voice_mode is ON', async () => {
     // Mic with waves OFF -> speak is NOT sent (response stays text).
     store.sendVoiceMessage('¿Cómo van las ventas?');
-    await Promise.resolve();
+    await settle();
     expect(api.createStreamIntent).toHaveBeenCalledWith(
       10,
       '¿Cómo van las ventas?',
@@ -153,7 +170,7 @@ describe('VexChatStore voice mode, mic input and on-demand listen', () => {
 
     store.toggleVoiceMode();
     store.sendMessage('Dame el detalle de hoy');
-    await Promise.resolve();
+    await settle();
 
     expect(api.createStreamIntent).toHaveBeenCalledWith(
       10,
@@ -166,7 +183,7 @@ describe('VexChatStore voice mode, mic input and on-demand listen', () => {
   it('delivers all streamed audio segments before finishing the turn and caches them for «Escuchar»', async () => {
     store.toggleVoiceMode();
     store.sendMessage('Resumen del día');
-    await Promise.resolve();
+    await settle();
 
     stream$.next({
       type: 'audio',

@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams, HttpResponse } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
+import { AiScanJobOptions, AiScanJobService } from '../../../../../core/services/ai-scan-job.service';
 import type {
   ApiEnvelope,
   ConfirmReceivedDocumentMatchInput,
@@ -14,8 +15,7 @@ import type {
   ReceivedDocumentMatchExpensesResponse,
   ReceivedDocumentMatchMutationResult,
   ReceivedDocumentReviewInput,
-  ReceivedDocumentScanEnqueueResponse,
-  ReceivedDocumentScanStatus,
+  ReceivedDocumentScanJobResult,
   ReceivedDocumentsPage,
   ReceivedDocumentQuery,
   ReceivedDocumentInboxSummary,
@@ -27,6 +27,7 @@ import type {
 @Injectable({ providedIn: 'root' })
 export class ReceivedDocumentsService {
   private readonly http = inject(HttpClient);
+  private readonly aiScanJobs = inject(AiScanJobService);
 
   private base(scope: ReceivedDocumentsScope): string {
     return `${environment.apiUrl}/${scope}/invoicing/received-documents`;
@@ -150,18 +151,64 @@ export class ReceivedDocumentsService {
     });
   }
 
-  scan(scope: ReceivedDocumentsScope, file: File, storeId?: number): Observable<ApiEnvelope<ReceivedDocumentScanEnqueueResponse>> {
+  /**
+   * Scans a supplier document with AI (`received-document-scan` queue).
+   * `AiScanJobService` enqueues, waits with backoff, feeds the progress bar and
+   * emits the job result once; it fails with `AiScanJobError`. `onEnqueued`
+   * receives the enqueue `data` (`document_id`, `job_id`).
+   */
+  scanAndWait(
+    scope: ReceivedDocumentsScope,
+    file: File,
+    storeId: number | undefined,
+    opts: Pick<AiScanJobOptions, 'progress' | 'onStall' | 'onEnqueued'>,
+  ): Observable<ReceivedDocumentScanJobResult> {
     const body = new FormData();
     body.append('file', file, file.name);
-    return this.http.post<ApiEnvelope<ReceivedDocumentScanEnqueueResponse>>(`${this.base(scope)}/scan`, body, {
-      params: this.scopeParams(scope, storeId),
-    });
+    return this.aiScanJobs.enqueueAndWait<ReceivedDocumentScanJobResult>(
+      `${this.base(scope)}/scan${this.scopeQuery(scope, storeId)}`,
+      body,
+      {
+        ...opts,
+        statusUrl: this.scanStatusUrl(scope, storeId),
+        resumeKey: this.scanResumeKey(scope, storeId),
+        // Already-processed document: nothing to wait for, open it directly.
+        resultWithoutJob: (data) => {
+          if (data['already_processed'] === true && typeof data['document_id'] === 'number') {
+            return { document_id: data['document_id'] };
+          }
+          // The document was saved but the scan has no read id: say so (and
+          // point to the inbox) instead of the generic «No se pudo iniciar».
+          throw new Error('El documento se guardó, pero no se recibió un identificador de lectura. Consulta la bandeja.');
+        },
+      },
+    );
   }
 
-  getScanStatus(scope: ReceivedDocumentsScope, jobId: string, storeId?: number): Observable<ApiEnvelope<ReceivedDocumentScanStatus>> {
-    return this.http.get<ApiEnvelope<ReceivedDocumentScanStatus>>(`${this.base(scope)}/scan/${encodeURIComponent(jobId)}`, {
-      params: this.scopeParams(scope, storeId),
-    });
+  /** Re-attaches to a scan started before a reload or a close; `null` if none (QUI-1020). */
+  resumeScan(
+    scope: ReceivedDocumentsScope,
+    storeId: number | undefined,
+    opts: Pick<AiScanJobOptions, 'progress' | 'onStall'>,
+  ): Observable<ReceivedDocumentScanJobResult> | null {
+    return this.aiScanJobs.resume<ReceivedDocumentScanJobResult>(
+      this.scanResumeKey(scope, storeId),
+      { ...opts, statusUrl: this.scanStatusUrl(scope, storeId) },
+    );
+  }
+
+  private scanStatusUrl(scope: ReceivedDocumentsScope, storeId?: number): (jobId: string) => string {
+    return (jobId) => `${this.base(scope)}/scan/${encodeURIComponent(jobId)}${this.scopeQuery(scope, storeId)}`;
+  }
+
+  /** One remembered scan per scope and operational store. */
+  private scanResumeKey(scope: ReceivedDocumentsScope, storeId?: number): string {
+    return `received_document:${scope}:${scope === 'organization' ? storeId ?? 'none' : 'store'}`;
+  }
+
+  private scopeQuery(scope: ReceivedDocumentsScope, storeId?: number): string {
+    const params = this.scopeParams(scope, storeId).toString();
+    return params ? `?${params}` : '';
   }
 
   createManual(scope: ReceivedDocumentsScope, dto: ManualReceivedDocumentInput, storeId?: number): Observable<ApiEnvelope<ReceivedDocumentCreateResult>> {

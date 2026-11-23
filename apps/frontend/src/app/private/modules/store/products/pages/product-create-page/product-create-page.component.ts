@@ -10,6 +10,13 @@ import {
   DestroyRef,
   untracked,
 } from '@angular/core';
+import { ManufacturingPlantsService } from '../../../manufacturing/services/manufacturing-plants.service';
+import {
+  productionSiteMissing,
+  productionSiteOptions,
+  productionSiteRequired,
+  productionSiteVisible,
+} from '../../../../../../shared/utils/production-site.util';
 import { HttpClient } from '@angular/common/http';
 import { DatePipe, DecimalPipe, KeyValuePipe } from '@angular/common';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -700,6 +707,66 @@ export class ProductCreatePageComponent {
   readonly isRestaurant = computed(() =>
     this.storeIndustries().includes('restaurant'),
   );
+  /**
+   * Dónde se produce: visible para productos producidos en lote en tiendas
+   * con manufactura. Restaurante puro no lo ve (todo va a Cocina, como antes).
+   */
+  readonly showProductionSite = computed(() => {
+    this.formUpdateTrigger();
+    return productionSiteVisible(
+      this.storeIndustries(),
+      !!this.productForm?.get('is_batch_produced')?.value,
+    );
+  });
+  /** Restaurante + manufactura: la industria no decide, el producto debe decirlo. */
+  readonly productionSiteRequired = computed(() => {
+    this.formUpdateTrigger();
+    return productionSiteRequired(
+      this.storeIndustries(),
+      !!this.productForm?.get('is_batch_produced')?.value,
+    );
+  });
+  /** Aviso "Elige dónde se produce" (obligatorio y vacío, también en productos existentes). */
+  readonly productionSiteMissing = computed(() => {
+    this.formUpdateTrigger();
+    return productionSiteMissing(
+      this.storeIndustries(),
+      !!this.productForm?.get('is_batch_produced')?.value,
+      this.productForm?.get('production_site')?.value,
+    );
+  });
+  readonly productionSiteIsPlant = computed(() => {
+    this.formUpdateTrigger();
+    return this.productForm?.get('production_site')?.value === 'plant';
+  });
+  /** Fuera de Planta la planta concreta no aplica: se limpia. */
+  onProductionSiteChange(): void {
+    if (this.productForm.get('production_site')?.value !== 'plant') {
+      this.productForm.get('production_plant_id')?.setValue(null);
+    }
+  }
+  readonly productionSiteOptions = computed<SelectorOption[]>(() =>
+    productionSiteOptions(this.storeIndustries()),
+  );
+  private readonly manufacturingPlants = inject(ManufacturingPlantsService);
+  private readonly plantsLoaded = signal(false);
+  readonly productionPlantOptions = signal<SelectorOption[]>([]);
+  /** Carga las plantas una vez, solo cuando el selector de planta se muestra. */
+  private readonly loadPlantsEffect = effect(() => {
+    if (!this.productionSiteIsPlant() || untracked(this.plantsLoaded)) return;
+    this.plantsLoaded.set(true);
+    this.manufacturingPlants
+      .list()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (plants) =>
+          this.productionPlantOptions.set([
+            { value: '', label: 'Planta principal' },
+            ...plants.map((plant) => ({ value: plant.id, label: plant.name })),
+          ]),
+        error: () => this.productionPlantOptions.set([{ value: '', label: 'Planta principal' }]),
+      });
+  });
   /**
    * `true` solo si la tienda tiene la industria `service`. Gatea el tipo
    * "Servicio" en el selector, igual que `isRestaurant` gatea "Plato preparado".
@@ -2818,6 +2885,9 @@ export class ProductCreatePageComponent {
         is_ingredient: [false],
         is_combo: [false],
         is_batch_produced: [false],
+        // Dónde se produce (Cocina / Planta) y planta concreta (vacío = principal).
+        production_site: [null as 'kitchen' | 'plant' | null],
+        production_plant_id: [null as number | null],
         // Appointment redesign phase 2 — per-product home-service
         // eligibility. The form template only renders this toggle when
         // `service_modality === 'in_person'`, but we still seed it as
@@ -3176,6 +3246,8 @@ export class ProductCreatePageComponent {
       is_ingredient: !!product.is_ingredient,
       is_combo: !!product.is_combo,
       is_batch_produced: !!product.is_batch_produced,
+      production_site: product.production_site ?? null,
+      production_plant_id: product.production_plant_id ?? null,
       // Appointment redesign phase 2 — load per-product home-service
       // eligibility. Backend returns the field in the product payload
       // (see product.interface.ts); default `false` for legacy rows.
@@ -4785,6 +4857,17 @@ export class ProductCreatePageComponent {
       });
     }
 
+    if (this.productionSiteMissing()) {
+      requirements.push({
+        id: 'production_site',
+        label: 'Dónde se produce',
+        reason:
+          'La tienda es restaurante y manufactura: elige si este producto se produce en Cocina (Producción) o en Planta.',
+        severity: 'required',
+        action: { label: 'Elegir dónde se produce', kind: 'focus', target: 'production_site' },
+      });
+    }
+
     // Errores a nivel de formulario (cross-field).
     const formErrors = form.errors ?? {};
     if (formErrors['saleLessThanBase']) {
@@ -5289,6 +5372,14 @@ export class ProductCreatePageComponent {
       // Un insumo no puede ser combo / menú fijo: se neutraliza por robustez.
       is_combo: formValue.is_ingredient ? false : !!formValue.is_combo,
       is_batch_produced: !!formValue.is_batch_produced,
+      // Solo viaja donde el formulario lo muestra (tiendas con manufactura).
+      ...(this.showProductionSite() && {
+        production_site: formValue.production_site || null,
+        production_plant_id:
+          formValue.production_site === 'plant' && formValue.production_plant_id
+            ? Number(formValue.production_plant_id)
+            : null,
+      }),
       // Appointment redesign phase 2 — propagar el flag al DTO
       // enviado al backend. Default `false` para preservar UX legacy.
       is_eligible_for_home_service: !!formValue.is_eligible_for_home_service,

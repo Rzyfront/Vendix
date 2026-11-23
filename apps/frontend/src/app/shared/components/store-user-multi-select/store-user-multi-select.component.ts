@@ -17,7 +17,16 @@ import {
   FormsModule,
 } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Subject, debounceTime, distinctUntilChanged, forkJoin, of, switchMap, tap } from 'rxjs';
+import {
+  Observable,
+  Subject,
+  debounceTime,
+  distinctUntilChanged,
+  forkJoin,
+  of,
+  switchMap,
+  tap,
+} from 'rxjs';
 import { catchError } from 'rxjs/operators';
 import { IconComponent } from '../icon/icon.component';
 import {
@@ -191,6 +200,24 @@ export class StoreUserMultiSelectComponent
    * full store-user list.
    */
   readonly excludeRole = input<string | null>(null);
+  /**
+   * `'staff'` searches only the store staff (`staff-lookup`), as the single
+   * `app-store-user-select` does. Opt-in — defaults to `'default'`.
+   */
+  readonly lookupMode = input<'default' | 'staff'>('default');
+  /**
+   * Users whose name is already known (e.g. the ones saved on a record), so
+   * an incoming id renders its name without a lookup round-trip.
+   */
+  readonly knownUsers = input<StoreUserOption[]>([]);
+  /**
+   * Own search for pickers backed by another endpoint (e.g. the CRM task
+   * support people, gated by the tasks permission). Opt-in — defaults to
+   * `null`, which keeps {@link StoreUserLookupService.search}.
+   */
+  readonly searchFn = input<((term: string) => Observable<StoreUserOption[]>) | null>(
+    null,
+  );
 
   // Signal UI state (zoneless-safe)
   readonly query = signal<string>('');
@@ -214,6 +241,9 @@ export class StoreUserMultiSelectComponent
     return this.results().filter((u) => !excluded.has(u.id));
   });
 
+  /** Bumped on every write so a slow name lookup never overwrites a newer value. */
+  private writeRequest = 0;
+
   // ControlValueAccessor callbacks
   private onChange: (value: number[]) => void = () => {};
   private onTouched: () => void = () => {};
@@ -224,14 +254,18 @@ export class StoreUserMultiSelectComponent
         debounceTime(SEARCH_DEBOUNCE_MS),
         distinctUntilChanged(),
         tap(() => this.isLoading.set(true)),
-        switchMap((term) =>
-          this.lookup
-            .search(term, {
-              excludeIds: this.excludeIds(),
-              excludeRole: this.excludeRole() ?? undefined,
-            })
-            .pipe(catchError(() => of([] as StoreUserOption[]))),
-        ),
+        switchMap((term) => {
+          const search = this.searchFn();
+          return (
+            search
+              ? search(term)
+              : this.lookup.search(term, {
+                  excludeIds: this.excludeIds(),
+                  excludeRole: this.excludeRole() ?? undefined,
+                  mode: this.lookupMode(),
+                })
+          ).pipe(catchError(() => of([] as StoreUserOption[])));
+        }),
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((options) => {
@@ -244,13 +278,26 @@ export class StoreUserMultiSelectComponent
   writeValue(value: number[] | null): void {
     const ids = value ?? [];
     if (ids.length === 0) {
+      this.writeRequest++;
       this.selected.set([]);
       return;
     }
-    // Resolve name/avatar for each incoming id.
-    forkJoin(ids.map((id) => this.lookup.getById(id)))
+    // Resolve name/avatar for each incoming id; known users (given by the
+    // caller or already chosen here) skip the lookup.
+    const known = new Map(
+      [...this.knownUsers(), ...this.selected()].map((user) => [user.id, user]),
+    );
+    const request = ++this.writeRequest;
+    forkJoin(
+      ids.map((id) => {
+        const user = known.get(id);
+        return user ? of(user) : this.lookup.getById(id, { mode: this.lookupMode() });
+      }),
+    )
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((resolved) => {
+        // A newer writeValue/selection already replaced this one.
+        if (request !== this.writeRequest) return;
         this.selected.set(
           resolved.map((user, index) =>
             user ?? { id: ids[index], name: `Usuario #${ids[index]}` },
@@ -314,6 +361,7 @@ export class StoreUserMultiSelectComponent
   add(user: StoreUserOption): void {
     if (this.isDisabled()) return;
     if (this.selectedIds().includes(user.id)) return;
+    this.writeRequest++;
     this.selected.update((current) => [...current, user]);
     this.query.set('');
     this.isOpen.set(false);
@@ -323,6 +371,7 @@ export class StoreUserMultiSelectComponent
   remove(id: number, event: Event): void {
     event.stopPropagation();
     if (this.isDisabled()) return;
+    this.writeRequest++;
     this.selected.update((current) => current.filter((u) => u.id !== id));
     this.emit();
   }

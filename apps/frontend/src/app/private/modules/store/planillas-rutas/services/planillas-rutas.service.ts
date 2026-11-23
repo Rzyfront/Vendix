@@ -3,6 +3,11 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, of, throwError } from 'rxjs';
 import { catchError, map, shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import {
+  StoreScopedCache,
+  activeStoreId,
+} from '../../../../../core/utils/store-scoped-cache';
 import {
   AiScanJobOptions,
   AiScanJobService,
@@ -30,15 +35,19 @@ import {
   VoidDispatchRouteDto,
 } from '../interfaces/planilla.interface';
 
-let statsCache$: Observable<DispatchRouteStats> | null = null;
-let statsCacheTime = 0;
-const CACHE_TTL = 30_000;
+/**
+ * Stats cards cache, one entry per store and emptied on every store switch
+ * (QUI-1021): the backend resolves the store from the session, so the URL
+ * alone does not say whose stats a response holds.
+ */
+const statsCache = new StoreScopedCache<DispatchRouteStats>(30_000);
 
 @Injectable({ providedIn: 'root' })
 export class PlanillasRutasService {
   private readonly apiUrl = environment.apiUrl;
   private readonly http = inject(HttpClient);
   private readonly aiScanJobs = inject(AiScanJobService);
+  private readonly authFacade = inject(AuthFacade);
 
   list(query: DispatchRouteQuery = {}): Observable<PaginatedDispatchRoutesResponse> {
     const params = new URLSearchParams();
@@ -122,23 +131,24 @@ export class PlanillasRutasService {
   }
 
   getStats(): Observable<DispatchRouteStats> {
-    const now = Date.now();
-    if (statsCache$ && now - statsCacheTime < CACHE_TTL) {
-      return statsCache$;
+    const storeId = activeStoreId(this.authFacade);
+    const cached = statsCache.get(storeId);
+    if (cached) {
+      return cached;
     }
-    statsCache$ = this.http
+    const stats$ = this.http
       .get<any>(`${this.apiUrl}/store/dispatch-routes/stats`)
       .pipe(
         map((r) => r.data as DispatchRouteStats),
         shareReplay({ bufferSize: 1, refCount: false }),
-        tap(() => (statsCacheTime = Date.now())),
+        tap(() => statsCache.touch(storeId)),
       );
-    return statsCache$;
+    statsCache.set(storeId, stats$);
+    return stats$;
   }
 
   invalidateStatsCache() {
-    statsCache$ = null;
-    statsCacheTime = 0;
+    statsCache.clear();
   }
 
   create(dto: CreateDispatchRouteDto): Observable<DispatchRoute> {
@@ -313,6 +323,17 @@ export class PlanillasRutasService {
     );
   }
 
+  /** Re-attaches to a scan started before a reload; `null` if none (QUI-1020). */
+  resumeScan(
+    routeId: number,
+    opts?: Parameters<AiScanJobService['resume']>[1],
+  ): Observable<RouteSheetScanResult> | null {
+    return this.aiScanJobs.resume<RouteSheetScanResult>(
+      `route_sheet:${routeId}`,
+      opts,
+    );
+  }
+
   /**
    * Match the extracted rows against the route's real stops.
    * `POST /store/dispatch-routes/:id/scan/match` (JSON body: the scan result).
@@ -381,22 +402,47 @@ export class PlanillasRutasService {
   /**
    * Lists dispatch notes that the operator can still pick when creating a
    * planilla. Uses the backend `GET /store/dispatch-routes/available-notes`
-   * endpoint, which already filters out notes that are locked by an active
-   * (non-draft, non-released) stop. The legacy
+   * endpoint, which already filters out notes that are locked by any
+   * non-released stop (draft routes included). The legacy
    * `/dispatch-notes?status=confirmed` query returns ALL confirmed notes
    * and triggered 500 errors when the wizard tried to assign locked ones.
+   *
+   * Paginado y con búsqueda en el servidor: `data` es la página pedida y
+   * `pagination.total` el total real de remisiones disponibles (`meta` de
+   * `ResponseService.paginated`).
    */
-  listAvailableDispatchNotes(search?: string): Observable<{ data: any[]; pagination: any }> {
+  listAvailableDispatchNotes(
+    query: { search?: string; page?: number; limit?: number; ids?: number[] } = {},
+  ): Observable<{
+    data: any[];
+    pagination: { total: number; page: number; limit: number; totalPages: number };
+  }> {
     const params = new URLSearchParams();
+    const search = query.search?.trim();
     if (search) params.append('search', search);
+    if (query.page) params.append('page', String(query.page));
+    if (query.limit) params.append('limit', String(query.limit));
+    if (query.ids?.length) params.append('ids', query.ids.join(','));
     const qs = params.toString();
     return this.http
       .get<any>(`${this.apiUrl}/store/dispatch-routes/available-notes${qs ? '?' + qs : ''}`)
       .pipe(
-        map((r) => ({
-          data: r.data ?? [],
-          pagination: { total: (r.data ?? []).length, page: 1, limit: (r.data ?? []).length || 1, totalPages: 1 },
-        })),
+        map((r) => {
+          const data: any[] = Array.isArray(r?.data) ? r.data : [];
+          const meta = r?.meta ?? {};
+          const total = Number(meta.total ?? data.length);
+          const page = Number(meta.page ?? query.page ?? 1);
+          const limit = Number(meta.limit ?? query.limit ?? (data.length || 1));
+          return {
+            data,
+            pagination: {
+              total,
+              page,
+              limit,
+              totalPages: Number(meta.totalPages ?? Math.ceil(total / (limit || 1))),
+            },
+          };
+        }),
         catchError((e) => throwError(() => new Error(this.extractMessage(e)))),
       );
   }

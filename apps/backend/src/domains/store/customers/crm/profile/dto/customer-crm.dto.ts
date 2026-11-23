@@ -19,6 +19,7 @@ import {
   CRM_TIMELINE_TYPES,
   CrmTimelineType,
 } from '../../../history/customer-history.service';
+import { CRM_TAG_GROUPS } from '../../tags/crm-tags.constants';
 
 /** `store_users.crm_source` values (PLAN-CRM §2.2). */
 export const CRM_CUSTOMER_SOURCES = [
@@ -166,6 +167,21 @@ export class CreateCrmTagDto {
   @IsString()
   @MaxLength(20)
   color?: string | null;
+
+  /** Grupo del catálogo; `null` lo deja sin grupo. Lista cerrada (ver constante). */
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsString()
+  @MaxLength(30)
+  @IsIn(CRM_TAG_GROUPS)
+  group_name?: string | null;
+
+  /** «Cuándo se pone»: la regla humana para usar la etiqueta. */
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsString()
+  @MaxLength(200)
+  description?: string | null;
 }
 
 export class UpdateCrmTagDto {
@@ -180,4 +196,19 @@ export class UpdateCrmTagDto {
   @IsString()
   @MaxLength(20)
   color?: string | null;
+
+  /** Grupo del catálogo; `null` lo saca del grupo. Lista cerrada (ver constante). */
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsString()
+  @MaxLength(30)
+  @IsIn(CRM_TAG_GROUPS)
+  group_name?: string | null;
+
+  /** «Cuándo se pone»; `null` o vacío borra la nota. */
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsString()
+  @MaxLength(200)
+  description?: string | null;
 }

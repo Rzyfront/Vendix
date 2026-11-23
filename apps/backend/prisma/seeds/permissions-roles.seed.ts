@@ -13,6 +13,17 @@ export interface SeedPermissionsResult {
   assignmentsCreated: number;
 }
 
+/**
+ * Permisos de la superficie Vendix Platform (`platform:*`). Son de SISTEMA
+ * (`is_system_permission = true`) y ningún rol compartido por los tenants los
+ * hereda: los filtros permisivos de owner/admin/manager los excluyen con esta
+ * función. Solo los portan super_admin (recibe todo) y el rol "Comercial
+ * Vendix" de la org plataforma.
+ */
+export function isPlatformPermission(name: string): boolean {
+  return name.startsWith('platform:');
+}
+
 export async function seedPermissionsAndRoles(
   prisma?: PrismaClient,
 ): Promise<SeedPermissionsResult> {
@@ -2241,6 +2252,16 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/stock-transfers/:id',
       method: 'PATCH',
     },
+    // D2 — aprobar es una acción propia: cualquier usuario con este permiso
+    // puede aprobar (incluido el creador). El endpoint acepta además el
+    // histórico `update` para no quitarle la acción a los roles existentes.
+    {
+      name: 'store:stock-transfers:approve',
+      description:
+        'Aprobar una transferencia de inventario (no mueve stock; reserva el origen)',
+      path: '/api/store/stock-transfers/:id/approve',
+      method: 'PATCH',
+    },
     {
       name: 'store:stock-transfers:delete',
       description: 'Eliminar transferencia de inventario',
@@ -4210,6 +4231,19 @@ export async function seedPermissionsAndRoles(
       method: 'PATCH',
     },
     {
+      name: 'superadmin:messaging:prices:read',
+      description: 'Leer los precios de mensajería (SMS, WhatsApp y correo)',
+      path: '/api/superadmin/messaging/prices/unique-read',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:messaging:prices:write',
+      description:
+        'Editar los precios de mensajería (SMS, WhatsApp y correo)',
+      path: '/api/superadmin/messaging/prices/unique-write',
+      method: 'PATCH',
+    },
+    {
       name: 'superadmin:notification_sounds:read',
       description: 'Ver catálogo global de sonidos de notificación',
       path: '/api/superadmin/notification-sounds',
@@ -4902,6 +4936,26 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/payment-requests/:id/confirm',
       method: 'POST',
     },
+    // Vendix Platform · enlace prospecto CRM ↔ organización cliente
+    // (odd/tasks/vendix-platform-crm-enlace.md). Prefijo `platform:` = permiso
+    // de SISTEMA (`isPlatformPermission` abajo): ninguna organización puede
+    // asignarlo (ORG_PERM_001) y owner/admin/manager lo excluyen. Solo lo
+    // portan super_admin y el rol "Comercial Vendix" de la org plataforma
+    // (`platform-crm-role.seed.ts` y la migración 20261204090000).
+    {
+      name: 'platform:crm_link:manage',
+      description:
+        'Vendix Platform: enlazar y desenlazar prospectos del CRM con organizaciones cliente',
+      path: '/api/store/platform-crm/customers/:customerId/link',
+      method: 'POST',
+    },
+    {
+      name: 'platform:crm_link:read',
+      description:
+        'Vendix Platform: ver la cuenta Vendix enlazada a un prospecto del CRM',
+      path: '/api/store/platform-crm/customers/:customerId/link',
+      method: 'GET',
+    },
   ];
 
   // Create-only seed: never delete existing permission rows.
@@ -4922,6 +4976,7 @@ export async function seedPermissionsAndRoles(
       }
       const isSystemPermission =
         permission.name.includes('super_admin') ||
+        isPlatformPermission(permission.name) ||
         permission.name.startsWith('system.') ||
         permission.name.startsWith('security.') ||
         permission.name.startsWith('rate.limiting.');
@@ -5118,6 +5173,7 @@ export async function seedPermissionsAndRoles(
       !p.name.startsWith('superadmin:') &&
       !p.name.startsWith('superadmin:roles:') &&
       !p.name.startsWith('superadmin:users:') &&
+      !isPlatformPermission(p.name) &&
       !p.name.includes('system.test') &&
       !p.name.includes('users.impersonate'),
   );
@@ -5166,6 +5222,7 @@ export async function seedPermissionsAndRoles(
       !p.name.startsWith('superadmin:') &&
       !p.name.startsWith('superadmin:roles:') &&
       !p.name.startsWith('superadmin:users:') &&
+      !isPlatformPermission(p.name) &&
       !p.name.includes('system.test') &&
       !p.name.includes('users.impersonate'),
   );
@@ -5244,6 +5301,8 @@ export async function seedPermissionsAndRoles(
   // lives at /api/organization/inventory/suppliers).
   const managerPermissions = allPermissions.filter(
     (p) =>
+      // Vendix Platform: `platform:*` nunca sale de super_admin y "Comercial Vendix".
+      !isPlatformPermission(p.name) &&
       // Manager loses store-side supplier writes — those move to ORG_ADMIN.
       !(
         p.name === 'store:inventory:suppliers:create' ||

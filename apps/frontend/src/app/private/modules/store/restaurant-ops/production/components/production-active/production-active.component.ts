@@ -31,7 +31,7 @@ import {
   ToastService,
 } from '../../../../../../../shared/components';
 import { formatStoreDateTime, storeToday } from '../../../../../../../shared/utils/date.util';
-import { ManufacturingOrdersService } from '../../../../manufacturing/services';
+import { ManufacturingOrdersService, injectPlantSession } from '../../../../manufacturing/services';
 import { addDays, fullDate } from '../../../../scheduled-orders/utils/ymd.util';
 import {
   ProductionDayCard,
@@ -138,6 +138,7 @@ const NO_TIME_KEY = 'no-time';
       <app-production-day-supplies
         [date]="date()"
         [apiScope]="apiScope"
+        [plantId]="plantSession.plantId()"
         [refreshToken]="data()"
         [summary]="summary()"
       />
@@ -187,6 +188,19 @@ const NO_TIME_KEY = 'no-time';
                 [value]="date()"
                 (change)="onDateInput($event)"
               />
+              @if (plantSession.showPicker()) {
+                <select
+                  class="h-9 min-w-0 flex-1 rounded-[10px] border border-border bg-surface px-2.5 text-sm text-text-primary md:flex-none"
+                  aria-label="Planta"
+                  (change)="plantSession.selectFrom($event)"
+                >
+                  @for (plant of plantSession.plants(); track plant.id) {
+                    <option [value]="plant.id" [selected]="plant.id === plantSession.plantId()">
+                      {{ plant.name }}
+                    </option>
+                  }
+                </select>
+              }
             </div>
           </div>
         </div>
@@ -453,6 +467,8 @@ export class ProductionActiveComponent {
   /** Planta routes read through the manufacturing API (its own industry guard). */
   readonly apiScope: ProductionApiScope =
     this.routeData['apiScope'] === 'manufacturing' ? 'manufacturing' : 'restaurant';
+  /** QUI-1013: with several plants the session shows one plant (Planta only). */
+  readonly plantSession = injectPlantSession(this.apiScope === 'manufacturing');
 
   readonly headerActions: StickyHeaderActionButton[] = this.listBase
     ? [
@@ -523,6 +539,9 @@ export class ProductionActiveComponent {
 
     effect(() => {
       const date = this.date();
+      // QUI-1013: wait for the plants, then reload when the session's plant changes.
+      if (!this.plantSession.ready()) return;
+      this.plantSession.plantId();
       untracked(() => this.load(date, true));
     });
 
@@ -539,6 +558,7 @@ export class ProductionActiveComponent {
 
   // --- loading ---------------------------------------------------------------
   reload(): void {
+    if (!this.plantSession.ready()) return;
     this.load(this.date(), false);
   }
 
@@ -549,7 +569,8 @@ export class ProductionActiveComponent {
     this.errorMessage.set(null);
     // S20: la línea de tiempo necesita TODAS las órdenes en curso del día, así que
     // esta pantalla recorre las páginas hasta que `next_cursor` sea null.
-    this.loadSub = this.service.getDayAllPages(date, this.apiScope).subscribe({
+    const plantId = this.plantSession.plantId();
+    this.loadSub = this.service.getDayAllPages(date, this.apiScope, plantId).subscribe({
       next: (res) => {
         this.data.set(res);
         this.loading.set(false);
@@ -616,7 +637,9 @@ export class ProductionActiveComponent {
 
   onHeaderAction(id: string): void {
     if (id === 'list' && this.listBase) {
-      void this.router.navigate([this.listBase], { queryParams: { date: this.date() } });
+      void this.router.navigate([this.listBase], {
+        queryParams: { date: this.date(), ...this.plantSession.queryParams() },
+      });
     }
   }
 

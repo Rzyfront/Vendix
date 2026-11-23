@@ -13,6 +13,9 @@ export function createPlaybookTools(): RegisteredTool[] {
   return [
     {
       name: 'search_playbooks',
+      access: 'public',
+      accessReason:
+        'Agent procedure guides; reads no business data, and their steps run permission-checked tools.',
       version: '1',
       domain: 'playbooks',
       readOnly: true,
@@ -35,6 +38,9 @@ export function createPlaybookTools(): RegisteredTool[] {
     },
     {
       name: 'load_playbook',
+      access: 'public',
+      accessReason:
+        'Agent procedure guides; reads no business data, and their steps run permission-checked tools.',
       version: '1',
       domain: 'playbooks',
       readOnly: true,

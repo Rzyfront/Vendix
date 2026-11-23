@@ -1,8 +1,9 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { shareReplay, tap } from 'rxjs/operators';
+import { map, shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import { withUserActionTimeout } from '../../../../../core/utils/backend-availability.util';
 import {
   AIEngineConfig,
   CreateAIConfigDto,
@@ -24,7 +25,14 @@ import {
   UpdateAIAgentDto,
   AIAgentQueryDto,
   PaginatedAIAgentResponse,
+  AIAppHealthQuery,
+  AIAppHealthReport,
 } from '../interfaces';
+import {
+  AgentRuntimeSheet,
+  AgentVoicePreview,
+  UpdateAgentRuntimeDto,
+} from '../interfaces/agent-runtime.interface';
 
 interface CacheEntry<T> {
   observable: T;
@@ -32,6 +40,16 @@ interface CacheEntry<T> {
 }
 
 let statsCache: CacheEntry<Observable<any>> | null = null;
+
+/**
+ * Las pruebas llaman al proveedor de IA. El backend corta según el tipo de app
+ * (90 s texto, 120 s imagen, 180 s video: `AI_APP_TEST_TIMEOUT_BY_TYPE_MS`);
+ * el cliente espera un poco más que el mayor para recibir ese error
+ * controlado antes de rendirse. Si el cliente corta, el backend cancela la
+ * llamada al proveedor. Un guardado/prueba colgado termina en toast, nunca en
+ * el gato.
+ */
+export const AI_TEST_ACTION_TIMEOUT_MS = 200_000;
 
 @Injectable({
   providedIn: 'root',
@@ -85,32 +103,32 @@ export class AIEngineService {
   }
 
   createConfig(data: CreateAIConfigDto): Observable<AIEngineConfig> {
-    return this.http.post<any>(`${this.apiUrl}/superadmin/ai-engine`, data);
+    return this.http
+      .post<any>(`${this.apiUrl}/superadmin/ai-engine`, data)
+      .pipe(withUserActionTimeout());
   }
 
   updateConfig(
     id: number,
     data: UpdateAIConfigDto,
   ): Observable<AIEngineConfig> {
-    return this.http.patch<any>(
-      `${this.apiUrl}/superadmin/ai-engine/${id}`,
-      data,
-    );
+    return this.http
+      .patch<any>(`${this.apiUrl}/superadmin/ai-engine/${id}`, data)
+      .pipe(withUserActionTimeout());
   }
 
   deleteConfig(id: number): Observable<void> {
-    return this.http.delete<void>(
-      `${this.apiUrl}/superadmin/ai-engine/${id}`,
-    );
+    return this.http
+      .delete<void>(`${this.apiUrl}/superadmin/ai-engine/${id}`)
+      .pipe(withUserActionTimeout());
   }
 
   testConnection(
     id: number,
   ): Observable<{ success: boolean; message: string }> {
-    return this.http.post<any>(
-      `${this.apiUrl}/superadmin/ai-engine/${id}/test`,
-      {},
-    );
+    return this.http
+      .post<any>(`${this.apiUrl}/superadmin/ai-engine/${id}/test`, {})
+      .pipe(withUserActionTimeout(AI_TEST_ACTION_TIMEOUT_MS));
   }
 
   // --- AI Applications ---
@@ -139,32 +157,35 @@ export class AIEngineService {
   }
 
   createApp(data: CreateAIAppDto): Observable<AIEngineApp> {
-    return this.http.post<any>(
-      `${this.apiUrl}/superadmin/ai-engine/applications`,
-      data,
-    );
+    return this.http
+      .post<any>(`${this.apiUrl}/superadmin/ai-engine/applications`, data)
+      .pipe(withUserActionTimeout());
   }
 
   updateApp(id: number, data: UpdateAIAppDto): Observable<AIEngineApp> {
-    return this.http.patch<any>(
-      `${this.apiUrl}/superadmin/ai-engine/applications/${id}`,
-      data,
-    );
+    return this.http
+      .patch<any>(
+        `${this.apiUrl}/superadmin/ai-engine/applications/${id}`,
+        data,
+      )
+      .pipe(withUserActionTimeout());
   }
 
   deleteApp(id: number): Observable<void> {
-    return this.http.delete<void>(
-      `${this.apiUrl}/superadmin/ai-engine/applications/${id}`,
-    );
+    return this.http
+      .delete<void>(`${this.apiUrl}/superadmin/ai-engine/applications/${id}`)
+      .pipe(withUserActionTimeout());
   }
 
   testApp(
     id: number,
   ): Observable<{ success: boolean; content?: string; error?: string }> {
-    return this.http.post<any>(
-      `${this.apiUrl}/superadmin/ai-engine/applications/${id}/test`,
-      {},
-    );
+    return this.http
+      .post<any>(
+        `${this.apiUrl}/superadmin/ai-engine/applications/${id}/test`,
+        {},
+      )
+      .pipe(withUserActionTimeout(AI_TEST_ACTION_TIMEOUT_MS));
   }
 
   // --- AI Tools (F5: catálogo vivo, sin paginación) ---
@@ -183,6 +204,25 @@ export class AIEngineService {
     return this.http.get<any>(
       `${this.apiUrl}/superadmin/ai-engine/jobs/${queueName}/${jobId}`,
     );
+  }
+
+  // --- Salud por app (ia-cargas F6): solo lectura ---
+
+  getAppHealth(query: AIAppHealthQuery = {}): Observable<AIAppHealthReport> {
+    let params = new HttpParams();
+    if (query.date_from) params = params.set('date_from', query.date_from);
+    if (query.date_to) params = params.set('date_to', query.date_to);
+    return this.http
+      .get<
+        { data?: AIAppHealthReport } | AIAppHealthReport
+      >(`${this.apiUrl}/superadmin/ai-engine/app-health`, { params })
+      .pipe(
+        map((response) =>
+          'apps' in response
+            ? response
+            : (response.data ?? { date_from: '', date_to: '', apps: [] }),
+        ),
+      );
   }
 
   // --- AI Agents (F5: CRUD del endpoint F4) ---
@@ -220,6 +260,40 @@ export class AIEngineService {
     return this.http.delete<void>(
       `${this.apiUrl}/superadmin/ai-engine/agents/${id}`,
     );
+  }
+
+  // --- Ficha única del agente (Vex / Vexi): modelo, proveedor y voz ---
+
+  getAgentSheet(agentKey: string): Observable<AgentRuntimeSheet> {
+    return this.http
+      .get<{ data: AgentRuntimeSheet }>(
+        `${this.apiUrl}/superadmin/ai-engine/agent-runtime/${agentKey}`,
+      )
+      .pipe(map((r) => r.data));
+  }
+
+  updateAgentSheet(
+    agentKey: string,
+    data: UpdateAgentRuntimeDto,
+  ): Observable<AgentRuntimeSheet> {
+    return this.http
+      .patch<{ data: AgentRuntimeSheet }>(
+        `${this.apiUrl}/superadmin/ai-engine/agent-runtime/${agentKey}`,
+        data,
+      )
+      .pipe(map((r) => r.data));
+  }
+
+  previewAgentVoice(
+    agentKey: string,
+    text?: string,
+  ): Observable<AgentVoicePreview> {
+    return this.http
+      .post<{ data: AgentVoicePreview }>(
+        `${this.apiUrl}/superadmin/ai-engine/agent-runtime/${agentKey}/voice-preview`,
+        text ? { text } : {},
+      )
+      .pipe(map((r) => r.data));
   }
 
   invalidateCache(): void {

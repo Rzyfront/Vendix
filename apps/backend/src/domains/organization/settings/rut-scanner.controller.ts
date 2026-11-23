@@ -27,43 +27,6 @@ export class RutScannerController {
     private readonly responseService: ResponseService,
   ) {}
 
-  /**
-   * @deprecated Usar POST organization/settings/rut-scanner/scan/async (el síncrono muere en 504 tras 60 s de proxy).
-   */
-  @Post('scan')
-  @Permissions('organization:settings:fiscal_data:write')
-  @UseInterceptors(FileInterceptor('file'))
-  @ApiOperation({
-    summary:
-      'Scan a Colombian RUT document (image/PDF) and extract normalized fiscal identity data',
-  })
-  @ApiResponse({ status: 200, description: 'RUT scanned successfully' })
-  async scanRut(@UploadedFile() file: Express.Multer.File) {
-    try {
-      if (!file) {
-        throw new VendixHttpException(ErrorCodes.RUT_SCAN_NO_FILE);
-      }
-      const allowedTypes = [
-        'image/jpeg',
-        'image/png',
-        'image/webp',
-        'application/pdf',
-      ];
-      if (!allowedTypes.includes(file.mimetype)) {
-        throw new VendixHttpException(ErrorCodes.RUT_SCAN_INVALID_FILE);
-      }
-      const result = await this.rutScannerService.scanRutDocument(file);
-      return this.responseService.success(result, 'RUT escaneado exitosamente');
-    } catch (error) {
-      if (error instanceof VendixHttpException) throw error;
-      return this.responseService.error(
-        error.message || 'Error al escanear el RUT',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
-  }
-
   @Post('scan/async')
   @HttpCode(HttpStatus.ACCEPTED)
   @Permissions('organization:settings:fiscal_data:write')

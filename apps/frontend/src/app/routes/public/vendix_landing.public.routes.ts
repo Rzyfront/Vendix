@@ -1,30 +1,22 @@
 import { Routes } from '@angular/router';
 import { pricingRoutes } from '../../public/pricing/pricing.routes';
-import { SECTOR_GUIDES_ENABLED } from '../../public/landing/guides/sector-guides.config';
+import { ROUTED_SECTOR_GUIDES } from '../../public/landing/guides/sector-guides.config';
 import { SECTOR_PAGES_ENABLED, SECTOR_PAGE_PATHS } from '../../public/sectors/sector-pages.config';
 import { IMPLEMENTATION_PAGE_ENABLED } from '../../public/implementation/implementation-page.config';
 
-const sectorGuideRoutes: Routes = SECTOR_GUIDES_ENABLED
-  ? [
-      'comandas-restaurantes',
-      'ventas-mayoristas-al-detal',
-      'preparar-demostracion',
-      'cierre-de-caja',
-      'control-de-inventario',
-      'elegir-software-pos',
-      'pasar-productos-excel-a-pos',
-    ].map((guideKey) => ({
-      path: `guias/${guideKey}`,
-      loadComponent: () =>
-        import('../../public/landing/guides/sector-guide.component').then(
-          (c) => c.SectorGuideComponent,
-        ),
-      data: { guideKey },
-    }))
-  : [];
+// SEO-OPS-36: en producción solo las guías publicadas (PUBLISHED_SECTOR_GUIDES); en
+// vista previa, las siete. /guias ya es prefijo de la app en la función de CloudFront.
+const sectorGuideRoutes: Routes = ROUTED_SECTOR_GUIDES.map((guideKey) => ({
+  path: `guias/${guideKey}`,
+  loadComponent: () =>
+    import('../../public/landing/guides/sector-guide.component').then(
+      (c) => c.SectorGuideComponent,
+    ),
+  data: { guideKey },
+}));
 
 // SEO-OPS-17 / SEO-TECH-08: páginas de sector desde la plantilla. Solo existen con el
-// interruptor encendido (apagado en producción). Al publicar una, agregarla a MARKETING_PAGES
+// interruptor encendido (encendido en producción desde el 17-nov-2026). Al publicar una, agregarla a MARKETING_PAGES
 // de infra/cloudfront/spa-rewrite.js, al sitemap del backend y al smoke SEO.
 const sectorPageRoutes: Routes = SECTOR_PAGES_ENABLED
   ? SECTOR_PAGE_PATHS.map((path) => ({
@@ -35,7 +27,7 @@ const sectorPageRoutes: Routes = SECTOR_PAGES_ENABLED
     }))
   : [];
 
-// SEO-OPS-19: la ruta solo existe con el interruptor encendido (apagado en producción).
+// SEO-OPS-19: la ruta solo existe con el interruptor encendido (encendido en producción desde el 17-nov-2026).
 const implementationRoutes: Routes = IMPLEMENTATION_PAGE_ENABLED
   ? [
       {

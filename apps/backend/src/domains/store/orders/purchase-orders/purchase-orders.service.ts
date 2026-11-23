@@ -109,6 +109,12 @@ import {
   vatTreatmentFromResult,
 } from '@common/helpers/vat-responsibility.helper';
 import { PurchaseVatContributionService } from './purchase-vat-contribution.service';
+import {
+  PURCHASE_UOM_RELATIONS_SELECT,
+  PurchaseUomLite,
+  resolvePurchaseUomFactor,
+} from './purchase-uom-factor.util';
+import { redactAuditRows } from '@common/audit/audit-redaction.util';
 
 /**
  * QUI-647 — marcador del pago real de un abono registrado al crear la OC.
@@ -291,6 +297,18 @@ interface PersistPreload {
   uoms: Map<number, any>;
   tiers: Map<string, any>;
   variantCounts: Map<number, number>;
+}
+
+/** Línea de OC con lo que necesita el guard de unidades (QUI-1017). */
+interface ReceiptUomLine {
+  purchase_uom_id?: number | null;
+  stock_uom_id?: number | null;
+  products?: {
+    name?: string | null;
+    purchase_to_stock_factor?: unknown;
+    stock_uom?: PurchaseUomLite | null;
+    purchase_uom?: PurchaseUomLite | null;
+  } | null;
 }
 
 const PERSIST_PRODUCT_SELECT = {
@@ -941,12 +959,22 @@ export class PurchaseOrdersService {
       where: { id: productId },
       select: {
         id: true,
+        name: true,
         is_ingredient: true,
         purchase_to_stock_factor: true,
         stock_uom_id: true,
         purchase_uom_id: true,
+        ...PURCHASE_UOM_RELATIONS_SELECT,
       },
     });
+
+    // QUI-1017 — red de seguridad: `receive()` ya valida todas las líneas antes
+    // de crear la recepción, pero ninguna conversión de masa/volumen puede
+    // caer al 1:1 en silencio por otro camino.
+    const resolution = resolvePurchaseUomFactor(product);
+    if (resolution.kind === 'blocked') {
+      throw new BadRequestException(resolution.message);
+    }
 
     return PurchaseOrdersService.applyUoMConversion(
       product,
@@ -975,6 +1003,9 @@ export class PurchaseOrdersService {
           purchase_to_stock_factor?: unknown;
           stock_uom_id?: number | null;
           purchase_uom_id?: number | null;
+          name?: string | null;
+          stock_uom?: PurchaseUomLite | null;
+          purchase_uom?: PurchaseUomLite | null;
         }
       | null
       | undefined,
@@ -985,6 +1016,22 @@ export class PurchaseOrdersService {
     stockUnitCost: number;
     purchaseFactor: number;
   } {
+    // QUI-1017 — stock en masa/volumen con las dos unidades resueltas: el
+    // factor sale del catálogo (o del contenido por envase), sea o no insumo.
+    // Un `purchase_to_stock_factor` vacío ya no cae a 1 (kg recibido como g).
+    // Solo aplica cuando la fila trae las relaciones de unidad; el resto del
+    // catálogo sigue exactamente igual que antes.
+    if (product && ('stock_uom' in product || 'purchase_uom' in product)) {
+      const resolution = resolvePurchaseUomFactor(product);
+      if (resolution.kind === 'ok') {
+        return PurchaseOrdersService.convertByFactor(
+          resolution.factor,
+          purchaseQuantity,
+          purchaseUnitCost,
+        );
+      }
+    }
+
     const factor = Number(product?.purchase_to_stock_factor ?? 1);
     // QUI-648 — la conversión al recibir deja de ser exclusiva del insumo:
     // comprar 5 rollos y almacenar 100.000 mm es el mismo mecanismo que
@@ -1006,6 +1053,23 @@ export class PurchaseOrdersService {
       };
     }
 
+    return PurchaseOrdersService.convertByFactor(
+      factor,
+      purchaseQuantity,
+      purchaseUnitCost,
+    );
+  }
+
+  /** Aritmética de la conversión compra → stock con un factor ya resuelto. */
+  private static convertByFactor(
+    factor: number,
+    purchaseQuantity: number,
+    purchaseUnitCost: number,
+  ): {
+    stockQuantity: number;
+    stockUnitCost: number;
+    purchaseFactor: number;
+  } {
     // 10 L × 1000 ml/L = 10000 ml in stock.
     // unit_cost was 5000 COP per L → 5 COP per ml.
     const stockQuantity = Math.round(purchaseQuantity * factor);
@@ -1429,6 +1493,39 @@ export class PurchaseOrdersService {
       }
     }
 
+    // QUI-1017 — un producto que NO es insumo, con stock en masa/volumen y
+    // unidad de compra distinta (kg → g), también necesita su factor: antes
+    // solo se derivaba para insumos y la recepción lo trataba 1:1. Las líneas
+    // con `sale_uoms` ya lo resuelven en `persistSaleUomConfigToProduct`; aquí
+    // se cubre el resto. Sin `throw`: si la combinación no es convertible, la
+    // recepción la bloquea con un mensaje que nombra el producto.
+    let retailUomConfig:
+      | { stock_uom_id: number; purchase_uom_id: number; factor?: number }
+      | undefined;
+    if (
+      !effectiveIsIngredient &&
+      item.purchase_uom_id != null &&
+      item.stock_uom_id != null &&
+      (item as { sale_uoms?: unknown }).sale_uoms === undefined
+    ) {
+      const uomMap = await ctx.loadUoms(tx, [
+        item.stock_uom_id,
+        item.purchase_uom_id,
+      ]);
+      const resolution = resolvePurchaseUomFactor({
+        stock_uom: uomMap.get(item.stock_uom_id) ?? null,
+        purchase_uom: uomMap.get(item.purchase_uom_id) ?? null,
+        purchase_to_stock_factor: item.purchase_to_stock_factor,
+      });
+      if (resolution.kind !== 'not_applicable') {
+        retailUomConfig = {
+          stock_uom_id: item.stock_uom_id,
+          purchase_uom_id: item.purchase_uom_id,
+          factor: resolution.kind === 'ok' ? resolution.factor : undefined,
+        };
+      }
+    }
+
     // Producto existente: primero por SKU y, si no, por código de barras.
     // Sin el respaldo por código, una línea "nueva" cuyo código ya tiene
     // un producto no archivado (otra factura, o la misma línea repetida
@@ -1557,10 +1654,37 @@ export class PurchaseOrdersService {
     // Un existente comprado en kg con stock en g recibía el costo del kilo
     // como costo del gramo (×1000) y, por la escala de arriba, un precio
     // ×1000. Se usa la MISMA aritmética de la recepción.
-    const productCost = existingProduct
-      ? PurchaseOrdersService.applyUoMConversion(existingProduct, 1, cost)
-          .stockUnitCost
-      : cost;
+    //
+    // QUI-1017 — para el existente se resuelve con sus unidades del catálogo
+    // (factor real aunque no sea insumo). Si su configuración no es
+    // convertible (masa/volumen sin unidad de compra), NO se reescribe el
+    // costo: un costo de unidad desconocida terminaba en `cost_price` y de ahí
+    // en el costo de cada venta. Un producto NUEVO no insumo con unidades
+    // convertibles nace con el costo por unidad de stock.
+    let productCost: number;
+    if (existingProduct) {
+      const existingUoms = await this.loadProductUomRelations(
+        tx,
+        ctx,
+        existingProduct,
+      );
+      const existingResolution = resolvePurchaseUomFactor({
+        ...existingUoms,
+        purchase_to_stock_factor: existingProduct.purchase_to_stock_factor,
+      });
+      productCost =
+        existingResolution.kind === 'blocked'
+          ? 0
+          : PurchaseOrdersService.applyUoMConversion(
+              { ...existingProduct, ...existingUoms },
+              1,
+              cost,
+            ).stockUnitCost;
+    } else {
+      productCost = retailUomConfig?.factor
+        ? roundUomMoney(cost / retailUomConfig.factor)
+        : cost;
+    }
     if (productCost > 0 && (!item.base_price || item.base_price === 0)) {
       basePrice = productCost * basePriceScale * (1 + margin / 100);
     }
@@ -1752,6 +1876,22 @@ export class PurchaseOrdersService {
       // (syncIngredientConfigOnReceipt sigue como backfill de labels /
       // same-dimension al recibir.) No se neutraliza pricing/ecommerce del
       // producto existente para no clobberear su config de venta.
+      // QUI-1017 — no insumo: se completa la unidad de compra y su factor
+      // SOLO si la línea declara la misma unidad de stock que ya tiene el
+      // producto. Cambiar la unidad de stock de un producto con existencias
+      // exige convertirlas (`persistSaleUomConfigToProduct`), no se hace aquí.
+      if (
+        retailUomConfig &&
+        existingProduct.stock_uom_id != null &&
+        Number(existingProduct.stock_uom_id) ===
+          Number(retailUomConfig.stock_uom_id)
+      ) {
+        productUpdateData.purchase_uom_id = retailUomConfig.purchase_uom_id;
+        if (retailUomConfig.factor != null) {
+          productUpdateData.purchase_to_stock_factor = retailUomConfig.factor;
+        }
+      }
+
       if (effectiveIsIngredient) {
         productUpdateData.is_ingredient = true;
         if (item.purchase_uom_id != null) {
@@ -1845,7 +1985,16 @@ export class PurchaseOrdersService {
             description: item.product_description || '',
             sku: desiredSku,
             barcode: item.barcode || undefined,
-            cost_price: cost,
+            // QUI-1017 — por unidad de STOCK cuando la línea trae unidades
+            // convertibles (no insumo); si no, el histórico (`cost`).
+            cost_price: retailUomConfig?.factor ? productCost : cost,
+            ...(retailUomConfig
+              ? {
+                  stock_uom_id: retailUomConfig.stock_uom_id,
+                  purchase_uom_id: retailUomConfig.purchase_uom_id,
+                  purchase_to_stock_factor: retailUomConfig.factor ?? null,
+                }
+              : {}),
             profit_margin: margin,
             stock_quantity: 0,
             state: productState,
@@ -3309,7 +3458,8 @@ export class PurchaseOrdersService {
         location: true,
         purchase_order_items: {
           include: {
-            products: true,
+            // QUI-1017 — unidades de stock/compra para `receipt_uom_block`.
+            products: { include: PURCHASE_UOM_RELATIONS_SELECT },
             product_variants: true,
             purchase_order_item_taxes: { orderBy: { sequence: 'asc' } },
           },
@@ -3331,7 +3481,12 @@ export class PurchaseOrdersService {
       );
     }
 
-    return order;
+    return {
+      ...order,
+      purchase_order_items: await this.withReceiptUomBlocks(
+        order.purchase_order_items,
+      ),
+    };
   }
 
   /**
@@ -4559,6 +4714,129 @@ export class PurchaseOrdersService {
     }
   }
 
+  /**
+   * QUI-1017 — Unidades de stock y compra de un producto ya leído (solo ids),
+   * desde el catálogo cacheado del lote (`ctx.loadUoms`).
+   */
+  private async loadProductUomRelations(
+    tx: any,
+    ctx: { loadUoms: (tx: any, ids: number[]) => Promise<Map<number, any>> },
+    product: { stock_uom_id?: number | null; purchase_uom_id?: number | null },
+  ): Promise<{
+    stock_uom: PurchaseUomLite | null;
+    purchase_uom: PurchaseUomLite | null;
+  }> {
+    const ids = [product.stock_uom_id, product.purchase_uom_id].filter(
+      (v): v is number => v != null,
+    );
+    if (ids.length === 0) return { stock_uom: null, purchase_uom: null };
+    const uomMap = await ctx.loadUoms(tx, ids);
+    return {
+      stock_uom:
+        product.stock_uom_id != null
+          ? (uomMap.get(product.stock_uom_id) ?? null)
+          : null,
+      purchase_uom:
+        product.purchase_uom_id != null
+          ? (uomMap.get(product.purchase_uom_id) ?? null)
+          : null,
+    };
+  }
+
+  /**
+   * QUI-1017 — Por qué NO se puede recibir cada línea (alineado por índice,
+   * `null` = recibible). Evalúa la configuración EFECTIVA al recibir: las
+   * unidades capturadas en la línea (insumos) ganan sobre las del producto,
+   * igual que `syncIngredientConfigOnReceipt`, que las sella antes de
+   * convertir. Lo usan el guard de `receive()` y el detalle de la OC (tienda y
+   * organización), para que la UI bloquee exactamente lo que el backend
+   * rechaza.
+   *
+   * `uomReader` lee el catálogo global de unidades: el `tx` de la recepción o
+   * el cliente de tienda (su `units_of_measure` no tiene scope).
+   */
+  async receiptUomBlockMessages(
+    uomReader: { units_of_measure: { findMany: (args: any) => Promise<any[]> } },
+    lines: ReadonlyArray<ReceiptUomLine | null | undefined>,
+  ): Promise<Array<string | null>> {
+    const capturedIds = Array.from(
+      new Set(
+        lines
+          .flatMap((l) => [l?.purchase_uom_id, l?.stock_uom_id])
+          .filter((v): v is number => v != null)
+          .map(Number),
+      ),
+    );
+    const capturedById = new Map<number, PurchaseUomLite>();
+    if (capturedIds.length > 0) {
+      const rows: Array<PurchaseUomLite & { id: number }> =
+        await uomReader.units_of_measure.findMany({
+          where: { id: { in: capturedIds } },
+          select: { id: true, code: true, dimension: true, factor_to_base: true },
+        });
+      for (const row of rows) capturedById.set(Number(row.id), row);
+    }
+
+    return lines.map((line) => {
+      const product = line?.products;
+      if (!line || !product) return null;
+      const resolution = resolvePurchaseUomFactor({
+        name: product.name,
+        purchase_to_stock_factor: product.purchase_to_stock_factor,
+        stock_uom:
+          (line.stock_uom_id != null
+            ? capturedById.get(Number(line.stock_uom_id))
+            : undefined) ?? product.stock_uom ?? null,
+        purchase_uom:
+          (line.purchase_uom_id != null
+            ? capturedById.get(Number(line.purchase_uom_id))
+            : undefined) ?? product.purchase_uom ?? null,
+      });
+      return resolution.kind === 'blocked' ? resolution.message : null;
+    });
+  }
+
+  /**
+   * Detalle de la OC: cada línea lleva `receipt_uom_block` (mensaje o `null`).
+   * Solo líneas con pendiente por recibir pueden bloquear.
+   */
+  async withReceiptUomBlocks<T extends ReceiptUomLine & {
+    quantity_ordered?: number | null;
+    quantity_received?: number | null;
+  }>(items: T[]): Promise<Array<T & { receipt_uom_block: string | null }>> {
+    const pending = items.map((item) =>
+      Number(item.quantity_ordered ?? 0) - Number(item.quantity_received ?? 0) >
+      0
+        ? item
+        : null,
+    );
+    const messages = await this.receiptUomBlockMessages(this.prisma, pending);
+    return items.map((item, index) => ({
+      ...item,
+      receipt_uom_block: messages[index],
+    }));
+  }
+
+  /**
+   * QUI-1017 — Bloquea la recepción si alguna línea tiene stock en masa/volumen
+   * sin unidad de compra o sin factor de conversión resoluble.
+   */
+  private async assertReceiptUomResolvable(
+    tx: any,
+    lines: ReadonlyArray<ReceiptUomLine>,
+  ): Promise<void> {
+    const messages = new Set(
+      (await this.receiptUomBlockMessages(tx, lines)).filter(
+        (m): m is string => m != null,
+      ),
+    );
+    if (messages.size > 0) {
+      throw new BadRequestException(
+        `No se puede recibir la mercancía. ${Array.from(messages).join(' ')}`,
+      );
+    }
+  }
+
   private async syncIngredientConfigOnReceipt(
     productId: number,
     orderItem:
@@ -4689,6 +4967,17 @@ export class PurchaseOrdersService {
             // Se piden en esta misma consulta para no añadir un round-trip.
             product_id: true,
             product_variant_id: true,
+            // QUI-1017: unidades de la línea y del producto para el guard de
+            // conversión compra → stock (misma consulta, sin round-trip).
+            purchase_uom_id: true,
+            stock_uom_id: true,
+            products: {
+              select: {
+                name: true,
+                purchase_to_stock_factor: true,
+                ...PURCHASE_UOM_RELATIONS_SELECT,
+              },
+            },
           },
         });
         const poLineById = new Map<
@@ -4699,6 +4988,14 @@ export class PurchaseOrdersService {
             quantity_received: number;
             product_id: number | null;
             product_variant_id: number | null;
+            purchase_uom_id?: number | null;
+            stock_uom_id?: number | null;
+            products?: {
+              name?: string | null;
+              purchase_to_stock_factor?: unknown;
+              stock_uom?: PurchaseUomLite | null;
+              purchase_uom?: PurchaseUomLite | null;
+            } | null;
           }
         >(poLines.map((l) => [l.id, l]));
         // El pendiente se descuenta A MEDIDA que se recorre el payload: el mapa se
@@ -4738,6 +5035,18 @@ export class PurchaseOrdersService {
             .map((item) => poLineById.get(item.id))
             .filter((line): line is NonNullable<typeof line> => !!line),
           { stage: 'receive', orderId: id },
+        );
+
+        // QUI-1017 — un producto con stock en masa/volumen sin unidad de compra
+        // (o sin factor resoluble) se recibía 1:1: 10 kg entraban como 10 g y
+        // el costo del kilo quedaba como costo del gramo. Se rechaza ANTES de
+        // crear la recepción, nombrando cada producto a corregir.
+        await this.assertReceiptUomResolvable(
+          tx,
+          dto.items
+            .filter((item) => item.quantity_received > 0)
+            .map((item) => poLineById.get(item.id))
+            .filter((line): line is NonNullable<typeof line> => !!line),
         );
 
         const reception = await tx.purchase_order_receptions.create({
@@ -6131,7 +6440,7 @@ export class PurchaseOrdersService {
     ]);
 
     const timeline = [
-      ...auditLogs.map((l) => ({
+      ...redactAuditRows<(typeof auditLogs)[number]>(auditLogs).map((l) => ({
         type: 'audit' as const,
         date: l.created_at || new Date(0),
         data: l,
@@ -6999,6 +7308,8 @@ export class PurchaseOrdersService {
       purchase_to_stock_factor: unknown;
       stock_uom_id: number | null;
       purchase_uom_id: number | null;
+      stock_uom: PurchaseUomLite | null;
+      purchase_uom: PurchaseUomLite | null;
     };
     const productRows: PreviewProductRow[] = productIds.length
       ? await this.prisma.products.findMany({
@@ -7016,6 +7327,8 @@ export class PurchaseOrdersService {
             purchase_to_stock_factor: true,
             stock_uom_id: true,
             purchase_uom_id: true,
+            // QUI-1017 — misma conversión que la recepción (factor del catálogo).
+            ...PURCHASE_UOM_RELATIONS_SELECT,
           },
         })
       : [];
@@ -7465,6 +7778,22 @@ export class PurchaseOrdersService {
     return this.prisma.$transaction(async (tx) => {
       const order = await this.loadOrderOrFail(tx, id);
       this.assertMutable(order, 'eliminar');
+      // QUI-684 — un documento soporte (vigente o anulado) es traza fiscal y
+      // su FK a la orden es RESTRICT: se nombra el bloqueo antes de borrar.
+      const support_document = await tx.invoices.findFirst({
+        where: { purchase_order_id: id },
+        select: { id: true, invoice_number: true },
+      });
+      if (support_document) {
+        throw new VendixHttpException(
+          ErrorCodes.PO_DELETE_SUPPORT_DOCUMENT_001,
+          `La orden ${order.order_number} tiene el documento soporte ${support_document.invoice_number ?? `#${support_document.id}`}: no se puede eliminar. Cancélala si ya no la necesitas.`,
+          {
+            invoice_id: support_document.id,
+            invoice_number: support_document.invoice_number,
+          },
+        );
+      }
       // QUI-855 — la FK de las filas de impuestos a la línea es RESTRICT y la
       // línea cae en cascada con la orden: sin borrarlas antes, el delete falla.
       await tx.purchase_order_item_taxes.deleteMany({

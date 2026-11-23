@@ -27,6 +27,16 @@ function selectorOf(tag: MetaTagValue): string {
 const MARKETING_HOSTS = new Set(['vendix.online', 'www.vendix.online', 'vendix.com', 'www.vendix.com']);
 
 /**
+ * Origen comercial (https://vendix.online o https://vendix.com) si el documento está en un
+ * host comercial; `null` en tiendas y dominios propios, que comparten estos componentes.
+ */
+export function marketingOrigin(document: Document): string | null {
+  const url = new URL(document.URL);
+  if (!MARKETING_HOSTS.has(url.hostname)) return null;
+  return url.hostname.endsWith('.com') ? 'https://vendix.com' : 'https://vendix.online';
+}
+
+/**
  * Aplica los metadatos de la página solo en el host comercial y devuelve la
  * función que los restaura al salir. Fuera del host comercial (tiendas y
  * dominios propios, que comparten estos componentes de auth) no toca nada.
@@ -41,11 +51,10 @@ export function applyMarketingPageMetadata(
   meta: Meta,
   page: MarketingPageMetadata,
 ): () => void {
-  const url = new URL(document.URL);
-  if (!MARKETING_HOSTS.has(url.hostname)) return () => {};
+  const origin = marketingOrigin(document);
+  if (origin === null) return () => {};
 
   const previousTitle = title.getTitle();
-  const origin = url.hostname.endsWith('.com') ? 'https://vendix.com' : 'https://vendix.online';
   const appliedHref = page.canonicalPath === null ? null : origin + page.canonicalPath;
 
   // Una página con URL propia también se comparte: sin esto og:* y twitter:*
@@ -156,8 +165,8 @@ export const MARKETING_PAGES = {
     title: 'Implementación de Vendix: cómo empezamos con tu negocio',
     description:
       'Conoce las etapas para empezar con Vendix: diagnóstico, configuración, carga de datos, capacitación y soporte. Qué aportas tú y qué hace el equipo.',
-    // SEO-OPS-19: noindex y sin canonical hasta la aprobación de Ventas y Producto (G4).
-    robots: 'noindex, follow',
-    canonicalPath: null,
+    // SEO-OPS-19: aprobada por Adel (Producto y Ventas) el 17-nov-2026.
+    robots: 'index, follow',
+    canonicalPath: '/implementacion',
   },
 } satisfies Record<string, MarketingPageMetadata>;

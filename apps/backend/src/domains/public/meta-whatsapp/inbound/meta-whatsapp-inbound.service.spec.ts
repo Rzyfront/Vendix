@@ -45,7 +45,11 @@ function setup(payloadName: string, overrides: { eventStatus?: string } = {}) {
       }),
       update: jest.fn().mockResolvedValue({}),
     },
-    social_channels: { findFirst: jest.fn().mockResolvedValue(channelRow) },
+    social_channels: {
+      findFirst: jest.fn().mockResolvedValue(channelRow),
+      findMany: jest.fn().mockResolvedValue([]),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
     stores: {
       findUnique: jest.fn().mockResolvedValue({
         id: 10,
@@ -438,7 +442,9 @@ describe('MetaWhatsappInboundService', () => {
         conversation_id: 3,
         status: 'sent',
       });
-      prisma.crm_conversations.findUnique.mockRejectedValue(new Error('db down'));
+      prisma.crm_conversations.findUnique.mockRejectedValue(
+        new Error('db down'),
+      );
 
       const outcome = await service.processEvent(99, defaults);
 
@@ -607,7 +613,10 @@ describe('MetaWhatsappInboundService', () => {
   });
 
   describe('marketing opt-out keywords', () => {
-    const withBody = (prisma: ReturnType<typeof setup>['prisma'], body: string) => {
+    const withBody = (
+      prisma: ReturnType<typeof setup>['prisma'],
+      body: string,
+    ) => {
       const payload = fixture('message-text');
       payload.entry[0].changes[0].value.messages[0].text.body = body;
       prisma.social_webhook_events.findUnique.mockResolvedValue({
@@ -630,7 +639,10 @@ describe('MetaWhatsappInboundService', () => {
           user_id: { in: [42] },
           whatsapp_consent: { not: 'opted_out' },
         },
-        data: { whatsapp_consent: 'opted_out', consent_updated_at: new Date(1761900000 * 1000) },
+        data: {
+          whatsapp_consent: 'opted_out',
+          consent_updated_at: new Date(1761900000 * 1000),
+        },
       });
     });
 
@@ -647,7 +659,10 @@ describe('MetaWhatsappInboundService', () => {
       });
       expect(prisma.store_users.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ store_id: 10, user_id: { in: [42, 43] } }),
+          where: expect.objectContaining({
+            store_id: 10,
+            user_id: { in: [42, 43] },
+          }),
           data: expect.objectContaining({ whatsapp_consent: 'opted_out' }),
         }),
       );
@@ -661,5 +676,461 @@ describe('MetaWhatsappInboundService', () => {
       }
     });
   });
-});
 
+  describe('field dispatch', () => {
+    const ECHO_PHONE_ID = '000000000000001';
+    const ECHO_WAMID = 'wamid.FAKEECHO0000000000000000000000000001';
+    const ECHO_WABA = '000000000000002';
+
+    function setupWith(payload: unknown) {
+      const ctx = setup('message-text');
+      ctx.prisma.social_webhook_events.findUnique.mockResolvedValue({
+        id: 99,
+        provider: 'meta_cloud',
+        processing_status: 'received',
+        payload,
+      });
+      const channels = ctx.prisma as unknown as {
+        social_channels: Record<string, jest.Mock>;
+      };
+      channels.social_channels.findMany = jest.fn().mockResolvedValue([]);
+      channels.social_channels.updateMany = jest
+        .fn()
+        .mockResolvedValue({ count: 1 });
+      return ctx;
+    }
+
+    function withValue(name: string, mutate: (value: any) => void) {
+      const payload = fixture(name);
+      mutate(payload.entry[0].changes[0].value);
+      return payload;
+    }
+
+    describe('smb_message_echoes', () => {
+      it('stores the echo as an outbound sent message without touching unread or the 24h window', async () => {
+        const { service, prisma, events } = setupWith(
+          fixture('smb-message-echo-text'),
+        );
+        const sentAt = new Date(1761900100 * 1000);
+
+        const outcome = await service.processEvent(99, defaults);
+
+        expect(outcome).toMatchObject({
+          status: 'processed',
+          messages_created: 0,
+          echoes_created: 1,
+          echoes_skipped: 0,
+        });
+        expect(prisma.social_channels.findFirst).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({ phone_number_id: ECHO_PHONE_ID }),
+          }),
+        );
+        expect(prisma.crm_conversations.create).toHaveBeenCalledWith({
+          data: {
+            store_id: 10,
+            social_channel_id: 5,
+            channel: 'whatsapp',
+            contact_address: '+15550000002',
+            customer_id: 42,
+            status: 'open',
+          },
+        });
+        expect(prisma.crm_messages.create).toHaveBeenCalledWith({
+          data: {
+            store_id: 10,
+            conversation_id: 3,
+            direction: 'outbound',
+            channel: 'whatsapp',
+            status: 'sent',
+            body: 'Claro, el envío a Medellín llega mañana.',
+            media: undefined,
+            provider: 'meta_cloud',
+            provider_message_id: ECHO_WAMID,
+            webhook_event_id: 99,
+            sent_at: sentAt,
+            created_at: sentAt,
+            sent_by_user_id: null,
+          },
+        });
+        expect(prisma.crm_conversations.update).toHaveBeenCalledWith({
+          where: { id: 3 },
+          data: { last_message_at: sentAt },
+        });
+        expect(prisma.store_users.updateMany).not.toHaveBeenCalled();
+        expect(events.publish).toHaveBeenCalledWith({
+          type: 'crm.message',
+          store_id: 10,
+          conversation_id: 3,
+          assigned_user_id: null,
+          message_id: 500,
+          status: 'sent',
+          direction: 'outbound',
+        });
+        expect(prisma.social_webhook_events.update).toHaveBeenCalledWith({
+          where: { id: 99 },
+          data: {
+            processing_status: 'processed',
+            processed_at: expect.any(Date),
+            error: null,
+          },
+        });
+      });
+
+      it('keeps the newest last_message_at when the echo is older', async () => {
+        const { service, prisma } = setupWith(fixture('smb-message-echo-text'));
+        const newer = new Date(1761999999 * 1000);
+        prisma.crm_conversations.findUnique.mockResolvedValue({
+          id: 3,
+          customer_id: 42,
+          last_message_at: newer,
+          last_inbound_at: newer,
+          assigned_user_id: 7,
+        });
+
+        await service.processEvent(99, defaults);
+
+        expect(prisma.crm_conversations.update).toHaveBeenCalledWith({
+          where: { id: 3 },
+          data: { last_message_at: newer },
+        });
+      });
+
+      it('is idempotent by provider_message_id', async () => {
+        const { service, prisma, events } = setupWith(
+          fixture('smb-message-echo-text'),
+        );
+        prisma.crm_messages.findUnique.mockResolvedValue({ id: 1 });
+
+        const outcome = await service.processEvent(99, defaults);
+
+        expect(outcome).toMatchObject({ echoes_created: 0 });
+        expect(prisma.crm_messages.findUnique).toHaveBeenCalledWith({
+          where: {
+            provider_provider_message_id: {
+              provider: 'meta_cloud',
+              provider_message_id: ECHO_WAMID,
+            },
+          },
+        });
+        expect(prisma.crm_messages.create).not.toHaveBeenCalled();
+        expect(prisma.crm_conversations.update).not.toHaveBeenCalled();
+        expect(events.publish).not.toHaveBeenCalled();
+      });
+
+      it('treats a concurrent duplicate (P2002) as already processed', async () => {
+        const { service, prisma, events } = setupWith(
+          fixture('smb-message-echo-text'),
+        );
+        prisma.crm_messages.create.mockRejectedValue({ code: 'P2002' });
+
+        const outcome = await service.processEvent(99, defaults);
+
+        expect(outcome).toMatchObject({ echoes_created: 0 });
+        expect(prisma.crm_conversations.update).not.toHaveBeenCalled();
+        expect(events.publish).not.toHaveBeenCalled();
+      });
+
+      it('skips and counts an echo that has no recipient phone', async () => {
+        const payload = withValue('smb-message-echo-text', (value) => {
+          delete value.message_echoes[0].to;
+          value.message_echoes[0].to_user_id = 'BSUID.FAKE.1';
+        });
+        const { service, prisma, events } = setupWith(payload);
+
+        const outcome = await service.processEvent(99, defaults);
+
+        expect(outcome).toMatchObject({
+          status: 'processed',
+          echoes_created: 0,
+          echoes_skipped: 1,
+        });
+        expect(prisma.crm_conversations.create).not.toHaveBeenCalled();
+        expect(prisma.crm_messages.create).not.toHaveBeenCalled();
+        expect(events.publish).not.toHaveBeenCalled();
+      });
+
+      it('parses media echoes with the same media pipeline as inbound', async () => {
+        const payload = withValue('smb-message-echo-text', (value) => {
+          value.message_echoes[0] = {
+            ...value.message_echoes[0],
+            type: 'image',
+            text: undefined,
+            image: {
+              id: 'MEDIA-ECHO-1',
+              mime_type: 'image/jpeg',
+              caption: 'Foto',
+            },
+          };
+        });
+        const { service, prisma } = setupWith(payload);
+        fetchSpy
+          .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({
+              url: 'https://lookaside.example/echo-media',
+              mime_type: 'image/jpeg',
+              file_size: 10,
+            }),
+          } as Response)
+          .mockResolvedValueOnce({
+            ok: true,
+            arrayBuffer: async () => new ArrayBuffer(10),
+          } as Response);
+
+        await service.processEvent(99, defaults);
+
+        const data = prisma.crm_messages.create.mock.calls[0][0].data;
+        expect(data.direction).toBe('outbound');
+        expect(data.body).toBe('Foto');
+        expect(data.media).toEqual([
+          expect.objectContaining({
+            type: 'image',
+            media_id: 'MEDIA-ECHO-1',
+            s3_key: expect.stringContaining('MEDIA-ECHO-1.jpg'),
+          }),
+        ]);
+      });
+
+      it('ignores the event when no store owns the phone number', async () => {
+        const { service, prisma } = setupWith(fixture('smb-message-echo-text'));
+        prisma.social_channels.findFirst.mockResolvedValue(null);
+
+        await expect(service.processEvent(99, defaults)).resolves.toMatchObject(
+          {
+            status: 'ignored',
+          },
+        );
+        expect(prisma.crm_messages.create).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('account_update', () => {
+      const connectedRow = {
+        id: 5,
+        store_id: 10,
+        status: 'connected',
+        metadata: { keep: true },
+      };
+
+      it('disconnects every connected channel of the WABA with the user-initiated text', async () => {
+        const { service, prisma } = setupWith(
+          fixture('account-update-partner-removed'),
+        );
+        prisma.social_channels.findMany.mockResolvedValue([
+          connectedRow,
+          { ...connectedRow, id: 6, store_id: 11, metadata: null },
+        ]);
+
+        const outcome = await service.processEvent(99, defaults);
+
+        expect(outcome).toMatchObject({
+          status: 'processed',
+          channels_disconnected: 2,
+        });
+        expect(prisma.social_channels.findFirst).not.toHaveBeenCalled();
+        expect(prisma.social_channels.findMany).toHaveBeenCalledWith({
+          where: {
+            provider: 'meta_cloud',
+            channel_type: 'whatsapp',
+            waba_id: ECHO_WABA,
+            status: { not: 'disconnected' },
+          },
+          select: { id: true, store_id: true, metadata: true },
+        });
+        expect(prisma.social_channels.updateMany).toHaveBeenCalledTimes(2);
+        const [first] = prisma.social_channels.updateMany.mock.calls;
+        expect(first[0].where).toEqual({
+          id: 5,
+          provider: 'meta_cloud',
+          channel_type: 'whatsapp',
+          status: { not: 'disconnected' },
+        });
+        expect(first[0].data).toMatchObject({
+          status: 'disconnected',
+          access_token_encrypted: null,
+          last_error: 'Desconectaste Vendix desde la app WhatsApp Business.',
+          disconnected_at: expect.any(Date),
+          metadata: {
+            keep: true,
+            disconnected_at: expect.any(String),
+            disconnection: {
+              event: 'PARTNER_REMOVED',
+              reason: 'ACCOUNT_DISCONNECTED',
+              initiated_by: 'USER',
+              at: expect.any(String),
+            },
+          },
+        });
+        expect(prisma.social_webhook_events.update).toHaveBeenCalledWith({
+          where: { id: 99 },
+          data: {
+            processing_status: 'processed',
+            processed_at: expect.any(Date),
+            error: null,
+          },
+        });
+      });
+
+      it('uses the inactivity text for PRIMARY_INACTIVITY', async () => {
+        const payload = withValue('account-update-partner-removed', (value) => {
+          value.disconnection_info = {
+            reason: 'PRIMARY_INACTIVITY',
+            initiated_by: 'SYSTEM',
+          };
+        });
+        const { service, prisma } = setupWith(payload);
+        prisma.social_channels.findMany.mockResolvedValue([connectedRow]);
+
+        await service.processEvent(99, defaults);
+
+        expect(
+          prisma.social_channels.updateMany.mock.calls[0][0].data.last_error,
+        ).toBe(
+          'Tu WhatsApp Business estuvo inactivo en el celular unos 14 días y se desconectó de Vendix. Vuelve a conectarlo.',
+        );
+      });
+
+      it('disconnects on ACCOUNT_OFFBOARDED with the generic text', async () => {
+        const payload = withValue('account-update-partner-removed', (value) => {
+          value.event = 'ACCOUNT_OFFBOARDED';
+          delete value.disconnection_info;
+        });
+        const { service, prisma } = setupWith(payload);
+        prisma.social_channels.findMany.mockResolvedValue([connectedRow]);
+
+        await service.processEvent(99, defaults);
+
+        const data = prisma.social_channels.updateMany.mock.calls[0][0].data;
+        expect(data.status).toBe('disconnected');
+        expect(data.last_error).toBe(
+          'Tu número se desconectó de Vendix. Vuelve a conectarlo.',
+        );
+        expect(data.metadata.disconnection).toMatchObject({
+          event: 'ACCOUNT_OFFBOARDED',
+        });
+      });
+
+      it('only logs ACCOUNT_RECONNECTED', async () => {
+        const payload = withValue('account-update-partner-removed', (value) => {
+          value.event = 'ACCOUNT_RECONNECTED';
+          delete value.disconnection_info;
+        });
+        const { service, prisma } = setupWith(payload);
+
+        const outcome = await service.processEvent(99, defaults);
+
+        expect(outcome.status).toBe('processed');
+        expect(prisma.social_channels.findMany).not.toHaveBeenCalled();
+        expect(prisma.social_channels.updateMany).not.toHaveBeenCalled();
+      });
+
+      it('ignores other account_update events', async () => {
+        const payload = withValue('account-update-partner-removed', (value) => {
+          value.event = 'PHONE_NUMBER_NAME_UPDATE';
+        });
+        const { service, prisma } = setupWith(payload);
+
+        const outcome = await service.processEvent(99, defaults);
+
+        expect(outcome.status).toBe('ignored');
+        expect(prisma.social_channels.updateMany).not.toHaveBeenCalled();
+      });
+
+      it('ignores the event when waba_info.waba_id is missing', async () => {
+        const payload = withValue('account-update-partner-removed', (value) => {
+          delete value.waba_info.waba_id;
+        });
+        const { service, prisma } = setupWith(payload);
+
+        const outcome = await service.processEvent(99, defaults);
+
+        expect(outcome.status).toBe('ignored');
+        expect(prisma.social_channels.findMany).not.toHaveBeenCalled();
+        expect(prisma.social_channels.updateMany).not.toHaveBeenCalled();
+      });
+
+      it('ignores the event when no connected channel owns that WABA', async () => {
+        const { service, prisma } = setupWith(
+          fixture('account-update-partner-removed'),
+        );
+
+        const outcome = await service.processEvent(99, defaults);
+
+        expect(outcome.status).toBe('ignored');
+        expect(prisma.social_channels.updateMany).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('fields without processing', () => {
+      const wrap = (field: string, value: unknown) => ({
+        object: 'whatsapp_business_account',
+        entry: [{ id: ECHO_WABA, changes: [{ field, value }] }],
+      });
+      const phoneValue = {
+        messaging_product: 'whatsapp',
+        metadata: { phone_number_id: ECHO_PHONE_ID },
+      };
+
+      it('leaves history untouched for now', async () => {
+        const { service, prisma, events } = setupWith(
+          wrap('history', { ...phoneValue, history: [{ threads: [] }] }),
+        );
+
+        const outcome = await service.processEvent(99, defaults);
+
+        expect(outcome.status).toBe('ignored');
+        expect(prisma.crm_messages.create).not.toHaveBeenCalled();
+        expect(prisma.crm_conversations.create).not.toHaveBeenCalled();
+        expect(events.publish).not.toHaveBeenCalled();
+      });
+
+      it('closes smb_app_state_sync as processed without effects', async () => {
+        const { service, prisma, events } = setupWith(
+          wrap('smb_app_state_sync', {
+            ...phoneValue,
+            state_sync: [{ type: 'contact' }],
+          }),
+        );
+
+        const outcome = await service.processEvent(99, defaults);
+
+        expect(outcome.status).toBe('processed');
+        expect(prisma.crm_messages.create).not.toHaveBeenCalled();
+        expect(prisma.crm_conversations.create).not.toHaveBeenCalled();
+        expect(events.publish).not.toHaveBeenCalled();
+        expect(prisma.social_webhook_events.update).toHaveBeenCalledWith({
+          where: { id: 99 },
+          data: {
+            processing_status: 'processed',
+            processed_at: expect.any(Date),
+            error: null,
+          },
+        });
+      });
+
+      it('ignores unknown fields as before', async () => {
+        const { service, prisma } = setupWith(
+          wrap('template_category_update', phoneValue),
+        );
+
+        const outcome = await service.processEvent(99, defaults);
+
+        expect(outcome.status).toBe('ignored');
+        expect(prisma.social_channels.findFirst).not.toHaveBeenCalled();
+      });
+    });
+
+    it('still handles messages and echoes of the same event', async () => {
+      const mixed = fixture('message-text');
+      const echo = fixture('smb-message-echo-text');
+      mixed.entry[0].changes.push(echo.entry[0].changes[0]);
+      const { service, prisma } = setupWith(mixed);
+
+      const outcome = await service.processEvent(99, defaults);
+
+      expect(outcome).toMatchObject({ messages_created: 1, echoes_created: 1 });
+      expect(prisma.crm_messages.create).toHaveBeenCalledTimes(2);
+    });
+  });
+});

@@ -5,6 +5,17 @@ import { RegisteredTool, ToolExecutionContext } from '../interfaces/tool.interfa
 import { createReminderTools } from './reminders.tools';
 import { RemindersService } from '../../../domains/store/reminders/reminders.service';
 import { createFakeRemindersPrisma } from '../../../domains/store/reminders/testing/fake-reminders-prisma';
+import { RequestContextService } from '../../../common/context/request-context.service';
+
+/** The Vex execution context carries the user's permissions (SSE request or agent worker). */
+function withPermissions(permissions: string[]) {
+  jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+    store_id: 1,
+    organization_id: 1,
+    user_id: 11,
+    permissions,
+  } as never);
+}
 
 const ANA_S1: ToolExecutionContext = { store_id: 1, organization_id: 1, user_id: 10 };
 const BETO_S1: ToolExecutionContext = { store_id: 1, organization_id: 1, user_id: 11 };
@@ -25,6 +36,8 @@ function build() {
 }
 
 describe('reminders tools — Vex only sees the current user reminders (QUI-580)', () => {
+  afterEach(() => jest.restoreAllMocks());
+
   it('list_reminders returns only the caller reminders in the caller store', async () => {
     const { call } = build();
     const titles = async (ctx: ToolExecutionContext) =>
@@ -59,6 +72,7 @@ describe('reminders tools — Vex only sees the current user reminders (QUI-580)
 
   it('create_reminder stores it for the caller with source vex and a product link', async () => {
     const { call, db } = build();
+    withPermissions(['store:products:read']);
     const out = await call(
       'create_reminder',
       {
@@ -72,7 +86,14 @@ describe('reminders tools — Vex only sees the current user reminders (QUI-580)
     expect(out.created).toMatchObject({
       title: 'Revisar el stock',
       source: 'vex',
-      link: { type: 'product', id: 501, label: 'Coca-Cola 1.5L', url: '/admin/products/501' },
+      link: {
+        type: 'product',
+        type_label: 'Producto',
+        id: 501,
+        label: 'Coca-Cola 1.5L',
+        available: true,
+        url: '/admin/products/501',
+      },
     });
     expect(out.display).toContain('Coca-Cola 1.5L');
     expect(db.rows.find((r) => r.id === out.created.reminder_id)).toMatchObject({
@@ -80,6 +101,19 @@ describe('reminders tools — Vex only sees the current user reminders (QUI-580)
       user_id: 11,
       source: 'vex',
     });
+  });
+
+  it('create_reminder cannot link a record the user may not read, so Vex never reveals its name', async () => {
+    const { call, db } = build();
+    withPermissions(['store:orders:read']);
+    const out = await call(
+      'create_reminder',
+      { title: 'Revisar el stock', link_type: 'product', link_id: 501 },
+      BETO_S1,
+    );
+    expect(out.error).toBeDefined();
+    expect(JSON.stringify(out)).not.toContain('Coca-Cola');
+    expect(db.rows.filter((r) => r.user_id === 11)).toHaveLength(1);
   });
 
   it('ignores store or user ids smuggled in the arguments', async () => {

@@ -372,6 +372,114 @@ describe('PurchaseOrdersService.receive()', () => {
   });
 
   /**
+   * QUI-1017 — un producto con stock en masa/volumen sin unidad de compra se
+   * recibía 1:1 (10 kg entraban como 10 g y el costo del kilo quedaba como
+   * costo del gramo). Ahora la recepción se rechaza nombrando el producto, y un
+   * producto que NO es insumo con kg → g convierte con el factor del catálogo.
+   */
+  describe('QUI-1017: conversión compra → stock en masa/volumen', () => {
+    const G = { code: 'g', dimension: 'mass', factor_to_base: '1.000000' };
+    const KG = { code: 'kg', dimension: 'mass', factor_to_base: '1000.000000' };
+
+    /** Corre receive() con el tx por defecto, parcheado por el test. */
+    const withTx = (patch: (tx: any) => void) => {
+      const original = (prismaService.$transaction as jest.Mock)
+        .getMockImplementation()!;
+      (prismaService.$transaction as jest.Mock).mockImplementation(
+        (callback: any) =>
+          original((tx: any) => {
+            patch(tx);
+            return callback(tx);
+          }),
+      );
+    };
+
+    it('stock en g y unidad de compra null ⇒ 400 con el nombre del producto, sin recepción ni stock', async () => {
+      let tx: any;
+      withTx((t) => {
+        tx = t;
+        t.purchase_order_items.findMany.mockResolvedValue([
+          {
+            id: PO_ITEM_ID,
+            quantity_ordered: 10,
+            quantity_received: 0,
+            product_id: PRODUCT_ID,
+            product_variant_id: null,
+            purchase_uom_id: null,
+            stock_uom_id: null,
+            products: {
+              name: 'Carne molida',
+              purchase_to_stock_factor: null,
+              stock_uom: G,
+              purchase_uom: null,
+            },
+          },
+        ]);
+      });
+
+      const error = await service.receive(PO_ID, baseDto).catch((e) => e);
+
+      expect(error.getStatus()).toBe(400);
+      expect(error.message).toContain('"Carne molida"');
+      expect(error.message).toContain('unidad de compra');
+      expect(tx.purchase_order_receptions.create).not.toHaveBeenCalled();
+      expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+    });
+
+    it('no insumo comprado en kg con stock en g ⇒ 10 kg entran como 10.000 g a costo por gramo', async () => {
+      withTx((t) => {
+        t.purchase_order_items.findMany.mockResolvedValue([
+          {
+            id: PO_ITEM_ID,
+            quantity_ordered: 10,
+            quantity_received: 0,
+            product_id: PRODUCT_ID,
+            product_variant_id: null,
+            purchase_uom_id: null,
+            stock_uom_id: null,
+            products: {
+              name: 'Lomo',
+              purchase_to_stock_factor: null,
+              stock_uom: G,
+              purchase_uom: KG,
+            },
+          },
+        ]);
+        t.products.findFirst.mockResolvedValue({
+          id: PRODUCT_ID,
+          name: 'Lomo',
+          is_ingredient: false,
+          purchase_to_stock_factor: null,
+          stock_uom_id: 1,
+          purchase_uom_id: 2,
+          stock_uom: G,
+          purchase_uom: KG,
+        });
+      });
+
+      await service.receive(PO_ID, baseDto);
+
+      expect(costingService.calculateCostOnReceipt).toHaveBeenCalledWith(
+        expect.objectContaining({ quantity_received: 10000, unit_cost: 2 }),
+        expect.anything(),
+      );
+      expect(stockLevelManager.updateStock).toHaveBeenCalledWith(
+        expect.objectContaining({ quantity_change: 10000 }),
+        expect.anything(),
+      );
+    });
+
+    it('producto por unidad (sin unidades de masa/volumen) recibe igual que antes', async () => {
+      await service.receive(PO_ID, baseDto);
+
+      expect(stockLevelManager.updateStock).toHaveBeenCalledWith(
+        expect.objectContaining({ quantity_change: 10, movement_unit_cost: 2000 }),
+        expect.anything(),
+      );
+    });
+  });
+
+  /**
    * QUI-486 — un producto con variantes solo se compra por variante.
    *
    * Sin el guard la recepción NO falla — es peor: `getOrCreateStockLevel`
@@ -549,6 +657,7 @@ describe('PurchaseOrdersService.receive()', () => {
           deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
         },
         product_variants: { findMany: jest.fn().mockResolvedValue([]) },
+        invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       };
       (prismaService.$transaction as jest.Mock).mockImplementation(
         async (callback: any) => callback(tx),
@@ -700,6 +809,31 @@ describe('PurchaseOrdersService.receive()', () => {
       expect(tx.purchase_orders.delete).toHaveBeenCalledWith({
         where: { id: PO_ID },
       });
+    });
+
+    // QUI-684 — `invoices.purchase_order_id` es FK RESTRICT: sin esta guarda el
+    // borrado de un borrador con documento soporte salía como 500 (P2003).
+    it('remove() de un BORRADOR con documento soporte responde PO_DELETE_SUPPORT_DOCUMENT_001 y no borra nada', async () => {
+      const tx = mockOrderInStatus('draft');
+      tx.invoices.findFirst.mockResolvedValue({
+        id: 12,
+        invoice_number: 'DS-12',
+        status: 'voided',
+      });
+
+      const error: any = await service.remove(PO_ID).catch((e) => e);
+      expect(error.errorCode).toBe('PO_DELETE_SUPPORT_DOCUMENT_001');
+      expect(error.getStatus()).toBe(409);
+      expect(error.getResponse().details).toEqual({
+        invoice_id: 12,
+        invoice_number: 'DS-12',
+      });
+
+      expect(tx.invoices.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { purchase_order_id: PO_ID } }),
+      );
+      expect(tx.purchase_order_item_taxes.deleteMany).not.toHaveBeenCalled();
+      expect(tx.purchase_orders.delete).not.toHaveBeenCalled();
     });
 
     it('receive() sobre una orden CANCELADA responde PO_STATUS_001', async () => {
@@ -3694,6 +3828,35 @@ describe('PurchaseOrdersService.findOne() — un recurso ausente es 404, no un s
     expect(prismaService.purchase_orders.findUnique).toHaveBeenCalledTimes(1);
   });
 
+  it('QUI-1017: la línea pendiente de un producto en g sin unidad de compra trae receipt_uom_block', async () => {
+    const G = { code: 'g', dimension: 'mass', factor_to_base: '1' };
+    prismaService.purchase_orders.findUnique.mockResolvedValue({
+      id: PO_ID,
+      purchase_order_items: [
+        {
+          id: 1,
+          quantity_ordered: 5,
+          quantity_received: 0,
+          products: { name: 'Costilla', stock_uom: G, purchase_uom: null },
+        },
+        {
+          id: 2,
+          quantity_ordered: 5,
+          quantity_received: 5,
+          products: { name: 'Pechuga', stock_uom: G, purchase_uom: null },
+        },
+      ],
+    });
+
+    const order: any = await service.findOne(PO_ID);
+
+    expect(order.purchase_order_items[0].receipt_uom_block).toContain(
+      '"Costilla"',
+    );
+    // Ya recibida por completo: no hay nada que bloquear.
+    expect(order.purchase_order_items[1].receipt_uom_block).toBeNull();
+  });
+
   it('una orden propia sigue devolviéndose igual que antes', async () => {
     const orden = {
       id: PO_ID,
@@ -3705,7 +3868,12 @@ describe('PurchaseOrdersService.findOne() — un recurso ausente es 404, no un s
     };
     prismaService.purchase_orders.findUnique.mockResolvedValue(orden);
 
-    await expect(service.findOne(PO_ID)).resolves.toBe(orden);
+    // QUI-1017 — único agregado: cada línea dice si se puede recibir
+    // (`receipt_uom_block`, null = sí). Todo lo demás viaja igual.
+    await expect(service.findOne(PO_ID)).resolves.toEqual({
+      ...orden,
+      purchase_order_items: [{ id: 1, receipt_uom_block: null }],
+    });
 
     // El include no cambió: proveedor, ubicación, líneas y el calendario de
     // pagos ordenado (QUI-647) siguen viajando en el mismo read.

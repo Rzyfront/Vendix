@@ -239,6 +239,8 @@ module.exports = {
         'destructive-foreground': 'var(--color-destructive-foreground)',
         'text-primary': 'rgba(var(--color-text-primary-rgb), <alpha-value>)',
         'text-secondary': 'rgba(var(--color-text-secondary-rgb), <alpha-value>)',
+        // Texto sobre un relleno `bg-primary` sólido.
+        'on-primary': 'var(--color-text-on-primary)',
         // Compuestos por canal RGB, como `text-primary` arriba, y NO como
         // `var(--color-success)` a secas: un token declarado con el hex crudo
         // no puede recibir modificador de alfa, así que `border-warning/30`

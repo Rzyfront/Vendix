@@ -51,6 +51,14 @@ export const SECTOR_GUIDES: Readonly<Record<string, SectorGuide>> = {
         ],
       },
       {
+        heading: 'Así lo probamos en Vendix',
+        paragraphs: [
+          'El 18 de noviembre de 2026, en la tienda de demostración de Vendix y con datos de prueba, cada rol entró con su propio usuario. El mesero abrió una mesa para dos personas, pidió un plato y una bebida, envió solo el plato a cocina y marcó la bebida como entregada.',
+          'En la pantalla de cocina, en la estación de parrilla, el cocinero inició el ticket, revisó los ingredientes y lo marcó listo. El mesero entregó el plato y cerró la mesa con la cuenta pendiente de pago. Al enviar el plato a cocina se descontaron los insumos de su receta.',
+          'En esa prueba la cuenta de la mesa la cobró el administrador. En tu demostración, define y comprueba qué rol cobrará las mesas.',
+        ],
+      },
+      {
         heading: 'Prepara una demostración de tu operación',
         paragraphs: [
           'Elige una mesa de prueba, dos productos y una observación. Define los roles de salón, cocina y caja e incluye un cambio o cancelación. Para preparación, inventario y pago, utiliza un entorno de prueba acordado; no ensayes con cuentas de clientes.',
@@ -85,7 +93,7 @@ export const SECTOR_GUIDES: Readonly<Record<string, SectorGuide>> = {
         heading: 'Distingue tarifa, cupón y promoción',
         paragraphs: [
           'Una tarifa organiza un precio comercial distinto. Un cupón aplica un beneficio mediante un código. Una promoción puede limitarse a ciertos productos y condiciones. Acuerda qué debe ocurrir cuando coinciden.',
-          'En una prueba controlada de Vendix se seleccionó manualmente una tarifa, se aplicó y retiró un cupón válido y se comprobó una promoción limitada a un producto. No se verificó acumulación ni selección automática por comprador o cantidad.',
+          'En pruebas en la tienda de demostración de Vendix, el 13 y el 14 de octubre de 2026 y con datos de prueba, se seleccionó manualmente una tarifa (de $10.000 a $9.000 COP), se aplicó y retiró un cupón válido y se comprobó una promoción limitada a un producto ($17.500 COP menos $1.000 COP). Un cupón vencido y uno inexistente fueron rechazados sin cambiar el total; el rechazo del cupón vencido se volvió a comprobar el 18 de noviembre de 2026. No se verificó acumulación ni selección automática por comprador o cantidad.',
         ],
       },
       {
@@ -147,6 +155,13 @@ export const SECTOR_GUIDES: Readonly<Record<string, SectorGuide>> = {
         heading: 'Revisa resultados y pendientes',
         paragraphs: [
           'Distingue lo demostrado de lo que falta. Que un descuento aparezca en el carrito no prueba un cobro final; que una comanda llegue a cocina no prueba preparación, entrega y cierre completos. Conserva evidencia sin datos personales.',
+        ],
+      },
+      {
+        heading: 'Así preparamos una demostración en Vendix',
+        paragraphs: [
+          'El 18 de noviembre de 2026 recorrimos un turno completo en la tienda de demostración de Vendix con datos ficticios y un usuario por rol: cajero, mesero y cocina. Antes de empezar anotamos el resultado esperado: con $200.000 de base, $34.000 en ventas en efectivo y un retiro de $15.000, la caja debía cerrar con $219.000. Cerró con $219.000 y sin diferencia.',
+          'Probar con cada rol mostró algo que una demostración con el usuario administrador no habría mostrado: en esa configuración, el cajero no podía cobrar las cuentas de mesa y el cobro lo hizo el administrador. Por eso conviene que cada persona de tu equipo pruebe con su propio rol.',
         ],
       },
     ],
@@ -394,6 +409,7 @@ export const SECTOR_GUIDES: Readonly<Record<string, SectorGuide>> = {
           'Existencias por ubicación y por variante. La Cantidad Inicial no aplica a productos con variantes. Para eso, y para cargar una bodega distinta, usa Inventario, Ajustes de Stock, Carga Masiva: eliges la ubicación y el tipo de ajuste, descargas la plantilla de productos existentes (trae una fila por variante, con el SKU de la variante), llenas Cantidad Nueva y subes. Las entradas sin stock en esa bodega se registran como Carga inicial.',
           'Duplicados. Un SKU que ya existe en tu tienda actualiza ese producto en vez de crear otro; si estaba archivado, lo reactiva con aviso. Un SKU repetido dentro del archivo genera una advertencia: corrígelo antes de guardar. Un código de barras repetido, en el archivo o ya en uso, es un error. En clientes, si el correo o el documento ya existe, la fila se rechaza: esta carga no actualiza clientes.',
           'Al reimportar. Si subes el mismo archivo, los productos con el mismo SKU se actualizan. Ten cuidado con la Cantidad Inicial: si el saldo del archivo es distinto al actual, Vendix lo ajusta a la cantidad del archivo. La descarga con productos actuales trae la existencia en otra columna y deja vacía la Cantidad Inicial para no recargar. Las fotos se cargan aparte, con un ZIP asociado por SKU.',
+          'Así lo probamos. El 13 de noviembre de 2026, en la tienda de demostración de Vendix y con un archivo de muestra ficticio, el catálogo pasó de 72 a 80 productos, con variantes incluidas, y 125 unidades quedaron como carga inicial en la ubicación principal. Al subir el mismo archivo otra vez, los productos se actualizaron por SKU sin duplicarse ni sumar existencias.',
           'Lo que no se trae. No existe importador de historial de ventas, facturas, contabilidad, cartera ni proveedores, y Vendix no se conecta con tu programa anterior: exportas tus datos a Excel o CSV y los pasas a la plantilla. La carga la haces tú; si prefieres que el equipo cargue muchos productos, se cotiza como implementación avanzada. No compartas tu base completa por canales informales: para consultar un caso bastan pocas filas.',
         ],
       },

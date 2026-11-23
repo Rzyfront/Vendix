@@ -211,9 +211,8 @@ export class StoreUserSelectComponent implements ControlValueAccessor, OnInit {
   /** Non-CVA selection channel (plain signal consumers). See class doc. */
   readonly value = input<number | null>(null);
   /**
-   * Name of the person behind `value` when the caller already knows it. The
-   * staff lookup cannot resolve a single id, so without it a preset value
-   * shows as `Usuario #id`.
+   * Name of the person behind `value` when the caller already knows it; saves
+   * the lookup round-trip. Without it the id is resolved through the API.
    */
   readonly valueLabel = input<string | null>(null);
   readonly valueChange = output<number | null>();
@@ -246,6 +245,13 @@ export class StoreUserSelectComponent implements ControlValueAccessor, OnInit {
   private receivedValueInput = false;
 
   /**
+   * Id whose name is being fetched. A late answer is applied only while it is
+   * still the latest requested id, so it never overwrites a person the user
+   * picked (or cleared) in the meantime.
+   */
+  private resolvingId: number | null = null;
+
+  /**
    * B9 — mirrors `writeValue` for the non-CVA `value` input: resolves the
    * incoming id to a name once (skips when it already matches `selected()`,
    * so it never fights the user's own in-progress `select()`).
@@ -261,20 +267,22 @@ export class StoreUserSelectComponent implements ControlValueAccessor, OnInit {
     const id = this.value();
     if (id == null) {
       if (!this.receivedValueInput) return; // CVA mode: `[value]` isn't bound — don't touch it.
+      this.resolvingId = null;
       if (untracked(() => this.selected()) !== null) this.selected.set(null);
       return;
     }
     this.receivedValueInput = true;
-    if (untracked(() => this.selected())?.id === id) return;
+    if (untracked(() => this.selected())?.id === id) {
+      this.resolvingId = null;
+      return;
+    }
     const label = untracked(() => this.valueLabel());
     if (label) {
+      this.resolvingId = null;
       this.selected.set({ id, name: label });
       return;
     }
-    this.lookup
-      .getById(id, { mode: this.lookupMode() })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((user) => this.selected.set(user ?? { id, name: `Usuario #${id}` }));
+    this.resolve(id);
   });
 
   ngOnInit(): void {
@@ -299,6 +307,7 @@ export class StoreUserSelectComponent implements ControlValueAccessor, OnInit {
   // ── ControlValueAccessor ──────────────────────────────────────────────
   writeValue(value: number | null): void {
     if (value == null) {
+      this.resolvingId = null;
       this.selected.set(null);
       // QUI-480: el formulario se reconstruye con el componente ya montado y
       // Angular llama writeValue(null); sin esto el texto buscado persiste entre
@@ -309,13 +318,28 @@ export class StoreUserSelectComponent implements ControlValueAccessor, OnInit {
       this.searchSubject.next('');
       return;
     }
+    if (this.selected()?.id === value) {
+      this.resolvingId = null;
+      return;
+    }
     // Resolve name/avatar for the incoming id.
+    this.resolve(value);
+  }
+
+  /**
+   * Fetches the name of `id` and shows it. `Usuario #id` is only the last
+   * resort, when the person no longer exists in the store.
+   */
+  private resolve(id: number): void {
+    this.resolvingId = id;
     this.lookup
-      .getById(value, { mode: this.lookupMode() })
+      .getById(id, { mode: this.lookupMode() })
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((user) =>
-        this.selected.set(user ?? { id: value, name: `Usuario #${value}` }),
-      );
+      .subscribe((user) => {
+        if (this.resolvingId !== id) return;
+        this.resolvingId = null;
+        this.selected.set(user ?? { id, name: `Usuario #${id}` });
+      });
   }
 
   registerOnChange(fn: (value: number | null) => void): void {
@@ -354,6 +378,7 @@ export class StoreUserSelectComponent implements ControlValueAccessor, OnInit {
   }
 
   select(user: StoreUserOption): void {
+    this.resolvingId = null;
     this.selected.set(user);
     this.query.set('');
     this.results.set([]);
@@ -366,6 +391,7 @@ export class StoreUserSelectComponent implements ControlValueAccessor, OnInit {
   clear(event: Event): void {
     event.stopPropagation();
     if (this.isDisabled()) return;
+    this.resolvingId = null;
     this.selected.set(null);
     this.query.set('');
     this.results.set([]);

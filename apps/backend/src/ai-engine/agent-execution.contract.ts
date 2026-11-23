@@ -1,6 +1,9 @@
 import type { AgentResult } from './ai-agent.service';
 import type { AIStreamChunk } from './interfaces/ai-provider.interface';
-import type { ObjectiveProgress } from './tasks/interfaces/agent-objective.interface';
+import {
+  clientObjectiveBudget,
+  type ObjectiveProgress,
+} from './tasks/interfaces/agent-objective.interface';
 import type {
   AgentExecutionSummary,
   ToolExecutionReceipt,
@@ -194,7 +197,30 @@ export function clientSafeExecution(
 export function clientSafeObjective(
   objective: ObjectiveProgress,
 ): ObjectiveProgress {
-  return { ...objective, next_step: null };
+  // An objective row may carry no budget (legacy rows, partial progress):
+  // there is no cost to strip, so pass it through instead of crashing the stream.
+  return {
+    ...objective,
+    next_step: null,
+    budget: objective.budget
+      ? clientObjectiveBudget(objective.budget)
+      : objective.budget,
+  };
+}
+
+/**
+ * T24 / P2-6: «el cliente no debe ver costos». Removes the turn's real cost
+ * (`cost_usd`) and any provider-reported `usage.cost` from a frame bound for a
+ * store client. Internal consumers read the cost before calling this.
+ */
+export function withoutClientCost<T extends object>(chunk: T): T {
+  const { cost_usd: _cost, ...rest } = chunk as T & { cost_usd?: unknown };
+  const usage = (rest as { usage?: unknown }).usage;
+  if (usage && typeof usage === 'object' && 'cost' in usage) {
+    const { cost: _usageCost, ...safeUsage } = usage as Record<string, unknown>;
+    return { ...rest, usage: safeUsage } as T;
+  }
+  return rest as T;
 }
 
 export function clientSafeChunk(chunk: AIStreamChunk): AIStreamChunk {

@@ -13,6 +13,7 @@ import { S3Service } from '@common/services/s3.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException } from 'src/common/errors';
 import * as bcrypt from 'bcrypt';
+import { SENSITIVE_USER_FIELDS } from '@common/utils/safe-user-select.util';
 
 /**
  * F-194: el servicio migró de `UnauthorizedException` (Nest) a
@@ -258,6 +259,7 @@ describe('AuthService Login Flow', () => {
       id: 10,
       slug: 'store-a',
       organization_id: 1, // Same Org ID
+      is_active: true,
     });
     // No store_users mock needed as it shouldn't be called for high privilege
 
@@ -305,6 +307,7 @@ describe('AuthService Login Flow', () => {
       id: 10,
       slug: 'store-a',
       organization_id: 1, // Same Org ID
+      is_active: true,
     });
     mockPrismaService.store_users.findFirst.mockResolvedValue(null); // No direct link
 
@@ -318,6 +321,266 @@ describe('AuthService Login Flow', () => {
     } catch (error) {
       expectUnauthorized(error);
     }
+  });
+
+  describe('tiendas inactivas (incidente vendix-centro)', () => {
+    // Los mocks son compartidos entre tests: se deja el estado que esperan
+    // los tests siguientes (tienda activa store-a con membresía).
+    afterEach(() => {
+      mockPrismaService.stores.findUnique.mockResolvedValue({
+        id: 10,
+        slug: 'store-a',
+        organization_id: 1,
+        is_active: true,
+      });
+      mockPrismaService.store_users.findFirst.mockResolvedValue({
+        store: { organizations: { id: 1 }, id: 10 },
+      });
+    });
+
+    it('rechaza abrir una tienda inactiva por slug explícito, incluso a un owner', async () => {
+      const user = accountRow({
+        email: 'owner@test.com',
+        password: await bcrypt.hash('123', 10),
+        user_roles: [{ roles: { name: 'owner', role_permissions: [] } }],
+      });
+      mockPrismaService.users.findMany.mockResolvedValue([user]);
+      mockPrismaService.stores.findFirst.mockResolvedValue({
+        id: 2,
+        slug: 'vendix-centro',
+        organization_id: 1,
+        organizations: { slug: 'org-a' },
+      });
+      mockPrismaService.user_settings.findUnique.mockResolvedValue({
+        config: {},
+      });
+      mockPrismaService.stores.findUnique.mockResolvedValue({
+        id: 2,
+        slug: 'vendix-centro',
+        organization_id: 1,
+        is_active: false,
+      });
+      mockPrismaService.store_users.create.mockClear();
+
+      await expect(
+        service.login({
+          email: 'owner@test.com',
+          password: '123',
+          store_slug: 'vendix-centro',
+        }),
+      ).rejects.toMatchObject({ errorCode: 'AUTH_STORE_INACTIVE_001' });
+      expect(mockPrismaService.store_users.create).not.toHaveBeenCalled();
+    });
+
+    it('login sin slug ignora una main_store inactiva y abre la tienda activa', async () => {
+      const user = accountRow({
+        email: 'rafa@test.com',
+        password: await bcrypt.hash('123', 10),
+        main_store_id: 2,
+        user_roles: [{ roles: { name: 'admin', role_permissions: [] } }],
+      });
+      mockPrismaService.users.findMany.mockResolvedValue([user]);
+      mockPrismaService.user_settings.findUnique.mockResolvedValue({
+        id: 1,
+        app_type: 'STORE_ADMIN',
+        config: {},
+      });
+      // main_store_id apunta a la tienda inactiva.
+      mockPrismaService.stores.findUnique.mockResolvedValue({
+        id: 2,
+        slug: 'vendix-centro',
+        organization_id: 1,
+        is_active: false,
+      });
+      const activeStore = {
+        id: 1,
+        slug: 'vendix-crm',
+        organization_id: 1,
+        is_active: true,
+        organizations: { id: 1 },
+      };
+      mockPrismaService.store_users.findFirst.mockReset();
+      mockPrismaService.store_users.findFirst.mockResolvedValue({
+        store: activeStore,
+      });
+      mockPrismaService.store_users.create.mockClear();
+      mockPrismaService.users.update.mockClear();
+      mockPrismaService.refresh_tokens.create.mockResolvedValue({});
+
+      await service.login({ email: 'rafa@test.com', password: '123' });
+
+      // Estrategia 2: solo membresías en tiendas activas, orden determinista.
+      expect(mockPrismaService.store_users.findFirst).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          where: {
+            user_id: user.id,
+            store: { organization_id: 1, is_active: true },
+          },
+          orderBy: { store_id: 'asc' },
+        }),
+      );
+      // Contexto final: también exige tienda activa.
+      expect(mockPrismaService.store_users.findFirst).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          where: expect.objectContaining({
+            store: expect.objectContaining({
+              slug: 'vendix-crm',
+              is_active: true,
+            }),
+          }),
+        }),
+      );
+      // Nunca se auto-relaciona con la tienda inactiva y el arranque queda en la activa.
+      expect(mockPrismaService.store_users.create).not.toHaveBeenCalled();
+      expect(mockPrismaService.users.update).toHaveBeenCalledWith({
+        where: { id: user.id },
+        data: { main_store_id: 1 },
+      });
+    });
+
+    it('slug de tienda inactiva con contraseña incorrecta: credenciales, sin revelar que está inactiva', async () => {
+      const user = accountRow({
+        email: 'owner@test.com',
+        password: await bcrypt.hash('correcta', 4),
+        user_roles: [{ roles: { name: 'owner', role_permissions: [] } }],
+      });
+      mockPrismaService.users.findMany.mockResolvedValue([user]);
+      mockPrismaService.stores.findFirst.mockResolvedValue({
+        id: 2,
+        slug: 'vendix-centro',
+        organization_id: 1,
+        organizations: { slug: 'org-a' },
+      });
+      mockPrismaService.user_settings.findUnique.mockResolvedValue({
+        config: {},
+      });
+      mockPrismaService.stores.findUnique.mockResolvedValue({
+        id: 2,
+        slug: 'vendix-centro',
+        organization_id: 1,
+        is_active: false,
+      });
+      const failed = jest
+        .spyOn(service as any, 'handleFailedLogin')
+        .mockResolvedValue(undefined);
+
+      await expect(
+        service.login({
+          email: 'owner@test.com',
+          password: 'otra',
+          store_slug: 'vendix-centro',
+        }),
+      ).rejects.toMatchObject({ errorCode: 'AUTH_CREDENTIALS_001' });
+      expect(failed).toHaveBeenCalledWith(user.id, undefined);
+      failed.mockRestore();
+    });
+
+    it('slug de tienda inactiva sin membresía (rol de tienda): credenciales antes que inactiva', async () => {
+      const user = accountRow({
+        email: 'staff@test.com',
+        password: await bcrypt.hash('123', 4),
+        user_roles: [{ roles: { name: 'employee', role_permissions: [] } }],
+      });
+      mockPrismaService.users.findMany.mockResolvedValue([user]);
+      mockPrismaService.stores.findFirst.mockResolvedValue({
+        id: 2,
+        slug: 'vendix-centro',
+        organization_id: 1,
+        organizations: { slug: 'org-a' },
+      });
+      mockPrismaService.user_settings.findUnique.mockResolvedValue({
+        config: {},
+      });
+      mockPrismaService.stores.findUnique.mockResolvedValue({
+        id: 2,
+        slug: 'vendix-centro',
+        organization_id: 1,
+        is_active: false,
+      });
+      mockPrismaService.store_users.findFirst.mockResolvedValueOnce(null);
+
+      await expect(
+        service.login({
+          email: 'staff@test.com',
+          password: '123',
+          store_slug: 'vendix-centro',
+        }),
+      ).rejects.toMatchObject({ errorCode: 'AUTH_CREDENTIALS_001' });
+    });
+
+    it('owner/admin: la sesión abierta a propósito en una tienda inactiva sí se renueva', async () => {
+      mockConfigService.get.mockReturnValue('secret');
+      mockJwtService.verify.mockReturnValue({
+        sub: 1,
+        organization_id: 1,
+        store_id: 2,
+      });
+      mockPrismaService.refresh_tokens.findFirst.mockResolvedValue({
+        id: 9,
+        user_id: 1,
+        users: {
+          id: 1,
+          organization_id: 1,
+          user_roles: [{ roles: { name: 'owner' } }],
+        },
+      });
+      const security = jest
+        .spyOn(service as any, 'validateRefreshTokenSecurity')
+        .mockResolvedValue(undefined);
+      // Se corta justo al emitir: basta con saber que llegó a generar tokens.
+      const generate = jest
+        .spyOn(service as any, 'generateTokens')
+        .mockRejectedValue(new Error('emitido'));
+      mockPrismaService.stores.findUnique.mockResolvedValue({
+        is_active: false,
+      });
+
+      await expect(
+        service.refreshToken({ refresh_token: 'rt' } as any),
+      ).rejects.toMatchObject({ errorCode: 'AUTH_TOKEN_001' });
+      expect(generate).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 1 }),
+        expect.objectContaining({ store_id: 2 }),
+      );
+      security.mockRestore();
+      generate.mockRestore();
+      mockConfigService.get.mockReset();
+    });
+
+    it('no renueva una sesión abierta en una tienda que se desactivó', async () => {
+      mockConfigService.get.mockReturnValue('secret');
+      mockJwtService.verify.mockReturnValue({
+        sub: 1,
+        organization_id: 1,
+        store_id: 2,
+      });
+      mockPrismaService.refresh_tokens.findFirst.mockResolvedValue({
+        id: 9,
+        user_id: 1,
+        users: { id: 1, organization_id: 1, user_roles: [] },
+      });
+      const security = jest
+        .spyOn(service as any, 'validateRefreshTokenSecurity')
+        .mockResolvedValue(undefined);
+      const generate = jest.spyOn(service as any, 'generateTokens');
+      mockPrismaService.stores.findUnique.mockResolvedValue({
+        is_active: false,
+      });
+
+      await expect(
+        service.refreshToken({ refresh_token: 'rt' } as any),
+      ).rejects.toMatchObject({ errorCode: 'AUTH_STORE_INACTIVE_001' });
+      expect(mockPrismaService.stores.findUnique).toHaveBeenCalledWith({
+        where: { id: 2 },
+        select: { is_active: true },
+      });
+      expect(generate).not.toHaveBeenCalled();
+      security.mockRestore();
+      generate.mockRestore();
+      mockConfigService.get.mockReset();
+    });
   });
 
   it.each(['admin@example.com', 'ADMIN@EXAMPLE.COM', ' Admin@Example.com '])(
@@ -452,7 +715,9 @@ describe('AuthService Login Flow', () => {
           state: { notIn: ['suspended', 'archived'] },
         },
       });
-      expect(mockPrismaService.password_reset_tokens.create).toHaveBeenCalledWith(
+      expect(
+        mockPrismaService.password_reset_tokens.create,
+      ).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ user_id: 41 }),
         }),
@@ -511,7 +776,9 @@ describe('AuthService Login Flow', () => {
 
       expect(withSlug).toEqual({ message: GENERIC });
       expect(withoutSlug).toEqual({ message: GENERIC });
-      expect(mockPrismaService.password_reset_tokens.create).not.toHaveBeenCalled();
+      expect(
+        mockPrismaService.password_reset_tokens.create,
+      ).not.toHaveBeenCalled();
       expect(mockEmailService.sendPasswordResetEmail).not.toHaveBeenCalled();
     });
 
@@ -546,9 +813,7 @@ describe('AuthService Login Flow', () => {
         undefined,
         undefined,
       );
-      expect(logError).toHaveBeenCalledWith(
-        expect.stringContaining('user 41'),
-      );
+      expect(logError).toHaveBeenCalledWith(expect.stringContaining('user 41'));
       expect(logError).not.toHaveBeenCalledWith(
         expect.stringContaining('cajero@tienda.com'),
       );
@@ -661,6 +926,7 @@ describe('AuthService Login Flow', () => {
         id: 10,
         slug: 'store-a',
         organization_id: 1,
+        is_active: true,
       });
       mockPrismaService.store_users.findFirst.mockResolvedValue({
         store: { id: 10, organizations: { id: 1 } },
@@ -716,7 +982,7 @@ describe('AuthService Login Flow', () => {
         },
       });
       mockPrismaService.refresh_tokens.update.mockResolvedValue({});
-      jest
+      const security = jest
         .spyOn(service as any, 'validateRefreshTokenSecurity')
         .mockResolvedValue(undefined);
       jest.spyOn(service as any, 'generateTokens').mockResolvedValue({
@@ -730,6 +996,279 @@ describe('AuthService Login Flow', () => {
 
       expect(result.user.avatar_url).toBe(SIGNED);
       expect(result.access_token).toBe('a');
+    });
+  });
+
+  describe('session user without auth-only columns', () => {
+    // An expired lock: login must go through it and still drop the columns.
+    const AUTH_ONLY = {
+      two_factor_secret: 'JBSWY3DPEHPK3PXP',
+      failed_login_attempts: 2,
+      locked_until: new Date('2020-01-01T00:00:00Z'),
+    };
+
+    function expectNoAuthOnlyColumns(user: object) {
+      for (const field of SENSITIVE_USER_FIELDS) {
+        expect(user).not.toHaveProperty(field);
+      }
+    }
+
+    afterEach(() => {
+      mockConfigService.get.mockReset();
+      jest.restoreAllMocks();
+    });
+
+    it('login still checks the password and returns the session without auth-only columns (login non-regression)', async () => {
+      mockPrismaService.users.findMany.mockResolvedValue([
+        accountRow({
+          email: 'owner@test.com',
+          password: await bcrypt.hash('123', 4),
+          ...AUTH_ONLY,
+          user_roles: [{ roles: { name: 'owner', role_permissions: [] } }],
+        }),
+      ]);
+      mockPrismaService.stores.findFirst.mockResolvedValue({
+        id: 10,
+        slug: 'store-a',
+        organization_id: 1,
+        organizations: { slug: 'org-a' },
+      });
+      mockPrismaService.user_settings.findUnique.mockResolvedValue({
+        config: {},
+      });
+      mockPrismaService.stores.findUnique.mockResolvedValue({
+        id: 10,
+        slug: 'store-a',
+        organization_id: 1,
+        is_active: true,
+      });
+      mockPrismaService.store_users.findFirst.mockResolvedValue({
+        store: { id: 10, organizations: { id: 1 } },
+      });
+      mockPrismaService.refresh_tokens.create.mockResolvedValue({});
+      mockPrismaService.users.update.mockResolvedValue({});
+
+      const result: any = await service.login({
+        email: 'owner@test.com',
+        password: '123',
+        store_slug: 'store-a',
+      });
+
+      expectNoAuthOnlyColumns(result.user);
+      expect(result.user).toEqual(
+        expect.objectContaining({
+          id: 1,
+          email: 'owner@test.com',
+          roles: ['owner'],
+        }),
+      );
+      expect(result).toEqual(
+        expect.objectContaining({
+          access_token: 'token',
+          refresh_token: 'token',
+          permissions: expect.any(Array),
+        }),
+      );
+    });
+
+    it('login still rejects an account whose lock has not expired', async () => {
+      mockPrismaService.users.findMany.mockResolvedValue([
+        accountRow({
+          email: 'owner@test.com',
+          password: await bcrypt.hash('123', 4),
+          ...AUTH_ONLY,
+          locked_until: new Date(Date.now() + 60 * 60 * 1000),
+          user_roles: [{ roles: { name: 'owner', role_permissions: [] } }],
+        }),
+      ]);
+      mockPrismaService.stores.findFirst.mockResolvedValue({
+        id: 10,
+        slug: 'store-a',
+        organization_id: 1,
+        organizations: { slug: 'org-a' },
+      });
+      mockPrismaService.refresh_tokens.create.mockClear();
+
+      await expect(
+        service.login({
+          email: 'owner@test.com',
+          password: '123',
+          store_slug: 'store-a',
+        }),
+      ).rejects.toMatchObject({ errorCode: 'AUTH_VALIDATE_001' });
+      expect(mockPrismaService.refresh_tokens.create).not.toHaveBeenCalled();
+    });
+
+    it('getCurrentUser (/auth/me) returns the user without auth-only columns', async () => {
+      mockPrismaService.users.findUnique.mockResolvedValue({
+        id: 1,
+        email: 'test@test.com',
+        password: 'hashed',
+        avatar_url: null,
+        ...AUTH_ONLY,
+      });
+
+      const result: any = await service.getCurrentUser(1, null);
+
+      expectNoAuthOnlyColumns(result);
+      expect(result).toEqual(
+        expect.objectContaining({ id: 1, email: 'test@test.com' }),
+      );
+    });
+
+    it('getProfile (/auth/profile) returns the user without auth-only columns', async () => {
+      mockPrismaService.users.findUnique.mockResolvedValue({
+        id: 1,
+        email: 'test@test.com',
+        password: 'hashed',
+        avatar_url: null,
+        addresses: [],
+        ...AUTH_ONLY,
+      });
+
+      const result: any = await service.getProfile(1, null);
+
+      expectNoAuthOnlyColumns(result);
+      expect(result).toEqual(
+        expect.objectContaining({ id: 1, addresses: [], user_roles: [] }),
+      );
+    });
+
+    it('refreshToken returns the user without auth-only columns', async () => {
+      mockConfigService.get.mockImplementation((key: string) =>
+        key === 'JWT_REFRESH_SECRET' ? 'refresh-secret' : undefined,
+      );
+      mockJwtService.verify.mockReturnValue({
+        sub: 1,
+        organization_id: 1,
+        store_id: null,
+      });
+      mockPrismaService.refresh_tokens.findFirst.mockResolvedValue({
+        id: 7,
+        users: {
+          id: 1,
+          organization_id: 1,
+          password: 'hashed',
+          avatar_url: null,
+          user_roles: [],
+          ...AUTH_ONLY,
+        },
+      });
+      mockPrismaService.refresh_tokens.update.mockResolvedValue({});
+      jest
+        .spyOn(service as any, 'validateRefreshTokenSecurity')
+        .mockResolvedValue(undefined);
+      jest.spyOn(service as any, 'generateTokens').mockResolvedValue({
+        access_token: 'a',
+        refresh_token: 'r',
+        token_type: 'Bearer',
+        expires_in: 900,
+      });
+
+      const result = await service.refreshToken({ refresh_token: 'rt' });
+
+      expectNoAuthOnlyColumns(result.user);
+      expect(result.user).toEqual(expect.objectContaining({ id: 1 }));
+    });
+
+    it('loginCustomer returns the customer without auth-only columns', async () => {
+      mockPrismaService.stores.findUnique.mockResolvedValue({
+        id: 10,
+        organization_id: 1,
+      });
+      mockPrismaService.users.findFirst.mockResolvedValue({
+        id: 9,
+        email: 'cliente@test.com',
+        password: await bcrypt.hash('123', 4),
+        state: 'active',
+        organization_id: 1,
+        user_roles: [{ roles: { name: 'customer' } }],
+        store_users: [{ store_id: 10 }],
+        user_settings: { id: 1, config: {} },
+        ...AUTH_ONLY,
+      });
+      jest.spyOn(service as any, 'generateTokens').mockResolvedValue({
+        access_token: 'a',
+        refresh_token: 'r',
+        token_type: 'Bearer',
+        expires_in: 900,
+      });
+      jest
+        .spyOn(service as any, 'createUserSession')
+        .mockResolvedValue(undefined);
+      jest.spyOn(service as any, 'logLoginAttempt').mockResolvedValue(undefined);
+
+      const result: any = await service.loginCustomer({
+        email: 'cliente@test.com',
+        password: '123',
+        store_id: 10,
+      });
+
+      expectNoAuthOnlyColumns(result.user);
+      expect(result.user).toEqual(
+        expect.objectContaining({ id: 9, email: 'cliente@test.com' }),
+      );
+      expect(result.access_token).toBe('a');
+    });
+  });
+
+  describe('updateProfile document_type (identification_type_enum)', () => {
+    beforeEach(() => {
+      mockPrismaService.users.update.mockReset();
+      mockPrismaService.users.update.mockResolvedValue({ id: 7 });
+      jest
+        .spyOn(service, 'getProfile')
+        .mockResolvedValue({ id: 7 } as any);
+    });
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it.each(['cc', 'CC', 'Cc', ' cc '])(
+      'normalizes %p to CC and saves the whole profile',
+      async (document_type) => {
+        await service.updateProfile(7, {
+          first_name: 'Rafael',
+          last_name: 'M',
+          phone: '3001234567',
+          document_type,
+          document_number: '1234567890',
+        });
+
+        expect(mockPrismaService.users.update).toHaveBeenCalledWith({
+          where: { id: 7 },
+          data: {
+            first_name: 'Rafael',
+            last_name: 'M',
+            phone: '3001234567',
+            document_type: 'CC',
+            document_number: '1234567890',
+          },
+        });
+      },
+    );
+
+    it.each(['X', 'C.C.'])(
+      'rejects %p with a clear Spanish error and writes nothing',
+      async (document_type) => {
+        await expect(
+          service.updateProfile(7, { document_type }),
+        ).rejects.toThrow(
+          'Tipo de documento no válido. Usa CC, CE, NIT, TI, RC, PA, PEP, PPT, DIE o NUIP.',
+        );
+        expect(mockPrismaService.users.update).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([null, '', '   '])('clears document_type when sent %p', async (value) => {
+      await service.updateProfile(7, {
+        document_type: value,
+        document_number: value,
+      });
+
+      expect(mockPrismaService.users.update).toHaveBeenCalledWith({
+        where: { id: 7 },
+        data: { document_type: null, document_number: null },
+      });
     });
   });
 });

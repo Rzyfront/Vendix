@@ -25,6 +25,10 @@ import {
 } from '../../../common/helpers/domain-generator.helper';
 import { BrandingGeneratorHelper } from '../../../common/helpers/branding-generator.helper';
 import { getDefaultStoreSettings } from '../../store/settings/defaults/default-store-settings';
+import {
+  isHomePanelSettings,
+  suggestHomePanelSettings,
+} from '../../../common/access/home-panels';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StoreSettings } from '../../store/settings/interfaces/store-settings.interface';
 import { StoreBootstrapHelper } from '@common/helpers/store-bootstrap.helper';
@@ -32,6 +36,7 @@ import { SubscriptionTrialService } from '../../store/subscriptions/services/sub
 import { StaffProvisioningService } from '@common/services/staff-provisioning.service';
 import { PwaCacheService } from '@common/services/pwa-cache.service';
 import { ensureDefaultStoreHomeApp } from '../../store/apps/store-home/store-home-default';
+import { SAFE_USER_SELECT } from '@common/utils/safe-user-select.util';
 
 // Aggregated store dashboards tolerate 1-2 min of staleness → short TTL (ms).
 const STORE_DASHBOARD_CACHE_TTL_MS = 120_000;
@@ -203,6 +208,21 @@ export class StoresService {
             ...(mergedSettings.general ?? {}),
             industries: storeData.industries,
           };
+          // QUI-967 — a new store opens on the panel suggested for its
+          // industries unless the payload already chose a valid one (this
+          // `settings` payload is free-form, so it is checked here).
+          mergedSettings.home_panel = isHomePanelSettings(
+            mergedSettings.home_panel,
+          )
+            ? mergedSettings.home_panel
+            : suggestHomePanelSettings(storeData.industries);
+        } else if (
+          mergedSettings.home_panel !== undefined &&
+          !isHomePanelSettings(mergedSettings.home_panel)
+        ) {
+          // Without industries there is nothing to suggest: an invalid panel
+          // from the free-form payload is dropped (the store keeps the Resumen).
+          delete mergedSettings.home_panel;
         }
         if (Object.keys(mergedSettings).length > 0) {
           await tx.store_settings.create({
@@ -296,7 +316,7 @@ export class StoresService {
         organizations: true,
         addresses: true,
         store_settings: true,
-        store_users: { include: { user: true } },
+        store_users: { include: { user: { select: SAFE_USER_SELECT } } },
         _count: {
           select: {
             products: true,

@@ -13,6 +13,7 @@ import { StoreUsersService } from './store-users.service';
 import { StoreUserManagementService } from './store-user-management.service';
 import {
   QueryStoreUsersDto,
+  QueryStoreUsersLookupDto,
   QueryStaffLookupDto,
   CreateStoreUserDto,
   UpdateStoreUserDto,
@@ -38,7 +39,7 @@ export class StoreUsersController {
 
   @Get()
   @Permissions('store:users:read')
-  async findAll(@Query() query: QueryStoreUsersDto) {
+  async findAll(@Query() query: QueryStoreUsersLookupDto) {
     const result = await this.storeUsersService.findAll(query);
     return this.responseService.paginated(
       result.data,

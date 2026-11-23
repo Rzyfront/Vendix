@@ -9,6 +9,7 @@ import { AuthService } from './auth.service';
 import { AppConfigService } from './app-config.service';
 import { RouteManagerService } from './route-manager.service';
 import { environment } from '../../../environments/environment';
+import { resetStoreScopedCaches } from '../utils/store-scoped-cache';
 
 export interface SwitchEnvironmentRequest {
   target_environment: 'STORE_ADMIN' | 'ORG_ADMIN';
@@ -193,6 +194,10 @@ export class EnvironmentSwitchService {
           response_data.store_settings,
           response_data.default_panel_ui,
         );
+
+        // QUI-1021: the module-level caches hold the previous store's data
+        // and outlive the page; the new environment must fetch its own.
+        resetStoreScopedCaches();
 
         this.saveUnifiedAuthState(response_data, tokens_payload);
 

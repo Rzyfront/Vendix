@@ -4,24 +4,26 @@ import {
   DestroyRef,
   ElementRef,
   computed,
+  effect,
   inject,
   input,
   model,
   output,
   signal,
+  untracked,
   viewChild,
 } from '@angular/core';
 import { NgClass } from '@angular/common';
-import { HttpErrorResponse } from '@angular/common/http';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Subscription } from 'rxjs';
+import { Observable, Subscription } from 'rxjs';
 
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { AlertBannerComponent } from '../../../../../../shared/components/alert-banner/alert-banner.component';
 import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
-import { parseApiError } from '../../../../../../core/utils/parse-api-error';
+import { injectAiJobProgress } from '../../../../../../shared/utils/ai-job-progress';
+import { AiJobProgressComponent } from '../../../../../../shared/components/ai-job-progress/ai-job-progress.component';
 
 import {
   INVOICE_DRAFT_SCAN_ACCEPTED_TYPES,
@@ -33,6 +35,7 @@ import {
 import {
   INVOICE_DRAFT_SCAN_STORE_PATH,
   InvoiceDraftScannerService,
+  invoiceDraftResumeKey,
 } from '../../services/invoice-draft-scanner.service';
 
 /** Megas del tope por archivo, para los textos (15 MB). */
@@ -44,18 +47,6 @@ const MAX_FILE_MB = Math.round(INVOICE_DRAFT_SCAN_MAX_FILE_BYTES / (1024 * 1024)
  * secas no le dice qué hacer.
  */
 const OFFICE_EXTENSIONS = /\.(docx?|xlsx?|xlsm|csv|odt|ods|pptx?)$/i;
-
-/**
- * Mensajes del progreso rotativo mientras FacturIA analiza (la cola no
- * informa porcentaje: se rota cada `FACTURIA_PROGRESS_INTERVAL_MS`).
- */
-export const FACTURIA_PROGRESS_MESSAGES = [
-  'Leyendo documentos…',
-  'Identificando al adquiriente…',
-  'Extrayendo líneas de cobro…',
-  'Completando la factura…',
-] as const;
-export const FACTURIA_PROGRESS_INTERVAL_MS = 2200;
 
 /**
  * FACTURIA — análisis inteligente de documentos de «Nueva factura».
@@ -71,14 +62,21 @@ export const FACTURIA_PROGRESS_INTERVAL_MS = 2200;
  * donde el operador corrige; una segunda pantalla de revisión sería otra copia
  * del mismo dato que se queda atrás.
  *
- * Cerrar el modal (o «Cancelar lectura») CANCELA el poll del job: la cola
- * termina igual en el servidor, pero su resultado ya no pisa el formulario.
+ * Cerrar el modal deja el job en curso: al reabrirlo se reengancha y entrega el
+ * resultado (QUI-1020). «Cancelar análisis» sí lo descarta.
  */
 @Component({
   selector: 'vendix-invoice-draft-scan-modal',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgClass, ModalComponent, ButtonComponent, IconComponent, AlertBannerComponent],
+  imports: [
+    NgClass,
+    ModalComponent,
+    ButtonComponent,
+    IconComponent,
+    AlertBannerComponent,
+    AiJobProgressComponent,
+  ],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -94,7 +92,7 @@ export const FACTURIA_PROGRESS_INTERVAL_MS = 2200;
       >
         <app-icon name="sparkles" [size]="16" />
       </span>
-      @if (!scanning()) {
+      @if (!showProgress()) {
         <div class="space-y-4">
           <p class="text-sm leading-relaxed text-[var(--color-text-secondary)]" data-testid="facturia-description">
             Sube RUT, cotizaciones, contratos u órdenes de compra.
@@ -216,55 +214,30 @@ export const FACTURIA_PROGRESS_INTERVAL_MS = 2200;
               variant="danger"
               icon="alert-triangle"
               tone="token"
-              heading="FacturIA no pudo analizar los documentos"
+              heading="No se pueden analizar los documentos"
             >
               {{ scanError() }}
             </app-alert-banner>
           }
         </div>
       } @else {
-        <!-- Analizando: escena IA + progreso rotativo (la cola no informa
-             porcentaje). El movimiento se apaga con reduced-motion desde el
-             sistema global. -->
+        <!-- Analizando: barra de progreso compartida de IA (QUI-1020). -->
         <div
-          class="vx-ai-stage is-analyzing relative flex min-h-[300px] flex-col items-center justify-center gap-4 overflow-hidden rounded-2xl border border-border p-6 text-center"
-          role="status"
-          aria-live="polite"
+          class="flex min-h-[200px] flex-col justify-center gap-3 p-2"
           data-testid="facturia-progress"
         >
-          <div class="vx-ai-holo-aurora"></div>
-          <div class="vx-ai-holo-grid"></div>
-          <div class="vx-ai-stage__halo"></div>
-          <div class="vx-ai-stage__scan"></div>
-          <div class="vx-ai-stage__shimmer"></div>
-          <span class="vx-ai-sparkle vx-ai-sparkle--a"></span>
-          <span class="vx-ai-sparkle vx-ai-sparkle--b"></span>
-          <span class="vx-ai-sparkle vx-ai-sparkle--c"></span>
-          <span class="vx-ai-sparkle vx-ai-sparkle--d"></span>
-          <span class="vx-ai-sparkle vx-ai-sparkle--e"></span>
-
-          <div class="vx-ai-stage__icon">
-            <app-icon name="sparkles" [size]="32" />
-          </div>
-          <p class="relative z-10 text-base font-semibold text-text-primary">
-            Factur<span class="vx-ai-text">IA</span> está analizando
-            {{ files().length }}
-            {{ files().length === 1 ? 'documento' : 'documentos' }}
-          </p>
-          <p
-            class="vx-ai-stage__caption relative z-10 max-w-[300px] text-sm"
-            data-testid="facturia-progress-message"
-          >
-            {{ progressMessage() }}
-          </p>
-          <p class="relative z-10 max-w-sm text-xs text-[var(--color-text-secondary)]">
-            @if (stalled()) {
-              Está tardando más de lo normal; seguimos procesando. Puedes
-              cancelar y capturar la factura a mano.
-            } @else {
-              Suele tardar menos de un minuto.
-            }
-          </p>
+          <app-ai-job-progress
+            [progress]="aiProgress"
+            [showRetry]="files().length > 0"
+            (retry)="startScan()"
+          />
+          @if (aiProgress.running()) {
+            <p class="text-center text-xs text-[var(--color-text-secondary)]">
+              Factur<span class="vx-ai-text">IA</span> está analizando
+              {{ files().length === 0 ? 'tus documentos' : files().length === 1 ? '1 documento' : files().length + ' documentos' }}.
+              Puedes cerrar esta ventana: el análisis continúa.
+            </p>
+          }
         </div>
       }
 
@@ -272,6 +245,10 @@ export const FACTURIA_PROGRESS_INTERVAL_MS = 2200;
         @if (scanning()) {
           <app-button variant="outline" (clicked)="cancelScan()">
             Cancelar análisis
+          </app-button>
+        } @else if (failed()) {
+          <app-button variant="outline" (clicked)="backToFiles()">
+            Cambiar documentos
           </app-button>
         } @else {
           <app-button variant="outline" (clicked)="isOpen.set(false)">
@@ -293,6 +270,8 @@ export const FACTURIA_PROGRESS_INTERVAL_MS = 2200;
 export class InvoiceDraftScanModalComponent {
   private readonly scanner = inject(InvoiceDraftScannerService);
   private readonly destroyRef = inject(DestroyRef);
+  /** Shared progress bar state of the analysis (QUI-1020). */
+  readonly aiProgress = injectAiJobProgress({ kind: 'invoice_draft' });
 
   readonly isOpen = model<boolean>(false);
   /**
@@ -314,20 +293,11 @@ export class InvoiceDraftScanModalComponent {
   readonly scanError = signal<string | null>(null);
   readonly isDragging = signal(false);
   readonly scanning = signal(false);
-  /** `true` si el job pasó el umbral de lentitud del servicio (~60 s). */
-  readonly stalled = signal(false);
+  /** The last analysis failed: the bar shows the error and the files stay. */
+  readonly failed = signal(false);
+  readonly showProgress = computed(() => this.scanning() || this.failed());
 
   readonly isFull = computed(() => this.files().length >= this.maxFiles);
-
-  /** Paso del progreso rotativo mientras `scanning()`. */
-  readonly progressIndex = signal(0);
-  readonly progressMessage = computed(
-    () =>
-      FACTURIA_PROGRESS_MESSAGES[
-        this.progressIndex() % FACTURIA_PROGRESS_MESSAGES.length
-      ],
-  );
-  private progressTimer: ReturnType<typeof setInterval> | null = null;
 
   /** Borde de la zona de carga: acento al arrastrar encima, neutro si no. */
   readonly dropzoneClass = computed(() => {
@@ -341,29 +311,11 @@ export class InvoiceDraftScanModalComponent {
   private scanSub: Subscription | null = null;
 
   constructor() {
-    this.destroyRef.onDestroy(() => {
-      this.scanSub?.unsubscribe();
-      this.stopProgress();
+    this.destroyRef.onDestroy(() => this.scanSub?.unsubscribe());
+    // Re-attach to an analysis still running when the modal is reopened.
+    effect(() => {
+      if (this.isOpen()) untracked(() => this.tryResume());
     });
-  }
-
-  // ── Progreso rotativo ───────────────────────────────────────
-
-  private startProgress(): void {
-    this.stopProgress();
-    this.progressIndex.set(0);
-    // Zoneless: la señal agenda la detección de cambios; no hace falta Zone.
-    this.progressTimer = setInterval(
-      () => this.progressIndex.update((i) => i + 1),
-      FACTURIA_PROGRESS_INTERVAL_MS,
-    );
-  }
-
-  private stopProgress(): void {
-    if (this.progressTimer !== null) {
-      clearInterval(this.progressTimer);
-      this.progressTimer = null;
-    }
   }
 
   // ── Archivos ────────────────────────────────────────────────
@@ -474,63 +426,82 @@ export class InvoiceDraftScanModalComponent {
     }
     if (this.scanning()) return;
 
-    this.scanSub?.unsubscribe();
     this.scanError.set(null);
-    this.stalled.set(false);
-    this.scanning.set(true);
-    this.startProgress();
-
-    this.scanSub = this.scanner
-      .scanDraft(
+    this.failed.set(false);
+    this.aiProgress.reset();
+    this.aiProgress.setSize(files.length);
+    this.listen(
+      this.scanner.scanDraft(
         files,
         this.note(),
-        { onStall: () => this.stalled.set(true) },
+        {
+          progress: this.aiProgress,
+          resumeKey: invoiceDraftResumeKey(this.endpoint()),
+        },
         this.endpoint(),
-      )
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (result) => {
-          this.stopProgress();
-          this.scanning.set(false);
-          this.scanSub = null;
-          this.scanned.emit(result);
-          // `closed` de app-modal dispara `reset()`.
-          this.isOpen.set(false);
-        },
-        error: (err: unknown) => {
-          this.stopProgress();
-          this.scanning.set(false);
-          this.stalled.set(false);
-          this.scanSub = null;
-          this.scanError.set(this.describeError(err));
-        },
-      });
+      ),
+    );
   }
 
-  /** Corta el poll; los archivos y la nota quedan para reintentar. */
+  private tryResume(): void {
+    if (this.scanSub || this.scanning()) return;
+    const resumed = this.scanner.resume(this.endpoint(), {
+      progress: this.aiProgress,
+    });
+    if (!resumed) return;
+    this.failed.set(false);
+    this.listen(resumed);
+  }
+
+  private listen(source: Observable<InvoiceDraftScanResult>): void {
+    this.scanSub?.unsubscribe();
+    this.scanning.set(true);
+    this.scanSub = source.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (result) => {
+        this.scanning.set(false);
+        this.scanSub = null;
+        this.scanned.emit(result);
+        // `closed` de app-modal dispara `reset()`.
+        this.isOpen.set(false);
+      },
+      // The classified error is shown by the progress bar; files and note stay.
+      error: () => {
+        this.scanning.set(false);
+        this.failed.set(true);
+        this.scanSub = null;
+      },
+    });
+  }
+
+  /** Explicit cancel: stops the poll and discards the remembered job. */
   cancelScan(): void {
+    this.detach();
+    this.scanner.forget(this.endpoint());
+    this.aiProgress.reset();
+  }
+
+  /** Back to the file list after a failure, keeping files and note. */
+  backToFiles(): void {
+    this.failed.set(false);
+    this.aiProgress.reset();
+  }
+
+  /** Stops listening without discarding the job (it can be resumed). */
+  private detach(): void {
     this.scanSub?.unsubscribe();
     this.scanSub = null;
-    this.stopProgress();
     this.scanning.set(false);
-    this.stalled.set(false);
   }
 
   /** Estado limpio al cerrar: el contenido de app-modal no se destruye. */
   reset(): void {
-    this.cancelScan();
+    this.detach();
+    this.aiProgress.reset();
+    this.failed.set(false);
     this.files.set([]);
     this.note.set('');
     this.fileError.set(null);
     this.scanError.set(null);
     this.isDragging.set(false);
-  }
-
-  private describeError(err: unknown): string {
-    if (err instanceof HttpErrorResponse) return parseApiError(err).userMessage;
-    // Los fallos del job ya llegan traducidos con ERROR_MESSAGES por
-    // AiScanJobService (`INVOICE_DRAFT_SCAN_*`).
-    if (err instanceof Error && err.message) return err.message;
-    return ERROR_MESSAGES['INVOICE_DRAFT_SCAN_AI_FAILED'];
   }
 }

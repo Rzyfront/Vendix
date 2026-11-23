@@ -1,11 +1,22 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
-import { Job } from 'bullmq';
+import { Job, UnrecoverableError } from 'bullmq';
 import { randomUUID } from 'crypto';
 import { RequestContextService } from '@common/context/request-context.service';
+import { AiJobMonitorService } from '@common/ai-scan-jobs/ai-job-monitor.service';
+import { LEGACY_AI_SOURCES } from '@common/ai-scan-jobs/ai-scan-sources';
+import { toAiJobFailure } from '@common/ai-scan-jobs/ai-job-failure.util';
 import { DispatchNotesService } from './dispatch-notes.service';
 import { ScanReceiptResult } from './dto/scan-receipt.dto';
 import { ReceiptScanJob } from './receipt-scan-job.interface';
+import { ReceiptScanReaderService } from './receipt-scan-reader.service';
+import { ErrorCodes } from '@common/errors';
+
+/** Model read/parse failures: non-deterministic, so BullMQ keeps retrying them. */
+const RECEIPT_SCAN_RETRY_CODES = [
+  ErrorCodes.DISPATCH_RECEIPT_SCAN_AI_FAIL.code,
+  ErrorCodes.DISPATCH_RECEIPT_SCAN_PARSE_FAIL.code,
+];
 
 /**
  * Async worker for the purchase-receipt OCR scanner (`receipt-scan` queue).
@@ -26,12 +37,16 @@ import { ReceiptScanJob } from './receipt-scan-job.interface';
 export class ReceiptScanProcessor extends WorkerHost {
   private readonly logger = new Logger(ReceiptScanProcessor.name);
 
-  constructor(private readonly dispatchNotesService: DispatchNotesService) {
+  constructor(
+    private readonly dispatchNotesService: DispatchNotesService,
+    private readonly monitor: AiJobMonitorService,
+    private readonly receiptReader: ReceiptScanReaderService,
+  ) {
     super();
   }
 
   async process(job: Job<ReceiptScanJob>): Promise<ScanReceiptResult> {
-    const { dataUri, mimeType, context } = job.data;
+    const { context } = job.data;
 
     this.logger.log(
       `Processing receipt-scan job ${job.id} (store_id=${context?.store_id})`,
@@ -54,14 +69,51 @@ export class ReceiptScanProcessor extends WorkerHost {
           user_id: context?.user_id,
           request_id: requestId,
         },
-        () => this.dispatchNotesService.scanReceiptFromImage(dataUri, mimeType),
+        () =>
+          this.monitor.runAiWork(job, LEGACY_AI_SOURCES.receiptScan, async () => {
+            // ia-cargas F5a: new jobs carry the S3 key of the original upload;
+            // jobs queued before carry the data URI. Both are read by pages.
+            const file = await this.receiptReader.load(job.data);
+            const result = await this.dispatchNotesService.scanReceiptFromFile(file, {
+              // Real progress by pages; `at` tells the monitor the job is alive.
+              reportProgress: async (progress) => {
+                try {
+                  await job.updateProgress({ ...progress, at: Date.now() });
+                } catch {
+                  // Progress is best effort.
+                }
+              },
+            });
+            await this.receiptReader.discard(job.data);
+            return result;
+          }),
       );
     } catch (error: any) {
       this.logger.error(
         `Receipt-scan job ${job.id} failed: ${error?.message}`,
       );
-      // Re-throw so BullMQ marks the job failed / retries per the enqueue policy.
-      throw error;
+      // Re-throw so BullMQ marks the job failed / retries per the enqueue
+      // policy. `failedReason` carries the Vendix error CODE (QUI-1020).
+      const failure = toAiJobFailure(error, { retryCodes: RECEIPT_SCAN_RETRY_CODES });
+      // Failed for good (document problem or last attempt): drop the S3 copy.
+      if (
+        failure instanceof UnrecoverableError ||
+        (job.attemptsMade ?? 0) + 1 >= (job.opts?.attempts ?? 1)
+      ) {
+        await this.receiptReader.discard(job.data);
+      }
+      throw failure;
     }
+  }
+
+  /** QUI-1020: a job that fails for good alerts Vendix once (deduplicated). */
+  @OnWorkerEvent('failed')
+  async onFailed(job: Job<ReceiptScanJob> | undefined): Promise<void> {
+    if (!job) return;
+    await this.monitor.onFailed(
+      job,
+      LEGACY_AI_SOURCES.receiptScan,
+      job.data?.context,
+    );
   }
 }

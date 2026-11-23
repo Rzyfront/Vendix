@@ -52,6 +52,7 @@ import { TableSessionSseService } from '../../modules/ecommerce/services/table-s
 import { parseApiError } from '../../../core/utils/parse-api-error';
 import { CurrencyPipe, CurrencyFormatService } from '../../../shared/pipes/currency';
 import { WompiCheckoutService } from '../../../core/services/wompi-checkout.service';
+import { allowsOnlineProductOptions } from '../../modules/ecommerce/utils/online-product-options.util';
 
 // Footer types (matching backend interfaces)
 interface FooterStoreInfo {
@@ -341,8 +342,13 @@ export class StoreEcommerceLayoutComponent {
       .getPublicConfig()
       .pipe(takeUntilDestroyed(this.destroy_ref))
       .subscribe({
-        next: (response) =>
-          this.is_hotel.set((response.data?.industries ?? []).includes('hospitality')),
+        next: (response) => {
+          this.is_hotel.set((response.data?.industries ?? []).includes('hospitality'));
+          // QUI-1005: sin adiciones en la tienda en línea, el carrito las olvida.
+          if (!allowsOnlineProductOptions(response.data)) {
+            this.cart_service.discardOptions();
+          }
+        },
         error: () => this.is_hotel.set(false),
       });
 

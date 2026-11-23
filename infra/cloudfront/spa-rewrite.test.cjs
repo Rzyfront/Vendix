@@ -59,6 +59,8 @@ const cases = [
   ['/repartos/pool', 'vendix.online', {}, '/noindex/index.html'],
   ['/onboarding', 'vendix.online', {}, '/noindex/index.html'],
   ['/reset-password', 'vendix.online', { token: { value: 'x' } }, '/noindex/index.html'],
+  // Puente del signup de WhatsApp: ruta de la app (200, no 404) y sin indexar.
+  ['/integraciones/whatsapp/conectar', 'vendix.online', { origin: { value: 'https://mitienda.com' }, nonce: { value: 'n' } }, '/noindex/index.html'],
   // SEO-TECH-04 arriba: ayuda, PQR, auth y paneles reciben la shell con noindex en el HTML.
   // Los prefijos de tienda siguen reescribiéndose en cualquier host (enlaces con token).
   ['/pedido/0b6f5c1e', 'vendix.online', {}, '/index.html'],
@@ -95,7 +97,7 @@ for (const host of STORE_HOSTS) {
   for (const uri of storeIndexable) assert.notStrictEqual(result(handler(event(uri, host))), '/noindex/index.html', `${host}${uri} indexable`);
 }
 // En vendix.online las páginas comerciales indexables no reciben noindex; los archivos nunca.
-for (const uri of ['/', '/pricing', '/legal/terminos', '/legal/privacidad', '/legal/cookies', '/guias/cierre-de-caja', '/ayudax', '/authors'])
+for (const uri of ['/', '/pricing', '/legal/terminos', '/legal/privacidad', '/legal/cookies', '/soluciones/software-pos', '/sectores/restaurantes', '/implementacion', '/migracion', '/guias/cierre-de-caja', '/ayudax', '/authors'])
   assert.notStrictEqual(result(handler(event(uri, 'vendix.online'))), '/noindex/index.html', `vendix.online${uri}`);
 for (const [uri, host] of [['/auth/app.js', 'vendix.online'], ['/cart/logo.png', 'mesura.beauty'], ['/.well-known/x', 'mesura.beauty']])
   assert.notStrictEqual(result(handler(event(uri, host))), '/noindex/index.html', `${host}${uri} archivo`);

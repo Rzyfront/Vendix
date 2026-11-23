@@ -1,3 +1,4 @@
+import { AiIngestModule } from '../../../common/ai-ingest/ai-ingest.module';
 import { Module, OnModuleInit } from '@nestjs/common';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createInvoicingTools } from '../../../ai-engine/tools/domains/invoicing.tools';
@@ -50,6 +51,7 @@ import { OrdersBulkInvoicingController } from './bulk/orders-bulk-invoicing.cont
 import { OrdersBulkInvoicingService } from './bulk/orders-bulk-invoicing.service';
 import { OrderLeaseModule } from '../../../common/locks/order-lease.module';
 import { ManualInvoiceEmissionService } from './manual-invoice-emission.service';
+import { PurchaseOrderSupportDocumentService } from './purchase-order-support/purchase-order-support-document.service';
 import { PosSaleCompletedListener } from './pos/pos-sale-completed.listener';
 import { ProfilesController } from './profiles/profiles.controller';
 import { ProfilesModule } from './profiles/profiles.module';
@@ -63,6 +65,7 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
 
 @Module({
   imports: [
+    AiIngestModule,
     ResponseModule,
     PrismaModule,
     S3Module,
@@ -190,6 +193,8 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
     // Creación manual + emisión opcional (`emit_immediately`) reusando
     // `InvoiceFlowService.validate` + `send`.
     ManualInvoiceEmissionService,
+    // QUI-684 — documento soporte generado desde la orden de compra.
+    PurchaseOrderSupportDocumentService,
     PosSaleCompletedListener,
   ],
   exports: [

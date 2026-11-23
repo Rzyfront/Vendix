@@ -9,6 +9,19 @@ import {
   ArtifactAggregate,
   readArtifactPage,
 } from '../../../../ai-engine/context/tool-result-compaction';
+import {
+  applyAggregate,
+  applyCompare,
+  applyDerive,
+  applyFilters,
+  applyJoin,
+  applySort,
+  VexBlockCompareSpec,
+  VexBlockDeriveError,
+  VexBlockDeriveSpec,
+  VexBlockJoinSpec,
+} from './vex-block-derive';
+import { ExpressionError } from '../../../../ai-engine/tools/compute/decimal-expression';
 
 export type VexBlockKind =
   | 'table'
@@ -16,7 +29,13 @@ export type VexBlockKind =
   | 'kpi'
   | 'image'
   | 'file'
-  | 'markdown';
+  | 'markdown'
+  | 'timeline'
+  | 'list'
+  | 'help_article'
+  | 'video'
+  | 'learning_path'
+  | 'write_batch';
 
 export const VEX_BLOCK_KINDS: readonly VexBlockKind[] = [
   'table',
@@ -25,7 +44,48 @@ export const VEX_BLOCK_KINDS: readonly VexBlockKind[] = [
   'image',
   'file',
   'markdown',
+  'timeline',
+  'list',
+  'help_article',
+  'video',
+  'learning_path',
+  'write_batch',
 ];
+
+/** Chart types Vex can render; `doughnut` stays accepted for older blocks. */
+export const VEX_CHART_TYPES: readonly string[] = [
+  'bar',
+  'line',
+  'pie',
+  'area',
+  'radar',
+  'scatter',
+  'gauge',
+  'doughnut',
+  'rose',
+  'stacked_bar',
+  'combo',
+  'funnel',
+  'heatmap',
+];
+
+const BLOCK_TONES = ['success', 'warning', 'error', 'info', 'neutral'];
+/** Timeline events / list items per block. */
+const MAX_COLLECTION_ITEMS = 200;
+const MAX_LIST_FIELDS = 8;
+
+
+/** Learning blocks (Vex Plus F4 T29): payload caps and enums. */
+export const VEX_VIDEO_SOURCES = [
+  'YOUTUBE',
+  'VIMEO',
+  'LOOM',
+  'DIRECT_S3',
+] as const;
+const MAX_LEARNING_PATH_ITEMS = 20;
+const MAX_ARTICLE_CONTENT_CHARS = 20000;
+const MAX_LEARNING_TEXT_CHARS = 500;
+const MAX_LEARNING_URL_CHARS = 2048;
 
 /** Beyond this a block is a data export, and it belongs in the module. */
 export const MAX_BLOCK_ROWS = 5000;
@@ -83,6 +143,12 @@ export interface VexBlockTransform {
     field: string;
     function: 'sum' | 'avg' | 'count' | 'min' | 'max';
   };
+  /** Joins another table block of the SAME conversation before anything else. */
+  join?: VexBlockJoinSpec & { block_id: string };
+  /** Derived columns, computed per row with decimal arithmetic. */
+  derive?: VexBlockDeriveSpec[];
+  /** Period-over-period comparison; replaces the rows with one per key. */
+  compare?: VexBlockCompareSpec;
 }
 
 export interface VexBlockInteraction {
@@ -262,11 +328,36 @@ export class VexBlockService {
     return this.toUiBlock(await this.getById(id));
   }
 
+  private analysisSpecOf(
+    spec: Record<string, any>,
+  ): { analysis: Record<string, any> } | Record<string, never> {
+    const a = spec.analysis;
+    if (
+      !isRecord(a) ||
+      typeof a.run_id !== 'string' ||
+      typeof a.source_hash !== 'string' ||
+      a.language !== 'python' ||
+      typeof a.purpose !== 'string'
+    ) {
+      return {};
+    }
+    return {
+      analysis: {
+        run_id: a.run_id,
+        source_hash: a.source_hash,
+        language: 'python',
+        purpose: a.purpose,
+        ...(typeof a.source === 'string' && a.source ? { source: a.source } : {}),
+      },
+    };
+  }
+
   async toUiBlock(
     row: VexBlockRow & { signed_url?: string },
   ): Promise<VexUiBlockView> {
     const spec = isRecord(row.spec) ? row.spec : {};
     const data = isRecord(row.data) ? row.data : {};
+    const analysis = this.analysisSpecOf(spec);
     switch (row.kind) {
       case 'table':
         return {
@@ -278,6 +369,7 @@ export class VexBlockService {
             ...(typeof spec.title === 'string' ? { title: spec.title } : {}),
             columns: Array.isArray(data.columns) ? data.columns : [],
             selectable: true,
+            ...analysis,
           },
           data: { rows: Array.isArray(data.rows) ? data.rows : [] },
         };
@@ -317,7 +409,12 @@ export class VexBlockService {
             series: series.map((s, i) => ({
               key: keys[i],
               ...(typeof s.name === 'string' ? { label: s.name } : {}),
+              // `combo` draws each series as its own mark; the panel needs it.
+              ...(s.type === 'bar' || s.type === 'line'
+                ? { type: s.type }
+                : {}),
             })),
+            ...analysis,
           },
           data: { rows },
         };
@@ -333,6 +430,7 @@ export class VexBlockService {
               typeof data.label === 'string' && data.label
                 ? data.label
                 : 'Indicador',
+            ...analysis,
           },
           data: {
             value: data.value ?? null,
@@ -375,6 +473,74 @@ export class VexBlockService {
           },
         };
       }
+      case 'timeline':
+        return {
+          block_id: row.id,
+          kind: 'timeline',
+          version: row.version,
+          spec: {
+            kind: 'timeline',
+            ...(typeof spec.title === 'string' ? { title: spec.title } : {}),
+          },
+          data: { events: Array.isArray(data.events) ? data.events : [] },
+        };
+      case 'list':
+        return {
+          block_id: row.id,
+          kind: 'list',
+          version: row.version,
+          spec: {
+            kind: 'list',
+            ...(typeof spec.title === 'string' ? { title: spec.title } : {}),
+            ...(spec.layout === 'cards' || spec.layout === 'rows'
+              ? { layout: spec.layout }
+              : {}),
+          },
+          data: { items: Array.isArray(data.items) ? data.items : [] },
+        };
+      case 'help_article':
+        return {
+          block_id: row.id,
+          kind: 'help_article',
+          version: row.version,
+          spec: { kind: 'help_article' },
+          data: { article: data.article ?? null },
+        };
+      case 'video':
+        return {
+          block_id: row.id,
+          kind: 'video',
+          version: row.version,
+          spec: { kind: 'video' },
+          data: {
+            video: data.video ?? null,
+            ...(data.autoplay === true ? { autoplay: true } : {}),
+          },
+        };
+      case 'learning_path':
+        return {
+          block_id: row.id,
+          kind: 'learning_path',
+          version: row.version,
+          spec: { kind: 'learning_path' },
+          data: { series: data.series ?? null },
+        };
+      case 'write_batch':
+        // Pointer only: the card reads the live batch (`GET batches/:id`), so
+        // steps, hashes and status never go stale inside the block row.
+        return {
+          block_id: row.id,
+          kind: 'write_batch',
+          version: row.version,
+          spec: { kind: 'write_batch' },
+          data: {
+            batch_id: typeof data.batch_id === 'string' ? data.batch_id : '',
+            goal: typeof data.goal === 'string' ? data.goal : '',
+            part_index: Number(data.part_index) || 1,
+            part_total: Number(data.part_total) || 1,
+            step_count: Number(data.step_count) || 0,
+          },
+        };
       case 'markdown':
       default:
         return {
@@ -537,7 +703,53 @@ export class VexBlockService {
         `Solo los bloques table se pueden transformar; este es ${row.kind}.`,
       );
     }
-    const rows = this.applyOps(this.rowsOf(row), ops);
+    let source = this.rowsOf(row);
+    let columns: unknown = row.data?.columns;
+    try {
+      if (ops.join) {
+        // `findOwnedBlock` keeps the store + owner boundary; the conversation
+        // check keeps a join from pulling rows out of another thread.
+        const other = await this.findOwnedBlock(String(ops.join.block_id));
+        if (
+          other.kind !== 'table' ||
+          other.conversation_id !== row.conversation_id
+        ) {
+          throw new VendixHttpException(
+            ErrorCodes.SYS_VALIDATION_001,
+            'join.block_id debe ser otro bloque table de esta misma conversación.',
+          );
+        }
+        source = applyJoin(source, this.rowsOf(other), ops.join);
+      }
+      if (ops.derive?.length) source = applyDerive(source, ops.derive);
+      if (ops.compare) source = applyCompare(source, ops.compare);
+    } catch (error) {
+      if (
+        error instanceof VexBlockDeriveError ||
+        error instanceof ExpressionError
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_VALIDATION_001,
+          error.message,
+        );
+      }
+      throw error;
+    }
+    const rows = this.applyOps(source, ops);
+    if (ops.join || ops.derive?.length || ops.compare) {
+      // The row shape changed: stale column definitions would hide the new
+      // fields, so the columns are rebuilt from the rows actually stored.
+      const keys: string[] = [];
+      for (const r of rows.slice(0, 50)) {
+        for (const k of Object.keys(r)) if (!keys.includes(k)) keys.push(k);
+      }
+      const known = new Map<string, unknown>(
+        (Array.isArray(columns) ? columns : [])
+          .filter(isRecord)
+          .map((c) => [String(c.key), c]),
+      );
+      columns = keys.map((k) => known.get(k) ?? { key: k, label: k });
+    }
     if (rows.length > MAX_BLOCK_ROWS) {
       throw new VendixHttpException(
         ErrorCodes.SYS_VALIDATION_001,
@@ -552,7 +764,11 @@ export class VexBlockService {
         message_id: row.message_id,
         kind: row.kind,
         spec: { ...row.spec, derived_from: row.id, transform: ops },
-        data: { ...row.data, rows },
+        data: {
+          ...row.data,
+          ...(columns !== undefined ? { columns } : {}),
+          rows,
+        },
         version: row.version + 1,
       },
     });
@@ -703,14 +919,139 @@ export class VexBlockService {
       }
       case 'chart': {
         const errors: string[] = [];
-        if (typeof spec.chart_type !== 'string' || !spec.chart_type) {
+        if (
+          typeof spec.chart_type !== 'string' ||
+          !VEX_CHART_TYPES.includes(spec.chart_type)
+        ) {
           errors.push(
-            'spec.chart_type es obligatorio (bar, line, pie, area, radar, scatter, gauge).',
+            `spec.chart_type es obligatorio y debe ser uno de: ${VEX_CHART_TYPES.join(', ')}.`,
           );
         }
         if (!Array.isArray(data.series) || data.series.length === 0) {
           errors.push('data.series debe ser una lista no vacía.');
+          return errors;
         }
+        if (spec.chart_type === 'combo') {
+          const bad = data.series.some(
+            (s: unknown) =>
+              isRecord(s) &&
+              s.type !== undefined &&
+              s.type !== 'bar' &&
+              s.type !== 'line',
+          );
+          if (bad) {
+            errors.push("series[].type debe ser 'bar' o 'line'.");
+          }
+        }
+        if (spec.chart_type === 'heatmap') {
+          const labels = Array.isArray(data.labels) ? data.labels : [];
+          const bad = data.series.some(
+            (s: unknown) =>
+              !isRecord(s) ||
+              !Array.isArray(s.data) ||
+              s.data.length !== labels.length,
+          );
+          if (labels.length === 0 || bad) {
+            errors.push(
+              'En heatmap, labels no puede ir vacío y cada series[].data debe tener un valor por label.',
+            );
+          }
+        }
+        return errors;
+      }
+      case 'timeline': {
+        const errors: string[] = [];
+        const events = data.events;
+        if (
+          !Array.isArray(events) ||
+          events.length === 0 ||
+          events.length > MAX_COLLECTION_ITEMS
+        ) {
+          return [
+            `data.events debe ser una lista de 1 a ${MAX_COLLECTION_ITEMS} eventos.`,
+          ];
+        }
+        events.forEach((e: unknown, i: number) => {
+          if (!isRecord(e)) {
+            errors.push(`events[${i}] debe ser un objeto.`);
+            return;
+          }
+          if (typeof e.title !== 'string' || !e.title.trim()) {
+            errors.push(`events[${i}].title es obligatorio.`);
+          }
+          if (
+            e.timestamp !== undefined &&
+            (typeof e.timestamp !== 'string' ||
+              Number.isNaN(Date.parse(e.timestamp)))
+          ) {
+            errors.push(`events[${i}].timestamp debe ser una fecha ISO 8601.`);
+          }
+          if (e.status !== undefined && !BLOCK_TONES.includes(e.status)) {
+            errors.push(
+              `events[${i}].status debe ser uno de: ${BLOCK_TONES.join(', ')}.`,
+            );
+          }
+        });
+        return errors;
+      }
+      case 'list': {
+        const errors: string[] = [];
+        if (
+          spec.layout !== undefined &&
+          spec.layout !== 'cards' &&
+          spec.layout !== 'rows'
+        ) {
+          errors.push("spec.layout debe ser 'cards' o 'rows'.");
+        }
+        const items = data.items;
+        if (
+          !Array.isArray(items) ||
+          items.length === 0 ||
+          items.length > MAX_COLLECTION_ITEMS
+        ) {
+          errors.push(
+            `data.items debe ser una lista de 1 a ${MAX_COLLECTION_ITEMS} ítems.`,
+          );
+          return errors;
+        }
+        items.forEach((it: unknown, i: number) => {
+          if (!isRecord(it)) {
+            errors.push(`items[${i}] debe ser un objeto.`);
+            return;
+          }
+          if (typeof it.title !== 'string' || !it.title.trim()) {
+            errors.push(`items[${i}].title es obligatorio.`);
+          }
+          if (it.badge !== undefined) {
+            if (
+              !isRecord(it.badge) ||
+              typeof it.badge.label !== 'string' ||
+              !it.badge.label ||
+              (it.badge.tone !== undefined &&
+                !BLOCK_TONES.includes(it.badge.tone))
+            ) {
+              errors.push(
+                `items[${i}].badge debe traer label y, si hay tone, uno de: ${BLOCK_TONES.join(', ')}.`,
+              );
+            }
+          }
+          if (it.fields !== undefined) {
+            if (
+              !Array.isArray(it.fields) ||
+              it.fields.length > MAX_LIST_FIELDS ||
+              it.fields.some(
+                (f: unknown) =>
+                  !isRecord(f) ||
+                  typeof f.label !== 'string' ||
+                  (typeof f.value !== 'string' && typeof f.value !== 'number'),
+              )
+            ) {
+              errors.push(
+                `items[${i}].fields admite hasta ${MAX_LIST_FIELDS} {label, value} con value texto o número.`,
+              );
+            }
+          }
+        });
         return errors;
       }
       case 'kpi': {
@@ -749,7 +1090,297 @@ export class VexBlockService {
         }
         return [];
       }
+      case 'help_article':
+        return this.validateHelpArticleData(data);
+      case 'video':
+        return this.validateVideoData(data);
+      case 'learning_path':
+        return this.validateLearningPathData(data);
+      case 'write_batch': {
+        const errors: string[] = [];
+        if (typeof data.batch_id !== 'string' || !data.batch_id) {
+          errors.push('data.batch_id es obligatorio.');
+        }
+        if (typeof data.goal !== 'string') {
+          errors.push('data.goal debe ser texto.');
+        }
+        for (const key of ['part_index', 'part_total', 'step_count']) {
+          if (!Number.isInteger(data[key]) || data[key] < 1) {
+            errors.push(`data.${key} debe ser un entero positivo.`);
+          }
+        }
+        return errors;
+      }
     }
+  }
+
+  // ── learning blocks (T29): strict payloads, unknown fields rejected ───
+
+  private unknownKeys(
+    value: Record<string, any>,
+    allowed: readonly string[],
+    path: string,
+  ): string[] {
+    return Object.keys(value)
+      .filter((key) => !allowed.includes(key))
+      .map((key) => `${path}.${key} no es un campo permitido.`);
+  }
+
+  private isHttpUrl(value: unknown): value is string {
+    if (typeof value !== 'string' || value.length > MAX_LEARNING_URL_CHARS) {
+      return false;
+    }
+    try {
+      const protocol = new URL(value).protocol;
+      return protocol === 'http:' || protocol === 'https:';
+    } catch {
+      return false;
+    }
+  }
+
+  private optionalText(
+    value: unknown,
+    path: string,
+    max = MAX_LEARNING_TEXT_CHARS,
+  ): string[] {
+    if (value === undefined || value === null) return [];
+    if (typeof value !== 'string' || value.length > max) {
+      return [`${path} debe ser texto de máximo ${max} caracteres.`];
+    }
+    return [];
+  }
+
+  private requiredText(
+    value: unknown,
+    path: string,
+    max = MAX_LEARNING_TEXT_CHARS,
+  ): string[] {
+    if (typeof value !== 'string' || !value.trim() || value.length > max) {
+      return [`${path} es obligatorio (texto de máximo ${max} caracteres).`];
+    }
+    return [];
+  }
+
+  private positiveInt(value: unknown, path: string): string[] {
+    return Number.isSafeInteger(value) && (value as number) > 0
+      ? []
+      : [`${path} debe ser un entero positivo.`];
+  }
+
+  private validateVideoRef(value: unknown, path: string): string[] {
+    if (!isRecord(value)) return [`${path} debe ser un objeto.`];
+    const errors = this.unknownKeys(
+      value,
+      [
+        'id',
+        'title',
+        'slug',
+        'summary',
+        'video_url',
+        'video_source',
+        'external_id',
+        'duration_seconds',
+        'thumbnail_url',
+      ],
+      path,
+    );
+    errors.push(...this.positiveInt(value.id, `${path}.id`));
+    errors.push(...this.requiredText(value.title, `${path}.title`, 255));
+    errors.push(...this.requiredText(value.slug, `${path}.slug`, 280));
+    errors.push(...this.optionalText(value.summary, `${path}.summary`));
+    if (!this.isHttpUrl(value.video_url)) {
+      errors.push(`${path}.video_url debe ser una URL http(s).`);
+    }
+    if (
+      typeof value.video_source !== 'string' ||
+      !(VEX_VIDEO_SOURCES as readonly string[]).includes(value.video_source)
+    ) {
+      errors.push(
+        `${path}.video_source debe ser uno de: ${VEX_VIDEO_SOURCES.join(', ')}.`,
+      );
+    }
+    errors.push(
+      ...this.optionalText(value.external_id, `${path}.external_id`, 255),
+    );
+    if (
+      value.duration_seconds !== undefined &&
+      value.duration_seconds !== null &&
+      !(
+        Number.isSafeInteger(value.duration_seconds) &&
+        value.duration_seconds >= 0
+      )
+    ) {
+      errors.push(`${path}.duration_seconds debe ser un entero >= 0.`);
+    }
+    if (
+      value.thumbnail_url !== undefined &&
+      value.thumbnail_url !== null &&
+      !this.isHttpUrl(value.thumbnail_url)
+    ) {
+      errors.push(`${path}.thumbnail_url debe ser una URL http(s).`);
+    }
+    return errors;
+  }
+
+  private validateHelpArticleData(data: Record<string, any>): string[] {
+    const errors = this.unknownKeys(data, ['article'], 'data');
+    const article = data.article;
+    if (!isRecord(article))
+      return [...errors, 'data.article debe ser un objeto.'];
+    errors.push(
+      ...this.unknownKeys(
+        article,
+        [
+          'id',
+          'title',
+          'slug',
+          'summary',
+          'content',
+          'type',
+          'module',
+          'cover_image_url',
+          'video',
+        ],
+        'data.article',
+      ),
+    );
+    errors.push(...this.positiveInt(article.id, 'data.article.id'));
+    errors.push(...this.requiredText(article.title, 'data.article.title', 255));
+    errors.push(...this.requiredText(article.slug, 'data.article.slug', 280));
+    errors.push(...this.optionalText(article.summary, 'data.article.summary'));
+    if (
+      typeof article.content !== 'string' ||
+      !article.content.trim() ||
+      article.content.length > MAX_ARTICLE_CONTENT_CHARS
+    ) {
+      errors.push(
+        `data.article.content es obligatorio (markdown de máximo ${MAX_ARTICLE_CONTENT_CHARS} caracteres).`,
+      );
+    }
+    errors.push(...this.optionalText(article.type, 'data.article.type', 50));
+    errors.push(
+      ...this.optionalText(article.module, 'data.article.module', 50),
+    );
+    if (
+      article.cover_image_url !== undefined &&
+      article.cover_image_url !== null &&
+      !this.isHttpUrl(article.cover_image_url)
+    ) {
+      errors.push('data.article.cover_image_url debe ser una URL http(s).');
+    }
+    if (article.video !== undefined && article.video !== null) {
+      errors.push(
+        ...this.validateVideoRef(article.video, 'data.article.video'),
+      );
+    }
+    return errors;
+  }
+
+  private validateVideoData(data: Record<string, any>): string[] {
+    const errors = this.unknownKeys(data, ['video', 'autoplay'], 'data');
+    errors.push(...this.validateVideoRef(data.video, 'data.video'));
+    if (data.autoplay !== undefined && typeof data.autoplay !== 'boolean') {
+      errors.push('data.autoplay debe ser booleano.');
+    }
+    return errors;
+  }
+
+  private validateLearningPathData(data: Record<string, any>): string[] {
+    const errors = this.unknownKeys(data, ['series'], 'data');
+    const series = data.series;
+    if (!isRecord(series))
+      return [...errors, 'data.series debe ser un objeto.'];
+    errors.push(
+      ...this.unknownKeys(
+        series,
+        ['id', 'title', 'summary', 'items'],
+        'data.series',
+      ),
+    );
+    errors.push(...this.positiveInt(series.id, 'data.series.id'));
+    errors.push(...this.requiredText(series.title, 'data.series.title', 255));
+    errors.push(...this.optionalText(series.summary, 'data.series.summary'));
+    if (
+      !Array.isArray(series.items) ||
+      series.items.length === 0 ||
+      series.items.length > MAX_LEARNING_PATH_ITEMS
+    ) {
+      errors.push(
+        `data.series.items debe tener entre 1 y ${MAX_LEARNING_PATH_ITEMS} elementos.`,
+      );
+      return errors;
+    }
+    series.items.forEach((item: unknown, index: number) => {
+      const path = `data.series.items[${index}]`;
+      if (!isRecord(item)) {
+        errors.push(`${path} debe ser un objeto.`);
+        return;
+      }
+      errors.push(
+        ...this.unknownKeys(
+          item,
+          ['position', 'video', 'article', 'progress'],
+          path,
+        ),
+      );
+      errors.push(...this.positiveInt(item.position, `${path}.position`));
+      errors.push(...this.validateVideoRef(item.video, `${path}.video`));
+      if (item.article !== undefined && item.article !== null) {
+        if (!isRecord(item.article)) {
+          errors.push(`${path}.article debe ser un objeto.`);
+        } else {
+          errors.push(
+            ...this.unknownKeys(
+              item.article,
+              ['id', 'title', 'slug'],
+              `${path}.article`,
+            ),
+          );
+          errors.push(
+            ...this.positiveInt(item.article.id, `${path}.article.id`),
+          );
+          errors.push(
+            ...this.requiredText(
+              item.article.title,
+              `${path}.article.title`,
+              255,
+            ),
+          );
+          errors.push(
+            ...this.requiredText(
+              item.article.slug,
+              `${path}.article.slug`,
+              280,
+            ),
+          );
+        }
+      }
+      if (item.progress !== undefined && item.progress !== null) {
+        if (!isRecord(item.progress)) {
+          errors.push(`${path}.progress debe ser un objeto.`);
+        } else {
+          errors.push(
+            ...this.unknownKeys(
+              item.progress,
+              ['seconds_watched', 'completed'],
+              `${path}.progress`,
+            ),
+          );
+          if (
+            !Number.isSafeInteger(item.progress.seconds_watched) ||
+            item.progress.seconds_watched < 0
+          ) {
+            errors.push(
+              `${path}.progress.seconds_watched debe ser un entero >= 0.`,
+            );
+          }
+          if (typeof item.progress.completed !== 'boolean') {
+            errors.push(`${path}.progress.completed debe ser booleano.`);
+          }
+        }
+      }
+    });
+    return errors;
   }
 
   // ── reads ─────────────────────────────────────────────────────────────
@@ -771,131 +1402,36 @@ export class VexBlockService {
   }
 
   private rowsOf(row: VexBlockRow): Array<Record<string, any>> {
-    const rows = (row.data as Record<string, any>)?.rows;
+    const data = row.data as Record<string, any>;
+    const rows =
+      row.kind === 'timeline'
+        ? data?.events
+        : row.kind === 'list'
+          ? data?.items
+          : data?.rows;
     return Array.isArray(rows) ? rows : [];
   }
 
   // ── transform ops ─────────────────────────────────────────────────────
 
+  /** filter → sort → aggregate, numeric-aware (see vex-block-derive.ts). */
   private applyOps(
     rows: Array<Record<string, any>>,
     ops: VexBlockTransform,
   ): Array<Record<string, any>> {
-    let out = [...rows];
-    for (const f of ops.filter ?? []) {
-      out = out.filter((r) => this.matches(r[f.field], f.op, f.value));
-    }
-    const sorts = ops.sort ?? [];
-    if (sorts.length > 0) {
-      out.sort((a, b) => {
-        for (const s of sorts) {
-          const dir = s.direction === 'desc' ? -1 : 1;
-          const av = a[s.field];
-          const bv = b[s.field];
-          if (av === bv) continue;
-          if (av === null || av === undefined) return 1;
-          if (bv === null || bv === undefined) return -1;
-          return (av < bv ? -1 : 1) * dir;
-        }
-        return 0;
-      });
-    }
-    if (ops.group_by || ops.aggregate) {
-      out = this.aggregate(out, ops.group_by, ops.aggregate);
-    }
-    return out;
-  }
-
-  private matches(field: unknown, op: string, value: unknown): boolean {
-    switch (op) {
-      case 'eq':
-        return field === value;
-      case 'neq':
-        return field !== value;
-      case 'gt':
-        return (
-          typeof field === 'number' &&
-          typeof value === 'number' &&
-          field > value
+    try {
+      let out = applyFilters(rows, ops.filter ?? []);
+      out = applySort(out, ops.sort ?? []);
+      if (ops.aggregate) out = applyAggregate(out, ops.group_by, ops.aggregate);
+      return out;
+    } catch (error) {
+      if (error instanceof VexBlockDeriveError) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_VALIDATION_001,
+          error.message,
         );
-      case 'gte':
-        return (
-          typeof field === 'number' &&
-          typeof value === 'number' &&
-          field >= value
-        );
-      case 'lt':
-        return (
-          typeof field === 'number' &&
-          typeof value === 'number' &&
-          field < value
-        );
-      case 'lte':
-        return (
-          typeof field === 'number' &&
-          typeof value === 'number' &&
-          field <= value
-        );
-      case 'contains':
-        return (
-          typeof field === 'string' &&
-          typeof value === 'string' &&
-          field.toLowerCase().includes(value.toLowerCase())
-        );
-      case 'in':
-        return Array.isArray(value) && value.includes(field);
-      default:
-        return false;
-    }
-  }
-
-  private aggregate(
-    rows: Array<Record<string, any>>,
-    groupBy: string | undefined,
-    aggregate: VexBlockTransform['aggregate'],
-  ): Array<Record<string, any>> {
-    if (!aggregate) return rows;
-    const groups = new Map<string, Array<Record<string, any>>>();
-    for (const row of rows) {
-      const key = groupBy ? String(row[groupBy] ?? '—') : 'total';
-      const bucket = groups.get(key);
-      if (bucket) bucket.push(row);
-      else groups.set(key, [row]);
-    }
-    const out: Array<Record<string, any>> = [];
-    for (const [key, bucket] of groups) {
-      const numbers = bucket
-        .map((r) => r[aggregate.field])
-        .filter((v): v is number => typeof v === 'number');
-      let value: number;
-      switch (aggregate.function) {
-        case 'sum':
-          value = numbers.reduce((a, b) => a + b, 0);
-          break;
-        case 'avg':
-          value = numbers.length
-            ? numbers.reduce((a, b) => a + b, 0) / numbers.length
-            : 0;
-          break;
-        case 'count':
-          value = bucket.length;
-          break;
-        case 'min':
-          value = numbers.length ? Math.min(...numbers) : 0;
-          break;
-        case 'max':
-          value = numbers.length ? Math.max(...numbers) : 0;
-          break;
       }
-      out.push(
-        groupBy
-          ? {
-              [groupBy]: key,
-              [`${aggregate.function}_${aggregate.field}`]: value,
-            }
-          : { [`${aggregate.function}_${aggregate.field}`]: value },
-      );
+      throw error;
     }
-    return out;
   }
 }

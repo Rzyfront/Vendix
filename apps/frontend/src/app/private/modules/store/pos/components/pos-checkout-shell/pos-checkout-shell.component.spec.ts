@@ -23,6 +23,7 @@ import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
 import { KitchenTicketPrintService } from '../../../restaurant-ops/kds/services/kitchen-ticket-print.service';
 import { LodgingReservationsService } from '../../../hospitality/reservations/services/lodging-reservations.service';
 import { PosScheduledOrderService } from '../../services/pos-scheduled-order.service';
+import { MenuFilterService } from '../../../../../../core/services/menu-filter.service';
 
 /**
  * CP-POS-CHECKOUT-KEYBOARD — matriz teclado × paso del modal de pago.
@@ -168,6 +169,7 @@ class CustomerSelectorStub {
   readonly requiresElectronicInvoicing = input(false);
   readonly showTopSuggestions = input(false);
   readonly searchLimit = input(3);
+  readonly splitByEstablishment = input(false);
   readonly customerSelected = output<unknown>();
   readonly customerCleared = output<void>();
   resolveIfNeeded() {
@@ -231,6 +233,8 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
   let settingsMock: { pos: () => any; checkout: () => null };
   let posSettings: WritableSignal<any>;
   let restaurantMode: WritableSignal<boolean>;
+  /** Store industries seen by the industry helper of the menu (QUI-1001). */
+  let industryAllowsScheduled: WritableSignal<boolean>;
   let scheduledMock: {
     enabled: WritableSignal<boolean>;
     schedule: WritableSignal<unknown>;
@@ -337,6 +341,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     };
     posSettings = signal(null);
     settingsMock = { pos: () => posSettings(), checkout: () => null };
+    industryAllowsScheduled = signal(true);
     scheduledMock = {
       enabled: signal(false),
       schedule: signal(null),
@@ -372,6 +377,13 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
         // El servicio real inyecta HttpClient y este spec no lo provee; el
         // shell solo lee el estado compartido del pedido programado.
         { provide: PosScheduledOrderService, useValue: scheduledMock },
+        {
+          provide: MenuFilterService,
+          useValue: {
+            industryAllowsModule: (key: string) =>
+              key === 'orders_scheduled' ? industryAllowsScheduled() : true,
+          },
+        },
       ],
     });
 
@@ -1015,6 +1027,27 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
       expect(chip.textContent).toContain('CC 52123456');
     });
 
+    it('el chip agrega el establecimiento elegido en el buscador', () => {
+      fixture.componentRef.setInput('cartState', {
+        customer: {
+          id: 99, legal_name: 'ACME SAS', document_type: 'NIT', document_number: '900123',
+          preferred_address_id: 11,
+          addresses: [
+            { id: 10, label: 'Sede Norte', address_line1: 'Calle 10', is_primary: true },
+            { id: 11, label: 'Sede Sur', address_line1: 'Calle 11', is_primary: false },
+          ],
+        },
+        items: [{ id: 1, product: { name: 'Producto' } }],
+        summary: { total: 10 },
+      });
+      component.currentStep.set(1);
+      component.clienteSubStep.set(1);
+      fixture.detectChanges();
+      expect(component.customerChipDetail()).toBe('NIT 900123 · Sede Sur');
+      // Persona jurídica: el chip muestra la razón social, no "Cliente sin nombre".
+      expect(component.customerDisplayName).toBe('ACME SAS');
+    });
+
     it('"Cambiar cliente" muestra el selector', () => {
       withCustomer();
       chipBtn('Cambiar cliente').click();
@@ -1103,6 +1136,20 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
       scheduledMock.active.set(true);
       fixture.detectChanges();
     };
+
+    it('QUI-1001: fuera de restaurante el bloque de pedido programado no aparece', () => {
+      fixture.detectChanges();
+      expect(pickerSections()).toEqual(['toggle']);
+
+      industryAllowsScheduled.set(false);
+      fixture.detectChanges();
+      expect(component.scheduledOrdersAvailable()).toBeFalse();
+      expect(pickerSections()).toEqual([]);
+
+      industryAllowsScheduled.set(true);
+      fixture.detectChanges();
+      expect(pickerSections()).toEqual(['toggle']);
+    });
 
     it('el toggle vive en Pedido y Cobro no muestra nada de entrega programada', () => {
       fixture.detectChanges();

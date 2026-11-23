@@ -1,3 +1,4 @@
+import { ErrorCodes, VendixHttpException } from '../../../common/errors';
 import { HttpException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
@@ -16,6 +17,13 @@ import { AssignProductsDto as AssignBrandProductsDto } from '../../../domains/st
  * es proyección (no escribe), el `handler` re-verifica y NO lanza, devuelve
  * `{error, next_step}`. Se registran desde `CategoriesModule` y `BrandsModule`.
  */
+
+/** State kept by `assign_products_to_category.compensate.capture`. */
+interface CategoryUndoSnapshot {
+  category_id: number;
+  mode: 'add' | 'remove';
+  product_ids: number[];
+}
 
 export interface CategoryToolDeps {
   categoriesService: CategoriesService;
@@ -540,6 +548,62 @@ export function createCategoryTools(deps: CategoryToolDeps): RegisteredTool[] {
               : undefined,
           );
         }
+      },
+      // T36 "Deshacer": undoes exactly the memberships this step changed (the
+      // products that were not in the category on add, or were in it on
+      // remove). Products that were already in their final state are never
+      // touched, so the inverse cannot add or drop anything the person had.
+      compensate: {
+        label: 'Restaurar la pertenencia anterior a la categoría',
+        capture: async (args) => {
+          const resolved = await resolveAssignment(kind, args);
+          if (!resolved.ok) return null;
+          const { target, mode, productIds } = resolved.value;
+          const current = await categoriesService.getProductIds(target.id);
+          const inCategory = new Set<number>(current.product_ids ?? []);
+          const changed = productIds.filter((id) =>
+            mode === 'add' ? !inCategory.has(id) : inCategory.has(id),
+          );
+          if (!changed.length) return null;
+          return {
+            category_id: target.id,
+            mode,
+            product_ids: changed,
+          } satisfies CategoryUndoSnapshot;
+        },
+        undo: async ({ snapshot }) => {
+          const snap = snapshot as CategoryUndoSnapshot;
+          const current = await categoriesService.getProductIds(
+            snap.category_id,
+          );
+          const inCategory = new Set<number>(current.product_ids ?? []);
+          // After an `add` every changed product must still be in the category;
+          // after a `remove` none may be back in it. Otherwise someone edited
+          // the membership since the batch.
+          const intact = snap.product_ids.every((id) =>
+            snap.mode === 'add' ? inCategory.has(id) : !inCategory.has(id),
+          );
+          if (!intact) {
+            throw new VendixHttpException(
+              ErrorCodes.SYS_CONFLICT_001,
+              'El valor cambió después del lote; no lo revertí.',
+            );
+          }
+          const inverse = snap.mode === 'add' ? 'remove' : 'add';
+          const validated = toValidatedDto(AssignCategoryProductsDto, {
+            action: inverse,
+            product_ids: snap.product_ids,
+          });
+          if (!validated.ok) throw new Error(validated.message);
+          await categoriesService.assignProducts(
+            snap.category_id,
+            validated.dto,
+          );
+          const n = snap.product_ids.length;
+          return inverse === 'remove'
+            ? `Se quitaron ${n} ${plural(n)} de la categoría.`
+            : `Se devolvieron ${n} ${plural(n)} a la categoría.`;
+        },
       },
     },
   ];

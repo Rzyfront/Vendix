@@ -1,0 +1,46 @@
+/** Discovery phrases (colloquial Colombian Spanish) of the CRM pipeline tools. */
+export const CRM_PIPELINE_DISCOVERY_QUERIES_ES: Record<string, string[]> = {
+  get_crm_pipeline: [
+    'cómo va el embudo de ventas',
+    'muéstrame el pipeline del CRM',
+    'cuántas oportunidades hay en cada etapa',
+    'cuánta plata tengo en negociación',
+    'qué etapas tiene mi embudo',
+    'dame un resumen de las oportunidades abiertas',
+    'cómo está el funnel de ventas',
+    'cuánto hay en el embudo por etapa',
+  ],
+  list_crm_opportunities: [
+    'qué oportunidades tiene abiertas Ana',
+    'lista las oportunidades de venta',
+    'necesito el id de la oportunidad de Luis',
+    'muéstrame los negocios que están en propuesta',
+    'qué oportunidades me tocan a mí',
+    'busca la oportunidad de la ferretería',
+    'cuáles son las oportunidades ganadas',
+  ],
+  create_crm_opportunity: [
+    'abre una oportunidad para Ana por dos millones',
+    'crea una nueva oportunidad de venta para este cliente',
+    'regístrame un negocio con Luis para fin de mes',
+    'monta una oportunidad en el embudo para Pedro',
+    'anota una oportunidad nueva de 500 mil con la panadería',
+    'crea la oportunidad y asígnamela a mí',
+  ],
+  move_crm_opportunity: [
+    'pasa la oportunidad de Ana a negociación',
+    'muévela a la etapa de propuesta',
+    'avanza ese negocio a la siguiente etapa',
+    'cambia la oportunidad de Luis a cotización enviada',
+    'devuelve la oportunidad a la etapa de contacto',
+    'reabre la oportunidad de Pedro en negociación',
+  ],
+  set_crm_opportunity_result: [
+    'marca como ganada la venta de Ana',
+    'cierra la oportunidad de Luis como ganada',
+    'se perdió la oportunidad de Pedro, márcala como perdida',
+    'perdimos ese negocio porque compró con otro',
+    'dale por ganado el negocio con la panadería',
+    'cierra la oportunidad como perdida por precio',
+  ],
+};

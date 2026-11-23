@@ -17,6 +17,7 @@ import { APP_MODULES } from '../../shared/constants/app-modules.constant';
 import { getModulesHiddenByIndustries } from '../../shared/constants/industry-modules.constant';
 import { BehaviorSubject, firstValueFrom, of, take } from 'rxjs';
 import { AccessGateService } from './access-gate.service';
+import { DashboardAccessExtension } from './dashboard-access-extension.service';
 import { STORE_ADMIN_MENU_ITEMS } from '../../private/layouts/store-admin/store-admin-menu-items';
 import { MODULE_INDUSTRIES, isIndustryAlwaysEnforced } from '../../shared/constants/module-industries';
 
@@ -419,6 +420,20 @@ describe('MenuFilterService.firstActiveModuleRoute (QUI-860)', () => {
       ],
     });
     service = TestBed.inject(MenuFilterService);
+  });
+
+  it('QUI-967: sin permisos de indicadores pero con un panel principal visible, ve y entra al Panel Principal', () => {
+    authFacade.isModuleVisible.and.callFake(
+      (key: string) => key === 'dashboard' || key === 'pos',
+    );
+    TestBed.inject(DashboardAccessExtension).register(() => true);
+    expect(service.firstActiveModuleRoute([])).toBe('/admin/dashboard');
+    const diagnosis = service.diagnose({
+      label: 'Panel Principal',
+      route: '/admin/dashboard',
+      icon: '',
+    } as any);
+    expect(diagnosis.visible).toBeTrue();
   });
 
   it('un usuario operativo cajero con pos activo es enrutado a /admin/pos', () => {
@@ -859,6 +874,62 @@ describe('MenuFilterService.canSeeKey / applyAccessGate (apps-f4 S4)', () => {
     industries.set(['restaurant']);
     expect(service.canSeeKey('orders_scheduled').allowed).toBeTrue();
     expect(service.canSeeKey('products_option_groups').allowed).toBeTrue();
+  });
+
+  it('QUI-1001: industryAllowsModule (selector POS, bloque del checkout, ajustes) sigue la capa industria del menú', () => {
+    const keys = [
+      'orders_scheduled',
+      'products_option_groups',
+      'restaurant_ops_production',
+      'restaurant_ops_kds',
+    ];
+    // Ni el panel del usuario ni el de la tienda cuentan: un cajero sin la
+    // key en su panel igual ve el selector si la tienda es restaurante.
+    userKeys = [];
+    storeSettings.set({ panel_ui: { STORE_ADMIN: { orders_scheduled: false } } });
+    for (const industry of [['retail'], ['service'], []]) {
+      industries.set(industry);
+      for (const key of keys) {
+        expect(service.industryAllowsModule(key)).withContext(`${industry} ${key}`).toBeFalse();
+      }
+    }
+    // Pedidos programados también para manufactura; adiciones, Producción y KDS no.
+    industries.set(['manufacturing']);
+    expect(service.industryAllowsModule('orders_scheduled')).toBeTrue();
+    for (const key of ['products_option_groups', 'restaurant_ops_production', 'restaurant_ops_kds']) {
+      expect(service.industryAllowsModule(key)).withContext(`manufacturing ${key}`).toBeFalse();
+    }
+    for (const industry of [['restaurant'], ['retail', 'restaurant']]) {
+      industries.set(industry);
+      for (const key of keys) {
+        expect(service.industryAllowsModule(key)).withContext(`${industry} ${key}`).toBeTrue();
+      }
+    }
+    // Same source as canSeeKey: the industries the access gate loaded win.
+    gate.industries.set(['retail']);
+    expect(service.industryAllowsModule('orders_scheduled')).toBeFalse();
+  });
+
+  it('QUI-1001: en modo auditoría el sidebar oculta y la URL bloquea Adiciones y Pedidos programados fuera de restaurante, owner incluido', () => {
+    owner = true;
+    expect(gate.mode()).toBe('audit');
+    for (const key of ['orders_scheduled', 'products_option_groups']) {
+      expect(service.applyAccessGate([key], true, 'sidebar')).withContext(key).toBeFalse();
+      expect(service.applyAccessGate([key], true, 'url')).withContext(key).toBeFalse();
+      expect(service.isIndustryLocked([key])).withContext(key).toBeTrue();
+    }
+    expect(service.resolveGateKeysForRoute('/admin/products/option-groups')).toContain(
+      'products_option_groups',
+    );
+    expect(service.resolveGateKeysForRoute('/admin/scheduled-orders/production')).toContain(
+      'orders_scheduled',
+    );
+
+    industries.set(['restaurant']);
+    for (const key of ['orders_scheduled', 'products_option_groups']) {
+      expect(service.applyAccessGate([key], true, 'sidebar')).withContext(key).toBeTrue();
+      expect(service.applyAccessGate([key], true, 'url')).withContext(key).toBeTrue();
+    }
   });
 
   it('capa usuario: un no-owner sin la key en su panel queda negado por usuario', () => {

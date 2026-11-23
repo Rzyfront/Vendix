@@ -58,8 +58,15 @@ export interface InvoiceProviderAdapter {
 
   /**
    * Checks the status of a previously sent document.
+   *
+   * `options.configuration_type` picks the DIAN habilitación whose credentials
+   * sign the query (a support document lives under `support_document`).
+   * Absent ⇒ `'invoicing'`, the historical behavior every caller relied on.
    */
-  checkStatus(trackingId: string): Promise<StatusResponse>;
+  checkStatus(
+    trackingId: string,
+    options?: StatusQueryOptions,
+  ): Promise<StatusResponse>;
 
   /**
    * Cancels or voids a previously sent invoice.
@@ -297,6 +304,10 @@ export interface ProviderResponse {
   contingency_eligible?: boolean;
   /** Anexo §12 failure class, when the failure was a transport/availability one. */
   failure_class?: 'dian_error' | 'timeout' | 'non_retriable';
+}
+
+export interface StatusQueryOptions {
+  configuration_type?: 'invoicing' | 'support_document' | 'equivalent_document';
 }
 
 export interface StatusResponse {

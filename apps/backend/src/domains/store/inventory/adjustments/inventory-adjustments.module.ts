@@ -1,5 +1,7 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
 import { BulkUploadsModule } from '../../bulk-uploads/bulk-uploads.module';
+import { BulkUploadHandlerRegistry } from '../../bulk-uploads/bulk-upload-handler.registry';
+import { InventoryAdjustmentsBulkJobHandler } from './inventory-adjustments-bulk-job.handler';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { InventoryAdjustmentsService } from './inventory-adjustments.service';
 import { InventoryAdjustmentsBulkService } from './inventory-adjustments-bulk.service';
@@ -10,6 +12,7 @@ import { PrismaModule } from '../../../../prisma/prisma.module';
 import { StockLevelManager } from '../shared/services/stock-level-manager.service';
 import { ResponseModule } from '@common/responses/response.module';
 import { S3Module } from '@common/services/s3.module';
+import { AiIngestModule } from '@common/ai-ingest/ai-ingest.module';
 import { StoreSkuGeneratorService } from './store-sku-generator.service';
 import { SettingsModule } from '../../settings/settings.module';
 
@@ -18,6 +21,7 @@ import { SettingsModule } from '../../settings/settings.module';
   providers: [
     InventoryAdjustmentsService,
     InventoryAdjustmentsBulkService,
+    InventoryAdjustmentsBulkJobHandler,
     InventoryCountScannerService,
     StockLevelManager,
     StoreSkuGeneratorService,
@@ -30,7 +34,20 @@ import { SettingsModule } from '../../settings/settings.module';
     ResponseModule,
     SettingsModule,
     S3Module,
+    // ia-cargas F5a: the count scan reads sheets, PDFs and photos with the
+    // shared ai-ingest pipeline.
+    AiIngestModule,
   ],
   exports: [InventoryAdjustmentsService, StoreSkuGeneratorService],
 })
-export class InventoryAdjustmentsModule {}
+export class InventoryAdjustmentsModule implements OnModuleInit {
+  constructor(
+    private readonly bulkJobRegistry: BulkUploadHandlerRegistry,
+    private readonly bulkJobHandler: InventoryAdjustmentsBulkJobHandler,
+  ) {}
+
+  onModuleInit(): void {
+    // QUI-1009: ajuste masivo de inventario durable.
+    this.bulkJobRegistry.register(this.bulkJobHandler);
+  }
+}

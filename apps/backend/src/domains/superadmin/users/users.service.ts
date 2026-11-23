@@ -19,7 +19,13 @@ import { emailEquals, normalizeEmail } from '@common/utils/email.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { SyncPanelUiDto } from './dto/sync-panel-ui.dto';
 import { PRIVILEGED_ROLE_NAMES } from '../../../common/utils/privileged-roles.util';
+import { omitUserCredentials } from '@common/utils/safe-user-select.util';
 import { SuperadminRoleAssignmentService } from '../roles/superadmin-role-assignment.service';
+import {
+  CUSTOMER_ROLE_NAME,
+  vendixUserWhere,
+  withVendixUser,
+} from '@common/utils/vendix-user.util';
 
 const ELIGIBLE_ROLES = Array.from(PRIVILEGED_ROLE_NAMES);
 
@@ -104,9 +110,8 @@ export class UsersService {
         });
       }
 
-      // Remove password from response
-      const { password, ...userWithoutPassword } = user;
-      return userWithoutPassword;
+      // Credentials never leave; the lockout stays for the unlock screen
+      return omitUserCredentials(user);
     });
   }
 
@@ -121,10 +126,10 @@ export class UsersService {
     } = query;
     const skip = (page - 1) * Number(limit);
 
-    const where: any = {};
+    const filters: Prisma.usersWhereInput = {};
 
     if (search) {
-      where.OR = [
+      filters.OR = [
         { first_name: { contains: search, mode: 'insensitive' } },
         { last_name: { contains: search, mode: 'insensitive' } },
         { email: { contains: search, mode: 'insensitive' } },
@@ -132,17 +137,22 @@ export class UsersService {
     }
 
     if (state) {
-      where.state = state;
+      filters.state = state;
     }
 
     if (organization_id) {
-      where.organization_id = organization_id;
+      filters.organization_id = organization_id;
     }
 
     // Filter users by organization mode (exclude demo/test by default)
     if (!include_non_production) {
-      where.organizations = { mode: 'production' };
+      filters.organizations = { mode: 'production' };
     }
+
+    // Solo usuarios de Vendix: los clientes finales de las tiendas nunca se
+    // listan aquí. `UserQueryDto.role` no se aplica en este listado, así que
+    // pedir `role=customer` no abre ninguna puerta hacia ellos.
+    const where = withVendixUser(filters);
 
     const [users, total] = await Promise.all([
       this.prisma.users.findMany({
@@ -164,10 +174,9 @@ export class UsersService {
       this.prisma.users.count({ where }),
     ]);
 
-    // Remove passwords from response
+    // Credentials never leave; the lockout stays for the unlock screen
     const usersWithoutPasswords = users.map((user: any) => {
-      const { password, ...userWithoutPassword } = user;
-      return userWithoutPassword;
+      return omitUserCredentials(user);
     });
 
     return {
@@ -181,9 +190,14 @@ export class UsersService {
     };
   }
 
+  /**
+   * Detalle de un usuario de Vendix. Un cliente final puro (solo rol
+   * `customer` o sin roles) responde 404 igual que un id inexistente: el
+   * Super Admin no expone clientes de las tiendas por esta puerta.
+   */
   async findOne(id: number) {
-    const user = await this.prisma.users.findUnique({
-      where: { id },
+    const user = await this.prisma.users.findFirst({
+      where: withVendixUser({ id }),
       include: {
         organizations: true,
         user_roles: {
@@ -206,9 +220,8 @@ export class UsersService {
       throw new VendixHttpException(ErrorCodes.SUP_ADMIN_USER_001);
     }
 
-    // Remove password from response
-    const { password, ...userWithoutPassword } = user;
-    return userWithoutPassword;
+    // Credentials never leave; the lockout stays for the unlock screen
+    return omitUserCredentials(user);
   }
 
   async update(id: number, updateUserDto: UpdateUserDto) {
@@ -289,9 +302,8 @@ export class UsersService {
       },
     });
 
-    // Remove password from response
-    const { password, ...userWithoutPassword } = updatedUser;
-    return userWithoutPassword;
+    // Credentials never leave; the lockout stays for the unlock screen
+    return omitUserCredentials(updatedUser);
   }
 
   async remove(id: number) {
@@ -449,52 +461,61 @@ export class UsersService {
       usersByRole,
       recentUsers,
     ] = await Promise.all([
+      // Todas las cifras cuentan solo usuarios de Vendix (sin clientes finales).
       // Total users
-      this.prisma.users.count(),
+      this.prisma.users.count({ where: withVendixUser() }),
 
       // Active users
       this.prisma.users.count({
-        where: { state: user_state_enum.active },
+        where: withVendixUser({ state: user_state_enum.active }),
       }),
 
       // Inactive users
       this.prisma.users.count({
-        where: { state: user_state_enum.inactive },
+        where: withVendixUser({ state: user_state_enum.inactive }),
       }),
 
       // Pending verification users
       this.prisma.users.count({
-        where: { state: user_state_enum.pending_verification },
+        where: withVendixUser({
+          state: user_state_enum.pending_verification,
+        }),
       }),
 
       // Suspended users
       this.prisma.users.count({
-        where: { state: user_state_enum.suspended },
+        where: withVendixUser({ state: user_state_enum.suspended }),
       }),
 
       // Archived users
       this.prisma.users.count({
-        where: { state: user_state_enum.archived },
+        where: withVendixUser({ state: user_state_enum.archived }),
       }),
 
       // Users with 2FA enabled
       this.prisma.users.count({
-        where: { two_factor_enabled: true },
+        where: withVendixUser({ two_factor_enabled: true }),
       }),
 
       // Users with verified email
       this.prisma.users.count({
-        where: { email_verified: true },
+        where: withVendixUser({ email_verified: true }),
       }),
 
-      // Group by role
+      // Group by role: asignaciones de usuarios de Vendix, sin el tramo
+      // `customer` (ese segmento sería, por definición, clientes finales).
       this.prisma.user_roles.groupBy({
         by: ['role_id'],
+        where: {
+          users: vendixUserWhere(),
+          roles: { name: { not: CUSTOMER_ROLE_NAME } },
+        },
         _count: true,
       }),
 
       // Recent users
       this.prisma.users.findMany({
+        where: withVendixUser(),
         take: 5,
         orderBy: { created_at: 'desc' },
         include: {
@@ -518,10 +539,9 @@ export class UsersService {
       };
     });
 
-    // Remove passwords from recent users
+    // Credentials never leave; the lockout stays for the unlock screen
     const recentUsersWithoutPasswords = recentUsers.map((user: any) => {
-      const { password, ...userWithoutPassword } = user;
-      return userWithoutPassword;
+      return omitUserCredentials(user);
     });
 
     return {
@@ -566,9 +586,8 @@ export class UsersService {
       },
     });
 
-    // Remove password from response
-    const { password, ...userWithoutPassword } = updatedUser;
-    return userWithoutPassword;
+    // Credentials never leave; the lockout stays for the unlock screen
+    return omitUserCredentials(updatedUser);
   }
 
   async toggle2FA(id: number, enabled: boolean) {
@@ -593,8 +612,7 @@ export class UsersService {
       },
     });
 
-    const { password, ...userWithoutPassword } = updatedUser;
-    return userWithoutPassword;
+    return omitUserCredentials(updatedUser);
   }
 
   async unlock(id: number) {
@@ -622,8 +640,7 @@ export class UsersService {
       },
     });
 
-    const { password, ...userWithoutPassword } = updatedUser;
-    return userWithoutPassword;
+    return omitUserCredentials(updatedUser);
   }
 
   async previewPanelUISync() {

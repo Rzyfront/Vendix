@@ -75,7 +75,10 @@ import {
 } from '../../../../../../../core/utils/stock-shortage.util';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
-import { AddItemsModalComponent } from '../../components/add-items-modal/add-items-modal.component';
+import {
+  AddItemsAccountLine,
+  AddItemsModalComponent,
+} from '../../components/add-items-modal/add-items-modal.component';
 import { SplitAccountsPanelComponent } from '../../components/split-accounts-panel/split-accounts-panel.component';
 import { SplitOrderModalComponent } from '../../components/split-order-modal/split-order-modal.component';
 import {
@@ -297,6 +300,26 @@ export class TableSessionPageComponent implements OnInit {
 
   readonly items = computed<TableSessionOrderItem[]>(
     () => this.session()?.order?.order_items ?? [],
+  );
+
+  /**
+   * Líneas vivas de la cuenta para el selector "Agregar a la cuenta": el motor
+   * cotiza la cuenta completa (compra mínima, monto fijo y tope ya consumidos).
+   */
+  readonly accountLines = computed<AddItemsAccountLine[]>(() =>
+    this.items()
+      .filter((item) => !item.cancelled_at)
+      .map((item) => ({
+        product_id: item.product_id ?? null,
+        list_total:
+          Number(
+            item.total_before_discount ??
+              item.final_total_price ??
+              item.total_price ??
+              0,
+          ) || 0,
+        has_discount: item.discounted_total_price != null,
+      })),
   );
 
   readonly orderTotal = computed(() =>
@@ -1245,6 +1268,8 @@ export class TableSessionPageComponent implements OnInit {
   onRemoveItem(item: TableSessionOrderItem): void {
     const sessionId = this.session()?.id;
     if (!sessionId || this.isClosed()) return;
+    // Un plato a la vez: con una cancelación en vuelo no se abre otro flujo.
+    if (this.removingItemId() !== null) return;
     if (!this.canRemoveItem(item)) return;
     if (this.isPrepared(item)) {
       this.openItemCancellationModal(item);
@@ -1290,6 +1315,9 @@ export class TableSessionPageComponent implements OnInit {
               );
               return;
             }
+            // Doble clic: dos diálogos encolados llegan aquí; solo el
+            // primero envía.
+            if (this.removingItemId() !== null) return;
             this.removingItemId.set(item.id);
             this.tablesService
               .cancelOrderItem(sessionId, item.id, { reason })
@@ -2120,5 +2148,29 @@ export class TableSessionPageComponent implements OnInit {
         this.openAddItems();
         return;
     }
+  }
+
+  /**
+   * Precio de lista (con impuesto) de una línea con promo, para el tachado y
+   * el ahorro de la cuenta. Sale de `total_before_discount`, el mismo campo
+   * del detalle de la orden, así ambas pantallas muestran la misma cifra.
+   * `null` = el backend no lo informó o no supera lo cobrado: no se tacha
+   * nada (mejor no mostrar que mostrar la base como si fuera el precio).
+   */
+  itemListTotal(item: TableSessionOrderItem): number | null {
+    if (item.discounted_total_price == null) return null;
+    if (item.total_before_discount == null) return null;
+    const list = Number(item.total_before_discount);
+    const charged = Number(item.discounted_total_price);
+    return Number.isFinite(list) && list > charged ? list : null;
+  }
+
+  /** Ahorro de la línea con impuesto: lista − cobrado. `null` sin tachado. */
+  itemSavings(item: TableSessionOrderItem): number | null {
+    const list = this.itemListTotal(item);
+    if (list == null) return null;
+    return (
+      Math.round((list - Number(item.discounted_total_price)) * 100) / 100
+    );
   }
 }

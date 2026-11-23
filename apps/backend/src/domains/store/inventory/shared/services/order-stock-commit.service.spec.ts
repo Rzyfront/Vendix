@@ -600,6 +600,25 @@ describe('OrderStockCommitService — descuento multi-ubicación', () => {
   // sobreventa". Paired ALWAYS with `blockOnInsufficient: false`: the caller
   // (order-flow `deliverOrderItem`) only sets this after resolving
   // `StockValidatorService.resolveInventoryPolicy(...).allowOversell === true`.
+  it('sobreventa sin bodega con stock: la bodega por defecto se resuelve con la tx de la entrega', async () => {
+    setup(3, []);
+
+    await service.commitOrderDelivery(1, {
+      ...OPTS, blockOnInsufficient: false,
+    }, txMock);
+
+    // Sin `tx` la consulta pide otra conexión del pool con la transacción
+    // abierta: bajo carga el pool se agota y la entrega vence.
+    expect(stockLevelManagerMock.getDefaultLocationForProduct).toHaveBeenCalledWith(
+      100, undefined, txMock,
+    );
+    // El descuento sigue cayendo en esa bodega, igual que antes.
+    expect(stockLevelManagerMock.updateStock).toHaveBeenCalledWith(
+      expect.objectContaining({ location_id: 1, quantity_change: -3 }),
+      txMock,
+    );
+  });
+
   it('allowNegativeOnShortfall=true: el updateStock del faltante recibe allow_negative=true', async () => {
     setup(13);
 

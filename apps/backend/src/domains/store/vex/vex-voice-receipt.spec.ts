@@ -66,9 +66,26 @@ function fixture(
   jest.spyOn(voice, 'effectStepId').mockResolvedValue(`${planId}:s1`);
   const quota = jest.fn();
   const registry: any = { registerMany: jest.fn() };
-  new VexModule(registry, {} as any, voice, plans, {
-    consumeAIQuota: quota,
-  } as any).onModuleInit();
+  // The batch service only feeds createWriteBatchTools at registration; the
+  // voice receipt sink under test never calls it.
+  const writeBatches: any = { propose: jest.fn() };
+  new VexModule(
+    registry,
+    {} as any,
+    voice,
+    plans,
+    { consumeAIQuota: quota } as any,
+    writeBatches,
+    // F9/T52: the analysis broker only feeds createAnalysisTools at
+    // registration; a voice receipt never runs Python.
+    { run: jest.fn() } as any,
+    { resolve: jest.fn() } as any,
+    // F10/T65: Code Mode stays unavailable here, so registration is unchanged.
+    { available: () => false } as any,
+    {} as any,
+    // Help knowledge only feeds createVexLearningBlockTools at registration.
+    {} as any,
+  ).onModuleInit();
   const controller: any = Object.create(VexiController.prototype);
   controller.responseService = { success: (data: unknown) => data };
   controller.voiceConfirmations = voice;

@@ -224,6 +224,7 @@ describe('D1 task reference is separate from durable objective state', () => {
     });
     expect(queue.enqueueAgentTask).toHaveBeenCalledWith(
       expect.objectContaining({ task_id: 4, objective_id: 'objective' }),
+      'http:vexi/tarea-en-segundo-plano',
     );
     expect(prisma.ai_agent_tasks.findMany.mock.calls[0][0]).toMatchObject({
       where: { user_id: 3 },

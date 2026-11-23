@@ -396,11 +396,12 @@ const RULES: Record<string, Rule> = {
     identity: (d) => d.id,
     bridgePath: (_i, o) =>
       `store/stock-transfers/${o.resource_ids.transfer_id}`,
-    required: ['from_location_id', 'to_location_id', 'expected_status'],
-    effects: [['transfer', 'manage_stock_transfers']],
+    required: ['from_location_id', 'to_location_id', 'mode'],
+    effects: [['transfer', 'create_stock_transfer']],
+    // El estado esperado no se adivina: lo determina el modo elegido.
     predicate: (d, i, obs) =>
       !same(i.from_location_id, i.to_location_id) &&
-      d.status === i.expected_status &&
+      d.status === (i.mode === 'quick' ? 'completed' : 'pending') &&
       same(d.from_location_id, i.from_location_id) &&
       same(d.to_location_id, i.to_location_id) &&
       stockRowsValid(read(obs, 'stock', 'get_stock_levels')),

@@ -12,6 +12,7 @@ import {
 } from '../../../../common/helpers/organization-fiscal-columns.helper';
 import { resolveVatResponsibility } from '../../../../common/helpers/vat-responsibility.helper';
 import { normalizeFiscalResponsibilityCode } from '../../../../common/constants/fiscal-responsibilities';
+import { withVendixUser } from '@common/utils/vendix-user.util';
 
 /**
  * CP-platform-fiscal-invoicing-mvp · Phase A.3
@@ -151,8 +152,11 @@ export class PlatformTenantsService {
           }
         : {}),
     };
+    // El selector ofrece usuarios de Vendix, no clientes finales de las
+    // tiendas. La resolución por id (`kind === 'user'`) no se acota para no
+    // romper destinatarios de documentos ya emitidos.
     const rows = await prisma.users.findMany({
-      where,
+      where: withVendixUser(where),
       include: USER_INCLUDE,
       take: args.limit,
       orderBy: [{ first_name: 'asc' }, { last_name: 'asc' }],

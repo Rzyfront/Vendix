@@ -8,7 +8,6 @@ import { of } from 'rxjs';
 import { CustomerDetailsComponent } from './customer-details.component';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { CustomersService } from '../services/customers.service';
-import { MetadataFieldsService } from '../../data-collection/services/metadata-fields.service';
 import { CustomerHistoryService } from '../services/customer-history.service';
 
 /**
@@ -35,7 +34,6 @@ describe('CustomerDetailsComponent industry sections (H0.6)', () => {
         },
         { provide: Router, useValue: { navigate: jasmine.createSpy('navigate') } },
         { provide: CustomersService, useValue: {} },
-        { provide: MetadataFieldsService, useValue: {} },
         { provide: CustomerHistoryService, useValue: {} },
         {
           provide: AuthFacade,

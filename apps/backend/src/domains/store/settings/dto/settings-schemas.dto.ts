@@ -299,6 +299,25 @@ export class NotificationsSettingsDto {
   @Min(0)
   @Max(30)
   ap_due_soon_days?: number;
+
+  /**
+   * Minutos antes del vencimiento de una tarea CRM en que se avisa "Tarea por
+   * vencer" al responsable y a los apoyos (D2: 60).
+   */
+  @ApiProperty({ example: 60, required: false, minimum: 5, maximum: 1440 })
+  @IsOptional()
+  @IsInt()
+  @Min(5)
+  @Max(1440)
+  task_due_soon_minutes?: number;
+
+  /** Hora local de la tienda (0-23) del correo con las tareas que vencen ese día. */
+  @ApiProperty({ example: 7, required: false, minimum: 0, maximum: 23 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(23)
+  daily_digest_hour?: number;
 }
 
 export class ScaleDeviceConfigDto {
@@ -2257,12 +2276,19 @@ export class VexiSettingsDto {
   @IsBoolean()
   enabled?: boolean;
 
+  /**
+   * @deprecated T16/N5 — la tienda ya no configura el motor de voz (lo define
+   * superadmin y la voz es solo por API). Se sigue aceptando UNA versión para que
+   * una pestaña abierta con el selector viejo no reciba un 400 al guardar, pero
+   * `SettingsService.updateSettings` lo descarta: nunca se persiste.
+   */
   @ApiProperty({
-    example: 'realtime',
+    example: 'pipeline',
     enum: ['realtime', 'pipeline'],
     required: false,
+    deprecated: true,
     description:
-      'Motor del modo voz. `realtime` negocia WebRTC speech-to-speech contra el proveedor; `pipeline` transcribe, responde con el agente de texto del chat y dicta la respuesta. Solo el pipeline puede ejecutar escrituras con confirmación, porque es el único que pasa por la tarjeta de aprobación del panel.',
+      'OBSOLETO: se acepta y se ignora. El motor de voz ya no es configurable por tienda.',
   })
   @IsOptional()
   @IsIn(['realtime', 'pipeline'])
@@ -2471,4 +2497,14 @@ export class ProductOptionsSettingsDto {
   @IsOptional()
   @IsBoolean()
   enabled?: boolean;
+
+  @ApiProperty({
+    example: true,
+    required: false,
+    description:
+      'QUI-1005 — Permitir adiciones en la tienda en línea. Default true. En false la tienda en línea no muestra adiciones y el checkout público las rechaza (OPT_ONLINE_DISABLED); el POS no cambia.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  allow_online?: boolean;
 }

@@ -69,7 +69,7 @@ describe('StockTransfersService — searchTransferableProducts (D.2)', () => {
     expect(result.map((r: any) => r.id)).toEqual([2, 1]);
   });
 
-  it('shape legacy intacto incl. stock@origen/destino', async () => {
+  it('shape legacy (más variante nula) incl. stock@origen/destino', async () => {
     mockPrisma.products.findMany.mockResolvedValue([row({ id: 5 })]);
 
     const result = await service.searchTransferableProducts('tubo', 7, 9, 10);
@@ -77,7 +77,10 @@ describe('StockTransfersService — searchTransferableProducts (D.2)', () => {
     expect(result).toEqual([
       {
         id: 5,
+        product_id: 5,
+        product_variant_id: null,
         name: 'Cafe Tubo 1/2',
+        variant_name: null,
         sku: 'TUBO-001',
         stock_at_origin: {
           quantity_on_hand: 10,
@@ -159,5 +162,54 @@ describe('StockTransfersService — searchTransferableProducts (D.2)', () => {
       mockPrisma.products.findMany.mock.calls[1][0].where.OR,
     ).toHaveLength(2);
     expect(result).toHaveLength(1);
+  });
+
+  it('variantes: una fila por variante con stock en origen y destino por variante', async () => {
+    const vsl = (
+      location_id: number,
+      variant: { id: number; name: string; sku: string } | null,
+      on_hand: number,
+    ) => ({
+      ...sl(location_id, on_hand),
+      product_variant_id: variant?.id ?? null,
+      product_variants: variant,
+    });
+    const roja = { id: 41, name: 'Roja', sku: 'CAM-R' };
+    const azul = { id: 42, name: 'Azul', sku: 'CAM-A' };
+    mockPrisma.products.findMany.mockResolvedValue([
+      row({
+        id: 8,
+        name: 'Camisa',
+        sku: 'CAM',
+        stock_levels: [
+          vsl(7, roja, 5),
+          vsl(7, azul, 3),
+          // Fila base vacía de antes de crear variantes: no se ofrece.
+          vsl(7, null, 0),
+          vsl(9, azul, 2),
+        ],
+      }),
+    ]);
+
+    const result = await service.searchTransferableProducts('camisa', 7, 9, 10);
+
+    // El select pide la variante de cada stock_level.
+    const select = mockPrisma.products.findMany.mock.calls[0][0].select;
+    expect(select.stock_levels.select.product_variant_id).toBe(true);
+    expect(select.stock_levels.select.product_variants).toBeDefined();
+
+    expect(
+      result.map((r: any) => ({
+        id: r.id,
+        v: r.product_variant_id,
+        name: r.variant_name,
+        sku: r.sku,
+        origin: r.stock_at_origin.quantity_available,
+        dest: r.stock_at_destination.quantity_available,
+      })),
+    ).toEqual([
+      { id: 8, v: 42, name: 'Azul', sku: 'CAM-A', origin: 3, dest: 2 },
+      { id: 8, v: 41, name: 'Roja', sku: 'CAM-R', origin: 5, dest: 0 },
+    ]);
   });
 });

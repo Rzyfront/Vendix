@@ -191,6 +191,30 @@ describe('inventory.tools · O-14 manage_stock_transfers / O-15 approve_stock_ad
       expect(JSON.stringify(preview.changes)).toMatch(/Café 500g x50/);
     });
 
+    it('preview nombra el destino externo en vez de #null', async () => {
+      const { tools } = buildTools({
+        transfersService: {
+          findOne: jest.fn().mockResolvedValue({
+            ...TRANSFER,
+            to_location_id: null,
+            to_location: null,
+            is_external_destination: true,
+            external_destination_name: 'Cliente Mayorista',
+          }),
+        } as any,
+      });
+      const tool = getTool(tools, 'manage_stock_transfers');
+      const preview = await tool.preview!(
+        { action: 'approve', transfer_id: 301 },
+        CONTEXT,
+      );
+
+      expect(preview.target).toBe(
+        'Transferencia TRF-0301 — Bodega central → destino externo: Cliente Mayorista',
+      );
+      expect(preview.target).not.toMatch(/#null/);
+    });
+
     it('preview complete rechaza recibir más de lo despachado', async () => {
       const { tools } = buildTools({
         transfersService: {
@@ -877,7 +901,7 @@ describe('inventory.tools · O-14 manage_stock_transfers / O-15 approve_stock_ad
       expect(deps.stockLevelsService.getMirrorDrift).not.toHaveBeenCalled();
     });
 
-    it('happy transfer: el siguiente paso cita manage_stock_transfers', async () => {
+    it('happy transfer: el siguiente paso cita create_stock_transfer', async () => {
       const { tools } = sourcingTools({
         main_location: { id: 4, name: 'Bodega central', quantity_available: 2 },
         other_locations: [
@@ -892,7 +916,7 @@ describe('inventory.tools · O-14 manage_stock_transfers / O-15 approve_stock_ad
       );
 
       expect(answer.sugerencia).toBe('transfer');
-      expect(answer.siguiente_paso).toMatch(/manage_stock_transfers/);
+      expect(answer.siguiente_paso).toMatch(/create_stock_transfer/);
     });
 
     it('happy purchase: el siguiente paso cita crear una OC', async () => {

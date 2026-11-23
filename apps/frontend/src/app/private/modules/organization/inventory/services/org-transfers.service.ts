@@ -3,8 +3,13 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, throwError } from 'rxjs';
 import { catchError, map, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import type {
+  TransferPickerRow,
+  TransferPayload,
+} from '../../../store/inventory/transfers/quick-move/transfer-draft';
 import {
   CancelOrgTransferRequest,
+  CloseOrgTransferWithLossRequest,
   CompleteOrgTransferRequest,
   CreateOrgTransferRequest,
   DispatchOrgTransferRequest,
@@ -83,6 +88,43 @@ export class OrgTransfersService {
       );
   }
 
+  /**
+   * Movimiento rápido (D1): crea y aplica en una transacción —origen −,
+   * destino +— y solo deja el registro. Sin transporte ni remisión.
+   */
+  createAndComplete(dto: TransferPayload): Observable<OrgTransfer> {
+    return this.http
+      .post<ApiResponse<OrgTransfer>>(`${this.baseUrl}/complete`, dto)
+      .pipe(
+        map((r) => r.data),
+        tap(() => this.invalidateCache()),
+        catchError((err) => throwError(() => this.normalizeError(err))),
+      );
+  }
+
+  /**
+   * Picker del movimiento rápido de organización: una fila por variante con su
+   * disponible en origen y destino (mismo shape que la tienda).
+   */
+  searchTransferableProducts(
+    search: string,
+    fromLocationId: number,
+    toLocationId: number,
+    limit = 30,
+  ): Observable<TransferPickerRow[]> {
+    const params = new HttpParams()
+      .set('search', search)
+      .set('from_location_id', String(fromLocationId))
+      .set('to_location_id', String(toLocationId))
+      .set('limit', String(limit));
+    return this.http
+      .get<any>(`${this.baseUrl}/search-products`, { params })
+      .pipe(
+        map((r) => (Array.isArray(r) ? r : (r?.data ?? []))),
+        catchError((err) => throwError(() => this.normalizeError(err))),
+      );
+  }
+
   approve(id: number): Observable<OrgTransfer> {
     return this.http
       .post<ApiResponse<OrgTransfer>>(`${this.baseUrl}/${id}/approve`, {})
@@ -112,6 +154,20 @@ export class OrgTransfersService {
   ): Observable<OrgTransfer> {
     return this.http
       .post<ApiResponse<OrgTransfer>>(`${this.baseUrl}/${id}/complete`, body)
+      .pipe(
+        map((r) => r.data),
+        tap(() => this.invalidateCache()),
+        catchError((err) => throwError(() => this.normalizeError(err))),
+      );
+  }
+
+  /** D4 — cierre del pendiente como pérdida (solo tras la fecha límite). */
+  closeWithLoss(
+    id: number,
+    body: CloseOrgTransferWithLossRequest,
+  ): Observable<OrgTransfer> {
+    return this.http
+      .post<ApiResponse<OrgTransfer>>(`${this.baseUrl}/${id}/close-with-loss`, body)
       .pipe(
         map((r) => r.data),
         tap(() => this.invalidateCache()),
@@ -167,6 +223,7 @@ export class OrgTransfersService {
       error?.error?.error ||
       error?.message ||
       'Error desconocido';
+    if (Array.isArray(msg)) return new Error(msg.join('. '));
     return new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
   }
 }

@@ -14,7 +14,9 @@ import { Permissions } from '../../../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
 import { CRM_TASKS_PERMISSION, CrmTasksService } from './crm-tasks.service';
 import {
+  CompleteCrmTaskDto,
   CreateCrmTaskDto,
+  CrmTaskStaffQueryDto,
   CrmTaskStatsQueryDto,
   CrmTasksQueryDto,
   UpdateCrmTaskDto,
@@ -26,10 +28,11 @@ import {
  *   GET   /store/customers/crm/tasks             ?assigned&status&due&customer_id
  *   GET   /store/customers/crm/tasks/today       my overdue + due today
  *   GET   /store/customers/crm/tasks/stats       ?assigned (same filter as the list)
+ *   GET   /store/customers/crm/tasks/staff       ?q active staff for the support picker
  *   GET   /store/customers/crm/tasks/:id
  *   POST  /store/customers/crm/tasks
  *   PATCH /store/customers/crm/tasks/:id
- *   POST  /store/customers/crm/tasks/:id/complete
+ *   POST  /store/customers/crm/tasks/:id/complete   body? { opportunity_id, move_to_stage_id }
  *   POST  /store/customers/crm/tasks/:id/reopen
  */
 @Controller('store/customers/crm/tasks')
@@ -59,6 +62,13 @@ export class CrmTasksController {
     return this.response.success(await this.service.stats(query));
   }
 
+  /** Declared before `:id`, which would swallow `staff`. */
+  @Get('staff')
+  @Permissions(CRM_TASKS_PERMISSION)
+  async staff(@Query() query: CrmTaskStaffQueryDto) {
+    return this.response.success(await this.service.staff(query));
+  }
+
   @Get(':id')
   @Permissions(CRM_TASKS_PERMISSION)
   async findOne(@Param('id', ParseIntPipe) id: number) {
@@ -85,9 +95,12 @@ export class CrmTasksController {
 
   @Post(':id/complete')
   @Permissions(CRM_TASKS_PERMISSION)
-  async complete(@Param('id', ParseIntPipe) id: number) {
+  async complete(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CompleteCrmTaskDto,
+  ) {
     return this.response.success(
-      await this.service.complete(id),
+      await this.service.complete(id, dto ?? {}),
       'Tarea completada',
     );
   }

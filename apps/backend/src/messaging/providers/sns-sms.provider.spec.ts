@@ -7,8 +7,12 @@ import {
 } from '@aws-sdk/client-sns';
 import { mapSnsError, SnsSmsMessagingProvider } from './sns-sms.provider';
 import { OutboundMessage, ResolvedChannel } from '../interfaces/messaging.interface';
+import { MessagingPricesService } from '../pricing/messaging-prices.service';
 
-function setup(env: Record<string, string | undefined> = {}) {
+function setup(
+  env: Record<string, string | undefined> = {},
+  row: { value: unknown } | null = null,
+) {
   const config = {
     get: jest.fn(
       (key: string) =>
@@ -31,8 +35,12 @@ function setup(env: Record<string, string | undefined> = {}) {
   // Every SNS call goes through this spy: no test reaches AWS.
   const send = jest.spyOn(SNSClient.prototype, 'send') as unknown as jest.Mock;
   send.mockResolvedValue({ MessageId: 'sns-msg-1' });
-  const provider = new SnsSmsMessagingProvider(config, redis as never);
-  return { provider, send, redis, cache };
+  const prisma = {
+    platform_settings: { findUnique: jest.fn().mockResolvedValue(row) },
+  };
+  const prices = new MessagingPricesService(prisma as never, config);
+  const provider = new SnsSmsMessagingProvider(config, redis as never, prices);
+  return { provider, send, redis, cache, prisma };
 }
 
 const channel = (settings: Record<string, unknown> = {}): ResolvedChannel => ({
@@ -108,7 +116,7 @@ describe('SnsSmsMessagingProvider', () => {
     ['an unlisted country at the fallback price', message({ to: '+1 305 555 1234' })],
   ])('never lets SNS charge more than the reserved cost: %s', async (_label, sms) => {
     const { provider, send } = setup();
-    const quote = provider.quote(sms);
+    const quote = await provider.quote(sms);
     if (!('cost' in quote)) throw new Error('expected a quote');
 
     const result = await provider.send(sms, channel());
@@ -155,6 +163,65 @@ describe('SnsSmsMessagingProvider', () => {
     await invalid.provider.send(long, channel());
     const input = (invalid.send.mock.calls[0][0] as PublishCommand).input;
     expect(input.MessageAttributes!['AWS.SNS.SMS.MaxPrice'].StringValue).toBe('0.5000');
+  });
+
+  it('reserves and caps from the Superadmin prices, which win over the environment', async () => {
+    const { provider, send } = setup(
+      { SNS_SMS_MAX_PRICE_USD: '0.25', SNS_SMS_MAX_PRICE_MARGIN: '1' },
+      {
+        value: {
+          sms_price_table: { '57': 0.0509 },
+          sms_max_price_usd: 0.3,
+          sms_max_price_margin: 1.2,
+        },
+      },
+    );
+
+    const quote = await provider.quote(message());
+    expect(quote).toMatchObject({ cost: 0.0509, max_price: '0.0610' });
+
+    await provider.send(message(), channel());
+    const input = (send.mock.calls[0][0] as PublishCommand).input;
+    expect(input.MessageAttributes!['AWS.SNS.SMS.MaxPrice'].StringValue).toBe('0.0610');
+  });
+
+  it('quotes the cost and the MaxPrice from one resolution of the prices', async () => {
+    const { provider, prisma } = setup();
+
+    const quote = await provider.quote(message());
+
+    expect(prisma.platform_settings.findUnique).toHaveBeenCalledTimes(1);
+    expect(quote).toEqual({
+      to: '+573001234567',
+      cost: 0.0075,
+      segments: 1,
+      encoding: 'UCS-2',
+      max_price: '0.0075',
+    });
+  });
+
+  it('sends the MaxPrice of the reserved quote even if the prices change before the send', async () => {
+    const { provider, send, prisma } = setup();
+    const quote = await provider.quote(message());
+    if (!('cost' in quote)) throw new Error('expected a quote');
+    expect(quote.cost).toBe(0.0075);
+
+    // Superadmin raises the price and the cap after the reservation.
+    prisma.platform_settings.findUnique.mockResolvedValue({
+      value: { sms_price_table: { '57': 0.2 }, sms_max_price_margin: 3 },
+    });
+    const result = await provider.send(message(), channel(), quote);
+
+    expect(prisma.platform_settings.findUnique).toHaveBeenCalledTimes(1);
+    const input = (send.mock.calls[0][0] as PublishCommand).input;
+    expect(input.MessageAttributes!['AWS.SNS.SMS.MaxPrice'].StringValue).toBe(quote.max_price);
+    expect(result.cost_amount).toBe(0.0075);
+  });
+
+  it('computes its own quote when send is called without one', async () => {
+    const { provider, prisma } = setup();
+    await provider.send(message(), channel());
+    expect(prisma.platform_settings.findUnique).toHaveBeenCalledTimes(1);
   });
 
   it.each([

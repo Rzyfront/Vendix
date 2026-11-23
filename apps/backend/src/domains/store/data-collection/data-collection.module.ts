@@ -7,14 +7,25 @@ import { BookingDataCollectionListener } from './listeners/booking-data-collecti
 import { BookingSnapshotListener } from './listeners/booking-snapshot.listener';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
+import { S3Module } from '../../../common/services/s3.module';
+import { TemplateImportService } from './template-import.service';
+import { SubmissionDocumentsService } from './submission-documents.service';
 import { MetadataModule } from '../metadata/metadata.module';
+import { TemplateAiDraftService } from './ai-draft/template-ai-draft.service';
+import { ReceivedDocumentPagesService } from '../../received-documents/services/received-document-pages.service';
 
 @Module({
-  imports: [ResponseModule, PrismaModule, MetadataModule],
+  imports: [ResponseModule, PrismaModule, MetadataModule, S3Module],
   controllers: [TemplatesController, SubmissionsController],
   providers: [
     TemplatesService,
+    TemplateImportService,
+    SubmissionDocumentsService,
     SubmissionsService,
+    // «Crear con IA (PDF/foto)»: handler `data_collection_template` of the
+    // global `ai-scan` queue (AiScanJobsModule and AIEngineModule are global).
+    TemplateAiDraftService,
+    ReceivedDocumentPagesService,
     BookingDataCollectionListener,
     BookingSnapshotListener,
   ],

@@ -7,6 +7,8 @@ import {
   observedReceipt,
   userToolSummary,
   withExecutionContract,
+  withoutClientCost,
+  clientSafeObjective,
 } from './agent-execution.contract';
 import type { AgentResult } from './ai-agent.service';
 import type { AIStreamChunk } from './interfaces/ai-provider.interface';
@@ -390,5 +392,84 @@ describe('agent-execution.contract (fix router 2026-10): notices only without a 
       MODEL_TEXT,
     );
     expect(result.content).toContain(USER_NOTICES.unknown_effect);
+  });
+});
+
+describe('agent-execution.contract (P2-6): the store never sees costs', () => {
+  const budget = {
+    provider_attempts: 2,
+    prompt_tokens: 900,
+    completion_tokens: 120,
+    cost_usd: 0.0123,
+    tools: 1,
+    active_runtime_ms: 40,
+    expansions: 0,
+    recovery: 0,
+  };
+
+  it('withoutClientCost drops cost_usd and usage.cost and keeps everything else', () => {
+    const safe = withoutClientCost({
+      type: 'done' as const,
+      model: 'm',
+      cost_usd: 0.02,
+      usage: { promptTokens: 3, completionTokens: 4, totalTokens: 7, cost: 0.5 },
+    });
+    expect(safe).toEqual({
+      type: 'done',
+      model: 'm',
+      usage: { promptTokens: 3, completionTokens: 4, totalTokens: 7 },
+    });
+    expect(JSON.stringify(safe)).not.toMatch(/cost/);
+  });
+
+  it('clientSafeObjective keeps token counters and drops budget.cost_usd', () => {
+    const objective = clientSafeObjective({
+      id: 'o1',
+      goal: 'g',
+      conversation_id: 1,
+      version: 1,
+      semantic_status: 'active',
+      next_step: null,
+      budget: budget as any,
+      expires_at: '',
+      requires_revalidation: false,
+    });
+    expect(objective.budget).not.toHaveProperty('cost_usd');
+    expect(objective.budget.prompt_tokens).toBe(900);
+    expect(objective.budget.completion_tokens).toBe(120);
+  });
+
+  it('clientSafeChunk drops the objective cost on any frame', () => {
+    const chunk = clientSafeChunk({
+      type: 'progress',
+      objective: {
+        id: 'o1',
+        goal: 'g',
+        conversation_id: 1,
+        version: 1,
+        semantic_status: 'active',
+        next_step: null,
+        budget: budget as any,
+        expires_at: '',
+        requires_revalidation: false,
+      },
+    });
+    expect(JSON.stringify(chunk)).not.toMatch(/cost/);
+  });
+
+  it('clientSafeObjective passes an objective without budget through instead of crashing', () => {
+    const objective = clientSafeObjective({
+      id: 'o1',
+      goal: 'g',
+      conversation_id: 1,
+      version: 1,
+      semantic_status: 'active',
+      next_step: 'internal',
+      budget: undefined as any,
+      expires_at: '',
+      requires_revalidation: false,
+    });
+    expect(objective.budget).toBeUndefined();
+    expect(objective.next_step).toBeNull();
   });
 });

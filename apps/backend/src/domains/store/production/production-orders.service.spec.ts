@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { ProductionOrdersService } from './production-orders.service';
+import { productionSiteWhere } from './production-site.util';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
@@ -246,9 +247,11 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
         waste_percent: new Prisma.Decimal(0),
       },
     });
-    prismaMock.$transaction.mockImplementation(async (cb: any) =>
-      cb({ production_orders: { update: txOrderUpdate, updateMany: claimOk }, production_order_lines: noLines() }),
-    );
+    const txClient = {
+      production_orders: { update: txOrderUpdate, updateMany: claimOk },
+      production_order_lines: noLines(),
+    };
+    prismaMock.$transaction.mockImplementation(async (cb: any) => cb(txClient));
 
     // 4. The outer `production_orders.update` (post-transaction) is also
     // observed by some callers; mock it for safety.
@@ -271,6 +274,13 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
     expect(consumeCall[0].movement_type).toBe('consumption');
     expect(consumeCall[0].quantity_change).toBeLessThan(0);
     expect(consumeCall[0].quantity_change).toBeCloseTo(-10, 4);
+    // (b2) the ingredient's warehouse is resolved on the completion's tx
+    // connection: without it each ingredient asks the pool for a second
+    // connection while the transaction is still open.
+    expect(stockLevelManager.getDefaultLocationForProduct).toHaveBeenCalledWith(
+      99, undefined, txClient,
+    );
+    expect(consumeCall[0].location_id).toBe(1);
 
     // (c) production has movement_type='production' and positive qty
     expect(produceCall[0].movement_type).toBe('production');
@@ -1311,6 +1321,19 @@ describe('ProductionOrdersService — sale-linked orders (QUI-995)', () => {
     );
     expect(result.data.map((r: any) => r.sale_order_number)).toEqual(['ORD-9', null]);
     expect((result.data[0] as any).sale_order).toBeUndefined();
+  });
+
+  it('Producción (kitchen) never lists Planta orders; without a site the list is unchanged', async () => {
+    prismaMock.production_orders.findMany.mockResolvedValue([]);
+    prismaMock.production_orders.count.mockResolvedValue(0);
+    await service.findAll({} as any, 'kitchen');
+    const where = prismaMock.production_orders.findMany.mock.calls[0][0].where;
+    expect(where.AND).toEqual([productionSiteWhere('kitchen')]);
+    expect(prismaMock.production_orders.count.mock.calls[0][0].where).toEqual(where);
+
+    prismaMock.production_orders.findMany.mockClear();
+    await service.findAll({} as any);
+    expect(prismaMock.production_orders.findMany.mock.calls[0][0].where.AND).toBeUndefined();
   });
 
   it('S19: findAll and findOne (hence getDetail) read the variant name of the order', async () => {

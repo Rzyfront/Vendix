@@ -6,6 +6,7 @@ import { safeObjectiveArtifact } from '../tasks/agent-artifact-safety';
 import { objectiveArgsHash } from '../tasks/agent-durable-session.service';
 import { countsAsToolSuccess } from '../tools/tool-result.normalizer';
 import { AIToolRegistry } from '../tools/ai-tool-registry';
+import type { ToolExecutionResult } from '../tools/interfaces/tool.interface';
 import { SandboxClientService } from './sandbox-client.service';
 import { SandboxPolicyService } from './sandbox-policy.service';
 import {
@@ -20,6 +21,46 @@ import {
   SandboxReply,
   SandboxStart,
 } from './interfaces/sandbox-protocol.interface';
+
+/**
+ * Stdio-free core of one authorized sandbox tool call, shared by the stdio
+ * broker and the Code Mode bridge (F10). The CALLER has already validated the
+ * frame, the manifest and the arguments and runs this inside `authorize`
+ * (strict, re-derived tenant context). Order is part of the contract: the
+ * intent is audited as `dispatching` BEFORE the handler runs, the handler runs
+ * under the execution deadline with an evidence ref, and the execution must
+ * still be live when it returns (a non-cooperative read may complete after a
+ * revoke: it must not be published).
+ */
+export async function dispatchSandboxTool(
+  registry: Pick<AIToolRegistry, 'executeToolResult'>,
+  audit: Pick<SandboxAuditRepository, 'appendCall'>,
+  call: {
+    executionId: string;
+    seq: number;
+    tool: string;
+    args: Record<string, unknown>;
+    argsHash: string;
+    deadline: AgentDeadline;
+    assertLive: () => void;
+  },
+): Promise<ToolExecutionResult> {
+  await audit.appendCall(call.executionId, {
+    seq: call.seq,
+    tool: call.tool,
+    args_hash: call.argsHash,
+    status: 'dispatching',
+  });
+  call.assertLive();
+  const result = await agentDeadlineContext.run(call.deadline, () =>
+    registry.executeToolResult(call.tool, call.args, {
+      evidenceRef: `sandbox:${call.executionId}:${call.seq}`,
+    }),
+  );
+  // Even a non-cooperative read may complete after revoke: no publishing it.
+  call.assertLive();
+  return result;
+}
 
 const NEXT =
   'Usa list_products por páginas o un reporte/agregación existente; no reintentes automáticamente el sandbox.';
@@ -203,20 +244,19 @@ export class SandboxBrokerService {
                 assertLive();
                 if (!names.includes(tool))
                   throw new SandboxError('SANDBOX_DENIED');
-                await this.audit.appendCall(executionId, {
-                  seq,
-                  tool,
-                  args_hash: argsHash,
-                  status: 'dispatching',
-                });
-                assertLive();
-                const result = await agentDeadlineContext.run(deadline, () =>
-                  this.registry.executeToolResult(tool, frame.args, {
-                    evidenceRef: `sandbox:${executionId}:${seq}`,
-                  }),
+                const result = await dispatchSandboxTool(
+                  this.registry,
+                  this.audit,
+                  {
+                    executionId,
+                    seq,
+                    tool,
+                    args: frame.args,
+                    argsHash,
+                    deadline,
+                    assertLive,
+                  },
                 );
-                // Even a non-cooperative read may complete after revoke: no publishing it.
-                assertLive();
                 await invocation.durable.assertCurrent();
                 await this.policy.authorize(
                   snapshot,

@@ -39,6 +39,76 @@ const { Client } = require('pg');
  * Formato: 'tabla.columna'.
  */
 const REQUIRED_COLUMNS = [
+  // --- Promociones por días de la semana (20261216090000) ---
+  // Prisma nombra todas las columnas del modelo en cada SELECT: sin la
+  // migración, cotizar, cobrar en POS o abrir el carrito ecommerce da 500.
+  'promotions.active_weekdays',
+  // --- Transferencias multi-producto: transporte y remisión (20261215090000) ---
+  // El despacho/recepción y las listas leen estas columnas: sin la migración,
+  // despachar o recibir da 500 y el listado de transferencias también.
+  'stock_transfers.movement_mode',
+  'stock_transfers.transport_method',
+  'stock_transfers.vehicle_id',
+  'stock_transfers.dispatch_note_id',
+  'stock_transfers.receipt_note_id',
+  'stock_transfers.is_external_destination',
+  'stock_transfers.no_support_alert',
+  'stock_transfers.shipping_cost',
+  // Prisma nombra TODAS las columnas del modelo en cada SELECT/RETURNING: si
+  // falta una sola, cualquier lectura o escritura de transferencias da 500.
+  'stock_transfers.driver_user_id',
+  'stock_transfers.driver_name',
+  'stock_transfers.shipping_method_id',
+  'stock_transfers.carrier_name',
+  'stock_transfers.tracking_number',
+  'stock_transfers.external_destination_name',
+  'stock_transfers.external_destination_tax_id',
+  'stock_transfers.external_destination_address',
+  'stock_transfers.support_document_type',
+  'stock_transfers.support_document_id',
+  'stock_transfers.exit_reason',
+  'stock_transfers.loss_closed_at',
+  'stock_transfers.loss_closed_by_user_id',
+  'stock_transfers.loss_reason',
+  'stock_transfer_items.quantity_dispatched',
+  'stock_transfer_items.quantity_lost',
+  'stock_transfer_items.batch_id',
+  // --- CRM: grupo y descripción de etiquetas (20261218090000) ---
+  // Prisma nombra todas las columnas del modelo en cada SELECT: sin la
+  // migración, el gestor de etiquetas y el selector del cliente darían 500, y
+  // además el alta o la edición de una etiqueta no podrían guardar grupo ni
+  // «cuándo se pone».
+  'crm_tags.group_name',
+  'crm_tags.description',
+  // --- CRM: apoyo en tareas y etapa destino (20261210090000) ---
+  // Toda lectura de crm_tasks (lista, hoy, panel del cliente) trae
+  // move_to_stage_id y las personas de apoyo: sin ellas Tareas da 500.
+  'crm_tasks.move_to_stage_id',
+  'crm_task_assignees.user_id',
+  // --- CRM: plantillas de etapas y planilla del cliente (20261209090000, QUI-1043) ---
+  // Toda lectura de data_collection_templates (listado, editor, reservas) trae
+  // is_crm_default; la ficha del cliente y el detalle de la oportunidad leen
+  // store_users.crm_data_template_id; el pipeline lee crm_stage_templates.
+  'data_collection_templates.is_crm_default',
+  'store_users.crm_data_template_id',
+  'crm_stage_templates.stages',
+  // --- Manufactura: varias plantas (20261208090000, QUI-1013) ---
+  // Toda lectura de production_orders trae plant_id (restaurante incluido): sin
+  // ella cocina, Planta y pedidos programados dan 500. La planta resuelve las
+  // bodegas de insumos/terminado al completar.
+  'production_orders.plant_id',
+  'manufacturing_plants.input_location_id',
+  'manufacturing_plants.output_location_id',
+  // --- Dónde se produce cada producto (20261217090000) ---
+  // La lista de productos, el resolvedor de destino y Producción/Planta leen
+  // estas columnas: sin ellas el catálogo y ambas pantallas dan 500.
+  'products.production_site',
+  'products.production_plant_id',
+  'production_orders.production_site',
+  // --- CRM Vendix Platform: enlace a una tienda (20261207090000) ---
+  // Toda lectura y escritura de platform_crm_links la selecciona: sin ella el
+  // bloque «Cuenta Vendix» de la ficha del prospecto da 500.
+  'platform_crm_links.linked_store_id',
   // --- Registro de cargas masivas (20261202090000, QUI-1004) ---
   // El historial y el aviso de archivo repetido lo leen en cada carga.
   'bulk_upload_logs.file_hash',
@@ -75,6 +145,7 @@ const REQUIRED_COLUMNS = [
   'invoices.exchange_rate',
   'invoices.contingency_deadline',
   'invoices.xml_document',
+  'invoices.purchase_order_id',
   'invoice_items.unit_code',
   'invoice_items.account_code',
   'invoice_items.aiu_component',
@@ -229,6 +300,12 @@ const REQUIRED_COLUMNS = [
   // Proveedores de servicio como usuarios de tienda (migración 20261112090000):
   // crear un proveedor persiste `user_id`.
   'service_providers.user_id',
+  // Observabilidad de IA (migración 20261221090000): cada llamada de IA escribe
+  // estas columnas en ai_engine_logs. Sin ellas el log falla en silencio (se
+  // pierde costo y auditoría) y el tablero de salud por app da 500.
+  'ai_engine_logs.finish_reason',
+  'ai_engine_logs.attempt',
+  'ai_engine_logs.validation_error',
 ];
 
 /** Tablas cuya ausencia completa es igual de fatal. */
@@ -244,12 +321,21 @@ const REQUIRED_TABLES = [
   'production_order_lines',
   'manufacturing_settings',
   'store_sequences',
+  // QUI-1013 — varias plantas (migración 20261208090000_manufacturing_plants).
+  'manufacturing_plants',
+  // QUI-1010 — bot de monitoreo (migración 20261205100000_platform_alerts): el
+  // filtro global de errores y el barrido de colas escriben aquí en caliente.
+  'platform_alerts',
 ];
 
 /** Tipos enum que el schema referencia y la base debe conocer. */
 const REQUIRED_ENUM_TYPES = [
   'aiu_component_enum',
   'order_item_fulfillment_destination_enum',
+  // Transferencias: modo, transporte y documento soporte (20261215090000).
+  'transfer_movement_mode_enum',
+  'transfer_transport_method_enum',
+  'transfer_support_document_type_enum',
 ];
 
 /**
@@ -278,6 +364,8 @@ const REQUIRED_ENUM_VALUES = {
   // antes de enviar (20261106100400).
   notification_type_enum: ['crm_sms_spend_limit_reached'],
   crm_message_status_enum: ['sending'],
+  // Transferencias: recepción parcial y cierre con pérdida (20261215090000).
+  transfer_status_enum: ['partially_received', 'closed_with_loss'],
 };
 
 /** La identidad única de un abono CxC manual evita refund duplicado por retry. */
@@ -432,4 +520,10 @@ if (require.main === module) {
   });
 }
 
-module.exports = { findBrokenPartialIndexes, REQUIRED_PARTIAL_INDEXES };
+module.exports = {
+  findBrokenPartialIndexes,
+  REQUIRED_PARTIAL_INDEXES,
+  REQUIRED_COLUMNS,
+  REQUIRED_ENUM_TYPES,
+  REQUIRED_ENUM_VALUES,
+};

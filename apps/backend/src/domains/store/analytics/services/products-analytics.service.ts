@@ -26,6 +26,7 @@ import {
   productProfitRounded,
   round2,
   sqlStateList,
+  lineCogsSql,
 } from '../analytics-metrics.contract';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
@@ -241,7 +242,7 @@ export class ProductsAnalyticsService {
     >(Prisma.sql`
       SELECT
         oi.product_id AS product_id,
-        COALESCE(SUM(oi.quantity * oi.cost_price), 0)::decimal AS cogs,
+        COALESCE(SUM(${lineCogsSql()}), 0)::decimal AS cogs,
         COUNT(*) AS units_total
       FROM order_items oi
       JOIN orders o ON o.id = oi.order_id
@@ -831,7 +832,7 @@ export class ProductsAnalyticsService {
       SELECT oi.product_id,
              SUM(oi.quantity)                              AS units,
              SUM(oi.total_price)                           AS revenue,
-             SUM(oi.quantity * COALESCE(oi.cost_price, 0)) AS cogs,
+             SUM(${lineCogsSql()}) AS cogs,
              SUM(CASE WHEN oi.cost_price IS NULL
                       THEN oi.quantity ELSE 0 END)         AS units_without_cost
       FROM order_items oi
@@ -990,6 +991,7 @@ export class ProductsAnalyticsService {
     query: ProductsAnalyticsQueryDto,
   ): Prisma.Sql {
     const dir = query.sort_order === 'asc' ? 'ASC' : 'DESC';
+    const LINE_COGS = lineCogsSql().sql;
     switch (query.sort_by ?? 'profit') {
       case 'units_sold':
         return Prisma.raw(`SUM(oi.quantity) ${dir}`);
@@ -997,24 +999,24 @@ export class ProductsAnalyticsService {
         return Prisma.raw(`SUM(oi.total_price) ${dir}`);
       case 'total_cost':
         return Prisma.raw(
-          `SUM(oi.quantity * COALESCE(oi.cost_price, 0)) ${dir}`,
+          `SUM(${LINE_COGS}) ${dir}`,
         );
       case 'margin':
         return Prisma.raw(
           `CASE WHEN SUM(oi.total_price) > 0
-            THEN (SUM(oi.total_price) - SUM(oi.quantity * COALESCE(oi.cost_price, 0))) / SUM(oi.total_price)
+            THEN (SUM(oi.total_price) - SUM(${LINE_COGS})) / SUM(oi.total_price)
             ELSE -1 END ${dir}`,
         );
       case 'markup':
         return Prisma.raw(
-          `CASE WHEN SUM(oi.quantity * COALESCE(oi.cost_price, 0)) > 0
-            THEN (SUM(oi.total_price) - SUM(oi.quantity * COALESCE(oi.cost_price, 0))) / SUM(oi.quantity * COALESCE(oi.cost_price, 0))
+          `CASE WHEN SUM(${LINE_COGS}) > 0
+            THEN (SUM(oi.total_price) - SUM(${LINE_COGS})) / SUM(${LINE_COGS})
             ELSE -1 END ${dir}`,
         );
       case 'profit':
       default:
         return Prisma.raw(
-          `(SUM(oi.total_price) - SUM(oi.quantity * COALESCE(oi.cost_price, 0))) ${dir}`,
+          `(SUM(oi.total_price) - SUM(${LINE_COGS})) ${dir}`,
         );
     }
   }

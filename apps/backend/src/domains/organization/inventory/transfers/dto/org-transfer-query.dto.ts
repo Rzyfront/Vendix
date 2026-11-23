@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsOptional,
   IsNumber,
   IsString,
@@ -6,7 +7,7 @@ import {
   IsInt,
   IsIn,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 
 export class OrgTransferQueryDto {
   @IsOptional()
@@ -39,6 +40,9 @@ export class OrgTransferQueryDto {
     // legacy aliases — kept to preserve old frontend tabs / saved filters
     'draft',
     'completed',
+    // P2 (D4) — recepción parcial y cierre con pérdida.
+    'partially_received',
+    'closed_with_loss',
   ])
   status?:
     | 'pending'
@@ -47,7 +51,9 @@ export class OrgTransferQueryDto {
     | 'received'
     | 'cancelled'
     | 'draft'
-    | 'completed';
+    | 'completed'
+    | 'partially_received'
+    | 'closed_with_loss';
 
   /**
    * Breakdown filter. When provided, restricts the result to transfers where
@@ -86,6 +92,15 @@ export class OrgTransferQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  /**
+   * D8 — solo salidas externas con alerta (sin documento soporte ni motivo).
+   * Llega como texto en la URL (`?with_alert=true`).
+   */
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true' || value === '1')
+  @IsBoolean()
+  with_alert?: boolean;
 
   @IsOptional()
   @IsIn(['transfer_date', 'created_at', 'transfer_number'])

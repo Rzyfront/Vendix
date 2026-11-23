@@ -10,12 +10,8 @@ import {
   AiScanFile,
   AiScanJobContext,
 } from '@common/ai-scan-jobs/interfaces/ai-scan-job.interface';
+import type { AiJobProgress } from '@common/ai-scan-jobs/ai-job-monitor.service';
 import { AIEngineService } from '../../../../ai-engine/ai-engine.service';
-import {
-  AIMessage,
-  AIMessageContentPart,
-} from '../../../../ai-engine/interfaces/ai-provider.interface';
-import { parseAiJson } from '../../../../ai-engine/utils/ai-json.util';
 import {
   buildCurrencyInstruction,
   checkTotalsConsistency,
@@ -51,7 +47,27 @@ import {
   InvoiceDraftScanWithholding,
   MAX_INVOICE_DRAFT_SCAN_NOTE_LENGTH,
 } from './invoice-draft-scan.types';
-const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only (export default) but CJS runtime exports the function
+import {
+  AiExtractionService,
+  newIngestQuotaKey,
+} from '@common/ai-ingest/extraction/ai-extraction.service';
+import { toScannerError } from '@common/ai-ingest/extraction/scanner-errors';
+import { DocumentPagesService } from '@common/ai-ingest/documents/document-pages.service';
+import {
+  readDocumentsWithAi,
+  ReadDocumentsResult,
+} from '@common/ai-ingest/documents/document-reader';
+import { detectQueuedDocument } from '@common/ai-ingest/documents/queued-document';
+import {
+  buildFormInstruction,
+  scanSourceOf,
+} from '@common/ai-ingest/documents/form-instruction';
+import {
+  INVOICE_DRAFT_INGEST_PROFILE,
+  INVOICE_DRAFT_MAX_TOTAL_PAGES,
+  INVOICE_DRAFT_PART_HINT,
+  mergeInvoiceDraftBatches,
+} from './invoice-draft-ingest.profile';
 
 /** Valores de `identification_type_enum` (schema.prisma). */
 const IDENTIFICATION_TYPES = new Set([
@@ -273,6 +289,8 @@ export interface InvoiceDraftScanOptions {
    * `RequestContextService` que el processor restableció.
    */
   job_context?: AiScanJobContext | null;
+  /** Progreso real por páginas (cola `ai-scan`). */
+  reportProgress?: (progress: AiJobProgress) => Promise<void>;
 }
 
 /** Moneda del borrador de plataforma: Vendix factura en pesos. */
@@ -283,9 +301,16 @@ const PLATFORM_CURRENCY: StoreCurrencyInfo = { code: 'COP', decimal_places: 0 };
  *
  * Lee 1-6 documentos (cotización, orden de compra, RUT del cliente, contrato…)
  * más una nota libre del usuario y devuelve un borrador normalizado para el
- * formulario «Nueva factura». Todos los documentos y la nota viajan en UNA sola
- * llamada al modelo para que pueda cruzar datos (el RUT trae la identidad del
- * adquiriente, la cotización trae las líneas).
+ * formulario «Nueva factura». Los documentos se leen por el lector común de
+ * ai-ingest (plan ia-cargas F5b): cada uno por páginas, con el texto nativo
+ * del PDF primero y las escaneadas o fotos como imagen; nunca el PDF crudo.
+ * Hasta 10 páginas de TODOS los documentos viajan en UNA sola llamada con la
+ * nota para que el modelo cruce datos (el RUT trae la identidad del
+ * adquiriente, la cotización trae las líneas); un borrador más largo se lee
+ * en partes que se fusionan (`mergeInvoiceDraftBatches`) sin perder líneas.
+ * La respuesta se valida con esquema (ajv) y se repara una vez; desde ahí la
+ * misma `normalize`: con la misma respuesta del modelo, cantidades, precios,
+ * impuestos, descuentos y cliente son idénticos.
  *
  * Nunca escribe: ni crea el cliente, ni lo vincula a la tienda, ni crea la
  * factura. `existing_customer_id` es una lectura.
@@ -309,6 +334,8 @@ export class InvoiceDraftScannerService {
     private readonly settingsService: SettingsService,
     private readonly customersService: CustomersService,
     private readonly globalPrisma: GlobalPrismaService,
+    private readonly extraction: AiExtractionService,
+    private readonly documentPages: DocumentPagesService,
   ) {}
 
   /**
@@ -357,54 +384,65 @@ export class InvoiceDraftScannerService {
     const currency =
       scope === 'platform' ? PLATFORM_CURRENCY : await this.resolveCurrency();
 
-    const content: AIMessageContentPart[] = [
-      {
-        type: 'text',
-        text: this.buildInstruction(files.length, currency, note, scope),
-      },
-    ];
-    for (const file of files) {
-      const { base64, mimeType } = await this.prepareFile(file);
-      content.push({
-        type: 'image_url',
-        image_url: { url: `data:${mimeType};base64,${base64}`, detail: 'high' },
+    // Tipo real por firma (nunca el declarado); un archivo que no es PDF ni
+    // foto es un problema del documento (AI_INGEST_INVALID_FILE).
+    const typed = files.map((file) => ({
+      buffer: file.buffer,
+      originalName: file.originalName ?? null,
+      mimeType: detectQueuedDocument(
+        { buffer: file.buffer, originalname: file.originalName, mimetype: file.mimeType },
+        'Los documentos deben ser PDF o fotos (JPG, PNG o WebP).',
+      ).mime,
+    }));
+
+    const baseInstruction = this.buildInstruction(files.length, currency, note, scope);
+    let read: ReadDocumentsResult<Raw>;
+    try {
+      read = await readDocumentsWithAi<Raw>({
+        files: typed,
+        pages: this.documentPages,
+        extraction: this.extraction,
+        appKey: INVOICE_DRAFT_SCAN_APP_KEY,
+        schema: INVOICE_DRAFT_INGEST_PROFILE.documentSchema,
+        instruction: (batch, context) =>
+          buildFormInstruction(baseInstruction, batch, context, INVOICE_DRAFT_PART_HINT),
+        variables: {
+          user_note: note ?? '(sin nota)',
+          store_currency: currency.code,
+        },
+        limits: INVOICE_DRAFT_INGEST_PROFILE.limits,
+        maxBytes: INVOICE_DRAFT_INGEST_PROFILE.limits.maxBytes,
+        maxTotalPages: INVOICE_DRAFT_MAX_TOTAL_PAGES,
+        // Una foto sigue siendo UNA imagen: franjas con solape podrían leer
+        // dos veces una línea y duplicar una cantidad.
+        splitTallImages: false,
+        // Una unidad de cuota por borrador, como la llamada única de antes.
+        quotaKey: newIngestQuotaKey(),
+        reportProgress: options.reportProgress,
+        logLabel: 'InvoiceDraftScan',
+        rawExtractionErrors: true,
+      });
+    } catch (err) {
+      this.logger.error(`[InvoiceDraftScan] AI extraction failed: ${(err as Error)?.message}`);
+      throw toScannerError(err, {
+        parseFail: ErrorCodes.INVOICE_DRAFT_SCAN_PARSE_FAIL,
+        aiFail: ErrorCodes.INVOICE_DRAFT_SCAN_AI_FAILED,
+        aiFailMessage: (e) => `La IA no pudo leer los documentos: ${e}`,
       });
     }
-    const message: AIMessage = { role: 'user', content };
 
-    const response = await this.aiEngine.run(
-      INVOICE_DRAFT_SCAN_APP_KEY,
-      {
-        user_note: note ?? '(sin nota)',
-        store_currency: currency.code,
-      },
-      [message],
-    );
-
-    if (!response.success || !response.content) {
-      this.logger.error(`[InvoiceDraftScan] AI extraction failed: ${response.error}`);
-      throw new VendixHttpException(
-        ErrorCodes.INVOICE_DRAFT_SCAN_AI_FAILED,
-        response.error
-          ? `La IA no pudo leer los documentos: ${response.error}`
-          : undefined,
+    const merged = mergeInvoiceDraftBatches(read.batches);
+    const parsed = merged.data;
+    const warnings = [...read.warnings, ...merged.warnings];
+    const rawLines = Array.isArray(parsed.lines) ? parsed.lines : [];
+    if (rawLines.length > MAX_DRAFT_LINES) {
+      const firstLeftOut = this.str(this.asObject(rawLines[MAX_DRAFT_LINES]).description);
+      warnings.push(
+        `Los documentos traen ${rawLines.length} líneas y el borrador admite ${MAX_DRAFT_LINES}: no se cargaron de la ${MAX_DRAFT_LINES + 1} a la ${rawLines.length}${firstLeftOut ? ` (desde «${firstLeftOut.slice(0, 80)}»)` : ''}. Factúralas en otra factura.`,
       );
     }
 
-    let parsed: unknown;
-    try {
-      parsed = parseAiJson(response.content);
-    } catch (err: any) {
-      this.logger.error(
-        `[InvoiceDraftScan] Unparseable AI response (${err?.message}): ${response.content}`,
-      );
-      throw new VendixHttpException(ErrorCodes.INVOICE_DRAFT_SCAN_PARSE_FAIL);
-    }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new VendixHttpException(ErrorCodes.INVOICE_DRAFT_SCAN_PARSE_FAIL);
-    }
-
-    const result = this.normalize(parsed as Raw, currency, note, files.length);
+    const result: InvoiceDraftScanResult = this.normalize(parsed, currency, note, files.length);
 
     // Enriquecimientos de solo lectura: un fallo de base de datos degrada el
     // borrador (sin cliente / sin emparejar) pero nunca tumba el escaneo.
@@ -419,6 +457,8 @@ export class InvoiceDraftScannerService {
 
     result.missing_fields = this.collectMissing(result);
     result.requires_review = this.collectReview(result, note);
+    if (warnings.length) result.warnings = warnings;
+    result.scan_source = scanSourceOf(read);
     return result;
   }
 
@@ -454,40 +494,6 @@ export class InvoiceDraftScannerService {
         : 'USER NOTE: none. "note_applied" must be null.',
     );
     return parts.join('\n\n');
-  }
-
-  /** Imágenes: sharp a 1536 px / JPEG q85. PDFs y formatos que sharp no lee: crudos. */
-  private async prepareFile(
-    file: AiScanFile,
-  ): Promise<{ base64: string; mimeType: string }> {
-    const raw = {
-      base64: file.buffer.toString('base64'),
-      mimeType: file.mimeType,
-    };
-    if (file.mimeType === 'application/pdf') return raw;
-
-    const MAX_DIMENSION = 1536;
-    const JPEG_QUALITY = 85;
-    try {
-      const metadata = await sharp(file.buffer).metadata();
-      const needsResize =
-        (metadata.width && metadata.width > MAX_DIMENSION) ||
-        (metadata.height && metadata.height > MAX_DIMENSION);
-      let pipeline = sharp(file.buffer);
-      if (needsResize) {
-        pipeline = pipeline.resize(MAX_DIMENSION, MAX_DIMENSION, {
-          fit: 'inside',
-          withoutEnlargement: true,
-        });
-      }
-      const processed = await pipeline.jpeg({ quality: JPEG_QUALITY }).toBuffer();
-      return { base64: processed.toString('base64'), mimeType: 'image/jpeg' };
-    } catch (err: any) {
-      this.logger.warn(
-        `[InvoiceDraftScan] Image preprocessing failed, using raw: ${err?.message}`,
-      );
-      return raw;
-    }
   }
 
   private async resolveCurrency(): Promise<StoreCurrencyInfo> {

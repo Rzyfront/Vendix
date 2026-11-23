@@ -66,7 +66,8 @@
         "approval": "none",
         "arguments": {
           "product_id": "${inputs.product_id}"
-        }
+        },
+        "background": true
       },
       {
         "id": "update",
@@ -76,11 +77,21 @@
         "depends_on": [
           "before"
         ],
-        "approval": "individual",
+        "approval": "batch",
         "arguments": {
           "product_id": "${inputs.product_id}",
           "base_price": "${inputs.net_price}"
         }
+      },
+      {
+        "id": "propose-batch",
+        "section": "steps",
+        "tool": "propose_write_batch",
+        "instruction": "Proponer los cambios preparados como un solo lote; Vex no escribe nada hasta que el usuario apruebe el lote.",
+        "depends_on": [
+          "update"
+        ],
+        "approval": "none"
       },
       {
         "id": "verify",
@@ -88,7 +99,7 @@
         "tool": "get_product_pricing",
         "instruction": "Leer net_price/unit_price/taxes y moneda; final_price nunca se persiste.",
         "depends_on": [
-          "update"
+          "propose-batch"
         ],
         "approval": "none",
         "arguments": {
@@ -202,7 +213,12 @@
         "expected": "not_verified"
       }
     ],
-    "gaps": []
+    "gaps": [],
+    "approval": "batch",
+    "launch": {
+      "title": "Cambiar precios",
+      "prompt": "Quiero cambiar el precio de uno o varios productos. Pregúntame lo mínimo y déjame aprobar el lote."
+    }
   }
 }
 ---
@@ -229,7 +245,9 @@ El neto y el final son distintos; formato de moneda viene del tenant. Tarifas po
 Las dependencias son orden lógico, no scheduler automático. Reutilizar IDs/evidencia del objetivo sin repetir descubrimiento; revalidar stock, saldo y estado antes de proponer cambios. Una tool resuelta con error/pending/unknown nunca prueba éxito.
 
 ## approvals
-Cada escritura exige preview de dominio actual y tarjeta individual del circuito propose→confirm→execute; el playbook no es consentimiento general, no emite tokens ni ejecuta handlers. Tras rechazo/no respuesta conservar estado pendiente. Nunca repetir un efecto desconocido ni un pago por un segundo seam.
+
+Playbook de lote: los pasos en segundo plano solo leen y preparan; las escrituras entran a un único lote con `propose_write_batch` y nada se aplica hasta que el usuario apruebe el lote. Las herramientas irreversibles nunca entran al lote: salen con su propia tarjeta.
+Cada escritura del lote exige preview de dominio actual y la aprobación del lote en el circuito propose→confirm→execute; el playbook no es consentimiento general, no emite tokens ni ejecuta handlers. Tras rechazo/no respuesta conservar estado pendiente. Nunca repetir un efecto desconocido ni un pago por un segundo seam.
 Si algún write pierde preview/contrato vigente, degradar a preparación-only y registrar el gap, no aprobar a ciegas.
 
 ## recovery

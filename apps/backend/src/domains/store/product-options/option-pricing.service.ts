@@ -135,6 +135,11 @@ export class OptionPricingService {
    * enviados → OPT_REQUIRES_SCHEDULE; sin ids el producto se vende solo, aunque
    * tenga grupos obligatorios. Un borrador (`draft`) guarda las adiciones
    * elegidas sin agendamiento (no cobra ni descuenta).
+   *
+   * QUI-1005: `channel: 'ecommerce'` marca la tienda en línea. Con
+   * «Permitir adiciones en la tienda en línea» apagado, ids enviados →
+   * OPT_ONLINE_DISABLED y, sin ids, el producto se vende solo (sin exigir
+   * grupos obligatorios). Sin `channel` (POS y canales internos) no se lee.
    */
   async resolve(
     store_id: number,
@@ -147,10 +152,12 @@ export class OptionPricingService {
       /** Restaurant store: add-ons are sold without a schedule. */
       restaurant?: boolean;
       client?: Prisma.TransactionClient;
+      /** Sales channel; only the online store honours `allow_online`. */
+      channel?: 'ecommerce';
     },
   ): Promise<ResolvedOptions> {
     const ids = option_ids ?? [];
-    const { scheduled, draft, restaurant, client } = options;
+    const { scheduled, draft, restaurant, client, channel } = options;
     if (!product_id) {
       if (ids.length) throw new VendixHttpException(ErrorCodes.OPT_SELECTION_INVALID);
       return EMPTY;
@@ -158,6 +165,10 @@ export class OptionPricingService {
     const enabled = await this.productOptions.isEnabled(store_id);
     if (!enabled) {
       if (ids.length) throw new VendixHttpException(ErrorCodes.OPT_DISABLED);
+      return EMPTY;
+    }
+    if (channel === 'ecommerce' && !(await this.productOptions.isAllowedOnline(store_id))) {
+      if (ids.length) throw new VendixHttpException(ErrorCodes.OPT_ONLINE_DISABLED);
       return EMPTY;
     }
     if (!scheduled) {

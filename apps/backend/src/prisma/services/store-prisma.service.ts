@@ -40,6 +40,9 @@ export class StorePrismaService extends BasePrismaService {
     'notifications',
     'notification_subscriptions',
     'push_subscriptions',
+    // Recordatorios y notificaciones (plan §3.1): `store_id` propio NOT NULL.
+    'notification_deliveries',
+    'scheduled_reminders',
     'invoices',
     // QUI — perfiles de facturación. `store_id` propio y NO nullable: el
     // invariante «un solo predeterminado por (store_id, operation_type)» se
@@ -125,6 +128,7 @@ export class StorePrismaService extends BasePrismaService {
     'ai_agent_recipe_events',
     'ai_agent_tool_results',
     'ai_agent_effects',
+    'ai_agent_write_batches',
     // Explicit store ownership excludes system-only (NULL tenant) trace spans.
     'ai_agent_trace_spans',
     // Bloques UI de Vex. `store_id` propio y NO nullable: scoping directo por
@@ -132,6 +136,11 @@ export class StorePrismaService extends BasePrismaService {
     // devolvería un delegate SIN scoping y un bloque sería legible por id
     // desde otra tienda.
     'ai_ui_blocks',
+    // Constancia de borrado de conversaciones: `store_id` propio, sin contenido.
+    'ai_conversation_purges',
+    // F4 T31: memoria de la tienda de Vex. `store_id` propio y NO nullable:
+    // sin este registro un recuerdo sería legible por id desde otra tienda.
+    'ai_agent_memories',
     'dispatch_notes',
     'employee_stores',
     'accounts_receivable',
@@ -221,6 +230,8 @@ export class StorePrismaService extends BasePrismaService {
     // ===== Manufacturing module (MVP) =====
     'manufacturing_settings',
     'store_sequences',
+    // QUI-1013: production plants (direct store_id).
+    'manufacturing_plants',
     // ===== Membership core (generalized) =====
     // Las 5 tablas de membresía llevan store_id directo → scoping directo por
     // tienda. membership_access_logs también scopea por store_id (bitácora).
@@ -301,8 +312,10 @@ export class StorePrismaService extends BasePrismaService {
     'crm_segments',
     'crm_pipelines',
     'crm_pipeline_stages',
+    'crm_stage_templates',
     'crm_opportunities',
     'crm_tasks',
+    'crm_task_assignees',
     'user_reminders',
     'crm_notes',
     'crm_campaigns',
@@ -1358,6 +1371,14 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.push_subscriptions;
   }
 
+  get notification_deliveries() {
+    return this.scoped_client.notification_deliveries;
+  }
+
+  get scheduled_reminders() {
+    return this.scoped_client.scheduled_reminders;
+  }
+
   // Invoicing models
   get invoices() {
     return this.scoped_client.invoices;
@@ -1777,12 +1798,24 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.ai_agent_effects;
   }
 
+  get ai_agent_write_batches() {
+    return this.scoped_client.ai_agent_write_batches;
+  }
+
   get ai_agent_tasks() {
     return this.scoped_client.ai_agent_tasks;
   }
 
   get ai_ui_blocks() {
     return this.scoped_client.ai_ui_blocks;
+  }
+
+  get ai_conversation_purges() {
+    return this.scoped_client.ai_conversation_purges;
+  }
+
+  get ai_agent_memories() {
+    return this.scoped_client.ai_agent_memories;
   }
 
   // Order Installments
@@ -2171,12 +2204,20 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.crm_pipeline_stages;
   }
 
+  get crm_stage_templates() {
+    return this.scoped_client.crm_stage_templates;
+  }
+
   get crm_opportunities() {
     return this.scoped_client.crm_opportunities;
   }
 
   get crm_tasks() {
     return this.scoped_client.crm_tasks;
+  }
+
+  get crm_task_assignees() {
+    return this.scoped_client.crm_task_assignees;
   }
 
   get user_reminders() {
@@ -2373,6 +2414,10 @@ export class StorePrismaService extends BasePrismaService {
 
   get store_sequences() {
     return this.scoped_client.store_sequences;
+  }
+
+  get manufacturing_plants() {
+    return this.scoped_client.manufacturing_plants;
   }
 
   // ===== Pedidos programados + adiciones =====

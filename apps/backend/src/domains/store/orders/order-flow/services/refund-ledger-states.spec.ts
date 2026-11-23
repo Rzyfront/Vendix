@@ -138,14 +138,8 @@ describe('RefundCoverageLedger — estados LEDGER (M2 fix-forward)', () => {
         refund_items: { create: jest.fn().mockResolvedValue({ id: 1 }), findMany: jest.fn().mockResolvedValue([]) },
         order_items: { findMany: jest.fn().mockResolvedValue([]) },
         payments: { update: jest.fn().mockResolvedValue({}) },
-        $transaction: jest.fn(async (cb: any, onReject?: any) => {
-          try {
-            return await cb(mockPrisma);
-          } catch (e) {
-            if (onReject) return onReject(e);
-            throw e;
-          }
-        }),
+        // Firma real de Prisma: el 2º arg son opciones (timeout/maxWait).
+        $transaction: jest.fn(async (cb: any, _options?: unknown) => cb(mockPrisma)),
       };
       const module: TestingModule = await Test.createTestingModule({
         providers: [

@@ -57,6 +57,20 @@ export class HabilitationScannerService {
       .pipe(map((result) => ({ success: true, data: result })));
   }
 
+  /** Re-attach to a scan remembered under `dian_habilitation:${scope}` (QUI-1020). */
+  resume(
+    scope: HabilitationScannerScope,
+    opts?: Omit<AiScanJobOptions, 'resumeKey' | 'onEnqueued'>,
+  ): Observable<HabilitationScanApiResponse> | null {
+    const resumed = this.aiScanJobs.resume<DianHabilitationScanResult>(
+      `dian_habilitation:${scope}`,
+      opts,
+    );
+    return resumed
+      ? resumed.pipe(map((result) => ({ success: true, data: result })))
+      : null;
+  }
+
   private scanUrl(scope: HabilitationScannerScope): string {
     return `${environment.apiUrl}/${scope}/invoicing/dian-config/scan-habilitation`;
   }

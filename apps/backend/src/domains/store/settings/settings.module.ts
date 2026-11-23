@@ -1,3 +1,4 @@
+import { AiIngestModule } from '../../../common/ai-ingest/ai-ingest.module';
 import { Module, OnModuleInit, forwardRef } from '@nestjs/common';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createSettingsAdminTools } from '../../../ai-engine/tools/domains/settings-admin.tools';
@@ -29,6 +30,7 @@ import { CashRegistersModule } from '../cash-registers/cash-registers.module';
   // QUI-784 agregó la dependencia inversa (sessions→settings vía token) y
   // CashRegistersModule ahora importa SettingsModule para proveer el token.
   imports: [
+    AiIngestModule,
     PrismaModule,
     AuditModule,
     EmailModule,

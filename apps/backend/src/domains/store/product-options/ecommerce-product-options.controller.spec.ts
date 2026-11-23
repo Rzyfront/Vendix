@@ -3,13 +3,16 @@ import { RequestContextService } from '@common/context/request-context.service';
 
 describe('EcommerceProductOptionsController (QUI-1001)', () => {
   const groups = [{ id: 1, name: 'Sabor' }];
-  let productOptions: { applicableForProduct: jest.Mock };
+  let productOptions: { applicableForProduct: jest.Mock; isAllowedOnline: jest.Mock };
   let globalPrisma: { stores: { findUnique: jest.Mock } };
   let controller: EcommerceProductOptionsController;
   const responseService = { success: jest.fn((data: unknown) => ({ data })) };
 
   beforeEach(() => {
-    productOptions = { applicableForProduct: jest.fn().mockResolvedValue(groups) };
+    productOptions = {
+      applicableForProduct: jest.fn().mockResolvedValue(groups),
+      isAllowedOnline: jest.fn().mockResolvedValue(true),
+    };
     globalPrisma = { stores: { findUnique: jest.fn() } };
     jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(7);
     controller = new EcommerceProductOptionsController(
@@ -39,5 +42,16 @@ describe('EcommerceProductOptionsController (QUI-1001)', () => {
     globalPrisma.stores.findUnique.mockResolvedValue({ industries: ['retail', 'restaurant'] });
     const res: any = await controller.forProduct(5);
     expect(res.data).toEqual(groups);
+  });
+
+  // QUI-1005: «Permitir adiciones en la tienda en línea» apagado → the online
+  // store gets no groups, so the product shows without the add-on step.
+  it('returns an empty list when the store does not allow add-ons online', async () => {
+    globalPrisma.stores.findUnique.mockResolvedValue({ industries: ['restaurant'] });
+    productOptions.isAllowedOnline.mockResolvedValue(false);
+    const res: any = await controller.forProduct(5);
+    expect(res.data).toEqual([]);
+    expect(productOptions.isAllowedOnline).toHaveBeenCalledWith(7);
+    expect(productOptions.applicableForProduct).not.toHaveBeenCalled();
   });
 });

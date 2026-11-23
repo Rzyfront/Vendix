@@ -14,6 +14,12 @@ export interface MetaReadiness {
   production_checklist: string[];
 }
 
+export interface WhatsappCoexistence {
+  enabled: boolean;
+  contacts_sync: string | null;
+  history_sync: string | null;
+}
+
 export interface WhatsappChannel {
   id?: number;
   connected: boolean;
@@ -28,7 +34,8 @@ export interface WhatsappChannel {
   connected_at?: string | null;
   disconnected_at?: string | null;
   last_error?: string | null;
-  registration_status?: 'registered' | 'failed' | null;
+  registration_status?: 'registered' | 'failed' | 'not_required' | null;
+  coexistence?: WhatsappCoexistence | null;
   metadata?: Record<string, any> | null;
 }
 
@@ -39,6 +46,8 @@ export interface CompleteWhatsappEmbeddedSignupRequest {
   phone_number_id?: string;
   display_phone_number?: string;
   business_account_id?: string;
+  /** Raw FINISH* session event, when Meta sent one. */
+  finish_event?: string;
 }
 
 export interface ApiResponse<T> {

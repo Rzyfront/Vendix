@@ -308,4 +308,14 @@
     label="Adiciones"
     description="Permite ofrecer adiciones a los productos (fresas, chantilly, velas). Se administran en Productos > Adiciones."
   />
+
+  @if (optionsEnabled()) {
+    <!-- QUI-1005: solo gobierna la tienda en línea; el POS no cambia. -->
+    <app-setting-toggle
+      [ngModel]="optionsAllowOnline()"
+      (ngModelChange)="onOptionsAllowOnlineChange($event)"
+      label="Permitir adiciones en la tienda en línea"
+      description="Apagado: la tienda en línea vende estos productos sin adiciones y rechaza pedidos que las traigan. El punto de venta las sigue ofreciendo."
+    />
+  }
 </div>

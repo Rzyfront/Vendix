@@ -32,6 +32,21 @@ export const PRODUCT_SAVE_ERROR_MAP: Record<string, ProductSaveErrorInfo> = {
     actionKind: 'release-reservations',
     actionLabel: 'Liberar reservas',
   },
+  PRODUCTION_SITE_REQUIRED: {
+    label: 'Dónde se produce',
+    reason:
+      'La tienda es restaurante y manufactura: elige si este producto se produce en Cocina (Producción) o en Planta.',
+    actionKind: 'focus',
+    actionLabel: 'Elegir dónde se produce',
+    actionTarget: 'production_site',
+  },
+  PRODUCTION_SITE_PLANT_INVALID: {
+    label: 'Planta no válida',
+    reason: 'La planta elegida ya no existe en la tienda. Elige otra o deja la planta principal.',
+    actionKind: 'focus',
+    actionLabel: 'Elegir planta',
+    actionTarget: 'production_plant_id',
+  },
   PROD_DUP_001: {
     label: 'SKU o URL duplicados',
     reason:

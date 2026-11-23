@@ -13,6 +13,7 @@ import { PriceTierCacheService } from '../../../price-tiers/services/price-tier-
 import { PriceResolverService } from '../../../../../../shared/services/pricing';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
+import { CustomerLocationsService } from '../../../../../../shared/services/customer-locations.service';
 
 describe('QuotationFormModalComponent', () => {
   let quotations: jasmine.SpyObj<QuotationsService>;
@@ -66,6 +67,42 @@ describe('QuotationFormModalComponent', () => {
         { provide: CurrencyFormatService, useValue: { loadCurrency: () => undefined, format: (value: number) => String(value) } },
       ],
     });
+  });
+
+  it('el buscador lista una línea por establecimiento y la elegida llega preseleccionada', () => {
+    const locations = [
+      { id: 10, label: 'Sede Norte', address_line1: 'Calle 10', city: 'Cali', is_primary: true },
+      { id: 11, label: 'Sede Sur', address_line1: 'Calle 11', city: 'Cali', is_primary: false },
+    ];
+    TestBed.overrideProvider(CustomerLocationsService, {
+      useValue: { listByCustomer: () => of(locations) },
+    });
+    const fixture = createComponent('sale');
+    const component = fixture.componentInstance;
+    component.customerResults.set([
+      { id: 1, legal_name: 'ACME SAS', addresses: locations },
+      { id: 2, first_name: 'Ana', addresses: [] },
+    ]);
+
+    expect(component.customerRows().map((r) => r.key)).toEqual(['1-10', '1-11', '2']);
+
+    component.selectCustomerRow(component.customerRows()[1]);
+    expect(component.selectedCustomer()?.id).toBe(1);
+    expect(component.selectedLocationId()).toBe(11);
+  });
+
+  it('elegir un cliente sin sedes divididas conserva la principal como hoy', () => {
+    const locations = [
+      { id: 10, label: 'Sede Norte', address_line1: 'Calle 10', city: 'Cali', is_primary: false },
+      { id: 12, label: 'Bodega', address_line1: 'Calle 12', city: 'Cali', is_primary: true },
+    ];
+    TestBed.overrideProvider(CustomerLocationsService, {
+      useValue: { listByCustomer: () => of(locations) },
+    });
+    const fixture = createComponent('sale');
+    const component = fixture.componentInstance;
+    component.selectCustomer({ id: 7, first_name: 'Ada' });
+    expect(component.selectedLocationId()).toBe(12);
   });
 
   it('requires a customer for contract quotes, includes a free line, blocks duplicate saves, and allows retry after failure', async () => {

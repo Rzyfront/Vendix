@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
 import { ErrorCodes, VendixHttpException } from '../../../../../common/errors';
@@ -7,24 +7,47 @@ import {
   resolveStoreTimezone,
   zonedWallClockToUtc,
 } from '../../../../../common/utils/store-timezone.util';
-import { NotificationsService } from '../../../notifications/notifications.service';
+import { NotificationDispatcher } from '../../../notifications/notification-dispatcher.service';
+import { ReminderScheduler } from '../../../notifications/reminders/reminder-scheduler.service';
+import {
+  CrmPipelineService,
+  CrmTaskOpportunityMove,
+} from '../pipeline/crm-pipeline.service';
 import {
   CrmViewer,
+  activeStoreStaffUserWhere,
   isActiveStoreStaff,
   isStoreCustomer,
   resolveCrmViewer,
 } from '../shared/crm-access';
 import {
+  CompleteCrmTaskDto,
   CreateCrmTaskDto,
+  CrmTaskStaffQueryDto,
   CrmTaskStatsQueryDto,
   CrmTasksQueryDto,
   UpdateCrmTaskDto,
 } from './dto/crm-tasks.dto';
+import {
+  CRM_TASK_ASSIGNED_NOTIFICATION,
+  CRM_TASK_CLOSED_NOTIFICATION,
+  CRM_TASK_REASSIGNED_NOTIFICATION,
+  CRM_TASK_REMINDER_SOURCE,
+  crmTaskCustomerSuffix,
+  crmTaskData,
+  crmTaskReminderRecipients,
+  formatCrmTaskDueAt,
+} from './crm-task-notifications';
+
+export {
+  CRM_TASK_ASSIGNED_NOTIFICATION,
+  CRM_TASK_DUE_NOTIFICATION,
+  CRM_TASKS_ROUTE,
+} from './crm-task-notifications';
 
 export const CRM_TASKS_PERMISSION = 'store:crm_tasks:manage';
-export const CRM_TASK_ASSIGNED_NOTIFICATION = 'crm_task_assigned';
-export const CRM_TASK_DUE_NOTIFICATION = 'crm_task_due';
-export const CRM_TASKS_ROUTE = '/admin/customers/tasks';
+/** People the support picker lists per search. */
+export const CRM_TASK_STAFF_LIMIT = 20;
 
 const PERSON_SELECT = { id: true, first_name: true, last_name: true } as const;
 
@@ -33,9 +56,20 @@ const TASK_INCLUDE = {
   assigned_user: { select: PERSON_SELECT },
   created_by: { select: PERSON_SELECT },
   opportunity: { select: { id: true, title: true } },
+  move_to_stage: { select: { id: true, name: true, kind: true, color: true } },
+  supporters: {
+    select: { user: { select: PERSON_SELECT } },
+    orderBy: { id: 'asc' },
+  },
 } as const;
 
 type TaskRow = Prisma.crm_tasksGetPayload<{ include: typeof TASK_INCLUDE }>;
+
+/** Opportunity and stage the seller chose when completing the task. */
+interface ChosenMove {
+  opportunity_id: number;
+  move_to_stage_id: number;
+}
 
 interface DayWindow {
   now: Date;
@@ -46,19 +80,36 @@ interface DayWindow {
 
 /**
  * CRM tasks (PLAN-CRM §4.6). A seller or cashier only sees the tasks assigned
- * to them or created by them and can only assign to themselves; owner/admin
- * (see-all) see and assign everything. Assigning someone else sends them a
- * notification through the existing notifications system; the due reminder is
- * `CrmTaskDueJob`.
+ * to them, created by them or where they are support, and can only assign to
+ * themselves (they can add support people); owner/admin (see-all) see and
+ * assign everything.
+ *
+ * Notifications (odd/tasks/recordatorios-notificaciones.md §2.1) go through
+ * `NotificationDispatcher` (store staff only, each person's device/e-mail
+ * preferences) and never to whoever did the action: assigned / added as
+ * support, reassigned (the previous assignee is told too), rescheduled by
+ * someone else, and completed or cancelled by someone else (to the creator).
+ * Every write re-syncs the task's reminders in `scheduled_reminders`
+ * (`ReminderScheduler`): due soon, due and still overdue after 24 h, fired by
+ * `ScheduledRemindersJob` through `CrmTaskReminderSource`.
+ *
+ * A task linked to an opportunity can "move" it: when the task is completed
+ * the opportunity goes to `move_to_stage_id` through the pipeline service.
+ * A task that moves nothing can still move an open opportunity of its
+ * customer chosen when completing it (`complete` with a body).
  *
  * "Today" and "overdue" are measured in the store's timezone, not the
  * server's (skill vendix-date-timezone).
  */
 @Injectable()
 export class CrmTasksService {
+  private readonly logger = new Logger(CrmTasksService.name);
+
   constructor(
     private readonly prisma: StorePrismaService,
-    private readonly notifications: NotificationsService,
+    private readonly dispatcher: NotificationDispatcher,
+    private readonly pipeline: CrmPipelineService,
+    private readonly reminders: ReminderScheduler,
   ) {}
 
   async list(query: CrmTasksQueryDto) {
@@ -93,7 +144,10 @@ export class CrmTasksService {
   async today() {
     const viewer = this.viewer();
     const window = await this.dayWindow(viewer.store_id);
-    const mine = { assigned_user_id: viewer.user_id, status: 'pending' as const };
+    const mine = {
+      ...this.involves(viewer.user_id),
+      status: 'pending' as const,
+    };
     const [overdue, today, upcoming] = await Promise.all([
       this.prisma.crm_tasks.findMany({
         where: { ...mine, due_at: { lt: window.now } },
@@ -169,12 +223,55 @@ export class CrmTasksService {
     return this.toTask(row, new Date());
   }
 
+  /**
+   * Active staff of the store for the support picker: the same people the
+   * API accepts as support (role with `store:crm_tasks:manage`), so a seller
+   * without POS access can still find them. Only id and name; every word of
+   * `q` must match the first or the last name.
+   */
+  async staff(query: CrmTaskStaffQueryDto = {}) {
+    this.viewer();
+    const words = (query.q ?? '').trim().split(/\s+/).filter(Boolean);
+    const rows = await this.prisma.store_users.findMany({
+      where: {
+        user: {
+          ...activeStoreStaffUserWhere(CRM_TASKS_PERMISSION),
+          ...(words.length
+            ? {
+                AND: words.map((word) => ({
+                  OR: [
+                    { first_name: { contains: word, mode: 'insensitive' as const } },
+                    { last_name: { contains: word, mode: 'insensitive' as const } },
+                  ],
+                })),
+              }
+            : {}),
+        },
+      },
+      select: { user: { select: PERSON_SELECT } },
+      orderBy: [{ user: { first_name: 'asc' } }, { user_id: 'asc' }],
+      take: CRM_TASK_STAFF_LIMIT,
+    });
+    return rows.map((row) => row.user);
+  }
+
   async create(dto: CreateCrmTaskDto) {
     const viewer = this.viewer();
     const assignee =
       dto.assigned_user_id === undefined ? viewer.user_id : dto.assigned_user_id;
     await this.assertAssignee(viewer, assignee);
     await this.assertLinks(viewer, dto);
+    const supporters = await this.resolveSupporters(
+      dto.support_user_ids ?? [],
+      assignee,
+    );
+    if (dto.move_to_stage_id) {
+      await this.assertTargetStage(
+        viewer,
+        dto.opportunity_id,
+        dto.move_to_stage_id,
+      );
+    }
 
     const created = await this.prisma.crm_tasks.create({
       data: {
@@ -187,17 +284,41 @@ export class CrmTasksService {
         customer_id: dto.customer_id ?? null,
         opportunity_id: dto.opportunity_id ?? null,
         conversation_id: dto.conversation_id ?? null,
+        move_to_stage_id: dto.move_to_stage_id ?? null,
+        ...(supporters.length
+          ? {
+              supporters: {
+                create: supporters.map((user_id) => ({
+                  store_id: viewer.store_id,
+                  user_id,
+                })),
+              },
+            }
+          : {}),
       },
       include: TASK_INCLUDE,
     });
     await this.notifyAssigned(viewer, created);
+    await this.notifySupporters(viewer, created, supporters);
+    await this.syncReminders(created);
     return this.toTask(created, new Date());
   }
 
-  async update(id: number, dto: UpdateCrmTaskDto) {
+  async update(
+    id: number,
+    dto: UpdateCrmTaskDto,
+    options: { move?: ChosenMove } = {},
+  ) {
     const viewer = this.viewer();
     const current = await this.findVisible(viewer, id);
+    this.assertSupportOnlyEdit(viewer, current, dto);
+    const completing = dto.status === 'done' && current.status !== 'done';
+    // A task already done moves nothing, so its choice is not even checked.
+    const chosen = completing ? options.move : undefined;
+    if (chosen) await this.assertChosenMove(viewer, current, chosen);
+    // Plain fields are written as asked; the status step is guarded apart.
     const data: Prisma.crm_tasksUncheckedUpdateManyInput = {};
+    const state: Prisma.crm_tasksUncheckedUpdateManyInput = {};
 
     if (dto.title !== undefined) data.title = dto.title.trim();
     if (dto.description !== undefined) {
@@ -214,24 +335,131 @@ export class CrmTasksService {
       data.assigned_user_id = dto.assigned_user_id;
     }
     if (dto.status !== undefined && dto.status !== current.status) {
-      data.status = dto.status;
-      data.completed_at = dto.status === 'done' ? new Date() : null;
+      state.status = dto.status;
+      state.completed_at = dto.status === 'done' ? new Date() : null;
     }
+    if (
+      dto.move_to_stage_id !== undefined &&
+      dto.move_to_stage_id !== current.move_to_stage_id
+    ) {
+      if (dto.move_to_stage_id !== null) {
+        await this.assertTargetStage(
+          viewer,
+          current.opportunity_id,
+          dto.move_to_stage_id,
+        );
+      }
+      data.move_to_stage_id = dto.move_to_stage_id;
+    }
+    const assignee = reassigned
+      ? (dto.assigned_user_id ?? null)
+      : current.assigned_user_id;
+    const support = await this.supportChange(
+      current,
+      assignee,
+      dto.support_user_ids,
+    );
 
-    if (Object.keys(data).length) {
-      await this.prisma.crm_tasks.updateMany({ where: { id }, data });
+    // The task and its support set change together or not at all. The tx
+    // client is unscoped: every write names the store. Completing is guarded
+    // on the row, so of two simultaneous completions only one moves the
+    // opportunity; the other fields of the same request are saved anyway.
+    let completed = false;
+    let cancelled = false;
+    if (
+      Object.keys(data).length ||
+      Object.keys(state).length ||
+      support.removed.length ||
+      support.added.length
+    ) {
+      await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        if (Object.keys(data).length) {
+          await tx.crm_tasks.updateMany({
+            where: { id, store_id: viewer.store_id },
+            data,
+          });
+        }
+        if (Object.keys(state).length) {
+          const { count } = await tx.crm_tasks.updateMany({
+            where: {
+              id,
+              store_id: viewer.store_id,
+              ...(completing ? { status: { not: 'done' as const } } : {}),
+            },
+            data: state,
+          });
+          completed = completing && count === 1;
+          cancelled = state.status === 'cancelled' && count === 1;
+        }
+        if (support.removed.length) {
+          await tx.crm_task_assignees.deleteMany({
+            where: {
+              store_id: viewer.store_id,
+              task_id: id,
+              user_id: { in: support.removed },
+            },
+          });
+        }
+        if (support.added.length) {
+          await tx.crm_task_assignees.createMany({
+            data: support.added.map((user_id) => ({
+              store_id: viewer.store_id,
+              task_id: id,
+              user_id,
+            })),
+            skipDuplicates: true,
+          });
+        }
+      });
     }
     const updated = await this.prisma.crm_tasks.findFirst({
       where: { id },
       include: TASK_INCLUDE,
     });
     if (!updated) throw new VendixHttpException(ErrorCodes.CRM_TASK_001);
-    if (reassigned) await this.notifyAssigned(viewer, updated);
-    return this.toTask(updated, new Date());
+    if (reassigned) {
+      await this.notifyAssigned(viewer, updated);
+      await this.notifyReassignedAway(viewer, updated, current.assigned_user_id);
+    }
+    await this.notifySupporters(viewer, updated, support.added);
+    if (!reassigned && this.dueChanged(current.due_at, updated.due_at)) {
+      await this.notifyRescheduled(viewer, updated);
+    }
+    if (completed || cancelled) {
+      await this.notifyClosed(viewer, updated, completed ? 'done' : 'cancelled');
+    }
+    await this.syncReminders(updated);
+    const task = this.toTask(updated, new Date());
+    // Reopening never moves it back; only the step to `done` moves it, and
+    // only for the request that took that step.
+    if (!completed) return task;
+    return {
+      ...task,
+      opportunity_move: chosen
+        ? await this.moveOpportunity(
+            updated.id,
+            chosen.opportunity_id,
+            chosen.move_to_stage_id,
+            null,
+          )
+        : await this.moveLinkedOpportunity(updated),
+    };
   }
 
-  complete(id: number) {
-    return this.update(id, { status: 'done' });
+  /**
+   * Without a body the task is just completed (and moves its opportunity if
+   * it was set up to). With `opportunity_id` and `move_to_stage_id` it also
+   * moves that opportunity, see {@link assertChosenMove}.
+   */
+  complete(id: number, dto: CompleteCrmTaskDto = {}) {
+    const move =
+      dto.opportunity_id && dto.move_to_stage_id
+        ? {
+            opportunity_id: dto.opportunity_id,
+            move_to_stage_id: dto.move_to_stage_id,
+          }
+        : undefined;
+    return this.update(id, { status: 'done' }, { move });
   }
 
   reopen(id: number) {
@@ -242,6 +470,49 @@ export class CrmTasksService {
     return resolveCrmViewer(ErrorCodes.CRM_TASK_001);
   }
 
+  /**
+   * Who only helps with a task (not its assignee nor its creator, without
+   * see-all) may complete or reopen it, nothing else (CRM_TASK_003). Only
+   * what really changes counts: the form sends title, description and due
+   * date on every save, so saving untouched is not an edit.
+   */
+  private assertSupportOnlyEdit(
+    viewer: CrmViewer,
+    current: TaskRow,
+    dto: UpdateCrmTaskDto,
+  ): void {
+    if (
+      viewer.can_see_all ||
+      current.assigned_user_id === viewer.user_id ||
+      current.created_by_user_id === viewer.user_id
+    ) {
+      return;
+    }
+    const time = (value: Date | string | null | undefined) =>
+      value ? new Date(value).getTime() : null;
+    const before = current.supporters.map((row) => row.user.id);
+    const requested = dto.support_user_ids
+      ? [...new Set(dto.support_user_ids)].filter(
+          (userId) => userId !== current.assigned_user_id,
+        )
+      : before;
+    const changes = [
+      dto.title !== undefined && dto.title.trim() !== current.title,
+      dto.description !== undefined &&
+        (dto.description?.trim() || null) !== current.description,
+      dto.due_at !== undefined && time(dto.due_at) !== time(current.due_at),
+      dto.assigned_user_id !== undefined &&
+        dto.assigned_user_id !== current.assigned_user_id,
+      dto.move_to_stage_id !== undefined &&
+        dto.move_to_stage_id !== current.move_to_stage_id,
+      requested.length !== before.length ||
+        requested.some((userId) => !before.includes(userId)),
+    ];
+    if (changes.some(Boolean)) {
+      throw new VendixHttpException(ErrorCodes.CRM_TASK_003);
+    }
+  }
+
   private visibility(viewer: CrmViewer): Prisma.crm_tasksWhereInput {
     return viewer.can_see_all
       ? {}
@@ -249,8 +520,19 @@ export class CrmTasksService {
           OR: [
             { assigned_user_id: viewer.user_id },
             { created_by_user_id: viewer.user_id },
+            { supporters: { some: { user_id: viewer.user_id } } },
           ],
         };
+  }
+
+  /** The user is the assignee or one of the support people. */
+  private involves(userId: number): Prisma.crm_tasksWhereInput {
+    return {
+      OR: [
+        { assigned_user_id: userId },
+        { supporters: { some: { user_id: userId } } },
+      ],
+    };
   }
 
   private listWhere(
@@ -279,15 +561,18 @@ export class CrmTasksService {
     return { AND: and };
   }
 
-  /** `me`, `unassigned`, `all` (no filter) or a user id. */
+  /**
+   * `me`, `unassigned` (no assignee), `all` (no filter) or a user id. `me`
+   * and a user id match the assignee or a support person.
+   */
   private assignedWhere(
     viewer: CrmViewer,
     assigned: string,
   ): Prisma.crm_tasksWhereInput {
-    if (assigned === 'me') return { assigned_user_id: viewer.user_id };
+    if (assigned === 'me') return this.involves(viewer.user_id);
     if (assigned === 'unassigned') return { assigned_user_id: null };
     if (assigned === 'all') return {};
-    return { assigned_user_id: Number(assigned) };
+    return this.involves(Number(assigned));
   }
 
   private async findVisible(viewer: CrmViewer, id: number): Promise<TaskRow> {
@@ -323,14 +608,11 @@ export class CrmTasksService {
       throw new VendixHttpException(ErrorCodes.CRM_CUSTOMER_001);
     }
     if (dto.opportunity_id) {
-      // Same visibility as the pipeline: a seller links only their own.
-      const found = await this.prisma.crm_opportunities.count({
-        where: {
-          id: dto.opportunity_id,
-          ...(viewer.can_see_all ? {} : { owner_user_id: viewer.user_id }),
-        },
-      });
-      if (!found) throw new VendixHttpException(ErrorCodes.CRM_OPPORTUNITY_001);
+      await this.assertOpportunityVisible(
+        viewer,
+        dto.opportunity_id,
+        dto.customer_id,
+      );
     }
     if (dto.conversation_id) {
       const found = await this.prisma.crm_conversations.count({
@@ -340,22 +622,315 @@ export class CrmTasksService {
     }
   }
 
+  /**
+   * Support people to keep: unique, never the assignee, and every one not
+   * already on the task (`kept`) must be active staff that can see tasks.
+   */
+  private async resolveSupporters(
+    ids: number[],
+    assignee: number | null,
+    kept: number[] = [],
+  ): Promise<number[]> {
+    const unique = [...new Set(ids)].filter((id) => id !== assignee);
+    for (const id of unique) {
+      if (kept.includes(id)) continue;
+      if (!(await isActiveStoreStaff(this.prisma, id, CRM_TASKS_PERMISSION))) {
+        throw new VendixHttpException(ErrorCodes.CRM_STAFF_001);
+      }
+    }
+    return unique;
+  }
+
+  /**
+   * Who joins and who leaves the support people. Without `requested` the set
+   * stays, except a support person who just became the assignee.
+   */
+  private async supportChange(
+    current: TaskRow,
+    assignee: number | null,
+    requested: number[] | undefined,
+  ): Promise<{ added: number[]; removed: number[] }> {
+    const before = current.supporters.map((row) => row.user.id);
+    const after =
+      requested === undefined
+        ? before.filter((id) => id !== assignee)
+        : await this.resolveSupporters(requested, assignee, before);
+    return {
+      added: after.filter((id) => !before.includes(id)),
+      removed: before.filter((id) => !after.includes(id)),
+    };
+  }
+
+  /**
+   * A move chosen when completing: only for a task that moves nothing by
+   * itself (CRM_TASK_004), and with the same rules as setting one up: the
+   * opportunity is an open one of the task's customer that the viewer sees
+   * on the board (CRM_OPPORTUNITY_001), and the stage an active, non-lost
+   * stage of its board (CRM_TASK_002). Checked before anything is written.
+   */
+  private async assertChosenMove(
+    viewer: CrmViewer,
+    current: TaskRow,
+    chosen: ChosenMove,
+  ): Promise<void> {
+    if (current.move_to_stage_id) {
+      throw new VendixHttpException(ErrorCodes.CRM_TASK_004);
+    }
+    if (!current.customer_id) {
+      throw new VendixHttpException(ErrorCodes.CRM_OPPORTUNITY_001);
+    }
+    await this.assertOpportunityVisible(
+      viewer,
+      chosen.opportunity_id,
+      current.customer_id,
+      true,
+    );
+    await this.pipeline.assertTaskTargetStage(
+      chosen.opportunity_id,
+      chosen.move_to_stage_id,
+    );
+  }
+
+  /**
+   * Same visibility as the pipeline: a seller only reaches their own. With a
+   * customer, the opportunity must be that customer's, so a task of one
+   * customer never moves another customer's opportunity.
+   */
+  private async assertOpportunityVisible(
+    viewer: CrmViewer,
+    opportunityId: number,
+    customerId?: number,
+    openOnly = false,
+  ): Promise<void> {
+    const found = await this.prisma.crm_opportunities.count({
+      where: {
+        id: opportunityId,
+        ...(customerId ? { customer_id: customerId } : {}),
+        ...(openOnly ? { status: 'open' as const } : {}),
+        ...(viewer.can_see_all ? {} : { owner_user_id: viewer.user_id }),
+      },
+    });
+    if (!found) throw new VendixHttpException(ErrorCodes.CRM_OPPORTUNITY_001);
+  }
+
+  /**
+   * The target stage needs a linked opportunity and must be of its board.
+   * Choosing it decides where the opportunity goes when anyone completes the
+   * task, so only who sees that opportunity on the board may choose it (a
+   * support person of someone else's task may not).
+   */
+  private async assertTargetStage(
+    viewer: CrmViewer,
+    opportunityId: number | null | undefined,
+    stageId: number,
+  ): Promise<void> {
+    if (!opportunityId) throw new VendixHttpException(ErrorCodes.CRM_TASK_002);
+    await this.assertOpportunityVisible(viewer, opportunityId);
+    await this.pipeline.assertTaskTargetStage(opportunityId, stageId);
+  }
+
+  /**
+   * The task was just completed: move its opportunity if it says so. The
+   * task stays completed whatever happens here; the answer says why nothing
+   * moved.
+   */
+  private async moveLinkedOpportunity(
+    task: TaskRow,
+  ): Promise<CrmTaskOpportunityMove | null> {
+    if (!task.move_to_stage_id) return null;
+    const stage = task.move_to_stage
+      ? {
+          id: task.move_to_stage.id,
+          name: task.move_to_stage.name,
+          kind: task.move_to_stage.kind,
+        }
+      : null;
+    if (!task.opportunity_id) {
+      return { moved: false, reason: 'opportunity_missing', stage };
+    }
+    return this.moveOpportunity(
+      task.id,
+      task.opportunity_id,
+      task.move_to_stage_id,
+      stage,
+    );
+  }
+
+  /**
+   * Moves the opportunity through the pipeline (same move, audit and
+   * customer stage as the board). A failure leaves the task completed and
+   * answers `failed`.
+   */
+  private async moveOpportunity(
+    taskId: number,
+    opportunityId: number,
+    stageId: number,
+    stage: CrmTaskOpportunityMove['stage'],
+  ): Promise<CrmTaskOpportunityMove> {
+    try {
+      return await this.pipeline.moveForTask(opportunityId, stageId);
+    } catch (error) {
+      this.logger.warn(
+        `Task ${taskId}: opportunity ${opportunityId} not moved: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return { moved: false, reason: 'failed', stage };
+    }
+  }
+
+  /**
+   * One personal notice through the dispatcher: store staff only, with the
+   * person's device/e-mail preferences. Never throws (the dispatcher logs).
+   */
+  private async notify(
+    viewer: CrmViewer,
+    userId: number,
+    type: string,
+    title: string,
+    body: string,
+    data: Record<string, unknown>,
+  ): Promise<void> {
+    await this.dispatcher.notify({
+      store_id: viewer.store_id,
+      user_ids: [userId],
+      type,
+      title,
+      body,
+      data,
+    });
+  }
+
   /** Never notifies the actor about their own assignment. */
   private async notifyAssigned(viewer: CrmViewer, task: TaskRow) {
     if (!task.assigned_user_id || task.assigned_user_id === viewer.user_id) {
       return;
     }
-    const customer = task.customer
-      ? ` · ${[task.customer.first_name, task.customer.last_name].filter(Boolean).join(' ')}`
-      : '';
-    await this.notifications.sendToUser(
-      viewer.store_id,
+    await this.notify(
+      viewer,
       task.assigned_user_id,
       CRM_TASK_ASSIGNED_NOTIFICATION,
       'Nueva tarea asignada',
-      `${task.title}${customer}`,
-      { kind: 'crm_task', task_id: task.id, url: CRM_TASKS_ROUTE },
+      `${task.title}${this.customerSuffix(task)}`,
+      crmTaskData(task.id),
     );
+  }
+
+  /** The previous assignee learns the task is no longer theirs. */
+  private async notifyReassignedAway(
+    viewer: CrmViewer,
+    task: TaskRow,
+    previousAssignee: number | null,
+  ) {
+    if (!previousAssignee || previousAssignee === viewer.user_id) return;
+    if (previousAssignee === task.assigned_user_id) return;
+    await this.notify(
+      viewer,
+      previousAssignee,
+      CRM_TASK_REASSIGNED_NOTIFICATION,
+      'Tarea reasignada',
+      `Ya no está a tu cargo: ${task.title}${this.customerSuffix(task)}`,
+      crmTaskData(task.id, { role: 'previous_assignee' }),
+    );
+  }
+
+  /**
+   * Someone else moved (or cleared) the due date of a pending task: its
+   * assignee (the creator when unassigned) is told. Same preference as a
+   * reassignment ("Tarea reasignada o reprogramada").
+   */
+  private async notifyRescheduled(viewer: CrmViewer, task: TaskRow) {
+    if (task.status !== 'pending') return;
+    const owner = task.assigned_user_id ?? task.created_by_user_id;
+    if (!owner || owner === viewer.user_id) return;
+    const when = task.due_at
+      ? `nueva fecha: ${formatCrmTaskDueAt(
+          task.due_at,
+          await resolveStoreTimezone(this.prisma, viewer.store_id),
+        )}`
+      : 'ya no tiene fecha';
+    await this.notify(
+      viewer,
+      owner,
+      CRM_TASK_REASSIGNED_NOTIFICATION,
+      'Tarea reprogramada',
+      `${task.title}${this.customerSuffix(task)} · ${when}`,
+      crmTaskData(task.id, { role: 'rescheduled' }),
+    );
+  }
+
+  /** Completed or cancelled by someone else: the creator is told. */
+  private async notifyClosed(
+    viewer: CrmViewer,
+    task: TaskRow,
+    status: 'done' | 'cancelled',
+  ) {
+    const creator = task.created_by_user_id;
+    if (!creator || creator === viewer.user_id) return;
+    await this.notify(
+      viewer,
+      creator,
+      CRM_TASK_CLOSED_NOTIFICATION,
+      status === 'done' ? 'Tarea completada' : 'Tarea cancelada',
+      `${task.title}${this.customerSuffix(task)}`,
+      crmTaskData(task.id, { status }),
+    );
+  }
+
+  /** Only to the ones just added, never to the actor. Removing is silent. */
+  private async notifySupporters(
+    viewer: CrmViewer,
+    task: TaskRow,
+    added: number[],
+  ) {
+    for (const userId of added) {
+      if (userId === viewer.user_id) continue;
+      await this.notify(
+        viewer,
+        userId,
+        CRM_TASK_ASSIGNED_NOTIFICATION,
+        'Te sumaron como apoyo',
+        `Te sumaron como apoyo en: ${task.title}${this.customerSuffix(task)}`,
+        crmTaskData(task.id, { role: 'support' }),
+      );
+    }
+  }
+
+  private dueChanged(before: Date | null, after: Date | null): boolean {
+    return (before?.getTime() ?? null) !== (after?.getTime() ?? null);
+  }
+
+  /**
+   * Re-plans the task reminders after every write (idempotent): a pending
+   * task with a date gets due soon / due / escalation; done, cancelled or
+   * without a date cancels them. A failure never undoes the write.
+   */
+  private async syncReminders(task: TaskRow): Promise<void> {
+    try {
+      await this.reminders.sync({
+        source_type: CRM_TASK_REMINDER_SOURCE,
+        source_id: task.id,
+        store_id: task.store_id,
+        due_at: task.due_at,
+        status: task.status,
+        recipients: crmTaskReminderRecipients({
+          assigned_user_id: task.assigned_user_id,
+          created_by_user_id: task.created_by_user_id,
+          supporter_ids: task.supporters.map((row) => row.user.id),
+        }),
+        digest: true,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Task ${task.id}: reminders not synced: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  private customerSuffix(task: TaskRow): string {
+    return crmTaskCustomerSuffix(task.customer);
   }
 
   private async dayWindow(storeId: number): Promise<DayWindow> {
@@ -393,8 +968,10 @@ export class CrmTasksService {
       completed_at: row.completed_at,
       customer: row.customer,
       assigned_user: row.assigned_user,
+      support_users: row.supporters.map((supporter) => supporter.user),
       created_by: row.created_by,
       opportunity: row.opportunity,
+      move_to_stage: row.move_to_stage,
       conversation_id: row.conversation_id,
       created_at: row.created_at,
       updated_at: row.updated_at,

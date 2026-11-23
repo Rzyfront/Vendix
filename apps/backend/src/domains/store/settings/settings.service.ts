@@ -1,3 +1,4 @@
+import { HOME_PANEL_EDITOR_ROLES } from '../../../common/access/home-panels';
 import {
   Injectable,
   ForbiddenException,
@@ -5,8 +6,16 @@ import {
   BadRequestException,
   Logger,
   Inject,
+  Optional,
   forwardRef,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import {
+  FISCAL_DATA_UPDATED_EVENT,
+  FiscalCalendarSummary,
+  VatCalendarChangeDecision,
+  pickFiscalCalendarSummary,
+} from '@common/constants/fiscal-data-events';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
@@ -111,6 +120,8 @@ export const KNOWN_SECTIONS = [
   'product_options',
   // Recordatorios de cuotas de venta a crédito. Sección + DTO, ver `scheduled_orders`.
   'credit_reminders',
+  // Panel Principal de la tienda (QUI-967). Sección + DTO, ver `scheduled_orders`.
+  'home_panel',
   // `app` is intentionally accepted here because the service maps it to
   // branding via updateStoreBranding(); the migrator strips persisted `app`
   // afterwards. The legacy alias should not break update calls.
@@ -133,6 +144,9 @@ export class SettingsService {
     @Inject(forwardRef(() => SessionsService))
     private sessionsService: SessionsService,
     private pwaCache: PwaCacheService,
+    // Opcional: sin bus de eventos (tests unitarios) el guardado sigue igual y
+    // el calendario tributario simplemente no corre.
+    @Optional() private eventEmitter?: EventEmitter2,
   ) {}
 
   /**
@@ -583,6 +597,35 @@ export class SettingsService {
       assertCanChangeOverbooking();
     }
 
+    // QUI-967 — el Panel Principal es de toda la tienda: solo propietario o
+    // administrador lo cambian. `store:settings:update` también lo tienen
+    // `manager` y otros roles, así que se decide acá (como Vexi). Reenviar el
+    // valor vigente no lo exige: el formulario de Configuración manda todas
+    // las secciones al guardar cualquier otra.
+    const homePanelKey = (value?: {
+      default_panel?: string;
+      enabled_panels?: string[];
+    } | null): string =>
+      value
+        ? `${value.default_panel}|${(value.enabled_panels ?? []).join(',')}`
+        : '';
+    if (
+      dto.home_panel !== undefined &&
+      homePanelKey(dto.home_panel) !==
+        homePanelKey(currentSettings.home_panel)
+    ) {
+      const roles = RequestContextService.getRoles();
+      const puedeConfigurarPanel = roles.some((role) =>
+        HOME_PANEL_EDITOR_ROLES.includes(role),
+      );
+      if (!puedeConfigurarPanel) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_FORBIDDEN_001,
+          'Solo el propietario o un administrador de la tienda pueden cambiar el Panel Principal.',
+        );
+      }
+    }
+
     // Guardar valores antiguos para auditoría
     const oldValues = { ...currentSettings };
 
@@ -679,6 +722,24 @@ export class SettingsService {
       );
     }
 
+    // T16/N5 — `vexi.voice_engine` está obsoleto: se acepta (una pestaña vieja lo
+    // sigue enviando) pero se descarta ANTES del merge, de modo que nunca se
+    // persiste ni pisa el valor legado. Si no queda nada más en `vexi`, la sección
+    // se quita del PATCH: sin cambio real no hay merge ni fila de auditoría.
+    let ignoredDeprecatedOnly = false;
+    if (dto.vexi !== undefined && 'voice_engine' in (dto.vexi as object)) {
+      const { voice_engine: _ignored, ...rest } = dto.vexi as Record<
+        string,
+        unknown
+      >;
+      if (Object.values(rest).every((value) => value === undefined)) {
+        delete (dto as Record<string, unknown>).vexi;
+        ignoredDeprecatedOnly = Object.keys(dto).length === 0;
+      } else {
+        (dto as Record<string, unknown>).vexi = rest;
+      }
+    }
+
     // Merge solo las secciones enviadas
     const updatedSettings = { ...currentSettings };
     for (const key of Object.keys(dto)) {
@@ -722,6 +783,17 @@ export class SettingsService {
       (updatedSettings as any).apps = {
         ...((currentSettings as any).apps ?? {}),
         ...dto.apps,
+      };
+    }
+
+    // `product_options` se mezcla por clave, como `vex` (QUI-1005): el
+    // interruptor «Adiciones» manda `{ enabled }` y «Permitir adiciones en la
+    // tienda en línea» manda `{ allow_online }`; con reemplazo de sección, el
+    // primero devolvería la tienda en línea a «permitidas» sin avisar.
+    if (dto.product_options !== undefined) {
+      (updatedSettings as any).product_options = {
+        ...((currentSettings as any).product_options ?? {}),
+        ...dto.product_options,
       };
     }
 
@@ -971,6 +1043,9 @@ export class SettingsService {
     }
 
     // Registrar auditoría de actualización de settings
+    if (ignoredDeprecatedOnly) {
+      return mergeStoreSettingsWithDefaults(result.settings);
+    }
     try {
       // Solo guardar las secciones que cambiaron (no todo el objeto de settings)
       const changedSections: Record<string, any> = {};
@@ -1576,6 +1651,49 @@ export class SettingsService {
   async updateFiscalData(
     dto: Record<string, unknown>,
   ): Promise<StoreSettings['fiscal_data']> {
+    return (await this.updateFiscalDataWithCalendar(dto)).fiscal_data;
+  }
+
+  /**
+   * Igual que `updateFiscalData` y además devuelve el resumen del calendario
+   * tributario (obligaciones + recordatorios en la bitácora) generado DESPUÉS
+   * de persistir. Un fallo del calendario nunca rompe el guardado.
+   */
+  async updateFiscalDataWithCalendar(dto: Record<string, unknown>): Promise<{
+    fiscal_data: StoreSettings['fiscal_data'];
+    fiscal_calendar: FiscalCalendarSummary | null;
+  }> {
+    const decision = (dto.vat_calendar_change ?? null) as VatCalendarChangeDecision | null;
+    const persisted = await this.persistFiscalData(dto);
+    let fiscal_calendar: FiscalCalendarSummary | null = null;
+    if (this.eventEmitter) {
+      try {
+        fiscal_calendar = pickFiscalCalendarSummary(
+          await this.eventEmitter.emitAsync(FISCAL_DATA_UPDATED_EVENT, {
+            organization_id: persisted.organization_id,
+            store_id: persisted.store_id,
+            user_id: persisted.user_id,
+            previous_fiscal_data: persisted.previous as Record<string, unknown>,
+            next_fiscal_data: persisted.next as Record<string, unknown>,
+            vat_calendar_change: decision,
+          }),
+        );
+      } catch (err) {
+        this.logger.warn(
+          `Fiscal calendar after fiscal_data save failed: ${(err as Error).message}`,
+        );
+      }
+    }
+    return { fiscal_data: persisted.next, fiscal_calendar };
+  }
+
+  private async persistFiscalData(dto: Record<string, unknown>): Promise<{
+    organization_id: number;
+    store_id: number;
+    user_id: number | null;
+    previous: StoreSettings['fiscal_data'];
+    next: StoreSettings['fiscal_data'];
+  }> {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
     const user_id = context?.user_id;
@@ -1624,6 +1742,8 @@ export class SettingsService {
     const writableDto = { ...dto };
     delete writableDto.tax_responsibilities_source;
     delete writableDto.tax_regime_source;
+    // Decisión del diálogo de periodicidad: viaja en la petición, no se guarda.
+    delete writableDto.vat_calendar_change;
 
     const nextFiscalData = mergeFiscalData(
       previousFiscalData as Record<string, unknown>,
@@ -1681,7 +1801,13 @@ export class SettingsService {
       );
     }
 
-    return nextFiscalData as StoreSettings['fiscal_data'];
+    return {
+      organization_id,
+      store_id,
+      user_id: user_id ?? null,
+      previous: previousFiscalData as StoreSettings['fiscal_data'],
+      next: nextFiscalData as StoreSettings['fiscal_data'],
+    };
   }
 
   /**

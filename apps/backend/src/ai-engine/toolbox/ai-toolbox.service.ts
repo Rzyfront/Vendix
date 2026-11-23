@@ -1,7 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
-const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only (export default) but CJS runtime exports the function
 import { AIEngineService } from '../ai-engine.service';
 import { AIMessage } from '../interfaces/ai-provider.interface';
+// ia-cargas F5a: the shared page/image preparation, imported as a plain class
+// (it has no injected dependencies). Never `AiIngestModule`: its extraction
+// service depends on `AIEngineService`, which lives in this @Global() module.
+import {
+  AiDocumentPage,
+  DocumentPagesService,
+} from '../../common/ai-ingest/documents/document-pages.service';
+import { pagesMessageContent } from '../../common/ai-ingest/documents/page-content';
+import { detectIngestFile } from '../../common/ai-ingest/ingest-file.detector';
+import { decodeDataUri } from '../../common/ai-ingest/documents/queued-document';
 import { parseAiJson } from '../utils/ai-json.util';
 import { VexiAttachmentsService } from '../../domains/store/vexi/vexi-attachments.service';
 import { StorePrismaService } from '../../prisma/services/store-prisma.service';
@@ -57,9 +66,10 @@ export const IMAGE_KIND_TO_APP: Record<string, string> = {
   producto: 'product_image_enhancer',
 };
 
-/** sharp target, identical to `InvoiceScannerService.prepareImage`. */
-const MAX_DIMENSION = 1536;
-const JPEG_QUALITY = 85;
+/** Pages of one document Vexi hands to a specialist (plan ia-cargas D1). */
+const MAX_DOCUMENT_PAGES = 10;
+/** Same cap as a Vexi attachment (`VexiAttachmentsService`). */
+const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
 
 export interface ExtractionOutcome {
   app_key: string;
@@ -100,6 +110,7 @@ export class AiToolboxService {
     private readonly aiEngine: AIEngineService,
     private readonly attachments: VexiAttachmentsService,
     private readonly prisma: StorePrismaService,
+    private readonly documentPages: DocumentPagesService,
   ) {}
 
   /**
@@ -127,9 +138,10 @@ export class AiToolboxService {
     }
 
     const attachment = await this.attachments.dataUri(params.attachmentId);
-    const prepared = await this.prepareForVision(
+    const pages = await this.prepareForVision(
       attachment.dataUri,
       attachment.mimeType,
+      attachment.originalName,
     );
 
     const instruction = [
@@ -140,19 +152,15 @@ export class AiToolboxService {
         : '',
     ].join('');
 
+    // Every page travels in ONE call (the specialist sees the whole
+    // document): native PDF text as text, scans and photos as images.
     const documentMessage: AIMessage = {
       role: 'user',
-      content: [
-        { type: 'text', text: instruction },
-        {
-          type: 'image_url',
-          image_url: { url: prepared, detail: 'high' },
-        },
-      ],
+      content: pagesMessageContent(instruction, pages),
     };
 
     this.logger.log(
-      `Toolbox extraction: app=${appKey} attachment=${params.attachmentId} retry=${params.retryHint ? 'yes' : 'no'}`,
+      `Toolbox extraction: app=${appKey} attachment=${params.attachmentId} pages=${pages.length} retry=${params.retryHint ? 'yes' : 'no'}`,
     );
 
     const response = await this.aiEngine.run(appKey, {}, [documentMessage]);
@@ -308,49 +316,50 @@ export class AiToolboxService {
   }
 
   /**
-   * Shrinks a photo before it reaches the vision model.
+   * The attachment as pages for the vision specialist (ia-cargas F5a), with
+   * the shared ai-ingest preparation instead of a private sharp copy:
    *
-   * Mirrors `InvoiceScannerService.prepareImage` rather than importing it: that
-   * service belongs to the purchase-orders module, and pulling it into the
-   * `@Global()` ai-engine module would close a dependency cycle. Duplicating
-   * ~15 lines of sharp pipeline is the cheaper trade, and the constants are
-   * documented as a mirror so they get changed together.
+   * - A photo is straightened (EXIF) and reduced to a 1536 px JPEG, as before.
+   * - A PDF is read page by page: native text as text, scanned pages rendered
+   *   as images. It never travels raw (most vision configs reject it).
+   * - Anything that is not a PDF or a photo, an unreadable PDF or one longer
+   *   than 10 pages fails with an `AI_INGEST_*` error the orchestrator can
+   *   explain to the user, instead of a model call that cannot succeed.
    *
-   * A PDF (or anything sharp cannot decode) is forwarded untouched — the
-   * specialist configs accept it and the failure mode of guessing here would be
-   * a corrupted document.
+   * `DocumentPagesService` is a plain provider of this module (no injected
+   * dependencies), so the old reason for the copy — importing a domain
+   * service into this @Global() module would close a cycle — no longer holds.
    */
   private async prepareForVision(
     dataUri: string,
     mimeType: string,
-  ): Promise<string> {
-    if (!mimeType.startsWith('image/')) return dataUri;
-
-    const base64 = dataUri.slice(dataUri.indexOf(',') + 1);
-
-    try {
-      const buffer = Buffer.from(base64, 'base64');
-      const metadata = await sharp(buffer).metadata();
-      const needsResize =
-        (metadata.width ?? 0) > MAX_DIMENSION ||
-        (metadata.height ?? 0) > MAX_DIMENSION;
-
-      let pipeline = sharp(buffer);
-      if (needsResize) {
-        pipeline = pipeline.resize(MAX_DIMENSION, MAX_DIMENSION, {
-          fit: 'inside',
-          withoutEnlargement: true,
-        });
-      }
-
-      const processed = await pipeline.jpeg({ quality: JPEG_QUALITY }).toBuffer();
-      return `data:image/jpeg;base64,${processed.toString('base64')}`;
-    } catch (error: any) {
-      this.logger.warn(
-        `Vision preprocessing failed (${error?.message}); sending the original.`,
+    originalName?: string,
+  ): Promise<AiDocumentPage[]> {
+    const decoded = decodeDataUri(dataUri);
+    const detected = decoded
+      ? detectIngestFile({ buffer: decoded.buffer, mimeType, originalName })
+      : null;
+    if (!decoded || !detected || detected.kind === 'sheet') {
+      throw new VendixHttpException(
+        ErrorCodes.AI_INGEST_INVALID_FILE,
+        'El adjunto no es un PDF ni una foto (JPG, PNG o WebP) que se pueda leer.',
       );
-      return dataUri;
     }
+    const prepared = await this.documentPages.prepareForAi(
+      {
+        buffer: decoded.buffer,
+        mimetype: detected.mime,
+        size: decoded.buffer.length,
+        originalname: originalName ?? 'documento',
+      },
+      {
+        maxPages: MAX_DOCUMENT_PAGES,
+        maxBytes: MAX_DOCUMENT_BYTES,
+        // ONE image per photo, as before: strips are for list loads.
+        splitTallImages: false,
+      },
+    );
+    return prepared.pages;
   }
 
   // ── Cross-checking against real records ─────────────────────────────────

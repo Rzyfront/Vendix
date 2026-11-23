@@ -4,15 +4,17 @@ import {
   computed,
   inject,
   input,
+  effect,
   output,
   signal,
+  untracked,
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { HttpErrorResponse } from '@angular/common/http';
-import { Subscription, catchError, of } from 'rxjs';
+import { Observable, Subscription } from 'rxjs';
 
-import { parseApiError } from '../../../../core/utils/parse-api-error';
+import { injectAiJobProgress } from '../../../utils/ai-job-progress';
+import { AiJobProgressComponent } from '../../ai-job-progress/ai-job-progress.component';
 
 import { AiReviewAckComponent } from '../../ai-review-ack/ai-review-ack.component';
 import { ModalComponent } from '../../modal/modal.component';
@@ -20,9 +22,9 @@ import { ButtonComponent } from '../../button/button.component';
 import { BadgeComponent } from '../../badge/badge.component';
 import { IconComponent } from '../../icon/icon.component';
 import { StepsLineComponent } from '../../steps-line/steps-line.component';
-import { ToastService } from '../../toast/toast.service';
 
 import { RutScannerService } from '../services/rut-scanner.service';
+import { RutScanApiResponse } from '../interfaces/rut-scan-result.interface';
 import {
   RutScanResult,
   RutScannerScope,
@@ -66,6 +68,7 @@ const TAX_REGIME_LABELS: Record<string, string> = {
     IconComponent,
     StepsLineComponent,
     AiReviewAckComponent,
+    AiJobProgressComponent,
   ],
   template: `
     <app-modal
@@ -203,40 +206,20 @@ const TAX_REGIME_LABELS: Record<string, string> = {
         </div>
       }
 
-      <!-- Step 2: AI Analyzing (holographic) -->
+      <!-- Step 2: AI progress bar (QUI-1020) -->
       @if (currentStep() === 2) {
-        <div
-          class="vx-ai-stage is-analyzing relative overflow-hidden rounded-2xl border border-border min-h-[320px] flex flex-col items-center justify-center gap-4 p-6"
-        >
-          <!-- Holographic background layers -->
-          <div class="vx-ai-holo-aurora"></div>
-          <div class="vx-ai-holo-grid"></div>
-          <div class="vx-ai-stage__halo"></div>
-          <div class="vx-ai-stage__scan"></div>
-          <div class="vx-ai-stage__shimmer"></div>
-          <span class="vx-ai-sparkle vx-ai-sparkle--a"></span>
-          <span class="vx-ai-sparkle vx-ai-sparkle--b"></span>
-          <span class="vx-ai-sparkle vx-ai-sparkle--c"></span>
-          <span class="vx-ai-sparkle vx-ai-sparkle--d"></span>
-          <span class="vx-ai-sparkle vx-ai-sparkle--e"></span>
-
-          <!-- Foreground content -->
-          <div class="vx-ai-stage__icon">
-            <app-icon name="sparkles" [size]="32"></app-icon>
-          </div>
-          <p class="vx-ai-stage__title relative z-10 text-base font-semibold text-text-primary">
-            Analizando tu RUT con IA...
-          </p>
-          <p class="vx-ai-stage__caption relative z-10 max-w-[280px] text-center text-sm">
-            Extrayendo NIT, razón social, régimen y responsabilidades fiscales.
-          </p>
-          <p class="relative z-10 max-w-[320px] text-center text-xs text-text-secondary">
-            @if (scanStalled()) {
-              Está tardando más de lo normal; seguimos procesando el documento.
-            } @else {
-              Esto puede tardar unos minutos. No cierres la ventana.
-            }
-          </p>
+        <div class="min-h-[200px] flex flex-col justify-center gap-3 p-2">
+          <app-ai-job-progress
+            [progress]="aiProgress"
+            [showRetry]="!!selectedFile()"
+            (retry)="startScan()"
+          />
+          @if (aiProgress.running()) {
+            <p class="text-center text-xs text-text-secondary">
+              Extrayendo NIT, razón social, régimen y responsabilidades
+              fiscales. No cierres la ventana.
+            </p>
+          }
         </div>
       }
 
@@ -377,6 +360,24 @@ const TAX_REGIME_LABELS: Record<string, string> = {
             </div>
           }
 
+          <!-- ia-cargas F5b: avisos de lectura (páginas sin leer, valores en conflicto) -->
+          @if (result()!.warnings?.length) {
+            <div
+              class="flex items-start gap-2 bg-warning-light border border-warning rounded-lg p-3"
+            >
+              <app-icon
+                name="alert-triangle"
+                [size]="16"
+                class="text-warning mt-0.5"
+              ></app-icon>
+              <ul class="list-disc space-y-0.5 pl-4 text-xs text-warning">
+                @for (warning of result()!.warnings; track $index) {
+                  <li>{{ warning }}</li>
+                }
+              </ul>
+            </div>
+          }
+
           <!-- Verificación obligatoria de los datos precargados por la IA -->
           <app-ai-review-ack
             #ackBlock
@@ -399,6 +400,11 @@ const TAX_REGIME_LABELS: Record<string, string> = {
           <app-button variant="outline" (clicked)="onCancel()">
             Cancelar
           </app-button>
+          @if (currentStep() === 2 && !aiProgress.running()) {
+            <app-button variant="outline" (clicked)="backToUpload()">
+              Cambiar archivo
+            </app-button>
+          }
           @if (currentStep() === 1) {
             <app-button
               variant="primary"
@@ -427,7 +433,8 @@ const TAX_REGIME_LABELS: Record<string, string> = {
 })
 export class RutScannerModalComponent {
   private readonly rutScannerService = inject(RutScannerService);
-  private readonly toastService = inject(ToastService);
+  /** Shared progress bar state of the scan (QUI-1020). */
+  readonly aiProgress = injectAiJobProgress({ kind: 'rut' });
   private readonly destroyRef = inject(DestroyRef);
 
   /** Controls modal visibility. */
@@ -454,9 +461,6 @@ export class RutScannerModalComponent {
   readonly filePreviewUrl = signal<string | null>(null);
   readonly fileError = signal<string | null>(null);
   readonly isDragging = signal(false);
-  readonly isScanning = signal(false);
-  /** true cuando el job lleva más de ~60 s sin terminar. */
-  readonly scanStalled = signal(false);
   private scanSub: Subscription | null = null;
   readonly isProcessingFile = signal(false);
   readonly result = signal<RutScanResult | null>(null);
@@ -500,6 +504,12 @@ export class RutScannerModalComponent {
     { label: 'Analizar' },
     { label: 'Revisar' },
   ];
+
+  constructor() {
+    effect(() => {
+      if (this.isOpen()) untracked(() => this.tryResume());
+    });
+  }
 
   private readonly MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
   private readonly VALID_TYPES = [
@@ -615,42 +625,54 @@ export class RutScannerModalComponent {
     if (!file) return;
 
     this.currentStep.set(2);
-    this.isScanning.set(true);
+    this.aiProgress.reset();
+    this.listen(
+      this.rutScannerService.scanRut(file, this.scope(), {
+        progress: this.aiProgress,
+        resumeKey: this.resumeKey(),
+      }),
+    );
+  }
 
+  /** Back to the upload step keeping the chosen file (retry without re-upload). */
+  backToUpload(): void {
     this.scanSub?.unsubscribe();
-    this.scanStalled.set(false);
-    this.scanSub = this.rutScannerService
-      .scanRut(file, this.scope(), { onStall: () => this.scanStalled.set(true) })
-      .pipe(
-        catchError((err: unknown) => {
-          this.toastService.error(
-            this.extractErrorMessage(err),
-          );
-          this.currentStep.set(1);
-          this.isScanning.set(false);
-          return of(null);
-        }),
-        takeUntilDestroyed(this.destroyRef),
-      )
-      .subscribe((response) => {
-        this.isScanning.set(false);
-        if (!response) return;
+    this.scanSub = null;
+    this.aiProgress.reset();
+    this.currentStep.set(1);
+  }
 
+  private resumeKey(): string {
+    return `rut:${this.scope() ?? 'auto'}`;
+  }
+
+  /**
+   * Re-attach to a scan that was running when the screen was closed or
+   * reloaded. Same handlers as a fresh scan.
+   */
+  private tryResume(): void {
+    if (this.scanSub || this.currentStep() !== 1 || this.result()) return;
+    const resumed = this.rutScannerService.resume(this.scope(), {
+      progress: this.aiProgress,
+    });
+    if (!resumed) return;
+    this.currentStep.set(2);
+    this.listen(resumed);
+  }
+
+  private listen(source: Observable<RutScanApiResponse>): void {
+    this.scanSub?.unsubscribe();
+    this.scanSub = source.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (response) => {
         if (response.success && response.data) {
           this.result.set(response.data);
           this.currentStep.set(3);
-        } else {
-          this.toastService.error(
-            response.message || 'No se pudieron extraer los datos del RUT.',
-          );
-          this.currentStep.set(1);
         }
-      });
-  }
-
-  private extractErrorMessage(err: unknown): string {
-    if (err instanceof HttpErrorResponse) return parseApiError(err).userMessage;
-    return (err as Error | null)?.message || 'No se pudo escanear el documento';
+      },
+      // The classified error is already shown by the progress bar and the
+      // selected file is kept so the user can retry.
+      error: () => undefined,
+    });
   }
 
   /**
@@ -718,8 +740,7 @@ export class RutScannerModalComponent {
     this.isProcessingFile.set(false);
     this.scanSub?.unsubscribe();
     this.scanSub = null;
-    this.scanStalled.set(false);
-    this.isScanning.set(false);
+    this.aiProgress.reset();
     this.result.set(null);
     // Obligatorio: el contenido proyectado en app-modal no se destruye al
     // cerrar, así que sin este reset la segunda apertura traería el check ya

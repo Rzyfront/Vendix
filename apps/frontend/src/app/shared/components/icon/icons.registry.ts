@@ -1,4 +1,5 @@
 import {
+  Columns3,
   Menu,
   ChevronDown,
   ChevronUp,
@@ -362,6 +363,7 @@ import {
   Clapperboard,
   Hotel,
   BedDouble,
+  BellOff,
 } from 'lucide-angular';
 
 /**
@@ -534,6 +536,7 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   share: Share2,
   'trending-down': TrendingDown,
   layers: Layers,
+  columns: Columns3,
   'shield-off': ShieldOff,
   'circle-x': CircleX,
   phone: Phone,
@@ -810,6 +813,9 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'square-pen': SquarePen,
   'panel-right-close': PanelRightClose,
   'panel-right-open': PanelRightOpen,
+
+  // Vex: «No sugerir en este chat» (volume-2 is registered above).
+  'bell-off': BellOff,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

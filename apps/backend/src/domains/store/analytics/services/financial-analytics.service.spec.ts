@@ -2,6 +2,7 @@ import { FinancialAnalyticsService } from './financial-analytics.service';
 import { Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { Prisma } from '@prisma/client';
 
 /**
  * Mock shape for StorePrismaService. Only the delegates touched by
@@ -440,6 +441,107 @@ describe('FinancialAnalyticsService', () => {
       for (const n of numbers) {
         expect(n).toBe(round2(n));
       }
+    });
+  });
+
+  // QUI-1017 — el COGS del P&L multiplica el costo por las unidades de STOCK
+  // realmente movidas. Una venta por peso legado guarda quantity = 1 y los
+  // gramos en stock_units_consumed; una línea QUI-978 guarda la cantidad ya en
+  // unidad de stock y stock_units_consumed = NULL (sin doble conteo).
+  describe('getProfitLossSummary — costo en unidades de stock (QUI-1017)', () => {
+    const sqlOf = (args: unknown[]): string => {
+      const [first, ...values] = args;
+      if (!Array.isArray(first)) return (first as { sql: string }).sql;
+      return Prisma.sql(
+        first as unknown as TemplateStringsArray,
+        ...(values as never[]),
+      ).sql;
+    };
+
+    /** Evalúa la fórmula de COGS que el SQL usa sobre filas en memoria. */
+    const cogsOf = (
+      rows: Array<{
+        quantity: number;
+        stock_units_consumed: number | null;
+        cost_price: number | null;
+      }>,
+    ) =>
+      rows.reduce(
+        (sum, r) =>
+          sum + (r.stock_units_consumed ?? r.quantity) * (r.cost_price ?? 0),
+        0,
+      );
+
+    beforeEach(() => {
+      prisma.orders.aggregate.mockResolvedValue({
+        _sum: {
+          subtotal_amount: 0,
+          discount_amount: 0,
+          tax_amount: 0,
+          shipping_cost: 0,
+          grand_total: 0,
+        },
+        _count: { id: 0 },
+      });
+      prisma.refunds.aggregate.mockResolvedValue({
+        _sum: { amount: 0, subtotal_refund: 0, tax_refund: 0, shipping_refund: 0 },
+      });
+      prisma.expenses.aggregate.mockResolvedValue({ _sum: { amount: 0 } });
+    });
+
+    it('todas las consultas de COGS (base y prorrateada por caja) usan COALESCE(stock_units_consumed, quantity)', async () => {
+      await service.getProfitLossSummary(QUERY as any);
+
+      const cogsSql = prisma.$queryRaw.mock.calls
+        .map((call: unknown[]) => sqlOf(call))
+        .filter((sql: string) => /AS cogs/.test(sql));
+
+      // aggregateCogs (actual + anterior) y aggregateCashIncome (actual,
+      // anterior y acumulado).
+      expect(cogsSql.length).toBeGreaterThanOrEqual(5);
+      for (const sql of cogsSql) {
+        expect(sql).toContain(
+          '(COALESCE(oi.stock_units_consumed, oi.quantity) * COALESCE(oi.cost_price, 0))',
+        );
+        expect(sql).not.toMatch(/oi\.quantity \* COALESCE\(oi\.cost_price/);
+      }
+    });
+
+    it('línea de peso legado: costo = gramos × costo por gramo, no 1 × costo', () => {
+      // 180 g de carne a $30/g: quantity 1 (una pesada), 180 g consumidos.
+      expect(
+        cogsOf([{ quantity: 1, stock_units_consumed: 180, cost_price: 30 }]),
+      ).toBe(5400);
+    });
+
+    it('línea QUI-978: cantidad ya en unidad de stock, no se cuenta dos veces', () => {
+      // 500 g vendidos con UoM de venta: quantity 500, stock_units_consumed NULL.
+      expect(
+        cogsOf([{ quantity: 500, stock_units_consumed: null, cost_price: 30 }]),
+      ).toBe(15000);
+    });
+
+    it('el COGS consultado llega tal cual al P&L', async () => {
+      prisma.$queryRaw.mockImplementation((...args: unknown[]) => {
+        const sql = sqlOf(args);
+        if (/AS cogs/.test(sql) && !/paid_per_order/.test(sql)) {
+          return Promise.resolve([
+            {
+              cogs: cogsOf([
+                { quantity: 1, stock_units_consumed: 180, cost_price: 30 },
+                { quantity: 500, stock_units_consumed: null, cost_price: 30 },
+              ]),
+              units: 501,
+              units_without_cost: 0,
+            },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
+
+      const result = await service.getProfitLossSummary(QUERY as any);
+
+      expect(result.costs.cost_of_goods_sold).toBe(20400);
     });
   });
 

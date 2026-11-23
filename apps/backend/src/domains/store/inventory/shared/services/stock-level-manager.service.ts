@@ -360,6 +360,7 @@ export class StockLevelManager {
         data: stockUpdateData,
       });
     }
+    this.assertWriteSurvived(updated_stock);
 
     // 5. Crear inventory transaction
     // Nota: transactionsService debe manejar su propia conexión o aceptar prisma client si queremos que sea parte de la misma tx.
@@ -385,6 +386,7 @@ export class StockLevelManager {
       },
       prisma,
     );
+    this.assertWriteSurvived(transaction);
 
     // 6. Crear inventory movement si aplica
     if (params.create_movement) {
@@ -674,9 +676,13 @@ export class StockLevelManager {
       return 'weighted_average';
     }
 
+    // Read on the movement's own tx connection (`prisma` is the caller's tx
+    // or the one `updateStock` opened): outside it, every stock movement asks
+    // the pool for a second connection while the transaction stays open.
     return this.costingMethodResolver.resolveCostingMethod(
       organizationId,
       storeId ?? undefined,
+      prisma,
     );
   }
 
@@ -1586,6 +1592,23 @@ export class StockLevelManager {
   /**
    * Obtiene o crea un stock level
    */
+  /**
+   * T7 (transacciones colgadas) — a write inside the stock transaction came
+   * back without its row. That only happens when the interactive transaction
+   * was closed under the write: under load it expires mid-flight, Prisma
+   * rolls it back and releases the connection, and the rest of that
+   * operation no longer runs inside the transaction. Reading the missing row
+   * used to crash with `TypeError: Cannot read properties of null (reading
+   * 'id')` while the following writes kept going outside the rolled-back
+   * transaction. Stop here with the controlled "busy, retry" error instead:
+   * nothing else is written, and the rollback leaves nothing half done.
+   */
+  private assertWriteSurvived(row: unknown): void {
+    if (row == null) {
+      throw new VendixHttpException(ErrorCodes.SYS_BUSY_001);
+    }
+  }
+
   private async getOrCreateStockLevel(
     prisma: any,
     product_id: number,

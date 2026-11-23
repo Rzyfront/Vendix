@@ -1,10 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { WeeklyReportService } from '../weekly-report/weekly-report.service';
 import { SubscriptionResolverService } from '../subscriptions/services/subscription-resolver.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VexiAttachmentsService } from './vexi-attachments.service';
+import { AgentMemoryService } from '../../../ai-engine/memory/agent-memory.service';
 import type { VexiUiContext } from './vexi-stream-intent.service';
 
 /**
@@ -31,7 +32,8 @@ export type VexiSnapshot = Record<(typeof VEXI_SNAPSHOT_KEYS)[number], string>;
  * Keys of the Vex snapshot. Same sections as Vexi EXCEPT `ui_context` — Vex
  * never drives the browser, so screen state would only invite it to narrate
  * navigation it cannot do — plus `vex_blocks`, the live blocks of the
- * conversation the turn may keep reading and transforming.
+ * conversation the turn may keep reading and transforming — plus
+ * `store_memory`, the "Memoria de la tienda" block (F4 T31).
  */
 export const VEX_SNAPSHOT_KEYS = [
   'store_profile',
@@ -42,6 +44,7 @@ export const VEX_SNAPSHOT_KEYS = [
   'current_datetime',
   'turn_attachments',
   'vex_blocks',
+  'store_memory',
 ] as const;
 
 export type VexSnapshot = Record<(typeof VEX_SNAPSHOT_KEYS)[number], string>;
@@ -55,6 +58,9 @@ export interface VexBlockSummary {
 }
 
 const UNAVAILABLE = 'No disponible en este momento.';
+
+const NO_STORE_MEMORY =
+  'Memoria de la tienda: todavía no hay recuerdos guardados. Si el usuario te pide recordar una preferencia, usa la herramienta remember.';
 
 /**
  * A store can expose ~100 module keys. Listing all of them twice (visible and
@@ -74,6 +80,7 @@ export class VexiContextService {
     private readonly weeklyReport: WeeklyReportService,
     private readonly subscriptions: SubscriptionResolverService,
     private readonly attachments: VexiAttachmentsService,
+    @Optional() private readonly agentMemory?: AgentMemoryService,
   ) {}
 
   /**
@@ -141,6 +148,7 @@ export class VexiContextService {
       subscriptionState,
       currentDatetime,
       turnAttachments,
+      storeMemory,
     ] = await Promise.all([
       this.section('store_profile', () => this.buildStoreProfile()),
       this.section('business_metrics', () => this.buildBusinessMetrics()),
@@ -150,6 +158,7 @@ export class VexiContextService {
       this.section('turn_attachments', () =>
         this.buildTurnAttachments(options?.attachmentIds),
       ),
+      this.section('store_memory', () => this.buildStoreMemory()),
     ]);
 
     return {
@@ -161,7 +170,21 @@ export class VexiContextService {
       current_datetime: currentDatetime,
       turn_attachments: turnAttachments,
       vex_blocks: this.buildVexBlocks(options?.vexBlocks),
+      store_memory: storeMemory,
     };
+  }
+
+  /**
+   * "Memoria de la tienda" (F4 T31): what the store asked Vex to remember,
+   * scoped to the session's store by `AgentMemoryService`. Vex only — the
+   * Vexi snapshot never carries it.
+   */
+  private async buildStoreMemory(): Promise<string> {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId || !this.agentMemory) return NO_STORE_MEMORY;
+    return (
+      (await this.agentMemory.buildSnapshotBlock(storeId)) || NO_STORE_MEMORY
+    );
   }
 
   /**

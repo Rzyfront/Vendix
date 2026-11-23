@@ -1,10 +1,16 @@
 /**
- * In-memory `user_reminders` table for the QUI-580 isolation specs. It honours
- * the `where` the service sends (equality, `null`, `lt/lte/gte`, `AND`) and
- * applies NO tenant scope of its own, so a spec passes only when the service
- * itself filters by the actor's store AND user.
+ * In-memory tables for the QUI-580 isolation specs. They honour the `where`
+ * the code sends (equality, `null`, `lt/lte/gte`, `in`, `not`, `contains`,
+ * `AND`/`OR`, relation filters and `some`) and apply NO tenant scope of their
+ * own, so a spec passes only when the code itself filters by store and user.
+ * `select` is ignored: rows come back whole.
  */
 type Row = Record<string, any>;
+
+const OPERATORS = new Set(['lt', 'lte', 'gte', 'in', 'not', 'contains', 'mode', 'some', 'none']);
+
+const isOperatorObject = (condition: Row) =>
+  Object.keys(condition).every((key) => OPERATORS.has(key));
 
 function matchesValue(value: unknown, condition: unknown): boolean {
   if (condition === null) return value === null || value === undefined;
@@ -12,13 +18,34 @@ function matchesValue(value: unknown, condition: unknown): boolean {
     return value instanceof Date && value.getTime() === condition.getTime();
   }
   if (typeof condition === 'object') {
-    const ops = condition as Record<string, any>;
-    if (value === null || value === undefined) return false;
-    const v = value instanceof Date ? value.getTime() : (value as number);
-    const at = (x: any) => (x instanceof Date ? x.getTime() : x);
-    if ('lt' in ops && !(v < at(ops.lt))) return false;
-    if ('lte' in ops && !(v <= at(ops.lte))) return false;
-    if ('gte' in ops && !(v >= at(ops.gte))) return false;
+    const ops = condition as Row;
+    // A relation filter: the nested `where` applies to the related row.
+    if (!isOperatorObject(ops)) {
+      return !!value && typeof value === 'object' && matchesWhere(value as Row, ops);
+    }
+    if ('some' in ops) {
+      return Array.isArray(value) && value.some((item) => matchesWhere(item, ops.some));
+    }
+    if ('none' in ops) {
+      return !Array.isArray(value) || !value.some((item) => matchesWhere(item, ops.none));
+    }
+    if ('not' in ops && matchesValue(value, ops.not)) return false;
+    if ('in' in ops && !(ops.in as unknown[]).includes(value)) return false;
+    if ('contains' in ops) {
+      if (typeof value !== 'string') return false;
+      const insensitive = ops.mode === 'insensitive';
+      const haystack = insensitive ? value.toLowerCase() : value;
+      const needle = insensitive ? String(ops.contains).toLowerCase() : String(ops.contains);
+      if (!haystack.includes(needle)) return false;
+    }
+    if ('lt' in ops || 'lte' in ops || 'gte' in ops) {
+      if (value === null || value === undefined) return false;
+      const v = value instanceof Date ? value.getTime() : (value as number);
+      const at = (x: any) => (x instanceof Date ? x.getTime() : x);
+      if ('lt' in ops && !(v < at(ops.lt))) return false;
+      if ('lte' in ops && !(v <= at(ops.lte))) return false;
+      if ('gte' in ops && !(v >= at(ops.gte))) return false;
+    }
     return true;
   }
   return value === condition;
@@ -29,11 +56,56 @@ export function matchesWhere(row: Row, where: Row = {}): boolean {
     if (key === 'AND') {
       return (condition as Row[]).every((part) => matchesWhere(row, part));
     }
+    if (key === 'OR') {
+      return (condition as Row[]).some((part) => matchesWhere(row, part));
+    }
     return matchesValue(row[key], condition);
   });
 }
 
-export function createFakeRemindersPrisma(seed: Row[] = []) {
+/** A read-only table: `findMany`/`findFirst`/`findUnique` over seeded rows. */
+export function fakeTable(seed: Row[] = []) {
+  const rows = seed.map((row) => ({ ...row }));
+  return {
+    rows,
+    findMany: jest.fn(async ({ where, take }: Row = {}) =>
+      rows
+        .filter((r) => matchesWhere(r, where))
+        .slice(0, take ?? undefined)
+        .map((r) => ({ ...r })),
+    ),
+    findFirst: jest.fn(async ({ where }: Row = {}) => {
+      const row = rows.find((r) => matchesWhere(r, where));
+      return row ? { ...row } : null;
+    }),
+    findUnique: jest.fn(async ({ where }: Row = {}) => {
+      const row = rows.find((r) => matchesWhere(r, where));
+      return row ? { ...row } : null;
+    }),
+  };
+}
+
+/** Records a reminder can link to, per table (all optional). */
+export interface FakeLinkRecords {
+  products?: Row[];
+  orders?: Row[];
+  store_users?: Row[];
+  suppliers?: Row[];
+  purchase_orders?: Row[];
+  quotations?: Row[];
+  invoices?: Row[];
+  fiscal_obligations?: Row[];
+}
+
+/** Store 1 sells "Coca-Cola 1.5L" (id 501), the product the specs link to. */
+const DEFAULT_RECORDS: FakeLinkRecords = {
+  products: [{ id: 501, store_id: 1, name: 'Coca-Cola 1.5L', sku: 'CC15', state: 'active' }],
+};
+
+export function createFakeRemindersPrisma(
+  seed: Row[] = [],
+  records: FakeLinkRecords = DEFAULT_RECORDS,
+) {
   const rows: Row[] = seed.map((row) => ({ ...row }));
   let nextId = Math.max(0, ...rows.map((r) => r.id)) + 1;
   const base = {
@@ -96,13 +168,13 @@ export function createFakeRemindersPrisma(seed: Row[] = []) {
         stores: { timezone: 'America/Bogota' },
       })),
     },
-    products: {
-      findFirst: jest.fn(async ({ where }: Row) =>
-        where.id === 501 ? { name: 'Coca-Cola 1.5L' } : null,
-      ),
-    },
-    orders: { findFirst: jest.fn(async () => null) },
-    store_users: { findFirst: jest.fn(async () => null) },
-    suppliers: { findFirst: jest.fn(async () => null) },
+    products: fakeTable(records.products),
+    orders: fakeTable(records.orders),
+    store_users: fakeTable(records.store_users),
+    suppliers: fakeTable(records.suppliers),
+    purchase_orders: fakeTable(records.purchase_orders),
+    quotations: fakeTable(records.quotations),
+    invoices: fakeTable(records.invoices),
+    fiscal_obligations: fakeTable(records.fiscal_obligations),
   };
 }

@@ -1,6 +1,8 @@
 import { Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ManufacturingOrdersService } from './manufacturing-orders.service';
+import { productionSiteWhere } from '../../production/production-site.util';
+import { ErrorCodes, VendixHttpException } from '../../../../common/errors';
 
 type Row = Record<string, any>;
 
@@ -17,6 +19,7 @@ describe('ManufacturingOrdersService', () => {
   let settings: { get: jest.Mock };
   let sequences: { next: jest.Mock };
   let stockLevelManager: { getDefaultLocationForProduct: jest.Mock };
+  let plants: { resolveForOrder: jest.Mock };
   let service: ManufacturingOrdersService;
   let order: Row;
 
@@ -85,6 +88,8 @@ describe('ManufacturingOrdersService', () => {
       },
       stock_levels: { findFirst: jest.fn() },
       inventory_locations: { findFirst: jest.fn().mockResolvedValue({ id: 3 }) },
+      // QUI-1013: no plant row unless a test sets one.
+      manufacturing_plants: { findFirst: jest.fn().mockResolvedValue(null) },
       $transaction: jest.fn(async (cb: any) => cb(tx)),
     };
     production = {
@@ -107,6 +112,7 @@ describe('ManufacturingOrdersService', () => {
     };
     sequences = { next: jest.fn().mockResolvedValue('OP-000001') };
     stockLevelManager = { getDefaultLocationForProduct: jest.fn().mockResolvedValue(4) };
+    plants = { resolveForOrder: jest.fn().mockResolvedValue(null) };
     service = new ManufacturingOrdersService(
       prisma,
       production as any,
@@ -114,6 +120,7 @@ describe('ManufacturingOrdersService', () => {
       settings as any,
       sequences as any,
       stockLevelManager as any,
+      plants as any,
     );
   });
 
@@ -215,6 +222,15 @@ describe('ManufacturingOrdersService', () => {
       expect(prisma.production_orders.findMany.mock.calls[0][0].include.product_variant).toEqual({
         select: { id: true, name: true },
       });
+    });
+
+    it('Planta nunca lista las órdenes de cocina (ventas hechas en Producción)', async () => {
+      await service.findAll({ search: 'pan' } as any);
+      const where = prisma.production_orders.findMany.mock.calls[0][0].where;
+      expect(where.order_number).toEqual({ not: null });
+      expect(where.AND).toEqual([productionSiteWhere('plant')]);
+      // The search OR is kept next to the site filter.
+      expect(where.OR).toHaveLength(2);
     });
 
     it('S21: findOne marca can_restart solo en una orden cancelada que la regla de reinicio acepta', async () => {
@@ -438,6 +454,92 @@ describe('ManufacturingOrdersService', () => {
       expect(result[0].missing).toBe(0);
     });
   });
+  describe('QUI-1013 — planta de la orden', () => {
+    it('con una sola planta la orden se asigna sola (sin elegir)', async () => {
+      plants.resolveForOrder.mockResolvedValue(3);
+      await service.create({ recipe_id: 7, planned_qty: 10 });
+      expect(plants.resolveForOrder).toHaveBeenCalledWith(undefined);
+      expect(tx.production_orders.create.mock.calls[0][0].data.plant_id).toBe(3);
+    });
+
+    it('guarda la planta elegida', async () => {
+      plants.resolveForOrder.mockResolvedValue(9);
+      await service.create({ recipe_id: 7, planned_qty: 10, plant_id: 9 });
+      expect(plants.resolveForOrder).toHaveBeenCalledWith(9);
+      expect(tx.production_orders.create.mock.calls[0][0].data.plant_id).toBe(9);
+    });
+
+    it('con varias plantas y sin elegir no crea la orden (MFG_PLANT_REQUIRED)', async () => {
+      plants.resolveForOrder.mockRejectedValue(
+        new VendixHttpException(ErrorCodes.MFG_PLANT_REQUIRED),
+      );
+      await expect(service.create({ recipe_id: 7, planned_qty: 10 })).rejects.toMatchObject({
+        errorCode: 'MFG_PLANT_REQUIRED',
+      });
+      expect(sequences.next).not.toHaveBeenCalled();
+      expect(tx.production_orders.create).not.toHaveBeenCalled();
+    });
+
+    it('sin plantas la orden queda sin planta (como hoy)', async () => {
+      await service.create({ recipe_id: 7, planned_qty: 10 });
+      expect(tx.production_orders.create.mock.calls[0][0].data.plant_id).toBeNull();
+    });
+
+    it('editar sin plant_id no toca la planta; con plant_id la valida y la cambia', async () => {
+      await service.update(1, { notes: 'x' });
+      expect(plants.resolveForOrder).not.toHaveBeenCalled();
+      const first = tx.production_orders.update.mock.calls.at(-1)[0].data;
+      expect(first).not.toHaveProperty('plant_id');
+
+      plants.resolveForOrder.mockResolvedValue(4);
+      await service.update(1, { plant_id: 4 });
+      expect(plants.resolveForOrder).toHaveBeenCalledWith(4);
+      const second = tx.production_orders.update.mock.calls.at(-1)[0].data;
+      expect(second.plant_id).toBe(4);
+    });
+
+    it('el listado filtra por planta e incluye la planta de cada orden', async () => {
+      await service.findAll({ plant_id: 3 } as any);
+      const args = prisma.production_orders.findMany.mock.calls[0][0];
+      expect(args.where).toMatchObject({ order_number: { not: null }, plant_id: 3 });
+      expect(args.include.plant).toEqual({ select: { id: true, name: true, is_active: true } });
+    });
+
+    it('la revisión de faltantes mira la bodega de insumos de la planta', async () => {
+      order = baseOrder({ status: 'released', plant_id: 3 });
+      prisma.manufacturing_plants.findFirst.mockResolvedValue({
+        input_location_id: 11,
+        output_location_id: 12,
+      });
+      settings.get.mockResolvedValue({ default_input_location_id: 5 });
+      prisma.stock_levels.findFirst.mockResolvedValue({ quantity_available: 7 });
+
+      const result = await service.shortages(1);
+
+      expect(prisma.manufacturing_plants.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 3 } }),
+      );
+      expect(prisma.stock_levels.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ location_id: 11 }) }),
+      );
+      expect(result[0]).toMatchObject({ required: 20, available: 7, missing: 13 });
+    });
+
+    it('completar pasa al motor las bodegas de la planta', async () => {
+      order = baseOrder({ status: 'in_progress', plant_id: 3 });
+      prisma.manufacturing_plants.findFirst.mockResolvedValue({
+        input_location_id: 11,
+        output_location_id: 12,
+      });
+      production.complete.mockResolvedValue({});
+      await service.complete(1, { produced_qty: 10 });
+      expect(production.complete.mock.calls[0][2]).toMatchObject({
+        inputLocationId: 11,
+        outputLocationId: 12,
+      });
+    });
+  });
+
   describe('live-sync events (QUI-1002)', () => {
     let emitter: { emit: jest.Mock };
     let live: ManufacturingOrdersService;
@@ -453,6 +555,7 @@ describe('ManufacturingOrdersService', () => {
         settings as any,
         sequences as any,
         stockLevelManager as any,
+        plants as any,
         emitter as any,
       );
     });

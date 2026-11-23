@@ -4,8 +4,14 @@ import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import { SettingsService } from '../settings/settings.service';
 import { VexiSpeechCache, CachedAudio } from './vexi-speech.cache';
 import { VexiSpeechSegmenter, hasWordCharacter } from './vexi-speech.segmenter';
-import { VexiSpeechTurn, type VexiAudioFrame } from './vexi-speech.pipeline';
+import {
+  VexiSpeechTurn,
+  type VexiAudioFrame,
+  type VoiceMeter,
+} from './vexi-speech.pipeline';
 import type { SpeechCacheParams } from './vexi-speech.cache';
+import { estimateSpeechSeconds } from './vexi-speech.duration';
+import { agentVoiceFromSpeechMetadata } from '../../../ai-engine/agent-runtime-config.service';
 import {
   CURRENCY_SPOKEN_WORDS,
   DEFAULT_SPOKEN_CURRENCY,
@@ -31,6 +37,26 @@ const DEFAULT_SPEECH_PARAMS: SpeechCacheParams = {
   // escondería que la configuración real no se pudo leer.
   vol: 1,
 };
+
+/**
+ * One synthesized segment plus what the voice quota needs (T14).
+ *
+ * `generated` is true only when the provider was actually called: a cache hit
+ * costs nothing and does not count. `seconds` is the duration of the audio,
+ * read from its bytes (see `estimateSpeechSeconds`).
+ */
+export interface SynthesizedAudio extends CachedAudio {
+  generated: boolean;
+  seconds: number;
+}
+
+/** Options of a spoken turn (T14). */
+export interface SpeechTurnOptions {
+  /** Agent whose voice reads the answer (`metadata.speech.agent_voices`). */
+  agentKey?: string | null;
+  /** Called once per generated segment, for the per-agent voice quota. */
+  meter?: VoiceMeter;
+}
 
 /**
  * Strips markdown so the synthesizer receives prose.
@@ -151,16 +177,19 @@ export class VexiSpeechService {
    * change when somebody edits the application in Super Admin, and a round trip
    * on the critical path of every segment would cost more than the cache saves.
    */
-  async openTurn(startedAt: number = Date.now()): Promise<VexiSpeechTurn> {
+  async openTurn(
+    startedAt: number = Date.now(),
+    options: SpeechTurnOptions = {},
+  ): Promise<VexiSpeechTurn> {
     // Both resolved here and once: the voice params and the store's currency
     // change only when somebody edits a setting, and either query on the
     // critical path of every segment would cost more than the cache saves.
     // Concurrent because they hit different tables and neither needs the other.
     const [params, currency] = await Promise.all([
-      this.resolveParams(),
+      this.resolveParams(options.agentKey),
       this.resolveCurrency(),
     ]);
-    return new VexiSpeechTurn(this, params, startedAt, currency);
+    return new VexiSpeechTurn(this, params, startedAt, currency, options.meter);
   }
 
   /**
@@ -187,9 +216,15 @@ export class VexiSpeechService {
    * Called once per turn, not once per segment: the values only change when
    * somebody edits the application in Super Admin, and a query on the critical
    * path of every segment would spend more time than the cache saves.
+   *
+   * With `agentKey` (T15), the agent's own voice in
+   * `metadata.speech.agent_voices[agentKey]` wins over the shared one; an
+   * invalid override value falls back to the shared value, field by field.
    */
-  async resolveParams(): Promise<SpeechCacheParams> {
+  async resolveParams(agentKey?: string | null): Promise<SpeechCacheParams> {
     try {
+      const profile = agentKey ? await this.resolveVoiceProfile(agentKey) : null;
+
       const app = await this.prisma.ai_engine_applications.findUnique({
         where: { key: VOICE_TTS_APP_KEY },
         select: { metadata: true, config: { select: { model_id: true } } },
@@ -200,13 +235,46 @@ export class VexiSpeechService {
           | Record<string, any>
           | undefined) ?? {};
 
+      // F8 T49 — single source: the catalog voice assigned to the agent wins
+      // whole (voice, provider, model). `metadata.speech` below is only the
+      // read-only fallback for an agent with no profile, plus the format,
+      // which is a property of the playback path and not of a voice.
+      if (profile) {
+        return {
+          model: profile.model,
+          voice: profile.voice,
+          format:
+            this.text(speech.response_format) ?? DEFAULT_SPEECH_PARAMS.format,
+          speed:
+            profile.speed ??
+            this.positive(speech.speed) ??
+            DEFAULT_SPEECH_PARAMS.speed,
+          vol:
+            profile.vol ??
+            this.positive(speech.vol) ??
+            DEFAULT_SPEECH_PARAMS.vol,
+          configId: profile.configId,
+        };
+      }
+
+      const own = agentKey ? agentVoiceFromSpeechMetadata(speech, agentKey) : {};
+
       return {
         model: app?.config?.model_id || DEFAULT_SPEECH_PARAMS.model,
-        voice: this.text(speech.voice) ?? DEFAULT_SPEECH_PARAMS.voice,
+        voice:
+          this.text(own.voice) ??
+          this.text(speech.voice) ??
+          DEFAULT_SPEECH_PARAMS.voice,
         format:
           this.text(speech.response_format) ?? DEFAULT_SPEECH_PARAMS.format,
-        speed: this.positive(speech.speed) ?? DEFAULT_SPEECH_PARAMS.speed,
-        vol: this.positive(speech.vol) ?? DEFAULT_SPEECH_PARAMS.vol,
+        speed:
+          this.positive(own.speed) ??
+          this.positive(speech.speed) ??
+          DEFAULT_SPEECH_PARAMS.speed,
+        vol:
+          this.positive(own.vol) ??
+          this.positive(speech.vol) ??
+          DEFAULT_SPEECH_PARAMS.vol,
       };
     } catch (error) {
       // A voice turn must not die because the config lookup failed; the
@@ -216,6 +284,58 @@ export class VexiSpeechService {
         `Falling back to default speech params: ${(error as Error).message}`,
       );
       return DEFAULT_SPEECH_PARAMS;
+    }
+  }
+
+  /**
+   * F8 T49 — the catalog voice a super admin assigned to this agent, or null.
+   *
+   * Null on every doubt (no profile, profile or provider turned off, lookup
+   * failed): the caller then reads with the fallback voice instead of going
+   * silent. Vex and Vexi each read their own row, so assigning one never
+   * moves the other.
+   */
+  private async resolveVoiceProfile(agentKey: string): Promise<{
+    configId: number;
+    model: string;
+    voice: string;
+    speed: number | null;
+    vol: number | null;
+  } | null> {
+    try {
+      const agent = await this.prisma.ai_agents.findUnique({
+        where: { key: agentKey },
+        select: {
+          voice_profile: {
+            select: {
+              voice_id: true,
+              speed: true,
+              vol: true,
+              is_active: true,
+              config: {
+                select: { id: true, model_id: true, is_active: true },
+              },
+            },
+          },
+        },
+      });
+      const profile = agent?.voice_profile;
+      const voice = this.text(profile?.voice_id);
+      if (!profile || !profile.is_active || !profile.config?.is_active || !voice) {
+        return null;
+      }
+      return {
+        configId: profile.config.id,
+        model: profile.config.model_id,
+        voice,
+        speed: this.positive(profile.speed),
+        vol: this.positive(profile.vol),
+      };
+    } catch (error) {
+      this.logger.warn(
+        `Voice profile lookup failed for ${agentKey}; using the fallback voice: ${(error as Error).message}`,
+      );
+      return null;
     }
   }
 
@@ -231,7 +351,7 @@ export class VexiSpeechService {
     rawText: string,
     params: SpeechCacheParams,
     currency?: string,
-  ): Promise<CachedAudio | null> {
+  ): Promise<SynthesizedAudio | null> {
     // Order matters: the markdown strip has to run first because it is what
     // removes the list marker "1. ", and the number pass would otherwise see the
     // "1" as a quantity. The strip's own comment already flags that the trailing
@@ -247,11 +367,23 @@ export class VexiSpeechService {
 
     const key = this.cache.key(spoken, params);
     const hit = this.cache.get(key);
-    if (hit) return hit;
+    if (hit) return { ...hit, generated: false, seconds: 0 };
 
     const audio = await this.callProvider(spoken, params);
-    if (audio) this.cache.set(key, audio);
-    return audio;
+    if (!audio) return null;
+    this.cache.set(key, audio);
+    // Measured here, at synthesis (§3.7): the only place that knows a provider
+    // call produced audio. Cache hits above are free and never counted.
+    return {
+      ...audio,
+      generated: true,
+      seconds: estimateSpeechSeconds(
+        audio.audioBase64,
+        audio.contentType,
+        spoken,
+        params.speed,
+      ),
+    };
   }
 
   /**
@@ -403,7 +535,11 @@ export class VexiSpeechService {
           // caché, y una entrada nunca puede describir un volumen distinto del
           // que realmente se sintetizó.
           vol: params.vol,
+          // Only with a catalog voice: its model belongs to its provider. The
+          // fallback path keeps letting the app decide the model, as before.
+          ...(params.configId ? { model: params.model } : {}),
         },
+        ...(params.configId ? [{ configId: params.configId }] : []),
       );
 
       if (!response.success || !response.audioBase64) {

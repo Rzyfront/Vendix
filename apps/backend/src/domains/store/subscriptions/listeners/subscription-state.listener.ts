@@ -1,3 +1,4 @@
+import { jobOrigin, withJobOrigin } from '../../../../common/queue/job-origin';
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -242,6 +243,7 @@ export class SubscriptionStateListener {
               invoiceId: payload.invoiceId,
               paymentId: payload.paymentId,
               storeId: sub.store_id,
+              ...jobOrigin('event:subscription.payment.succeeded'),
             },
             {
               attempts: 3,
@@ -343,6 +345,7 @@ export class SubscriptionStateListener {
             invoiceId: payload.invoiceId,
             paymentId: payload.paymentId,
             storeId,
+            ...jobOrigin('event:subscription.payment.succeeded'),
           },
           {
             attempts: 3,
@@ -496,12 +499,16 @@ export class SubscriptionStateListener {
     payload: Record<string, unknown>,
   ): Promise<void> {
     try {
-      await this.emailQueue.add(jobName, payload, {
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 5000 },
-        removeOnComplete: { count: 50 },
-        removeOnFail: { count: 50 },
-      });
+      await this.emailQueue.add(
+        jobName,
+        withJobOrigin(payload, 'event:subscription.state.changed'),
+        {
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 5000 },
+          removeOnComplete: { count: 50 },
+          removeOnFail: { count: 50 },
+        },
+      );
     } catch (err: any) {
       this.logger.warn(`Failed to enqueue ${jobName}: ${err?.message ?? err}`);
     }

@@ -10,6 +10,8 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
+import { HttpErrorResponse } from '@angular/common/http';
+import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
@@ -37,7 +39,10 @@ import {
   GYM_MEMBERSHIP_STATUS_COLORS,
   GYM_MEMBERSHIP_STATUS_LABELS,
 } from '../../interfaces';
-import { MemberBulkScannerService } from '../../services/member-bulk-scanner.service';
+import {
+  MEMBER_COMMIT_CHUNK,
+  MemberBulkScannerService,
+} from '../../services/member-bulk-scanner.service';
 import { CommitMemberRosterDto } from '../../interfaces/member-bulk-scanner.interface';
 import { MembershipsService } from '../../services';
 import { MemberBulkScannerModalComponent } from '../../components/member-bulk-scanner/member-bulk-scanner-modal.component';
@@ -72,6 +77,10 @@ interface MembersStats {
 export class MembershipMembersListPageComponent implements OnInit {
   private readonly membershipsService = inject(MembershipsService);
   private readonly bulkScanner = inject(MemberBulkScannerService);
+  /** ia-cargas F2 — members committed so far in a chunked bulk load. */
+  readonly bulkCommitProgress = signal<{ done: number; total: number } | null>(
+    null,
+  );
   private readonly toastService = inject(ToastService);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
@@ -324,56 +333,73 @@ export class MembershipMembersListPageComponent implements OnInit {
    * resets via its own `(close)` listener; we just close on success.
    */
   onBulkCommit(dto: CommitMemberRosterDto): void {
+    // ia-cargas F2: a sheet may bring thousands of members; they go in
+    // chunks of 100 (the first one creates the new plans, the rest reuse
+    // them) and add up on one row of the upload log.
+    const total = dto.members.length;
+    if (total > MEMBER_COMMIT_CHUNK) {
+      this.toastService.info(
+        `Cargando ${total} socios por partes; puede tardar unos minutos. No cierres esta página.`,
+        'Carga masiva',
+        8000,
+      );
+    }
     this.bulkScanner
-      .commitRoster(dto)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (response) => {
-          const data = response?.data;
-          if (!data) {
-            this.toastService.error('Respuesta inesperada del servidor');
-            return;
-          }
+      .commitRosterInChunks(dto, (done, count) =>
+        this.bulkCommitProgress.set(
+          count > MEMBER_COMMIT_CHUNK ? { done, total: count } : null,
+        ),
+      )
+      .then((data) => {
+        this.bulkCommitProgress.set(null);
+        // Plan creation is atomic per request: if any plan failed, NO member
+        // of THAT request was persisted. Earlier chunks may have landed.
+        if (data.plan_errors?.length) {
+          this.toastService.error(
+            data.succeeded
+              ? `Se cargaron ${data.succeeded} socios y la carga se detuvo: ${data.plan_errors.length} plan(es) con error. Revisa los planes antes de cargar el resto.`
+              : `No se creó nada: ${data.plan_errors.length} plan(es) con error. Corrige los planes e intenta de nuevo.`,
+            'Carga masiva',
+          );
+          if (data.succeeded) this.loadMemberships();
+          return;
+        }
 
-          // Plan creation is atomic on the backend: if any plan failed, NO
-          // member row was persisted. Report and let the user retry.
-          if (data.plan_errors?.length) {
-            this.toastService.error(
-              `No se creó nada: ${data.plan_errors.length} plan(es) con error. Corrige los planes e intenta de nuevo.`,
-              'Carga masiva',
-            );
-            return;
-          }
+        const succeeded = data.succeeded ?? 0;
+        const failed = data.failed ?? 0;
+        const plansCreated = dto.plans.filter(
+          (p) => p.status === 'new',
+        ).length;
 
-          const succeeded = data.succeeded ?? 0;
-          const failed = data.failed ?? 0;
-          const plansCreated = dto.plans.filter(
-            (p) => p.status === 'new',
-          ).length;
+        if (failed === 0) {
+          this.toastService.success(
+            `Importación completa: ${succeeded} socios creados` +
+              (plansCreated ? `, ${plansCreated} planes nuevos.` : '.'),
+            'Carga masiva',
+          );
+        } else {
+          this.toastService.warning(
+            `Importación parcial: ${succeeded} ok, ${failed} con error. Revisa los detalles.`,
+            'Carga masiva',
+          );
+        }
 
-          if (failed === 0) {
-            this.toastService.success(
-              `Importación completa: ${succeeded} socios creados` +
-                (plansCreated ? `, ${plansCreated} planes nuevos.` : '.'),
-              'Carga masiva',
-            );
-          } else {
-            this.toastService.warning(
-              `Importación parcial: ${succeeded} ok, ${failed} con error. Revisa los detalles.`,
-              'Carga masiva',
-            );
-          }
-
-          this.showBulkScanner.set(false);
-          this.loadMemberships();
-        },
-        error: (error: unknown) => {
-          const message =
-            typeof error === 'string'
-              ? error
-              : 'Error al confirmar la carga masiva';
-          this.toastService.error(message);
-        },
+        this.showBulkScanner.set(false);
+        this.loadMemberships();
+      })
+      .catch((error: unknown) => {
+        this.bulkCommitProgress.set(null);
+        const message =
+          typeof error === 'string'
+            ? error
+            : error instanceof HttpErrorResponse
+              ? parseApiError(error).userMessage
+              : error instanceof Error && error.message
+                ? error.message
+                : 'Error al confirmar la carga masiva';
+        this.toastService.error(message);
+        // A chunk may have landed before the failure: show what exists.
+        this.loadMemberships();
       });
   }
 

@@ -23,6 +23,8 @@ import { emailEquals, normalizeEmail } from '@common/utils/email.util';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { computeNitDv, normalizeNit } from '../../../common/utils/nit.util';
+import { S3Service } from '@common/services/s3.service';
+import { signUserAvatar } from '../../auth/helpers/sign-user-avatar.helper';
 
 /**
  * Columnas de `users` que NUNCA pueden salir por la API de clientes.
@@ -180,6 +182,7 @@ export class CustomersService {
     private readonly prisma: StorePrismaService,
     private readonly eventEmitter: EventEmitter2,
     @Optional() private readonly operatingScope?: OperatingScopeService,
+    @Optional() private readonly s3Service?: S3Service,
   ) {}
 
   /**
@@ -1933,9 +1936,17 @@ export class CustomersService {
 
   async findAll(
     storeId: number,
-    query?: { search?: string; page?: number; limit?: number },
+    query?: {
+      search?: string;
+      page?: number;
+      limit?: number;
+      state_province?: string;
+      city?: string;
+    },
   ) {
     const { search, page = 1, limit = 20 } = query || {};
+    const stateProvince = query?.state_province?.trim();
+    const city = query?.city?.trim();
     const skip = (page - 1) * limit;
 
     const where: any = {
@@ -1971,7 +1982,34 @@ export class CustomersService {
         { document_number: { contains: search, mode: 'insensitive' } },
         { legal_name: { contains: search, mode: 'insensitive' } },
         { phone: { contains: search, mode: 'insensitive' } },
+        // Nombre de la sede/establecimiento ("Sede Norte"): el buscador de
+        // venta muestra una línea por establecimiento y debe encontrarlo por
+        // su nombre. Subconsulta EXISTS sobre la relación del propio cliente,
+        // así que el scope tenant de arriba sigue aplicando.
+        {
+          addresses: {
+            some: {
+              type: address_type_enum.shipping,
+              label: { contains: search, mode: 'insensitive' },
+            },
+          },
+        },
       ];
+    }
+
+    // Location filter: the customer matches when ANY of its addresses
+    // (shipping or billing) is in that department/city. Exact,
+    // case-insensitive match because the values come from the DANE catalog
+    // (a `contains` would match "Santander" inside "Norte de Santander").
+    if (stateProvince || city) {
+      where.addresses = {
+        some: {
+          ...(stateProvince && {
+            state_province: { equals: stateProvince, mode: 'insensitive' },
+          }),
+          ...(city && { city: { equals: city, mode: 'insensitive' } }),
+        },
+      };
     }
 
     const [data, total] = await Promise.all([
@@ -1979,7 +2017,12 @@ export class CustomersService {
         where,
         skip,
         take: limit,
-        orderBy: { created_at: 'desc' },
+        // Último editado primero; `updated_at` arranca igual a `created_at`,
+        // así que un cliente nunca editado queda en su orden de creación.
+        orderBy: [
+          { updated_at: { sort: 'desc', nulls: 'last' } },
+          { id: 'desc' },
+        ],
         omit: CUSTOMER_PRIVATE_COLUMNS,
         include: {
           addresses: CUSTOMER_ADDRESSES_INCLUDE,
@@ -2131,8 +2174,14 @@ export class CustomersService {
     });
 
     const row = stats[0];
+    // `avatar_url` persists the S3 key; the detail card renders it as <img>,
+    // so expose a signed URL (null without photo or without storage).
+    const avatar_url = this.s3Service
+      ? (await signUserAvatar(this.s3Service, user)).avatar_url
+      : null;
     return {
       ...withPriceTierId(withBillingAddress(user)),
+      avatar_url,
       total_orders: row?._count?.id ?? 0,
       total_spend: row?._sum?.grand_total ? Number(row._sum.grand_total) : 0,
       last_order_date: row?._max?.created_at ?? null,
@@ -2558,6 +2607,9 @@ export class CustomersService {
         // Email opcional: si viene en el payload lo normalizamos (null cuando
         // queda vacío, sin placeholders). Si no viene (undefined) no se toca.
         email: effectiveEmail,
+        // La columna no tiene @updatedAt: se marca a mano para que el listado
+        // pueda ordenarse por el último cliente editado.
+        updated_at: new Date(),
       },
       omit: CUSTOMER_PRIVATE_COLUMNS,
     });

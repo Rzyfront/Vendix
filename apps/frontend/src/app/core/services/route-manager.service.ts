@@ -8,6 +8,7 @@ import { ReplaySubject } from 'rxjs';
 import { AppConfig } from './app-config.service';
 import * as ConfigActions from '../store/config/config.actions';
 import { LandingOnlyGuard } from '../guards/landing-only.guard';
+import { withWhatsappSignupBridge } from '../../public/whatsapp-signup-bridge/whatsapp-signup-bridge.routes';
 
 @Injectable({
   providedIn: 'root',
@@ -22,35 +23,15 @@ export class RouteManagerService {
   public routesConfigured$ = this.routesConfigured.asObservable();
 
   private initialized = false;
-  private bootTimeout: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
-    // Initialize the route manager
+    // Initialize the route manager.
+    // Sin temporizador de arranque propio: el ÚNICO dueño del plazo de
+    // arranque es el APP_INITIALIZER (`app.config.ts` → `initializeApp`), que
+    // confirma con `/health` antes de despachar `initializeAppFailure` (gato).
+    // Un segundo temporizador aquí mostraba el gato a los 5 s con el backend
+    // vivo, saltándose la sonda.
     this.init();
-    this.startBootTimeout();
-  }
-
-  private startBootTimeout(): void {
-    if (typeof window === 'undefined') return;
-
-    this.bootTimeout = setTimeout(() => {
-      // Bug fix: previously this checked `!this.routesConfigured`, but
-      // `routesConfigured` is a ReplaySubject (always truthy), so the
-      // fallback never fired. Use the explicit `initialized_complete`
-      // flag which flips to true the moment configureDynamicRoutes runs.
-      this.bootTimeout = null;
-      if (!this.initialized_complete) {
-        console.warn(
-          '[RouteManagerService] Boot timeout - routes not configured after 5s, marking transient failure',
-        );
-        // NO degradar a landing. Marcamos un fallo transitorio tipado; el
-        // handler de initializeAppFailure configura rutas neutras y libera
-        // el APP_INITIALIZER, y la UI mostrará el estado de error.
-        this.store.dispatch(
-          ConfigActions.initializeAppFailure({ error: { kind: 'transient' } }),
-        );
-      }
-    }, 5000);
   }
 
   /**
@@ -93,11 +74,6 @@ export class RouteManagerService {
    * Public method to allow manual reconfiguration (e.g., during environment switch).
    */
   public configureDynamicRoutes(appConfig: AppConfig): void {
-    if (this.bootTimeout) {
-      clearTimeout(this.bootTimeout);
-      this.bootTimeout = null;
-    }
-
     // Si no tenemos config válida, fallback inmediato
     if (!appConfig || !appConfig.routes) {
       this.router.resetConfig(this.getFallbackRoutes());
@@ -155,7 +131,11 @@ export class RouteManagerService {
 
   private buildFinalRoutes(appConfig: AppConfig): Routes {
     const staticAuthRoutes = this.getStaticAuthRoutes();
-    const dynamicAppRoutes = appConfig.routes;
+    // The WhatsApp signup bridge hangs off the main domain, not the app_type.
+    const dynamicAppRoutes = withWhatsappSignupBridge(
+      appConfig.routes,
+      appConfig.domainConfig,
+    );
 
     return [
       ...staticAuthRoutes,
@@ -242,10 +222,6 @@ export class RouteManagerService {
    * mount the Vendix landing.
    */
   configureFallbackRoutes(): void {
-    if (this.bootTimeout) {
-      clearTimeout(this.bootTimeout);
-      this.bootTimeout = null;
-    }
     this.router.resetConfig(this.getFallbackRoutes());
     this.routesConfigured.next(true);
   }

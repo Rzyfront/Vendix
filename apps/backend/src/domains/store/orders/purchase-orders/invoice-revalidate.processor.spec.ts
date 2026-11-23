@@ -4,8 +4,32 @@ import {
   mimeFromBytes,
 } from './invoice-revalidate.processor';
 import { InvoiceScannerService } from './invoice-scanner.service';
+import { LEGACY_AI_SOURCES } from '@common/ai-scan-jobs/ai-scan-sources';
+import { AiExtractionService } from '@common/ai-ingest/extraction/ai-extraction.service';
 
-function build(aiContent: string | { success: false; error: string }) {
+const PDF = Buffer.from('%PDF-1.7 factura');
+/** ia-cargas F3: páginas ya preparadas por el lector común (sin pdfjs/sharp). */
+const fakePages = (unreadable: number[] = []) => ({
+  prepareForAi: jest.fn().mockResolvedValue({
+    source: 'pdf',
+    pages: [
+      { page_number: 1, mode: 'text', text: 'FACTURA FV-1 ACME' },
+      {
+        page_number: 2,
+        mode: 'image',
+        text: '',
+        image: 'data:image/jpeg;base64,AAAA',
+      },
+    ],
+    page_count: 2 + unreadable.length,
+    unreadable_pages: unreadable,
+  }),
+});
+
+function build(
+  aiContent: string | { success: false; error: string },
+  pages = fakePages(),
+) {
   const aiEngine = {
     run: jest.fn().mockResolvedValue(
       typeof aiContent === 'string'
@@ -25,10 +49,22 @@ function build(aiContent: string | { success: false; error: string }) {
     settings as any,
     null as any,
     null as any,
+    pages as any,
+    new AiExtractionService(aiEngine as any),
   );
-  const s3 = { downloadFile: jest.fn().mockResolvedValue(Buffer.from('doc')) };
-  const processor = new InvoiceRevalidateProcessor(scanner, s3 as any);
-  return { processor, aiEngine, s3 };
+  const s3 = { downloadFile: jest.fn().mockResolvedValue(PDF) };
+  const monitor = {
+    runAiWork: jest.fn((_job: unknown, _source: unknown, work: () => unknown) =>
+      work(),
+    ),
+    onFailed: jest.fn().mockResolvedValue(undefined),
+  };
+  const processor = new InvoiceRevalidateProcessor(
+    scanner,
+    s3 as any,
+    monitor as any,
+  );
+  return { processor, aiEngine, s3, monitor, pages };
 }
 
 const job = (over: Record<string, unknown> = {}) =>
@@ -127,7 +163,15 @@ describe('InvoiceRevalidateProcessor', () => {
     expect(JSON.parse(vars.consolidated_json).line_items[0].taxes[0]).toEqual(
       expect.objectContaining({ type: 'iva', rate: 19 }),
     );
-    expect(extra[0].content[1].image_url.url).toMatch(/^data:/);
+    // ia-cargas F3: el PDF ya no viaja crudo; va por páginas (texto nativo
+    // primero, la escaneada como imagen) en UNA sola llamada.
+    const parts = extra[0].content as any[];
+    expect(parts.some((p) => p.type === 'text' && p.text.includes('FACTURA FV-1 ACME'))).toBe(true);
+    const images = parts.filter((p) => p.type === 'image_url');
+    expect(images).toHaveLength(1);
+    expect(images[0].image_url.url).toMatch(/^data:image\/jpeg/);
+    expect(JSON.stringify(parts)).not.toContain('application/pdf');
+    expect(aiEngine.run).toHaveBeenCalledTimes(1);
 
     expect(res.consolidated.line_items[0].quantity).toBe(3);
     expect(res.consolidated.line_items[0].taxes![0]).toEqual(
@@ -171,6 +215,31 @@ describe('InvoiceRevalidateProcessor', () => {
     expect(res.report.divergences).toHaveLength(100);
   });
 
+  it('ia-cargas F3: una página ilegible queda avisada en el informe', async () => {
+    const { processor } = build(
+      JSON.stringify({
+        consolidated: {
+          supplier: { name: 'A' },
+          line_items: [{ description: 'x', quantity: 1, unit_price: 1, total: 1 }],
+          total: 1,
+        },
+        report: { findings: [] },
+      }),
+      fakePages([3]),
+    );
+    const res = await processor.process(job());
+    expect(res.report.findings[0]).toEqual(
+      expect.objectContaining({ severity: 'warning' }),
+    );
+    expect(res.report.findings[0].message).toContain('La página 3');
+  });
+
+  it('ia-cargas F3: JSON inválido se repara una vez antes de fallar', async () => {
+    const { processor, aiEngine } = build('esto no es json');
+    await processor.process(job()).catch(() => undefined);
+    expect(aiEngine.run).toHaveBeenCalledTimes(2);
+  });
+
   it('JSON inválido => UnrecoverableError en español', async () => {
     const { processor } = build('esto no es json');
     await expect(processor.process(job())).rejects.toBeInstanceOf(
@@ -188,8 +257,39 @@ describe('InvoiceRevalidateProcessor', () => {
   it('fallo de la IA => se relanza (BullMQ reintenta)', async () => {
     const { processor } = build({ success: false, error: 'boom' });
     const p = processor.process(job());
-    await expect(p).rejects.toThrow(/revalidar/);
+    await expect(p).rejects.toThrow('INV_SCAN_AI_FAIL');
     await expect(p).rejects.not.toBeInstanceOf(UnrecoverableError);
+  });
+
+  it('JSON inválido => failedReason es el CODIGO INV_SCAN_PARSE_FAIL', async () => {
+    const { processor } = build('esto no es json');
+    await expect(processor.process(job())).rejects.toMatchObject({
+      message: 'INV_SCAN_PARSE_FAIL',
+    });
+  });
+
+  it('envuelve la IA en runAiWork con la fuente invoice-revalidate', async () => {
+    const { processor, monitor } = build(
+      JSON.stringify({ consolidated: {}, report: {} }),
+    );
+    const j = job();
+    await processor.process(j).catch(() => undefined);
+    expect(monitor.runAiWork).toHaveBeenCalledWith(
+      j,
+      LEGACY_AI_SOURCES.invoiceRevalidate,
+      expect.any(Function),
+    );
+  });
+
+  it('onFailed delega en el monitor con la fuente y el dueño del job', async () => {
+    const { processor, monitor } = build('x');
+    const j = job();
+    await processor.onFailed(j);
+    expect(monitor.onFailed).toHaveBeenCalledWith(
+      j,
+      LEGACY_AI_SOURCES.invoiceRevalidate,
+      j.data,
+    );
   });
 });
 
@@ -208,12 +308,14 @@ describe('mimeFromBytes', () => {
 
   it('el processor prioriza los bytes sobre la extensión y cae a la extensión', async () => {
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-    const { processor, s3, aiEngine } = build(
+    const { processor, s3, pages } = build(
       JSON.stringify({ consolidated: {}, report: {} }),
     );
     s3.downloadFile.mockResolvedValue(png);
     await processor.process(job()).catch(() => undefined);
-    const call = aiEngine.run.mock.calls[0];
-    expect(JSON.stringify(call)).toContain('image/png');
+    expect(pages.prepareForAi).toHaveBeenCalledWith(
+      expect.objectContaining({ mimetype: 'image/png' }),
+      expect.objectContaining({ maxPages: 10, splitTallImages: false }),
+    );
   });
 });

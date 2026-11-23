@@ -301,6 +301,52 @@ describe('StockValidatorService — no-overselling guard', () => {
     });
   });
 
+  describe('assertIngredientsAvailable — consumeLocationId (QUI-1013, faltantes por planta)', () => {
+    const TELA = 910;
+    const tela = () =>
+      prismaMock.products.findMany.mockResolvedValue([
+        { id: TELA, store_id: STORE_ID, track_inventory: true, product_type: 'physical', name: 'Tela' },
+      ]);
+
+    it('lee solo la bodega de insumos de la planta (incluida aunque no sea vendible)', async () => {
+      tela();
+      allocatorMock.getSellableLevels.mockResolvedValue([{ location_id: 11, quantity_available: 4 }]);
+
+      await expect(
+        service.assertIngredientsAvailable([{ product_id: TELA, quantity: 6 }], {
+          consumeLocationId: 11,
+        }),
+      ).rejects.toMatchObject({ errorCode: 'INV_STOCK_INSUFFICIENT_LINES' });
+      expect(allocatorMock.getSellableLevels).toHaveBeenCalledWith(
+        STORE_ID,
+        TELA,
+        undefined,
+        undefined,
+        [11],
+        [11],
+      );
+    });
+
+    it('con sobre-uso permitido advierte con lo disponible en esa bodega, sin bloquear', async () => {
+      tela();
+      allocatorMock.getSellableLevels.mockResolvedValue([{ location_id: 11, quantity_available: 4 }]);
+      const items = await service.assertIngredientsAvailable([{ product_id: TELA, quantity: 6 }], {
+        consumeLocationId: 11,
+        allowIngredientOveruse: true,
+      });
+      expect(items).toEqual([
+        expect.objectContaining({ product_id: TELA, requested: 6, available: 4 }),
+      ]);
+    });
+
+    it('sin consumeLocationId mantiene el alcance vendible de toda la tienda', async () => {
+      tela();
+      allocatorMock.getSellableLevels.mockResolvedValue([{ location_id: 1, quantity_available: 9 }]);
+      await service.assertIngredientsAvailable([{ product_id: TELA, quantity: 6 }]);
+      expect(allocatorMock.getSellableLevels).toHaveBeenCalledWith(STORE_ID, TELA, undefined, undefined);
+    });
+  });
+
   describe('assertLinesAvailable — allowOversell (plan step 9)', () => {
     it('allowOversell=true: no lanza, advierte y devuelve los items en vez de bloquear', async () => {
       prismaMock.products.findMany.mockResolvedValue([

@@ -7,9 +7,21 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
-import { ErrorCodes, FinancialSplitErrors, VendixHttpException } from '../errors';
+import {
+  ErrorCodes,
+  FinancialSplitErrors,
+  VendixHttpException,
+  isPrismaBusyError,
+} from '../errors';
 import { RequestContextService } from '../context/request-context.service';
 import { redactSensitiveRoute } from '../utils/sensitive-route.util';
+import { routeKeyOf } from '../platform-alerts/platform-alert-sanitize';
+import type { HttpFailureInput } from '../platform-alerts/platform-alert.service';
+
+/** Lo que el filtro usa del bot de monitoreo (QUI-1010). */
+export interface HttpFailureSink {
+  captureHttpFailure(input: HttpFailureInput): void;
+}
 
 /**
  * DESAJUSTE DE TIPO EN UN VALOR — el ÚNICO subconjunto de
@@ -47,6 +59,9 @@ const PRISMA_VALUE_TYPE_MISMATCH =
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
+  /** `failures`: el bot de monitoreo registra cada 5xx (main.ts lo inyecta). */
+  constructor(private readonly failures?: HttpFailureSink) {}
+
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
@@ -163,6 +178,22 @@ export class AllExceptionsFilter implements ExceptionFilter {
         `[AllExceptionsFilter] Prisma P2020 on ${request.method} ${safePath}:`,
         redactSensitiveRoute(exception.message, request.url),
       );
+    } else if (isPrismaBusyError(exception)) {
+      /**
+       * P2028 (transacción interactiva vencida) y P2024 (pool sin conexiones
+       * libres): la base está saturada, no hay nada mal en la petición y
+       * Prisma ya hizo rollback. El usuario ve un mensaje para reintentar en
+       * vez de un 500 genérico; el texto de Prisma (tiempos, ids de la tx) se
+       * queda en el log.
+       */
+      const entry = ErrorCodes.SYS_BUSY_001;
+      status = entry.httpStatus;
+      errorCode = entry.code;
+      message = entry.devMessage;
+      console.error(
+        `[AllExceptionsFilter] Prisma ${exception.code} (database busy) on ${request.method} ${safePath}:`,
+        redactSensitiveRoute(exception.message, request.url),
+      );
     } else if (
       exception instanceof Prisma.PrismaClientValidationError &&
       PRISMA_VALUE_TYPE_MISMATCH.test(exception.message)
@@ -244,6 +275,30 @@ export class AllExceptionsFilter implements ExceptionFilter {
       };
     }
 
+    this.reportFailure(request, status, errorCode, exception);
     response.status(status).json(responseBody);
+  }
+
+  /** 5xx → bot de monitoreo (QUI-1010). Solo ruta sin valores y el error: nunca cuerpo ni cabeceras. */
+  private reportFailure(
+    request: Request,
+    status: number,
+    errorCode: string | undefined,
+    exception: unknown,
+  ): void {
+    if (!this.failures || status < 500) return;
+    try {
+      this.failures.captureHttpFailure({
+        method: request.method,
+        route: routeKeyOf(request),
+        status,
+        errorCode,
+        error: exception,
+        requestId:
+          RequestContextService.asyncLocalStorage.getStore()?.request_id ?? null,
+      });
+    } catch {
+      // El aviso nunca cambia la respuesta al cliente.
+    }
   }
 }

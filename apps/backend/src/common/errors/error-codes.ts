@@ -41,6 +41,8 @@ export const ErrorCodes = {
   OPT_ASSIGNMENT_TARGET: { code: 'OPT_ASSIGNMENT_TARGET', httpStatus: 400, devMessage: 'El grupo se engancha a un producto o a una categoría, no a ambos.' },
   OPT_REQUIRES_SCHEDULE: { code: 'OPT_REQUIRES_SCHEDULE', httpStatus: 400, devMessage: 'Las adiciones solo se venden en pedidos programados: agenda el pedido o quita las adiciones.' },
   OPT_SELECTION_INVALID: { code: 'OPT_SELECTION_INVALID', httpStatus: 400, devMessage: 'Las adiciones elegidas no cumplen las reglas del producto.' },
+  // QUI-1005: «Permitir adiciones en la tienda en línea» apagado. Solo el canal en línea.
+  OPT_ONLINE_DISABLED: { code: 'OPT_ONLINE_DISABLED', httpStatus: 400, devMessage: 'Esta tienda no permite adiciones en la tienda en línea: quita las adiciones del producto para continuar.' },
   OPT_DRAFT_LINE_LOCKED: { code: 'OPT_DRAFT_LINE_LOCKED', httpStatus: 409, devMessage: 'Esta línea del borrador tiene adiciones y no se puede cambiar aquí: quítala y vuelve a agregarla con sus adiciones.' },
   OPT_DRAFT_ADD_LOCKED: { code: 'OPT_DRAFT_ADD_LOCKED', httpStatus: 409, devMessage: 'Este pedido ya está guardado: no se le pueden agregar productos con adiciones. Cóbralo o cancélalo y registra las adiciones en un pedido nuevo.' },
   // API keys por tienda (/api/v1)
@@ -241,6 +243,22 @@ export const ErrorCodes = {
     code: 'SYS_CONFLICT_001',
     httpStatus: 409,
     devMessage: 'Resource conflict',
+  },
+  /**
+   * La base está saturada: la transacción interactiva venció (Prisma P2028),
+   * no hubo conexión libre en el pool (P2024) o una escritura dentro de la tx
+   * volvió sin fila porque la tx se cerró bajo ella. Prisma ya hizo rollback:
+   * no quedó nada a medias y reintentar es seguro. 503 y no 500 porque la
+   * petición es válida; lo que falta es capacidad en este momento.
+   *
+   * El mensaje es el texto que ve el usuario (S4 de
+   * odd/tasks/transacciones-colgadas-cancelaciones.md); el frontend lo repite
+   * en `error-messages.ts`.
+   */
+  SYS_BUSY_001: {
+    code: 'SYS_BUSY_001',
+    httpStatus: 503,
+    devMessage: 'El sistema está ocupado, intenta de nuevo en unos segundos',
   },
   /**
    * RED DE SEGURIDAD DEL FILTRO GLOBAL — Prisma P2020 («value out of range»).
@@ -700,6 +718,12 @@ export const ErrorCodes = {
     code: 'AUTH_PERM_001',
     httpStatus: 403,
     devMessage: 'Access denied',
+  },
+  AUTH_STORE_INACTIVE_001: {
+    code: 'AUTH_STORE_INACTIVE_001',
+    httpStatus: 403,
+    devMessage:
+      'The store is inactive: it cannot be opened nor receive users or customers',
   },
   AUTH_TOKEN_001: {
     code: 'AUTH_TOKEN_001',
@@ -1535,6 +1559,15 @@ export const ErrorCodes = {
     devMessage:
       'Una orden con mercancía recibida se revierte con una devolución a proveedor, no cancelándola',
   },
+  // QUI-684 — `invoices.purchase_order_id` es FK ON DELETE RESTRICT: la traza
+  // fiscal (incluso de un documento anulado) sobrevive al borrador. Sin esta
+  // guarda el borrado chocaba con la FK y salía como 500 (P2003).
+  PO_DELETE_SUPPORT_DOCUMENT_001: {
+    code: 'PO_DELETE_SUPPORT_DOCUMENT_001',
+    httpStatus: 409,
+    devMessage:
+      'La orden de compra tiene un documento soporte asociado y no se puede eliminar; cancélala si ya no la necesitas',
+  },
   PO_FIND_001: {
     code: 'PO_FIND_001',
     httpStatus: 404,
@@ -2017,6 +2050,34 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Stock transfer not found',
   },
+  INV_TRANSFER_EXTERNAL_REQUIRES_DISPATCH_NOTE: {
+    code: 'INV_TRANSFER_EXTERNAL_REQUIRES_DISPATCH_NOTE',
+    httpStatus: 400,
+    devMessage:
+      'External destination transfers require remisiones (with_dispatch_notes)',
+  },
+  INV_TRANSFER_QUICK_EXTERNAL_FORBIDDEN: {
+    code: 'INV_TRANSFER_QUICK_EXTERNAL_FORBIDDEN',
+    httpStatus: 400,
+    devMessage:
+      'Quick stock movements only run between own warehouses, not to external destinations',
+  },
+  INV_TRANSFER_NOT_DISPATCHED: {
+    code: 'INV_TRANSFER_NOT_DISPATCHED',
+    httpStatus: 400,
+    devMessage: 'Stock transfer has not been dispatched yet',
+  },
+  INV_TRANSFER_LOSS_NOT_DUE: {
+    code: 'INV_TRANSFER_LOSS_NOT_DUE',
+    httpStatus: 400,
+    devMessage:
+      'The loss can only be closed after the expected delivery date',
+  },
+  INV_TRANSFER_LOSS_REASON_REQUIRED: {
+    code: 'INV_TRANSFER_LOSS_REASON_REQUIRED',
+    httpStatus: 400,
+    devMessage: 'A reason is required to close the pending balance as a loss',
+  },
 
   // Serial number tracking (QUI-431)
   SERIAL_REQUIRED_001: {
@@ -2266,6 +2327,12 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Superadmin role not found',
   },
+  SUP_ADMIN_ROLE_002: {
+    code: 'SUP_ADMIN_ROLE_002',
+    httpStatus: 403,
+    devMessage:
+      'The customer role cannot be assigned from the Super Admin (end customers are not Vendix users)',
+  },
   SUP_ADMIN_PERM_001: {
     code: 'SUP_ADMIN_PERM_001',
     httpStatus: 403,
@@ -2288,10 +2355,59 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'No default AI provider configured',
   },
+  // QUI-1020: the provider refused for billing (402, insufficient_quota, credit
+  // balance too low). 4xx on purpose: the AI job queues treat it as final (a
+  // retry never refills the balance) and alert Vendix once.
+  AI_PROVIDER_003: {
+    code: 'AI_PROVIDER_003',
+    httpStatus: 402,
+    devMessage: 'AI provider has no credits or quota left',
+  },
+  // QUI-1020: the provider kept answering 429 after the job's retries. 429 on
+  // purpose: the AI job queues retry it like any rate limit before giving up.
+  AI_PROVIDER_004: {
+    code: 'AI_PROVIDER_004',
+    httpStatus: 429,
+    devMessage: 'AI provider rate limit kept refusing the request',
+  },
   AI_REQUEST_001: {
     code: 'AI_REQUEST_001',
     httpStatus: 500,
     devMessage: 'AI provider request failed',
+  },
+  // ai-ingest (ia-cargas F1): document-side failures, never retried as a job.
+  AI_INGEST_PARSE_FAIL: {
+    code: 'AI_INGEST_PARSE_FAIL',
+    httpStatus: 422,
+    devMessage:
+      'AI output did not match the extraction schema even after one repair attempt',
+  },
+  AI_INGEST_INCOMPLETE: {
+    code: 'AI_INGEST_INCOMPLETE',
+    httpStatus: 422,
+    devMessage:
+      'AI output was truncated (finish_reason=length) and the input cannot be split further',
+  },
+  AI_INGEST_INVALID_FILE: {
+    code: 'AI_INGEST_INVALID_FILE',
+    httpStatus: 400,
+    devMessage: 'Uploaded file is unreadable, empty or of an unsupported type',
+  },
+  AI_INGEST_TOO_MANY_PAGES: {
+    code: 'AI_INGEST_TOO_MANY_PAGES',
+    httpStatus: 400,
+    devMessage: 'PDF has more pages than the load profile accepts',
+  },
+  AI_INGEST_UNSUPPORTED_TYPE: {
+    code: 'AI_INGEST_UNSUPPORTED_TYPE',
+    httpStatus: 400,
+    devMessage: 'Image format cannot be decoded on the server (HEIC/HEVC)',
+  },
+  AI_INGEST_NO_PAGES: {
+    code: 'AI_INGEST_NO_PAGES',
+    httpStatus: 422,
+    devMessage:
+      'PDF has no usable native text and none of its pages could be rendered',
   },
   AI_CONFIG_002: {
     code: 'AI_CONFIG_002',
@@ -2333,6 +2449,16 @@ export const ErrorCodes = {
     code: 'VEXI_VOICE_TRANSCRIBE_FAILED',
     httpStatus: 502,
     devMessage: 'The transcription provider did not return text',
+  },
+  // N5: realtime voice is withdrawn from every surface. Only the creation of a
+  // NEW session answers this; tool-call and session/close stay alive so a
+  // session opened before the deploy still closes and bills.
+  VEXI_REALTIME_UNAVAILABLE: {
+    code: 'VEXI_REALTIME_UNAVAILABLE',
+    httpStatus: 410,
+    devMessage:
+      'Realtime voice is no longer available for new sessions; use dictation ' +
+      'and spoken replies (pipeline voice) instead',
   },
   AI_APP_001: {
     code: 'AI_APP_001',
@@ -2425,6 +2551,41 @@ export const ErrorCodes = {
     code: 'AI_CHAT_004',
     httpStatus: 400,
     devMessage: 'Message content is required',
+  },
+  AI_CHAT_005: {
+    code: 'AI_CHAT_005',
+    httpStatus: 409,
+    devMessage:
+      'Conversation has a running or pending task; stop it before deleting',
+  },
+  AI_CHAT_006: {
+    code: 'AI_CHAT_006',
+    httpStatus: 404,
+    devMessage: 'Follow-up suggestion not found in this conversation',
+  },
+  AI_CHAT_007: {
+    code: 'AI_CHAT_007',
+    httpStatus: 409,
+    devMessage: 'Follow-up suggestion was already dismissed',
+  },
+
+  // Vex store memory (F4 T31)
+  AI_MEMORY_LIMIT_001: {
+    code: 'AI_MEMORY_LIMIT_001',
+    httpStatus: 409,
+    devMessage:
+      'La memoria de la tienda llegó a su tope (40 recuerdos o 2000 caracteres contando la clave de cada uno). Edita o borra uno antes de agregar otro.',
+  },
+  AI_MEMORY_FORBIDDEN_001: {
+    code: 'AI_MEMORY_FORBIDDEN_001',
+    httpStatus: 422,
+    devMessage:
+      'No guardo contraseñas, datos de pago ni documentos de identidad en la memoria.',
+  },
+  AI_MEMORY_NOT_FOUND_001: {
+    code: 'AI_MEMORY_NOT_FOUND_001',
+    httpStatus: 404,
+    devMessage: 'El recuerdo no existe en la memoria de esta tienda.',
   },
 
   // Invoicing
@@ -3804,6 +3965,29 @@ export const ErrorCodes = {
     code: 'INVOICING_FISCAL_COVERAGE_001',
     httpStatus: 409,
     devMessage: 'Sale was charged without an issued fiscal document',
+  },
+  /**
+   * QUI-684 — la OC no tiene todos los datos que exige el documento soporte.
+   * El detalle viaja en `details.missing` (`{ code, field, label, target }[]`)
+   * para que el modal liste exactamente qué falta. 422: el cuerpo es válido,
+   * lo que falla es el estado de la compra/proveedor. No se crea nada.
+   */
+  INVOICING_SUPPORT_PO_001: {
+    code: 'INVOICING_SUPPORT_PO_001',
+    httpStatus: 422,
+    devMessage:
+      'La orden de compra no tiene todos los datos obligatorios para el documento soporte',
+  },
+  /**
+   * QUI-684 — la OC ya tiene un documento soporte vigente (no anulado). Una OC
+   * solo puede tener uno; el índice único parcial
+   * `invoices_po_active_support_document_key` lo garantiza también ante dos
+   * POST concurrentes. `details.active_document` = `{ id, invoice_number, status }`.
+   */
+  INVOICING_SUPPORT_PO_002: {
+    code: 'INVOICING_SUPPORT_PO_002',
+    httpStatus: 409,
+    devMessage: 'La orden de compra ya tiene un documento soporte vigente',
   },
   /**
    * IDENTIDAD FISCAL DEL EMISOR INCOMPLETA — lo lanza el resolvedor estricto
@@ -5278,6 +5462,43 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'No se encontró la carga masiva en esta tienda.',
   },
+  BULK_JOB_ALREADY_ACTIVE: {
+    code: 'BULK_JOB_ALREADY_ACTIVE',
+    httpStatus: 409,
+    devMessage:
+      'Ya hay una carga de este tipo en curso en la tienda. Espera a que termine.',
+  },
+  BULK_JOB_NOT_FOUND: {
+    code: 'BULK_JOB_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'No encontramos esa carga.',
+  },
+  BULK_JOB_NOT_RETRYABLE: {
+    code: 'BULK_JOB_NOT_RETRYABLE',
+    httpStatus: 409,
+    devMessage: 'Esta carga ya no se puede reanudar. Sube el archivo de nuevo.',
+  },
+  BULK_JOB_ENQUEUE_FAILED: {
+    code: 'BULK_JOB_ENQUEUE_FAILED',
+    httpStatus: 503,
+    devMessage:
+      'No pudimos iniciar la carga por un problema técnico. Intenta de nuevo en unos minutos.',
+  },
+  BULK_JOB_TIMEOUT: {
+    code: 'BULK_JOB_TIMEOUT',
+    httpStatus: 504,
+    devMessage: 'La carga superó el tiempo máximo de procesamiento.',
+  },
+  BULK_JOB_INTERRUPTED: {
+    code: 'BULK_JOB_INTERRUPTED',
+    httpStatus: 500,
+    devMessage: 'La carga se interrumpió mientras se procesaba un lote.',
+  },
+  BULK_JOB_NO_HANDLER: {
+    code: 'BULK_JOB_NO_HANDLER',
+    httpStatus: 500,
+    devMessage: 'No hay procesador registrado para este tipo de carga.',
+  },
   BULK_PROD_UPLOAD_FAILED: {
     code: 'BULK_PROD_UPLOAD_FAILED',
     httpStatus: 500,
@@ -5572,6 +5793,71 @@ export const ErrorCodes = {
     code: 'DCOL_PRODUCT_001',
     httpStatus: 400,
     devMessage: 'Product not found in this store or is not a service',
+  },
+  // La planilla del CRM (pipeline y ficha del cliente) solo usa plantillas
+  // activas de tipo Cliente (QUI-1043).
+  DCOL_CRM_001: {
+    code: 'DCOL_CRM_001',
+    httpStatus: 422,
+    devMessage: 'Solo una plantilla activa de tipo Cliente puede usarse en el CRM.',
+  },
+  // «Crear plantilla con IA (PDF/foto)»: borrador generado desde un formulario.
+  DCOL_AI_001: {
+    code: 'DCOL_AI_001',
+    httpStatus: 400,
+    devMessage: 'Invalid file for the AI template draft (type, size or content)',
+  },
+  DCOL_AI_002: {
+    code: 'DCOL_AI_002',
+    httpStatus: 422,
+    devMessage: 'The AI did not return a readable template JSON',
+  },
+  DCOL_AI_003: {
+    code: 'DCOL_AI_003',
+    httpStatus: 422,
+    devMessage: 'The AI template draft was cut by the output length limit',
+  },
+  DCOL_AI_004: {
+    code: 'DCOL_AI_004',
+    httpStatus: 422,
+    devMessage: 'The document pages could not be prepared for the AI',
+  },
+  DCOL_AI_005: {
+    code: 'DCOL_AI_005',
+    httpStatus: 502,
+    devMessage: 'The AI provider did not answer the template draft request',
+  },
+  DCOL_CRM_002: {
+    code: 'DCOL_CRM_002',
+    httpStatus: 409,
+    devMessage: 'Another template was marked as the CRM default at the same time.',
+  },
+  // Importación de plantillas desde JSON (contrato vendix.data-collection-template/v1).
+  DCOL_IMPORT_001: {
+    code: 'DCOL_IMPORT_001',
+    httpStatus: 422,
+    devMessage: 'The template JSON has errors (see details.errors).',
+  },
+  // Adjuntos del formulario público de recolección de datos.
+  DCOL_UPLOAD_001: {
+    code: 'DCOL_UPLOAD_001',
+    httpStatus: 400,
+    devMessage: 'File type or content not allowed for this field.',
+  },
+  DCOL_UPLOAD_002: {
+    code: 'DCOL_UPLOAD_002',
+    httpStatus: 400,
+    devMessage: 'File exceeds the maximum size for this field.',
+  },
+  DCOL_UPLOAD_003: {
+    code: 'DCOL_UPLOAD_003',
+    httpStatus: 400,
+    devMessage: 'The field is not a documents field of this form.',
+  },
+  DCOL_UPLOAD_004: {
+    code: 'DCOL_UPLOAD_004',
+    httpStatus: 400,
+    devMessage: 'Attachment does not belong to this store or too many files.',
   },
 
   // Customer History
@@ -5988,6 +6274,50 @@ export const ErrorCodes = {
     code: 'PARTNER_004',
     httpStatus: 409,
     devMessage: 'Commission payout already processed',
+  },
+
+  // Promociones de la tienda (descuentos de carrito / POS / ecommerce).
+  // 422 cuando la petición es válida pero la promoción no aplica; 409 cuando
+  // el cupo de usos ya se consumió.
+  PROMOTION_INVALID_001: {
+    code: 'PROMOTION_INVALID_001',
+    httpStatus: 422,
+    devMessage: 'Promotion not found, inactive or outside its date range',
+  },
+  PROMOTION_NOT_TODAY_001: {
+    code: 'PROMOTION_NOT_TODAY_001',
+    httpStatus: 422,
+    devMessage: 'Promotion does not apply on the current weekday (store timezone)',
+  },
+  PROMOTION_USAGE_LIMIT_001: {
+    code: 'PROMOTION_USAGE_LIMIT_001',
+    httpStatus: 409,
+    devMessage: 'Promotion reached its usage limit',
+  },
+  PROMOTION_CUSTOMER_LIMIT_001: {
+    code: 'PROMOTION_CUSTOMER_LIMIT_001',
+    httpStatus: 409,
+    devMessage: 'Customer reached the per-customer limit for this promotion',
+  },
+  PROMOTION_MIN_PURCHASE_001: {
+    code: 'PROMOTION_MIN_PURCHASE_001',
+    httpStatus: 422,
+    devMessage: 'Cart subtotal is below the promotion minimum purchase',
+  },
+  PROMOTION_NOT_APPLICABLE_001: {
+    code: 'PROMOTION_NOT_APPLICABLE_001',
+    httpStatus: 422,
+    devMessage: 'Promotion does not apply to any cart item',
+  },
+  PROMOTION_CODE_DUP_001: {
+    code: 'PROMOTION_CODE_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Code already used by another promotion or coupon of the store',
+  },
+  PROMOTION_STATE_001: {
+    code: 'PROMOTION_STATE_001',
+    httpStatus: 409,
+    devMessage: 'Promotion state does not allow this transition',
   },
 
   // Promotional plans
@@ -6898,6 +7228,11 @@ export const ErrorCodes = {
     devMessage:
       'El sonido está siendo usado por una o más tiendas y no puede eliminarse.',
   },
+  NOTIFICATION_TEST_RATE_LIMITED: {
+    code: 'NOTIFICATION_TEST_RATE_LIMITED',
+    httpStatus: 429,
+    devMessage: 'Espera unos segundos antes de enviarte otra prueba.',
+  },
 
   // Help Center
   HELP_ARTICLE_NOT_FOUND: {
@@ -7143,6 +7478,17 @@ export const ErrorCodes = {
     devMessage:
       'La orden de producción cambió en otra operación; recarga e intenta de nuevo',
   },
+  PRODUCTION_SITE_REQUIRED: {
+    code: 'PRODUCTION_SITE_REQUIRED',
+    httpStatus: 422,
+    devMessage:
+      'Elige dónde se produce: la tienda es restaurante y manufactura, y un producto producido por lote debe decir si va a Cocina (Producción) o a Planta.',
+  },
+  PRODUCTION_SITE_PLANT_INVALID: {
+    code: 'PRODUCTION_SITE_PLANT_INVALID',
+    httpStatus: 422,
+    devMessage: 'La planta elegida no existe en esta tienda.',
+  },
   PRODUCTION_ORDER_NOT_BATCH: {
     code: 'PRODUCTION_ORDER_NOT_BATCH',
     httpStatus: 422,
@@ -7221,6 +7567,38 @@ export const ErrorCodes = {
     code: 'MFG_SEQUENCE_FAILED',
     httpStatus: 500,
     devMessage: 'No se pudo generar el consecutivo de la orden de producción',
+  },
+  // QUI-1013 — varias plantas de producción.
+  MFG_PLANT_NOT_FOUND: {
+    code: 'MFG_PLANT_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'La planta no existe en la tienda',
+  },
+  MFG_PLANT_INACTIVE: {
+    code: 'MFG_PLANT_INACTIVE',
+    httpStatus: 422,
+    devMessage: 'La planta está desactivada: elige una planta activa',
+  },
+  MFG_PLANT_REQUIRED: {
+    code: 'MFG_PLANT_REQUIRED',
+    httpStatus: 422,
+    devMessage: 'La tienda tiene varias plantas: elige en cuál se hace la orden',
+  },
+  MFG_PLANT_NAME_DUPLICATE: {
+    code: 'MFG_PLANT_NAME_DUPLICATE',
+    httpStatus: 409,
+    devMessage: 'Ya existe una planta con ese nombre',
+  },
+  MFG_PLANT_INVALID_MANAGER: {
+    code: 'MFG_PLANT_INVALID_MANAGER',
+    httpStatus: 422,
+    devMessage: 'El responsable debe ser un usuario activo del equipo de la tienda',
+  },
+  MFG_PLANT_HAS_OPEN_ORDERS: {
+    code: 'MFG_PLANT_HAS_OPEN_ORDERS',
+    httpStatus: 409,
+    devMessage:
+      'La planta tiene órdenes de producción abiertas: termínalas, cancélalas o muévelas a otra planta antes de desactivarla',
   },
 
   // ── Kitchen Fire (Restaurant Suite Fase D) ─────────────────────────
@@ -8187,7 +8565,7 @@ export const ErrorCodes = {
     code: 'REMINDER_LINK_001',
     httpStatus: 400,
     devMessage:
-      'El dato vinculado no existe en esta tienda o el vínculo está incompleto.',
+      'El dato vinculado no existe en esta tienda, no tienes permiso para verlo o el vínculo está incompleto.',
   },
   REMINDER_DATE_001: {
     code: 'REMINDER_DATE_001',
@@ -8199,6 +8577,30 @@ export const ErrorCodes = {
     code: 'CRM_TASK_001',
     httpStatus: 404,
     devMessage: 'La tarea no existe o no tienes acceso a ella.',
+  },
+  // "Esta tarea mueve la oportunidad": exige oportunidad ligada y una etapa
+  // activa de su tablero que no sea de tipo perdida.
+  CRM_TASK_002: {
+    code: 'CRM_TASK_002',
+    httpStatus: 422,
+    devMessage:
+      'La etapa destino debe ser una etapa activa (no perdida) del tablero de la oportunidad ligada a la tarea.',
+  },
+  // Quien solo es apoyo de una tarea (no responsable, no creador, sin
+  // ver-todo) puede marcarla hecha o reabrirla, nada más.
+  CRM_TASK_003: {
+    code: 'CRM_TASK_003',
+    httpStatus: 403,
+    devMessage:
+      'Como apoyo de esta tarea solo puedes cambiar su estado; el resto lo edita el responsable o quien la creó.',
+  },
+  // Al completar se puede elegir qué oportunidad mover solo si la tarea no
+  // tiene ya una etapa destino configurada.
+  CRM_TASK_004: {
+    code: 'CRM_TASK_004',
+    httpStatus: 422,
+    devMessage:
+      'Esta tarea ya mueve su oportunidad al completarse; no se puede elegir otra al cerrarla.',
   },
   CRM_PIPELINE_001: {
     code: 'CRM_PIPELINE_001',
@@ -8237,6 +8639,52 @@ export const ErrorCodes = {
     code: 'CRM_PIPELINE_007',
     httpStatus: 403,
     devMessage: 'Solo el dueño o un administrador puede editar las etapas.',
+  },
+  // Aplicar una plantilla no cambia el tipo de una etapa que ya tiene
+  // oportunidades: su estado (abierta/ganada/perdida) dejaría de cuadrar.
+  CRM_PIPELINE_008: {
+    code: 'CRM_PIPELINE_008',
+    httpStatus: 409,
+    devMessage: 'Una etapa con oportunidades no puede cambiar de tipo. Muévelas antes de aplicar la plantilla.',
+  },
+  CRM_PIPELINE_009: {
+    code: 'CRM_PIPELINE_009',
+    httpStatus: 409,
+    devMessage: 'Ya existe un pipeline con ese nombre.',
+  },
+  // Plantillas de etapas (QUI-1043).
+  CRM_STAGE_TEMPLATE_001: {
+    code: 'CRM_STAGE_TEMPLATE_001',
+    httpStatus: 404,
+    devMessage: 'La plantilla de etapas no existe.',
+  },
+  CRM_STAGE_TEMPLATE_002: {
+    code: 'CRM_STAGE_TEMPLATE_002',
+    httpStatus: 409,
+    devMessage: 'Ya existe una plantilla de etapas con ese nombre.',
+  },
+  // Nombres de etapa repetidos (sin importar mayúsculas) o ninguna abierta.
+  CRM_STAGE_TEMPLATE_003: {
+    code: 'CRM_STAGE_TEMPLATE_003',
+    httpStatus: 422,
+    devMessage: 'La plantilla necesita al menos una etapa abierta, una ganada y una perdida, con nombres de etapa sin repetir.',
+  },
+  // Planilla de datos del cliente (QUI-1043).
+  CRM_DATA_SHEET_001: {
+    code: 'CRM_DATA_SHEET_001',
+    httpStatus: 422,
+    devMessage: 'El campo no pertenece a la plantilla de datos del cliente.',
+  },
+  // El adjunto debe ser uno subido a la ficha de este cliente.
+  CRM_DATA_SHEET_002: {
+    code: 'CRM_DATA_SHEET_002',
+    httpStatus: 422,
+    devMessage: 'El archivo no pertenece a la ficha de este cliente.',
+  },
+  CRM_DATA_SHEET_003: {
+    code: 'CRM_DATA_SHEET_003',
+    httpStatus: 422,
+    devMessage: 'File type not allowed in the customer data sheet.',
   },
   // Sin `store:crm_inbox:assign` solo te asignas tareas u oportunidades a ti.
   CRM_ASSIGN_001: {
@@ -8495,6 +8943,90 @@ export const ErrorCodes = {
     code: 'TIP_NOT_SUGGESTED_001',
     httpStatus: 422,
     devMessage: 'La propina debe ser la sugerida por la tienda.',
+  },
+
+  // ===== VENDIX PLATFORM · enlace CRM ↔ organización cliente =====
+  // (odd/tasks/vendix-platform-crm-enlace.md). Solo los ve la tienda de la
+  // org plataforma: cualquier otra tienda recibe un 404 genérico del guard.
+  PLATFORM_CRM_001: {
+    code: 'PLATFORM_CRM_001',
+    httpStatus: 404,
+    devMessage: 'El cliente no existe en el CRM de Vendix Platform.',
+  },
+  PLATFORM_CRM_002: {
+    code: 'PLATFORM_CRM_002',
+    httpStatus: 404,
+    devMessage: 'La organización no existe o no se puede enlazar.',
+  },
+  PLATFORM_CRM_003: {
+    code: 'PLATFORM_CRM_003',
+    httpStatus: 409,
+    devMessage: 'Este cliente ya tiene una cuenta Vendix enlazada.',
+  },
+  PLATFORM_CRM_004: {
+    code: 'PLATFORM_CRM_004',
+    httpStatus: 409,
+    devMessage: 'Esta organización ya está enlazada a otro cliente del CRM.',
+  },
+  PLATFORM_CRM_005: {
+    code: 'PLATFORM_CRM_005',
+    httpStatus: 404,
+    devMessage: 'Este cliente no tiene una cuenta Vendix enlazada.',
+  },
+  PLATFORM_CRM_006: {
+    code: 'PLATFORM_CRM_006',
+    httpStatus: 404,
+    devMessage: 'La tienda no existe o no se puede enlazar.',
+  },
+  PLATFORM_CRM_007: {
+    code: 'PLATFORM_CRM_007',
+    httpStatus: 409,
+    devMessage: 'Esta tienda ya está enlazada a otro cliente del CRM.',
+  },
+  PLATFORM_CRM_008: {
+    code: 'PLATFORM_CRM_008',
+    httpStatus: 409,
+    devMessage:
+      'Una tienda de esta organización ya está enlazada a otro cliente del CRM.',
+  },
+  // Varias cuentas por cliente (odd/tasks/cuenta-vendix-multi-movimientos.md, D2).
+  PLATFORM_CRM_009: {
+    code: 'PLATFORM_CRM_009',
+    httpStatus: 409,
+    devMessage: 'Esta cuenta ya está enlazada a este cliente.',
+  },
+  PLATFORM_CRM_010: {
+    code: 'PLATFORM_CRM_010',
+    httpStatus: 409,
+    devMessage: 'Este cliente ya llegó al máximo de 25 cuentas Vendix enlazadas.',
+  },
+  PLATFORM_CRM_011: {
+    code: 'PLATFORM_CRM_011',
+    httpStatus: 409,
+    devMessage:
+      'Este cliente tiene varias cuentas Vendix enlazadas: indica cuál desenlazar.',
+  },
+  PLATFORM_CRM_012: {
+    code: 'PLATFORM_CRM_012',
+    httpStatus: 404,
+    devMessage: 'El enlace no existe o no es de este cliente.',
+  },
+  PLATFORM_CRM_013: {
+    code: 'PLATFORM_CRM_013',
+    httpStatus: 409,
+    devMessage:
+      'Este cliente ya tiene enlazada una tienda de esta organización: desenlázala antes de enlazar la organización completa.',
+  },
+  // Movimientos de suscripción y actividad por comercio (D1, D4).
+  PLATFORM_CRM_014: {
+    code: 'PLATFORM_CRM_014',
+    httpStatus: 400,
+    devMessage: 'El rango de fechas no es válido.',
+  },
+  PLATFORM_CRM_015: {
+    code: 'PLATFORM_CRM_015',
+    httpStatus: 404,
+    devMessage: 'El comercio no está enlazado a este cliente.',
   },
 } as const satisfies Record<string, ErrorCodeEntry>;
 

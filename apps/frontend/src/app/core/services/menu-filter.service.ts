@@ -39,6 +39,7 @@ import {
   planModuleFamily,
 } from '../../shared/constants/plan-modules';
 import { canUserAccessDashboard } from '../utils/dashboard-access.util';
+import { DashboardAccessExtension } from './dashboard-access-extension.service';
 import type {
   OrganizationOperatingScope,
   OrganizationFiscalScope,
@@ -232,6 +233,7 @@ export class MenuFilterService {
   private authFacade = inject(AuthFacade);
   private subscriptionAccess = inject(SubscriptionAccessService);
   private accessGate = inject(AccessGateService);
+  private dashboardAccess = inject(DashboardAccessExtension);
 
   /**
    * True when the current store has at least one PQR. The store-admin layout
@@ -1779,6 +1781,17 @@ export class MenuFilterService {
   }
 
   /**
+   * Industry layer only, from the same industries `canSeeKey` reads. For
+   * in-page surfaces of an industry module (POS add-ons selector, checkout
+   * scheduled-order block, settings section) that follow the store industry
+   * but not the user/store panel layers (QUI-1001). Reactive inside
+   * `computed()`: it reads signals.
+   */
+  industryAllowsModule(key: string): boolean {
+    return industryAllowsKey(key, this.gateIndustries(this.accessGate.currentApp()));
+  }
+
+  /**
    * Lock painted on a sidebar item: only the plan lock (an upgrade unlocks it).
    * Industry-closed modules never reach the sidebar: they are hidden.
    */
@@ -2062,10 +2075,14 @@ export class MenuFilterService {
 
   /**
    * Authorization over the store dashboard. Mirrors `storeDashboardGuard`:
-   * requires trusted roles (owner/admin/super_admin/STORE_OWNER/ORG_OWNER/manager)
-   * or explicit permissions ('store:dashboard:view', 'store:analytics:read').
+   * trusted roles (owner/admin/super_admin/STORE_OWNER/ORG_OWNER/manager),
+   * explicit permissions ('store:dashboard:view', 'store:analytics:read') or
+   * (QUI-967) a panel of the store's Panel Principal visible to the user, so
+   * whoever the guard lets in also finds "Panel Principal" in the sidebar.
    */
   private canAccessDashboard(): boolean {
-    return canUserAccessDashboard(this.authFacade);
+    return (
+      canUserAccessDashboard(this.authFacade) || this.dashboardAccess.canEnter()
+    );
   }
 }

@@ -16,9 +16,8 @@ import {
   Query,
   UploadedFile,
   UseGuards,
-  UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { AiAttachmentUpload } from '../vexi/ai-attachment-upload.decorator';
 import { randomUUID } from 'node:crypto';
 import { ResponseService } from '../../../common/responses/response.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
@@ -54,6 +53,12 @@ import {
   USER_NOTICES,
 } from '../../../ai-engine/agent-execution.contract';
 import { VexActivityFeedService } from './services/vex-activity-feed.service';
+import { VexSuggestionsService } from './services/vex-suggestions.service';
+import { WriteBatchService } from './services/write-batch.service';
+import { WriteBatchExecutorService } from './services/write-batch-executor.service';
+import { WriteBatchCompensationService } from './services/write-batch-compensation.service';
+import { ApproveWriteBatchDto } from './dto/write-batch.dto';
+import { PlaybookService } from '../../../ai-engine/playbooks/playbook.service';
 
 /**
  * Vex's surface: whole-plan approval, plan-token applies, UI blocks, the
@@ -87,6 +92,11 @@ export class VexController {
     private readonly feed: VexActivityFeedService,
     private readonly attachments: VexiAttachmentsService,
     private readonly subscriptionAccess: SubscriptionAccessService,
+    private readonly suggestions: VexSuggestionsService,
+    private readonly writeBatches: WriteBatchService,
+    private readonly writeBatchExecutor: WriteBatchExecutorService,
+    private readonly writeBatchCompensation: WriteBatchCompensationService,
+    private readonly playbooks: PlaybookService,
     @Optional() private readonly speech?: VexiSpeechService,
   ) {}
 
@@ -498,6 +508,106 @@ export class VexController {
    * One UI block. Signed URLs for image/file kinds are minted fresh per read
    * and never persisted — see `VexBlockService`.
    */
+  /**
+   * Welcome suggestions for this store: ids only, ordered by real pending work
+   * (reminders due, open cash register, stock under its minimum). Read-only
+   * counts; no provider call, so it is not behind `AiAccessGuard`.
+   */
+  @Get('suggestions')
+  async getSuggestions() {
+    return this.responseService.success(
+      { suggestions: await this.suggestions.getSuggestions() },
+      'Sugerencias',
+    );
+  }
+
+  // ── F5 write batches ─────────────────────────────────────────────────
+  // Same gating rationale as `plans/:id/approve`: NOT behind `AiAccessGuard`
+  // (no provider call happens here and the batch was proposed inside an
+  // already-gated turn); owner/admin + `vex.enabled` from the class guards and
+  // the global `StoreOperationsGuard`. Ownership (404 other store, 403 other
+  // user) is enforced by `WriteBatchService.loadOwned`. No action quota is
+  // consumed (N4): the batch cost its messages/tokens in the proposing turn.
+
+  /** Live state of a batch: the card reads it on render, reload and while executing. */
+  @Get('batches/:id')
+  async getWriteBatch(@Param('id', ParseUUIDPipe) batchId: string) {
+    const userId = RequestContextService.getContext()?.user_id;
+    const batch = await this.writeBatches.getView(batchId, userId);
+    return this.responseService.success(batch, 'Lote');
+  }
+
+  /**
+   * Approves the ticked steps with ONE click and runs them in order. The
+   * executor claims the batch atomically (`proposed` → `executing`): a second
+   * approval (double click, another tab) runs nothing and answers the current
+   * state with `replayed: true`. Answers once the batch is terminal; its
+   * `summary.message` says exactly what was applied (D2).
+   */
+  @Post('batches/:id/approve')
+  async approveWriteBatch(
+    @Param('id', ParseUUIDPipe) batchId: string,
+    @Body() dto: ApproveWriteBatchDto,
+  ) {
+    const userId = RequestContextService.getContext()?.user_id;
+    const result = await this.writeBatchExecutor.approve({
+      batchId,
+      userId,
+      stepIds: dto.step_ids,
+    });
+    return this.responseService.success(
+      result,
+      result.batch.summary?.message ?? 'Lote procesado',
+    );
+  }
+
+  /** Cancels a proposed batch; nothing runs. Idempotent (`replayed` on repeat). */
+  @Post('batches/:id/reject')
+  async rejectWriteBatch(@Param('id', ParseUUIDPipe) batchId: string) {
+    const userId = RequestContextService.getContext()?.user_id;
+    const result = await this.writeBatchExecutor.reject({ batchId, userId });
+    return this.responseService.success(result, 'Lote cancelado');
+  }
+
+  /**
+   * «Deshacer» of one applied step whose tool declares an honest inverse,
+   * inside the undo window. The role is re-checked (T13) and the step is
+   * claimed atomically, so a double click undoes once.
+   */
+  @Post('batches/:id/steps/:step_id/undo')
+  async undoWriteBatchStep(
+    @Param('id', ParseUUIDPipe) batchId: string,
+    @Param('step_id') stepId: string,
+  ) {
+    if (!/^s\d{1,3}$/.test(stepId)) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_NOT_FOUND_001,
+        'No encontré ese paso en el lote.',
+      );
+    }
+    const userId = RequestContextService.getContext()?.user_id;
+    const batch = await this.writeBatchCompensation.undoStep({
+      batchId,
+      stepId,
+      userId,
+    });
+    return this.responseService.success(batch, 'Cambio deshecho');
+  }
+
+  /**
+   * F5/T39 — the «Tareas» gallery: playbooks that end in ONE batch card
+   * (`approval: 'batch'`). Picking one only sends its starter prompt as a
+   * normal message; the turn is gated like any other and nothing is written
+   * until the person approves the card. Pure read of the release catalog.
+   */
+  @Get('playbooks/launchable')
+  async launchablePlaybooks() {
+    return this.responseService.success(
+      this.playbooks.listLaunchable(),
+      'Tareas',
+    );
+  }
+
   @Get('blocks/:id')
   async getBlock(@Param('id', ParseUUIDPipe) id: string) {
     const block = await this.blocks.getUiBlock(id);
@@ -556,13 +666,37 @@ export class VexController {
   @Post('attachments')
   @UseGuards(AiAccessGuard)
   @RequireAIFeature('vex_agent' as AIFeatureKey)
-  @UseInterceptors(FileInterceptor('file'))
+  @AiAttachmentUpload()
   async uploadAttachment(
     @UploadedFile() file: Express.Multer.File,
     @Body() dto: UploadAttachmentDto,
   ) {
     const stored = await this.attachments.store(file, dto.conversation_id);
     return this.responseService.created(stored, 'Documento recibido');
+  }
+
+  /**
+   * Short-lived signed read URL of a staged attachment, so the chat can open an
+   * image or PDF inline. Scoped by store and by user through the attachments
+   * service (B2): another person's handle, like one from another store,
+   * resolves to nothing.
+   */
+  @Get('attachments/:handle/url')
+  @UseGuards(AiAccessGuard)
+  @RequireAIFeature('vex_agent' as AIFeatureKey)
+  async attachmentUrl(@Param('handle') handle: string) {
+    const [meta] = await this.attachments.describeMany([handle]);
+    if (!meta) {
+      throw new VendixHttpException(
+        ErrorCodes.AI_AGENT_003,
+        'El documento adjunto no existe o ya no está disponible.',
+      );
+    }
+    const url = await this.attachments.signedUrl(handle, 300);
+    return this.responseService.success(
+      { url, mime_type: meta.mime_type, original_name: meta.original_name },
+      'Documento adjunto',
+    );
   }
 
   /**

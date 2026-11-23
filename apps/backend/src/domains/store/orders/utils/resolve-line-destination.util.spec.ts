@@ -139,3 +139,42 @@ describe('lineConsumesOwnStock', () => {
     expect(lineConsumesOwnStock({})).toBe(true);
   });
 });
+
+describe('resolveLineDestination in manufacturing stores', () => {
+  const manuf = (over: Partial<ResolveLineDestinationInput> & { p?: Partial<typeof base> }) =>
+    run({ isRestaurant: false, isManufacturing: true, ...over });
+
+  it('producible with stock: the cashier picks (stock by default)', () => {
+    expect(manuf({ p: { is_batch_produced: true, product_type: 'physical' } })).toEqual({
+      destination: 'stock',
+      skip_kds: true,
+      choosable: true,
+    });
+    expect(
+      manuf({ p: { is_batch_produced: true, product_type: 'physical' }, requested: 'production' })
+        .destination,
+    ).toBe('production');
+  });
+
+  it('producible without stock goes to production', () => {
+    expect(
+      manuf({ p: { is_batch_produced: true, product_type: 'physical' }, availableStock: 0 }),
+    ).toEqual({ destination: 'production', skip_kds: true, choosable: false });
+  });
+
+  it('never goes to the KDS: a prepared non-producible line keeps no decision', () => {
+    expect(manuf({ clientSkipKds: true })).toEqual({
+      destination: null,
+      skip_kds: true,
+      choosable: false,
+    });
+  });
+
+  it('a non-producible physical line keeps no decision (legacy stock flow)', () => {
+    expect(manuf({ p: { product_type: 'physical' } }).destination).toBeNull();
+  });
+
+  it('restaurant + manufacturing keeps the restaurant matrix (KDS included)', () => {
+    expect(run({ isRestaurant: true, isManufacturing: true }).destination).toBe('kds');
+  });
+});

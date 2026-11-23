@@ -47,6 +47,8 @@ import { PosOrderCreateResult } from '../../models/order.model';
 // POR-UNIDAD para líneas sin `product_id`. Mismo `resolveLineUnits` +
 // división que `pos-payment.service.ts`/`pos-order.service.ts` ya usan.
 import { resolveLineUnits } from '../../utils/line-units.util';
+import { preferredEstablishment } from '../../../../../../shared/utils/customer-establishment-rows.util';
+import { customerDisplayName } from '../../../../../../shared/utils/customer-display-name.util';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
 import { formatStockWarningSummary } from '../../../../../../core/utils/stock-shortage.util';
@@ -55,6 +57,7 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
 import { PosHolderWarningComponent } from '../pos-holder-warning.component';
 import { KitchenTicketPrintService } from '../../../restaurant-ops/kds/services/kitchen-ticket-print.service';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import { MenuFilterService } from '../../../../../../core/services/menu-filter.service';
 import { StoreOrdersService } from '../../../orders/services/store-orders.service';
 import { of } from 'rxjs';
 import { catchError, map, switchMap } from 'rxjs/operators';
@@ -166,6 +169,7 @@ export class PosCheckoutShellComponent {
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly settingsFacade = inject(StoreSettingsFacade);
   private readonly authFacade = inject(AuthFacade);
+  private readonly menuFilter = inject(MenuFilterService);
   private readonly cartService = inject(PosCartService);
   private readonly paymentService = inject(PosPaymentService);
   private readonly scheduledOrders = inject(PosScheduledOrderService);
@@ -242,9 +246,12 @@ export class PosCheckoutShellComponent {
     () => this.effectiveIntent() === 'delivery',
   );
 
-  /** QUI-1001: scheduled orders are a restaurant-only module; hidden elsewhere. */
+  /**
+   * QUI-1001: scheduled orders follow their industry rule (`orders_scheduled`,
+   * restaurant only) through the same helper as the sidebar; hidden elsewhere.
+   */
   readonly scheduledOrdersAvailable = computed<boolean>(() =>
-    this.authFacade.isRestaurant(),
+    this.menuFilter.industryAllowsModule('orders_scheduled'),
   );
 
   /**
@@ -673,9 +680,8 @@ export class PosCheckoutShellComponent {
   get customerDisplayName(): string {
     const customer = this.cartState()?.customer;
     if (!customer) return 'Seleccionar cliente';
-    const firstName = customer.first_name || '';
-    const lastName = customer.last_name || '';
-    return `${firstName} ${lastName}`.trim() || 'Cliente sin nombre';
+    // Razón social primero (persona jurídica), luego nombre y apellido.
+    return customerDisplayName(customer, 'Cliente sin nombre');
   }
 
   /** El cajero pidió cambiar el cliente: reabre el selector aunque ya haya uno. */
@@ -683,13 +689,15 @@ export class PosCheckoutShellComponent {
 
   /** Detalle compacto del chip: documento (tipo + número) o, si no hay, teléfono. */
   readonly customerChipDetail = computed<string>(() => {
-    const c = this.cartState()?.customer as
-      | { document_type?: string; document_number?: string; phone?: string }
-      | null
-      | undefined;
+    const c = this.cartState()?.customer;
     if (!c) return '';
-    if (c.document_number) return `${c.document_type || 'Doc'} ${c.document_number}`;
-    return c.phone || '';
+    const base = c.document_number
+      ? `${c.document_type || 'Doc'} ${c.document_number}`
+      : c.phone || '';
+    // Establecimiento elegido en el buscador (línea por sede).
+    const establishment = preferredEstablishment(c);
+    const place = establishment?.label?.trim() || establishment?.address_line1?.trim();
+    return [base, place].filter(Boolean).join(' · ');
   });
 
   // ── Cliente sub-wizard (presentación; espeja Cobro/Envío) ────────────────

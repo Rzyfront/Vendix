@@ -16,6 +16,7 @@ import {
   UpdateDispatchRouteDto,
   DispatchRouteQueryDto,
   AddStopsDto,
+  AvailableNotesQueryDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -75,20 +76,25 @@ export class DispatchRoutesController {
   /**
    * Lists dispatch notes that are eligible to be added to a new planilla
    * stop. Excludes notes that are already attached to a non-released stop
-   * of a non-draft route, voided, or have been hard-deleted. This is the
-   * canonical source for the wizard's stop picker — the legacy
-   * `/dispatch-notes?status=confirmed` endpoint returns ALL confirmed
-   * notes (including those already locked in active routes) and triggers
-   * 500 errors when the operator tries to assign them.
+   * of ANY route (draft routes also reserve their notes), voided, or have
+   * been hard-deleted. This is the canonical source for the wizard's stop
+   * picker — the legacy `/dispatch-notes?status=confirmed` endpoint returns
+   * ALL confirmed notes (including those already locked in active routes)
+   * and triggers 500 errors when the operator tries to assign them.
+   *
+   * Paginated server-side (`page`, `limit` ≤ 100, `search` por número,
+   * cliente o documento). `data` sigue siendo el arreglo de remisiones; el
+   * total real va en `meta.total`.
    */
   @Get('available-notes')
   @Permissions('store:dispatch_routes:read')
-  async listAvailableNotes(@Query('search') search?: string) {
-    const result = await this.dispatchRoutesService.listAvailableNotes(
-      search,
-    );
-    return this.responseService.success(
-      result,
+  async listAvailableNotes(@Query() query: AvailableNotesQueryDto) {
+    const result = await this.dispatchRoutesService.listAvailableNotes(query);
+    return this.responseService.paginated(
+      result.data,
+      result.total,
+      result.page,
+      result.limit,
       'Remisiones disponibles para ruta',
     );
   }

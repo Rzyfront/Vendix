@@ -24,12 +24,15 @@ import {
 } from '../../../common/helpers/domain-generator.helper';
 import { BrandingGeneratorHelper } from '../../../common/helpers/branding-generator.helper';
 import { getDefaultStoreSettings } from '../../store/settings/defaults/default-store-settings';
+import { suggestHomePanelSettings } from '../../../common/access/home-panels';
 import { StoreBootstrapHelper } from '@common/helpers/store-bootstrap.helper';
 import { SubscriptionTrialService } from '../../store/subscriptions/services/subscription-trial.service';
 import { OrgLocationsService } from '../inventory/locations/org-locations.service';
 import { SettingsService } from '../../store/settings/settings.service';
 import { SettingsService as OrgSettingsService } from '../settings/settings.service';
 import { BASE_SYSTEM_PAYMENT_METHOD_NAMES } from './base-payment-methods.const';
+import { PLATFORM_PERMISSION_PREFIX } from '../../../common/constants/platform-permissions.constant';
+import { omitSensitiveUserFields } from '@common/utils/safe-user-select.util';
 import {
   normalizeFiscalStatusBlock,
   type FiscalStatusBlock,
@@ -43,6 +46,26 @@ interface WizardValidation {
 @Injectable()
 export class OnboardingWizardService {
   private readonly logger = new Logger(OnboardingWizardService.name);
+
+  /**
+   * Filtro que deja fuera el dominio core de la plataforma (`vendix_core` /
+   * `VENDIX_LANDING`). El wizard solo administra dominios de organización,
+   * tienda y e-commerce; el core lo gestiona únicamente el superadmin.
+   */
+  static readonly NOT_CORE_DOMAIN = {
+    domain_type: { not: 'vendix_core' as const },
+    app_type: { not: 'VENDIX_LANDING' as const },
+  };
+
+  static isCoreDomain(domain: {
+    domain_type?: string | null;
+    app_type?: string | null;
+  }): boolean {
+    return (
+      domain.domain_type === 'vendix_core' ||
+      domain.app_type === 'VENDIX_LANDING'
+    );
+  }
 
   constructor(
     private readonly prismaService: OrganizationPrismaService,
@@ -314,8 +337,7 @@ export class OnboardingWizardService {
         existingAddress.postal_code === setupUserDto.postal_code);
 
     if (isSameUserData && isSameAddress) {
-      const { password, ...userWithoutPassword } = user;
-      return { ...userWithoutPassword, already_completed: true };
+      return { ...omitSensitiveUserFields(user), already_completed: true };
     }
 
     // Update user data
@@ -369,8 +391,7 @@ export class OnboardingWizardService {
       }
     }
 
-    const { password, ...userWithoutPassword } = updatedUser;
-    return userWithoutPassword;
+    return omitSensitiveUserFields(updatedUser);
   }
 
   /**
@@ -862,6 +883,12 @@ export class OnboardingWizardService {
     if (setupStoreDto.industries) {
       defaultSettings.general.industries = setupStoreDto.industries;
     }
+    // QUI-967 — a new store opens on the panel suggested for its industries
+    // (a hotel on the rack, a salon on the agenda…). Existing stores never
+    // get the key and keep the "Resumen".
+    defaultSettings.home_panel = suggestHomePanelSettings(
+      defaultSettings.general.industries,
+    );
 
     // Atomic store bootstrap (matches the pattern used by StoresService.create
     // in the organization domain). All writes commit together or roll back
@@ -1135,6 +1162,10 @@ export class OnboardingWizardService {
         where: {
           organization_id: user.organization_id,
           // Removed ownership constraint to find any active/inactive org domain
+          // El dominio core de la plataforma (vendix.online, VENDIX_LANDING)
+          // también cuelga de su organización: el wizard NUNCA puede tomarlo
+          // como «auto-dominio» y renombrarlo, o la landing pública se cae.
+          ...OnboardingWizardService.NOT_CORE_DOMAIN,
         },
       });
 
@@ -1225,6 +1256,8 @@ export class OnboardingWizardService {
           organization_id: user.organization_id,
           domain_type: 'organization',
           status: 'active',
+          // Nunca desactivar el dominio core de la plataforma.
+          app_type: OnboardingWizardService.NOT_CORE_DOMAIN.app_type,
         },
         data: {
           status: 'disabled',
@@ -1249,62 +1282,73 @@ export class OnboardingWizardService {
       });
     }
 
-    // Create/Update organization_settings with branding
-    await this.prismaService.organization_settings.upsert({
-      where: { organization_id: user.organization_id },
-      create: {
-        organization_id: user.organization_id,
-        settings: {
-          branding: {
-            name: user.organizations?.name || 'Organization',
-            primary_color:
-              setupAppConfigDto.primary_color || branding.primary_color,
-            secondary_color:
-              setupAppConfigDto.secondary_color || branding.secondary_color,
-            accent_color:
-              setupAppConfigDto.accent_color || branding.accent_color,
-            background_color: branding.background_color,
-            surface_color: branding.surface_color,
-            text_color: branding.text_color,
-            text_secondary_color: branding.text_secondary_color,
-            text_muted_color: branding.text_muted_color,
-            logo_url: branding.logo_url,
-            favicon_url: branding.favicon_url,
-          },
-          fonts: {
-            primary: 'Inter, sans-serif',
-            secondary: 'Inter, sans-serif',
-            headings: 'Inter, sans-serif',
-          },
+    // organization_settings.branding: SOLO se crea cuando la organización aún
+    // no tiene branding propio. Antes era un upsert que reescribía TODO
+    // `settings` (branding + fonts, perdiendo cualquier otra clave) con los
+    // colores del wizard: al completar el onboarding de la org plataforma
+    // (2026-11-18) los colores de la tienda del CRM pisaron la marca de Vendix.
+    // Los colores del wizard se aplican siempre a la tienda (store_settings,
+    // más abajo); la marca de una organización existente se edita en su panel.
+    const orgBranding = {
+      name: user.organizations?.name || 'Organization',
+      primary_color: setupAppConfigDto.primary_color || branding.primary_color,
+      secondary_color:
+        setupAppConfigDto.secondary_color || branding.secondary_color,
+      accent_color: setupAppConfigDto.accent_color || branding.accent_color,
+      background_color: branding.background_color,
+      surface_color: branding.surface_color,
+      text_color: branding.text_color,
+      text_secondary_color: branding.text_secondary_color,
+      text_muted_color: branding.text_muted_color,
+      logo_url: branding.logo_url,
+      favicon_url: branding.favicon_url,
+    };
+    const defaultOrgFonts = {
+      primary: 'Inter, sans-serif',
+      secondary: 'Inter, sans-serif',
+      headings: 'Inter, sans-serif',
+    };
+    const existingOrgSettings =
+      await this.prismaService.organization_settings.findUnique({
+        where: { organization_id: user.organization_id },
+      });
+
+    if (!existingOrgSettings) {
+      await this.prismaService.organization_settings.create({
+        data: {
+          organization_id: user.organization_id,
+          settings: { branding: orgBranding, fonts: defaultOrgFonts },
         },
-      },
-      update: {
-        settings: {
-          branding: {
-            name: user.organizations?.name || 'Organization',
-            primary_color:
-              setupAppConfigDto.primary_color || branding.primary_color,
-            secondary_color:
-              setupAppConfigDto.secondary_color || branding.secondary_color,
-            accent_color:
-              setupAppConfigDto.accent_color || branding.accent_color,
-            background_color: branding.background_color,
-            surface_color: branding.surface_color,
-            text_color: branding.text_color,
-            text_secondary_color: branding.text_secondary_color,
-            text_muted_color: branding.text_muted_color,
-            logo_url: branding.logo_url,
-            favicon_url: branding.favicon_url,
+      });
+    } else {
+      const currentSettings =
+        existingOrgSettings.settings &&
+        typeof existingOrgSettings.settings === 'object' &&
+        !Array.isArray(existingOrgSettings.settings)
+          ? (existingOrgSettings.settings as Record<string, any>)
+          : {};
+      const currentBranding = currentSettings.branding;
+      const hasOwnBranding =
+        currentBranding &&
+        typeof currentBranding === 'object' &&
+        Object.keys(currentBranding).length > 0;
+
+      if (!hasOwnBranding) {
+        // Fila existente sin branding (p. ej. creada por el paso fiscal):
+        // se agrega la marca conservando el resto de claves.
+        await this.prismaService.organization_settings.update({
+          where: { organization_id: user.organization_id },
+          data: {
+            settings: {
+              ...currentSettings,
+              branding: orgBranding,
+              fonts: currentSettings.fonts ?? defaultOrgFonts,
+            },
+            updated_at: new Date(),
           },
-          fonts: {
-            primary: 'Inter, sans-serif',
-            secondary: 'Inter, sans-serif',
-            headings: 'Inter, sans-serif',
-          },
-        },
-        updated_at: new Date(),
-      },
-    });
+        });
+      }
+    }
 
     // 3. Create/Update Store Domain with branding config
     let storeDomainRecord = null;
@@ -1372,6 +1416,16 @@ export class OnboardingWizardService {
         },
         fonts: defaultSettings.fonts,
         publication: defaultSettings.publication,
+        // QUI-967 — keep the suggested panel written by setupStore (or
+        // suggest it now from the preserved industries).
+        home_panel:
+          existing?.home_panel ??
+          suggestHomePanelSettings(
+            Array.isArray(existing?.general?.industries) &&
+              existing.general.industries.length > 0
+              ? existing.general.industries
+              : defaultSettings.general.industries,
+          ),
       };
 
       await this.prismaService.store_settings.upsert({
@@ -1545,6 +1599,17 @@ export class OnboardingWizardService {
           },
         },
       );
+
+      // El dominio core de la plataforma no se reutiliza como dominio propio,
+      // aunque pertenezca a la misma organización.
+      if (
+        existingCustom &&
+        OnboardingWizardService.isCoreDomain(existingCustom)
+      ) {
+        throw new ConflictException(
+          `The domain ${customDomain} is reserved by the platform.`,
+        );
+      }
 
       if (
         existingCustom &&
@@ -2371,9 +2436,14 @@ export class OnboardingWizardService {
       return;
     }
 
-    // Get all system permissions for org-level access
+    // Get all system permissions for org-level access.
+    // Vendix Platform (candado 3): `platform:*` también es de sistema pero
+    // pertenece solo a la org plataforma; ningún ORG_ADMIN nuevo lo recibe.
     const allPermissions = await this.prismaService.permissions.findMany({
-      where: { is_system_permission: true },
+      where: {
+        is_system_permission: true,
+        NOT: { name: { startsWith: PLATFORM_PERMISSION_PREFIX } },
+      },
     });
 
     // Create the ORG_ADMIN role

@@ -33,7 +33,6 @@ import {
   PURCHASE_ORDER_ITEMS_MAX,
 } from './dto/create-purchase-order.dto';
 import { AddAttachmentDto } from './dto/add-attachment.dto';
-import { parseAiJson } from '../../../../ai-engine/utils/ai-json.util';
 import { fuzzyScore } from '../../../../ai-engine/utils/ocr-fuzzy-score.util';
 import {
   buildCurrencyInstruction,
@@ -55,7 +54,33 @@ import {
   isInvoiceOcrV2,
   toInvoiceOcrV2Shape,
 } from './invoice-ocr-v2.adapter';
-const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only (export default) but CJS runtime exports the function
+import {
+  AiExtractionError,
+  AiExtractionService,
+  newIngestQuotaKey,
+} from '@common/ai-ingest/extraction/ai-extraction.service';
+import { DocumentPagesService } from '@common/ai-ingest/documents/document-pages.service';
+import {
+  readDocumentWithAi,
+  ReadDocumentResult,
+} from '@common/ai-ingest/documents/document-reader';
+import { pagesMessageContent } from '@common/ai-ingest/documents/page-content';
+import { detectIngestFile } from '@common/ai-ingest/ingest-file.detector';
+import type { AiJobProgress } from '@common/ai-scan-jobs/ai-job-monitor.service';
+import {
+  buildInvoiceInstruction,
+  INVOICE_REVALIDATE_SCHEMA,
+  mergeInvoiceBatches,
+  PAYMENT_RECEIPT_SCHEMA,
+  PURCHASE_INVOICE_PROFILE,
+  subtotalVsLinesWarning,
+} from './purchase-invoice-ingest.profile';
+
+/** Options of a scan run by a queue worker. */
+export interface InvoiceScanRunOptions {
+  /** Real progress by pages (`{done,total,unit:'páginas'}`); best effort. */
+  reportProgress?: (progress: AiJobProgress) => Promise<void>;
+}
 
 /**
  * Resultado interno del emparejador de productos.
@@ -112,6 +137,9 @@ export class InvoiceScannerService {
   private readonly logger = new Logger(InvoiceScannerService.name);
 
   constructor(
+    // Sin uso directo desde ia-cargas F3 (las llamadas pasan por
+    // `AiExtractionService`); se conserva para no mover la firma del
+    // constructor que construyen los specs y el resto del módulo.
     private readonly aiEngine: AIEngineService,
     private readonly prisma: StorePrismaService,
     private readonly purchaseOrdersService: PurchaseOrdersService,
@@ -121,6 +149,10 @@ export class InvoiceScannerService {
     // constante local + un método privado que replicaban la lógica del
     // helper canónico. Mismo razonamiento que en PurchaseOrdersService.
     private readonly vatService: VatResponsibilityService,
+    // ia-cargas F3 — lector común de documentos (páginas, texto nativo primero)
+    // y extracción con esquema + ajv + reparación.
+    private readonly documentPages: DocumentPagesService,
+    private readonly extraction: AiExtractionService,
   ) {}
 
   /**
@@ -165,92 +197,155 @@ export class InvoiceScannerService {
   /**
    * Pipeline OCR completo desde un buffer (preprocesado + IA + normalizacion).
    * Lo usan `scanInvoice` (sync) y el processor async `invoice-scan`.
+   *
+   * ia-cargas F3 — el documento ya no viaja crudo: pasa por el lector común
+   * (`readDocumentWithAi`, perfil `purchase_invoice`). Un PDF se lee por
+   * páginas con el texto nativo primero (las escaneadas como imagen) y una
+   * foto se endereza (EXIF) y se reduce a 1536 px como antes. Hasta 5 páginas
+   * viajan en UNA llamada; una factura más larga se lee en lotes que se
+   * fusionan (`mergeInvoiceBatches`) en UNA respuesta cruda. Desde ahí todo
+   * sigue igual: la misma `normalizeOcrResponse`, la misma moneda y el mismo
+   * contrato de respuesta. Lo nuevo es solo opcional (`scan_source`) o son
+   * avisos en `scan_warnings`.
    */
   async scanInvoiceFromBuffer(
     buffer: Buffer,
     mimeType: string,
     orderType: 'retail' | 'ingredient',
     scanAttachment: InvoiceScanResult['scan_attachment'],
+    options: InvoiceScanRunOptions = {},
   ): Promise<InvoiceScanResult> {
-    const prepared = await this.preprocessImage({
-      buffer,
-      mimetype: mimeType,
-      size: buffer?.length ?? 0,
-    } as Express.Multer.File);
-    const base64 = prepared.base64;
-    const dataUri = `data:${prepared.mimeType};base64,${base64}`;
-
-    this.logger.debug(`[InvoiceScan] DataURI length: ${dataUri.length} chars`);
-
     // Anchor the model to the store's real currency. Without this the model
     // falls back to a decimal-currency prior and reads the Colombian
     // thousands separator as a decimal point ("24.990" → 24.99), a silent
     // 1000x error. The instruction lives in the USER message, not the system
     // prompt, because the currency is per-store and the prompt is global.
     const currency = await this.resolveScanCurrency();
-
-    const imageMessage: AIMessage = {
-      role: 'user',
-      content: [
-        {
-          type: 'text',
-          text:
-            'Extract all data from this purchase invoice image. Return ONLY the JSON object matching the schema defined in your system instructions.\n\n' +
-            buildCurrencyInstruction(currency),
-        },
-        {
-          type: 'image_url',
-          image_url: { url: dataUri, detail: 'high' },
-        },
-      ],
-    };
+    const currencyInstruction = buildCurrencyInstruction(currency);
 
     const appKey =
       orderType === 'ingredient' ? 'invoice_ocr_ingredient' : 'invoice_ocr';
     this.logger.debug(
-      `[InvoiceScan] Sending to AI engine (profile=${orderType}, appKey=${appKey})...`,
-    );
-    const response = await this.aiEngine.run(appKey, {}, [imageMessage]);
-
-    this.logger.debug(
-      `[InvoiceScan] AI response: success=${response.success}, contentLength=${response.content?.length ?? 0}, model=${response.model}, error=${response.error}`,
-    );
-    this.logger.debug(
-      `[InvoiceScan] AI content preview: ${response.content?.substring(0, 300)}`,
+      `[InvoiceScan] Reading document (profile=${orderType}, appKey=${appKey}, bytes=${buffer?.length ?? 0})...`,
     );
 
-    if (!response.success || !response.content) {
-      this.logger.error(`AI OCR failed: ${response.error}`);
-      throw new VendixHttpException(ErrorCodes.INV_SCAN_AI_FAIL);
-    }
+    const read = await this.readInvoicePages<Record<string, any>>(() =>
+      readDocumentWithAi<Record<string, any>>({
+        file: { buffer, originalName: 'factura' },
+        mimeType: this.realDocumentMime(buffer, mimeType),
+        pages: this.documentPages,
+        extraction: this.extraction,
+        appKey,
+        schema: PURCHASE_INVOICE_PROFILE.documentSchema,
+        instruction: (batch, context) =>
+          buildInvoiceInstruction(batch, context, currencyInstruction),
+        limits: PURCHASE_INVOICE_PROFILE.limits,
+        maxBytes: PURCHASE_INVOICE_PROFILE.limits.maxBytes,
+        // A photo stays ONE image, as before: strips of a tall ticket could
+        // read a line twice in their overlap and double its quantity.
+        splitTallImages: false,
+        // One unit of quota per scan, as the single call charged before.
+        quotaKey: newIngestQuotaKey(),
+        reportProgress: options.reportProgress,
+        logLabel: `InvoiceScan/${appKey}`,
+      }),
+    );
 
-    // Parsing and validation are deliberately separate. They used to share one
-    // try/catch, so a model reply that parsed perfectly but omitted `total`
-    // was reported as "no se pudo parsear el JSON" — the wrong diagnosis, and
-    // exactly the shape a POS receipt (no invoice number, no printed subtotal)
-    // produces.
-    let parsed: unknown;
-    try {
-      parsed = parseAiJson(response.content);
-    } catch (err: any) {
-      this.logger.error(
-        `Failed to parse AI OCR response (${err?.message}). Raw content: ${response.content}`,
+    const merged = mergeInvoiceBatches(read.batches, {
+      decimalPlaces: currency.decimal_places,
+    });
+    if (read.batches.length > 1) {
+      this.logger.log(
+        `[InvoiceScan] ${read.pages} page(s) read in ${read.batches.length} batches; ${merged.repeatedLines} repeated boundary line(s) merged.`,
       );
-      throw new VendixHttpException(ErrorCodes.INV_SCAN_PARSE_FAIL);
     }
 
+    let normalized: InvoiceScanResult;
     try {
-      return {
-        ...this.normalizeOcrResponse(parsed, currency),
-        scan_attachment: scanAttachment,
-      };
+      normalized = this.normalizeOcrResponse(merged.data, currency);
     } catch (err: any) {
       if (err instanceof VendixHttpException) throw err;
       this.logger.error(
-        `AI OCR response incomplete (${err?.message}). Raw content: ${response.content}`,
+        `AI OCR response incomplete (${err?.message}). Pages=${read.pages}, batches=${read.batches.length}`,
       );
       throw new VendixHttpException(ErrorCodes.INV_SCAN_INCOMPLETE);
     }
+
+    // Pages left out, lines merged across batches and a subtotal that does
+    // not match the lines are told, never corrected.
+    const extraWarnings = [...read.warnings, ...merged.warnings];
+    if (read.pages > 1) {
+      const subtotalWarning = subtotalVsLinesWarning(normalized, currency);
+      if (subtotalWarning) extraWarnings.push(subtotalWarning);
+    }
+    const scanWarnings = [...(normalized.scan_warnings ?? []), ...extraWarnings];
+
+    return {
+      ...normalized,
+      scan_warnings: scanWarnings.length > 0 ? scanWarnings : undefined,
+      scan_source: {
+        pages: read.pages,
+        text_pages: read.textPages,
+        batches: read.batches.length,
+        ...(read.missingPages.length ? { missing_pages: read.missingPages } : {}),
+      },
+      scan_attachment: scanAttachment,
+    };
+  }
+
+  /**
+   * Real type of the scanned file by its bytes (never the multipart/S3 one).
+   * Anything that is not a PDF or a photo fails as a document problem.
+   */
+  private realDocumentMime(buffer: Buffer, declared: string): string {
+    const detected = buffer?.length
+      ? detectIngestFile({ buffer, mimeType: declared })
+      : null;
+    if (!detected || detected.kind === 'sheet') {
+      throw new VendixHttpException(
+        ErrorCodes.AI_INGEST_INVALID_FILE,
+        'El archivo no es un PDF ni una imagen (JPG, PNG o WebP) que se pueda leer.',
+      );
+    }
+    return detected.mime;
+  }
+
+  /**
+   * Runs a read through the shared reader keeping the scanner's error
+   * contract: a model answer that cannot be used is still
+   * `INV_SCAN_PARSE_FAIL` and an AI failure `INV_SCAN_AI_FAIL` (the screens
+   * and the queue retry rules know them). Document problems keep their
+   * `AI_INGEST_*` code (no pages, too many pages, unsupported type, cut
+   * answer) and credits / rate limit their `AI_PROVIDER_*` one.
+   */
+  private async readInvoicePages<T>(
+    run: () => Promise<ReadDocumentResult<T>>,
+    messages: { parseFail?: string; aiFail?: string } = {},
+  ): Promise<ReadDocumentResult<T>> {
+    try {
+      return await run();
+    } catch (err: any) {
+      throw this.toScanError(err, messages);
+    }
+  }
+
+  private toScanError(
+    err: unknown,
+    messages: { parseFail?: string; aiFail?: string } = {},
+  ): unknown {
+    const error =
+      err instanceof AiExtractionError ? err.toHttpException() : err;
+    if (!(error instanceof VendixHttpException)) return error;
+    if (error.errorCode === ErrorCodes.AI_INGEST_PARSE_FAIL.code) {
+      return new VendixHttpException(
+        ErrorCodes.INV_SCAN_PARSE_FAIL,
+        messages.parseFail,
+      );
+    }
+    if (error.errorCode === ErrorCodes.AI_REQUEST_001.code) {
+      return new VendixHttpException(ErrorCodes.INV_SCAN_AI_FAIL, messages.aiFail);
+    }
+    return error;
   }
 
   /**
@@ -1059,67 +1154,66 @@ export class InvoiceScannerService {
     return fuzzyScore(query, target);
   }
 
-  private async preprocessImage(
-    file: Express.Multer.File,
-  ): Promise<{ base64: string; mimeType: string }> {
-    return this.prepareImage(file);
-  }
-
   /**
-   * Public OCR preprocessing — sharp resize to 1536px / q85, returns base64 +
-   * dataUri-compatible mimeType. Espejo del patrón `ExpenseScannerService.prepareImage`
-   * (vendix-ai-queue v2.2 — el processor async recibe la dataUri, no el buffer).
+   * Foto de un comprobante de pago lista para la cola `payment-receipt-scan`
+   * (el buffer de multer no cruza la cola; viaja el data URI).
+   *
+   * ia-cargas F3 — mismo camino que el escaneo de facturas: tipo REAL por
+   * firma y `DocumentPagesService.prepareForAi` (foto enderezada por EXIF,
+   * ≤1536 px, JPEG q85). Ya no hay copia propia de sharp ni caída a los bytes
+   * crudos: un archivo que no es una foto legible, o una HEIC que el servidor
+   * no decodifica, se rechaza con un `AI_INGEST_*` claro (problema del
+   * documento) en vez de mandárselo así al modelo.
    */
   async prepareImage(
     file: Express.Multer.File,
   ): Promise<{ base64: string; mimeType: string }> {
-    const MAX_DIMENSION = 1536;
-    const JPEG_QUALITY = 85;
-
-    try {
-      const metadata = await sharp(file.buffer).metadata();
-      const needsResize =
-        (metadata.width && metadata.width > MAX_DIMENSION) ||
-        (metadata.height && metadata.height > MAX_DIMENSION);
-
-      let pipeline = sharp(file.buffer);
-
-      if (needsResize) {
-        pipeline = pipeline.resize(MAX_DIMENSION, MAX_DIMENSION, {
-          fit: 'inside',
-          withoutEnlargement: true,
-        });
-      }
-
-      const processedBuffer = await pipeline
-        .jpeg({ quality: JPEG_QUALITY })
-        .toBuffer();
-
-      this.logger.debug(
-        `[InvoiceScan] Image preprocessed: ${file.size} bytes → ${processedBuffer.length} bytes (${metadata.width}x${metadata.height}${needsResize ? ' resized' : ''})`,
+    const detected = file?.buffer?.length
+      ? detectIngestFile({
+          buffer: file.buffer,
+          originalName: file.originalname,
+          mimeType: file.mimetype,
+        })
+      : null;
+    if (!detected || detected.kind !== 'image') {
+      throw new VendixHttpException(
+        ErrorCodes.AI_INGEST_INVALID_FILE,
+        'El comprobante debe ser una foto (JPG, PNG o WebP).',
       );
-
-      return {
-        base64: processedBuffer.toString('base64'),
-        mimeType: 'image/jpeg',
-      };
-    } catch (err) {
-      this.logger.warn(
-        `[InvoiceScan] Image preprocessing failed, using raw: ${err.message}`,
-      );
-      return {
-        base64: file.buffer.toString('base64'),
-        mimeType: file.mimetype,
-      };
     }
+    const prepared = await this.documentPages.prepareForAi(
+      {
+        buffer: file.buffer,
+        mimetype: detected.mime,
+        size: file.buffer.length,
+        originalname: file.originalname ?? 'comprobante',
+      },
+      { splitTallImages: false },
+    );
+    const dataUri = prepared.pages[0]?.image ?? '';
+    const comma = dataUri.indexOf(',');
+    if (comma < 0) {
+      throw new VendixHttpException(
+        ErrorCodes.AI_INGEST_INVALID_FILE,
+        'No se pudo leer la imagen.',
+      );
+    }
+    this.logger.debug(
+      `[PaymentReceiptScan] Image prepared: ${file.buffer.length} bytes → ${dataUri.length} chars`,
+    );
+    return { base64: dataUri.slice(comma + 1), mimeType: 'image/jpeg' };
   }
 
   /**
    * Track B2 — worker-side OCR for payment receipts. Calque de
-   * `ExpenseScannerService.scanFromImage`: llama `aiEngine.run()` DIRECTO
-   * (NUNCA `runByApplicationType`, que descarta extra_messages en apps image).
+   * `ExpenseScannerService.scanFromImage`: llama a la IA DIRECTO (nunca
+   * `runByApplicationType`, que descarta extra_messages en apps image).
    * Devuelve `{amount, payment_date, payment_method, reference, currency,
-   * notes, confidence}` parseado de forma defensiva.
+   * notes, confidence}`.
+   *
+   * ia-cargas F3 — la respuesta pasa por `AiExtractionService` (esquema +
+   * ajv + un intento de reparación) en vez de un `JSON.parse` sin red. Los
+   * campos se leen igual que antes.
    */
   async scanPaymentFromImage(
     dataUri: string,
@@ -1133,7 +1227,7 @@ export class InvoiceScannerService {
     notes: string | null;
     confidence: number;
   }> {
-    const imageMessage: any = {
+    const imageMessage: AIMessage = {
       role: 'user',
       content: [
         {
@@ -1147,30 +1241,18 @@ export class InvoiceScannerService {
       ],
     };
 
-    const response = await this.aiEngine.run('payment_receipt_ocr', {}, [
-      imageMessage,
-    ]);
-
-    if (!response.success) {
-      this.logger.error(
-        `[PaymentReceiptScan] aiEngine.run failed: ${response?.error ?? 'unknown'}`,
-      );
-      throw new Error('AI scan failed');
-    }
-
-    let parsed: any;
-    const raw = (response as any).content ?? (response as any).text ?? '';
+    let parsed: Record<string, any>;
     try {
-      const cleaned = String(raw)
-        .replace(/^```(?:json)?\s*/i, '')
-        .replace(/\s*```\s*$/i, '')
-        .trim();
-      parsed = JSON.parse(cleaned);
+      parsed = await this.extraction.extract<Record<string, any>>({
+        appKey: 'payment_receipt_ocr',
+        schema: PAYMENT_RECEIPT_SCHEMA,
+        messages: [imageMessage],
+      });
     } catch (err: any) {
       this.logger.error(
-        `[PaymentReceiptScan] JSON parse failed: ${err?.message} (raw=${String(raw).slice(0, 200)})`,
+        `[PaymentReceiptScan] extraction failed: ${err?.message ?? err}`,
       );
-      throw new Error('OCR parse failed');
+      throw this.toScanError(err);
     }
 
     return {
@@ -1190,14 +1272,18 @@ export class InvoiceScannerService {
    * contra los datos CONSOLIDADOS (lo que el usuario edito tras la precarga) y
    * su nota, y devuelve datos re-consolidados + informe.
    *
-   * - El documento pasa por `prepareImage` (igual que el escaneo; un PDF que
-   *   sharp no procesa viaja crudo con su mimetype).
+   * - ia-cargas F3: el documento pasa por el lector común
+   *   (`DocumentPagesService.prepareForAi`: texto nativo primero, páginas
+   *   escaneadas como imagen, nunca el PDF crudo) y TODAS sus páginas van en
+   *   UNA llamada: la revalidación compara la factura completa contra lo
+   *   consolidado, así que no se parte en lotes. La respuesta se valida con
+   *   esquema + ajv + un intento de reparación.
    * - `consolidated` llega en la forma NORMALIZADA del escaneo (unit_price neto,
    *   unit_price_gross, taxes[].tax_type...). Se traduce a la forma CRUDA de
    *   extraccion antes de enviarla a la IA y la respuesta se normaliza con la
    *   MISMA `normalizeOcrResponse` del escaneo, de modo que el frontend recibe
    *   exactamente la forma de un scan.
-   * - Llama `aiEngine.run` DIRECTO (nunca `runByApplicationType`, que descarta
+   * - Llama a la IA DIRECTO (nunca `runByApplicationType`, que descarta
    *   extra_messages en apps image).
    * Errores: VendixHttpException con mensaje en espanol.
    */
@@ -1210,62 +1296,57 @@ export class InvoiceScannerService {
   }): Promise<InvoiceRevalidateResult> {
     const { fileBuffer, mimeType, consolidated, note, orderType } = params;
 
-    const { base64, mimeType: preparedMime } = await this.prepareImage({
-      buffer: fileBuffer,
-      mimetype: mimeType,
-      size: fileBuffer.length,
-    } as Express.Multer.File);
-    const dataUri = `data:${preparedMime};base64,${base64}`;
-
     const currency = await this.resolveScanCurrency();
 
     const consolidatedJson = JSON.stringify(toInvoiceOcrV2Shape(consolidated));
     const userNote = (note ?? '').trim() || '(sin nota del usuario)';
 
-    const imageMessage: AIMessage = {
-      role: 'user',
-      content: [
-        {
-          type: 'text',
-          text:
-            'Revalidate the consolidated data against this original purchase invoice document. Return ONLY the JSON envelope { "consolidated", "report" } defined in your system instructions.\n\n' +
-            (orderType === 'ingredient'
-              ? 'This is an INGREDIENT order: keep presentation / pack_size / uom_hint on each line exactly as they appear in the consolidated JSON.\n\n'
-              : '') +
-            buildCurrencyInstruction(currency),
-        },
-        {
-          type: 'image_url',
-          image_url: { url: dataUri, detail: 'high' },
-        },
-      ],
+    const errorMessages = {
+      parseFail:
+        'La IA devolvió una respuesta que no se pudo leer. Intenta revalidar de nuevo.',
+      aiFail:
+        'La IA no pudo revalidar el documento. Intenta de nuevo en unos minutos.',
     };
 
-    const response = await this.aiEngine.run(
-      'invoice_ocr_revalidate',
-      { consolidated_json: consolidatedJson, user_note: userNote },
-      [imageMessage],
-    );
-
-    if (!response.success || !response.content) {
-      this.logger.error(`[InvoiceRevalidate] AI failed: ${response.error}`);
-      throw new VendixHttpException(
-        ErrorCodes.INV_SCAN_AI_FAIL,
-        'La IA no pudo revalidar el documento. Intenta de nuevo en unos minutos.',
-      );
-    }
-
     let parsed: any;
+    let unreadablePages: number[] = [];
     try {
-      parsed = parseAiJson(response.content);
+      const prepared = await this.documentPages.prepareForAi(
+        {
+          buffer: fileBuffer,
+          mimetype: this.realDocumentMime(fileBuffer, mimeType),
+          size: fileBuffer?.length ?? 0,
+          originalname: 'factura',
+        },
+        {
+          maxPages: PURCHASE_INVOICE_PROFILE.limits.maxPages,
+          maxBytes: PURCHASE_INVOICE_PROFILE.limits.maxBytes,
+          splitTallImages: false,
+        },
+      );
+      unreadablePages = prepared.unreadable_pages;
+
+      const instruction =
+        'Revalidate the consolidated data against this original purchase invoice document. Return ONLY the JSON envelope { "consolidated", "report" } defined in your system instructions.\n\n' +
+        (orderType === 'ingredient'
+          ? 'This is an INGREDIENT order: keep presentation / pack_size / uom_hint on each line exactly as they appear in the consolidated JSON.\n\n'
+          : '') +
+        buildCurrencyInstruction(currency);
+
+      parsed = await this.extraction.extract<Record<string, any>>({
+        appKey: 'invoice_ocr_revalidate',
+        schema: INVOICE_REVALIDATE_SCHEMA,
+        messages: [
+          { role: 'user', content: pagesMessageContent(instruction, prepared.pages) },
+        ],
+        variables: { consolidated_json: consolidatedJson, user_note: userNote },
+        quotaKey: newIngestQuotaKey(),
+      });
     } catch (err: any) {
       this.logger.error(
-        `[InvoiceRevalidate] parse failed (${err?.message}). Raw: ${String(response.content).slice(0, 500)}`,
+        `[InvoiceRevalidate] failed: ${err?.message ?? err}`,
       );
-      throw new VendixHttpException(
-        ErrorCodes.INV_SCAN_PARSE_FAIL,
-        'La IA devolvió una respuesta que no se pudo leer. Intenta revalidar de nuevo.',
-      );
+      throw this.toScanError(err, errorMessages);
     }
 
     const rawNext =
@@ -1296,9 +1377,20 @@ export class InvoiceScannerService {
     }
     const { scan_attachment: _omit, ...consolidatedOut } = normalized;
 
+    const report = this.sanitizeRevalidateReport(parsed.report);
+    if (unreadablePages.length) {
+      // Una página que no se pudo leer no se comparó: se dice, no se calla.
+      report.findings.unshift({
+        severity: 'warning',
+        message:
+          `${unreadablePages.length > 1 ? 'Las páginas' : 'La página'} ${unreadablePages.join(', ')} del PDF no ` +
+          `${unreadablePages.length > 1 ? 'se pudieron' : 'se pudo'} leer y no ${unreadablePages.length > 1 ? 'se compararon' : 'se comparó'} con lo consolidado.`,
+      });
+    }
+
     return {
       consolidated: consolidatedOut,
-      report: this.sanitizeRevalidateReport(parsed.report),
+      report,
     };
   }
 

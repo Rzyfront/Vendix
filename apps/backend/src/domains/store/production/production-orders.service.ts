@@ -22,6 +22,7 @@ import {
 } from './production-order-events';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { ProductionSaleLinkService } from './production-sale-link.service';
+import { type ProductionSite, productionSiteWhere } from './production-site.util';
 import {
   RECIPE_REQUIREMENT_SELECT,
   computeComponentRequirements as computeRequirements,
@@ -33,6 +34,7 @@ import {
   type SaleLineForPlan,
 } from './production-order-lines.util';
 import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
+import { findPlantLocations } from '../manufacturing/plants/plant-resolution.util';
 import {
   VendixHttpException,
   ErrorCodes,
@@ -380,6 +382,8 @@ export class ProductionOrdersService {
         recipe_id: dto.recipe_id,
         planned_qty: new Prisma.Decimal(dto.planned_qty),
         status: 'draft',
+        // Born in Producción: never listed by Planta.
+        production_site: 'kitchen',
         // S1: the order is born knowing what it must consume (consumed_qty = 0).
         lines: {
           create: plannedLinesCreate(
@@ -399,7 +403,11 @@ export class ProductionOrdersService {
   }
 
   // -------------------------------------------------------------------- find
-  async findAll(query: ProductionOrderQueryDto) {
+  /**
+   * `site` scopes the list to the screen that owns the orders (Producción passes
+   * `kitchen`); without it, every order of the store (internal callers).
+   */
+  async findAll(query: ProductionOrderQueryDto, site?: ProductionSite) {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
     if (!store_id) {
@@ -421,6 +429,7 @@ export class ProductionOrdersService {
     const skip = (page - 1) * limit;
 
     const where: Prisma.production_ordersWhereInput = {
+      ...(site && { AND: [productionSiteWhere(site)] }),
       ...(status && { status }),
       ...(product_id && { product_id }),
       ...(recipe_id && { recipe_id }),
@@ -688,11 +697,29 @@ export class ProductionOrdersService {
     }
     const sourceModule = options?.sourceModule ?? 'production';
 
+    // QUI-1013: an order made in a plant works with that plant's locations
+    // when the caller did not choose them (restaurant endpoint, sale-linked
+    // orders). Planta passes its own (plant → settings → none) resolution.
+    const plantLocations = await findPlantLocations(
+      this.prisma,
+      (order as { plant_id?: number | null }).plant_id,
+    );
+    const inputLocationId =
+      options?.inputLocationId ?? plantLocations?.input_location_id ?? undefined;
+    // The plant-only rules (shortage judged in the input location, add-ons
+    // consumed there) apply only to orders of a plant with an input location.
+    // Without one, everything stays as before: store-wide pre-check and each
+    // add-on from its own default location.
+    const plantInputLocationId =
+      plantLocations?.input_location_id != null ? inputLocationId : undefined;
+    const outputLocationId =
+      options?.outputLocationId ?? plantLocations?.output_location_id ?? undefined;
+
     // Resolve the location for the produced good. Uses the same default
     // resolver as the rest of the inventory flow so we don't surprise
     // operators with arbitrary location selection.
     const location_id =
-      options?.outputLocationId ??
+      outputLocationId ??
       (await (variantId != null
         ? this.stockLevelManager.getDefaultLocationForProduct(
             order.product_id,
@@ -737,7 +764,13 @@ export class ProductionOrdersService {
     if (ingredientDemands.length > 0) {
       stockWarnings = await this.stockValidatorService.assertIngredientsAvailable(
         ingredientDemands,
-        { allowIngredientOveruse: inventoryPolicy.allowIngredientOveruse },
+        {
+          allowIngredientOveruse: inventoryPolicy.allowIngredientOveruse,
+          // QUI-1013: an order of a plant is judged where its inputs are
+          // actually consumed (the plant's input location), not on the whole
+          // store's sellable stock.
+          ...(plantInputLocationId != null && { consumeLocationId: plantInputLocationId }),
+        },
       );
     }
 
@@ -808,9 +841,11 @@ export class ProductionOrdersService {
         // nunca bajaba y el terminado sí se acreditaba. Inventario inflado en
         // silencio, sin una fila que lo explicara.
         const componentLocationId =
-          options?.inputLocationId ??
+          inputLocationId ??
           (await this.stockLevelManager.getDefaultLocationForProduct(
             item.component_product_id,
+            undefined,
+            tx,
           ));
 
         const result = await this.stockLevelManager.updateStock(
@@ -868,6 +903,7 @@ export class ProductionOrdersService {
           production_order_id: order.id,
           sourceModule,
           allowOveruse: inventoryPolicy.allowIngredientOveruse,
+          inputLocationId: plantInputLocationId,
         });
         totalConsumedCost += addons.cost;
         consumedLineCount += addons.lines;
@@ -1047,6 +1083,8 @@ export class ProductionOrdersService {
       production_order_id: number;
       sourceModule: string;
       allowOveruse: boolean;
+      /** QUI-1013: the plant's input location; default = each add-on's own. */
+      inputLocationId?: number;
     },
   ): Promise<{ cost: number; lines: number; consumptions: LineConsumption[] }> {
     const lines = await tx.order_items.findMany({
@@ -1119,11 +1157,13 @@ export class ProductionOrdersService {
     let cost = 0;
     const consumptions: LineConsumption[] = [];
     for (const line of consumption) {
-      const location_id = await this.stockLevelManager.getDefaultLocationForProduct(
-        line.product_id,
-        line.variant_id ?? undefined,
-        tx,
-      );
+      const location_id =
+        p.inputLocationId ??
+        (await this.stockLevelManager.getDefaultLocationForProduct(
+          line.product_id,
+          line.variant_id ?? undefined,
+          tx,
+        ));
       const result = await this.stockLevelManager.updateStock(
         {
           product_id: line.product_id,
@@ -1631,6 +1671,8 @@ export class ProductionOrdersService {
   private async resolveDayWhere(
     store_id: number,
     queryDate?: string,
+    plant_id?: number,
+    site?: ProductionSite,
   ): Promise<{
     date: string;
     timezone: string;
@@ -1644,6 +1686,10 @@ export class ProductionOrdersService {
 
     const dayWhere: Prisma.production_ordersWhereInput = {
       status: { not: 'cancelled' },
+      // QUI-1013: a plant's production session only sees that plant's orders.
+      ...(plant_id != null && { plant_id }),
+      // Each screen sees only its own orders (Producción `kitchen`, Planta `plant`).
+      ...(site && { AND: [productionSiteWhere(site)] }),
       OR: [
         { order_id: { not: null }, due_date: { gte: local.startDate, lte: local.endDate } },
         { order_id: null, due_date: { gte: naive.startDate, lte: naive.endDate } },
@@ -1671,13 +1717,18 @@ export class ProductionOrdersService {
    * carried over from earlier days first, then by their timeline time
    * (delivery for sales, creation for manual orders).
    */
-  async findDay(query: ProductionDayQueryDto) {
+  async findDay(query: ProductionDayQueryDto, site?: ProductionSite) {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
     if (!store_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
-    const { date, timezone, dayWhere } = await this.resolveDayWhere(store_id, query?.date);
+    const { date, timezone, dayWhere } = await this.resolveDayWhere(
+      store_id,
+      query?.date,
+      query?.plant_id,
+      site,
+    );
     const select = {
       id: true,
       order_number: true,
@@ -1712,8 +1763,10 @@ export class ProductionOrdersService {
     // Paginación keyset (S20): el cursor es la última fila base de la página.
     const pageSize = query?.limit ?? PRODUCTION_DAY_PAGE_MAX;
     const cursor = query?.cursor ? decodeDayCursor(query.cursor) : null;
+    // The screen filter lives in `dayWhere.AND`; extra conditions append to it.
+    const siteAnd = (dayWhere.AND ?? []) as Prisma.production_ordersWhereInput[];
     const pageRows = await this.prisma.production_orders.findMany({
-      where: cursor ? { ...dayWhere, AND: [dayCursorWhere(cursor)] } : dayWhere,
+      where: cursor ? { ...dayWhere, AND: [...siteAnd, dayCursorWhere(cursor)] } : dayWhere,
       select,
       orderBy,
       take: pageSize + 1,
@@ -1732,7 +1785,7 @@ export class ProductionOrdersService {
     ];
     if ((cursor || hasMore) && saleIds.length > 0) {
       const siblings = await this.prisma.production_orders.findMany({
-        where: { ...dayWhere, AND: [{ order_id: { in: saleIds } }] },
+        where: { ...dayWhere, AND: [...siteAnd, { order_id: { in: saleIds } }] },
         select,
         orderBy,
       });
@@ -1846,12 +1899,17 @@ export class ProductionOrdersService {
    * - `difference`: sum of (consumed - planned) over the completed orders.
    * - `orders_without_breakdown`: completed orders with no lines (before the deploy).
    */
-  async findDaySupplies(query: ProductionSuppliesQueryDto) {
+  async findDaySupplies(query: ProductionSuppliesQueryDto, site?: ProductionSite) {
     const store_id = RequestContextService.getContext()?.store_id;
     if (!store_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
-    const { date, timezone, dayWhere } = await this.resolveDayWhere(store_id, query?.date);
+    const { date, timezone, dayWhere } = await this.resolveDayWhere(
+      store_id,
+      query?.date,
+      query?.plant_id,
+      site,
+    );
 
     const orders = await this.prisma.production_orders.findMany({
       where: dayWhere,
@@ -1930,13 +1988,15 @@ export class ProductionOrdersService {
     };
   }
 
-  async getStats() {
+  /** `site`: Producción counts only its own orders (`kitchen`). */
+  async getStats(site?: ProductionSite) {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
     if (!store_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
+    const siteFilter = site ? { AND: [productionSiteWhere(site)] } : {};
     const now = new Date();
     const startOfDay = new Date(
       now.getFullYear(),
@@ -1961,24 +2021,26 @@ export class ProductionOrdersService {
       month,
     ] = await Promise.all([
       this.prisma.production_orders.count({
-        where: { store_id, status: 'draft' },
+        where: { store_id, ...siteFilter, status: 'draft' },
       }),
       this.prisma.production_orders.count({
-        where: { store_id, status: 'in_progress' },
+        where: { store_id, ...siteFilter, status: 'in_progress' },
       }),
       this.prisma.production_orders.count({
         where: {
           store_id,
+          ...siteFilter,
           status: 'completed',
           produced_at: { gte: startOfMonth },
         },
       }),
       this.prisma.production_orders.count({
-        where: { store_id, status: 'cancelled' },
+        where: { store_id, ...siteFilter, status: 'cancelled' },
       }),
       this.prisma.production_orders.aggregate({
         where: {
           store_id,
+          ...siteFilter,
           status: 'completed',
           produced_at: { gte: startOfDay },
         },
@@ -1987,6 +2049,7 @@ export class ProductionOrdersService {
       this.prisma.production_orders.aggregate({
         where: {
           store_id,
+          ...siteFilter,
           status: 'completed',
           produced_at: { gte: startOfWeek },
         },
@@ -1995,6 +2058,7 @@ export class ProductionOrdersService {
       this.prisma.production_orders.aggregate({
         where: {
           store_id,
+          ...siteFilter,
           status: 'completed',
           produced_at: { gte: startOfMonth },
         },

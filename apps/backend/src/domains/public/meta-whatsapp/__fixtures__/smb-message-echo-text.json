@@ -1,0 +1,30 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "000000000000002",
+      "changes": [
+        {
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "15550000001",
+              "phone_number_id": "000000000000001"
+            },
+            "message_echoes": [
+              {
+                "from": "15550000001",
+                "to": "15550000002",
+                "id": "wamid.FAKEECHO0000000000000000000000000001",
+                "timestamp": "1761900100",
+                "type": "text",
+                "text": { "body": "Claro, el envío a Medellín llega mañana." }
+              }
+            ]
+          },
+          "field": "smb_message_echoes"
+        }
+      ]
+    }
+  ]
+}

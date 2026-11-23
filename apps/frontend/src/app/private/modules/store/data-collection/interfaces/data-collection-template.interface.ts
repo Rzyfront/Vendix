@@ -54,6 +54,8 @@ export interface DataCollectionTemplate {
   checkin_show_products?: boolean;
   checkin_show_notes?: boolean;
   is_default: boolean;
+  /** Planilla del cliente en el CRM (distinta de is_default, que es el respaldo de reservas). */
+  is_crm_default: boolean;
   tabs?: TemplateTab[];
   sections: TemplateSection[];
   products?: { product: { id: number; name: string; slug: string } }[];

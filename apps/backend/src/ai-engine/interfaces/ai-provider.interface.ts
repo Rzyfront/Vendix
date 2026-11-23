@@ -6,7 +6,8 @@ import type {
 export type SdkType =
   | 'openai_compatible'
   | 'anthropic_compatible'
-  | 'minimax_t2a';
+  | 'minimax_t2a'
+  | 'gemini_tts';
 export type AIModelType =
   | 'text'
   | 'image'
@@ -69,6 +70,44 @@ export interface AIRequestOptions {
     | 'auto'
     | 'none'
     | { type: 'function'; function: { name: string } };
+  /**
+   * Structured output request (ai-ingest). Opt-in per provider config: it only
+   * reaches the wire when the config declares `settings.supports_json_schema`
+   * (`openai_compatible` → `response_format: json_schema` strict;
+   * `anthropic_compatible` → forced `emit_result` tool). Otherwise nothing new
+   * is sent and the caller still validates the text answer itself.
+   */
+  responseSchema?: AIResponseSchema;
+  /**
+   * Server-only quota dedupe key; never serialized into a provider body. A
+   * job that makes several calls (ai-ingest batches) passes the same key so
+   * a per-call category (`async_queue`) charges ONE unit per job, as before.
+   */
+  quotaKey?: string;
+  /**
+   * Server-only annotations for the `ai_engine_logs` row of this `run()`;
+   * stripped before the provider sees the options. Never changes the call.
+   */
+  logContext?: AIRunLogContext;
+}
+
+/** What a caller (ai-ingest) adds to the log row of one `run()`. */
+export interface AIRunLogContext {
+  /** Caller attempt: ai-ingest 1 = first call, +1 per repair and split level. */
+  attempt?: number;
+  /**
+   * Called once with the final answer text of a successful, non-truncated
+   * call. Returns why the caller will reject it (`null` = valid). Its result
+   * only goes to `validation_error`; if it throws, the column stays empty.
+   */
+  validate?: (content: string) => string | null;
+}
+
+export interface AIResponseSchema {
+  /** `^[a-zA-Z0-9_-]{1,64}$` (OpenAI `json_schema.name`). */
+  name: string;
+  /** JSON Schema in strict form: every property required, no extra keys. */
+  schema: Record<string, unknown>;
 }
 
 export type AIImageSize =
@@ -100,11 +139,19 @@ export interface AIImageRequestOptions {
   referenceImages?: AIImageReference[];
 }
 
+/**
+ * Why a provider refused, when the SDK says so: `credits` (402, insufficient
+ * quota, credit balance too low) or `rate_limited` (429). QUI-1020: the AI job
+ * queues turn these into "IA sin créditos / no disponible" and alert Vendix.
+ */
+export type AIProviderFailureReason = 'credits' | 'rate_limited';
+
 export interface AIResponse {
   success: boolean;
   /** Optional D0 transport classification, not a new retry policy. */
   error_code?: string;
   retryable?: boolean;
+  failure_reason?: AIProviderFailureReason;
   content?: string;
   usage?: {
     promptTokens: number;
@@ -119,6 +166,8 @@ export interface AIResponse {
   error?: string;
   tool_calls?: AIToolCall[];
   finish_reason?: 'stop' | 'tool_calls' | 'length';
+  /** Real USD cost of this call on the config that served it; absent = unknown. */
+  cost_usd?: number;
 }
 
 export interface AIStreamChunk {
@@ -151,12 +200,38 @@ export interface AIStreamChunk {
   model?: string;
   error_code?: string;
   usage_state?: 'reported' | 'unknown';
+  /**
+   * Present on `done`: real USD cost of the turn (every provider call the turn
+   * made, fallback retry included). The chat persists it in
+   * `ai_messages.cost_usd`; absent means unknown, never "free".
+   */
+  cost_usd?: number;
   context_budget?: {
     estimated_input_tokens: number;
     omitted_messages: number;
     context_window_tokens: number;
     provenance: 'configured' | 'fallback';
     method: 'conservative_estimate';
+    /** Output reserved for the answer. */
+    max_output_tokens?: number;
+    /** Ring percent at which the UI warns and the next turn compacts. */
+    compaction_percent?: number;
+  };
+  /**
+   * P2-6: present on the Vex/Vexi chat `done` frame instead of any cost — the
+   * store's plan limit for the agent (used / cap per period; `cap: null` = no
+   * limit). Read from `AgentQuotaService.getAgentUsage`; absent when unknown.
+   */
+  quota?: {
+    agent_key: 'vex' | 'vexi';
+    meters: Array<{
+      capability_key: string;
+      label: string;
+      unit: 'messages' | 'tokens' | 'seconds';
+      period: 'daily' | 'monthly';
+      used: number;
+      cap: number | null;
+    }>;
   };
   /** Transport cursor is observational and grants no execution authority. */
   replay?: {
@@ -174,7 +249,19 @@ export interface AIStreamChunk {
   /** Present on `ui_block`: the rendered block reference and payload. */
   ui_block?: {
     block_id: string;
-    kind: 'table' | 'chart' | 'kpi' | 'image' | 'file' | 'markdown';
+    kind:
+      | 'table'
+      | 'chart'
+      | 'kpi'
+      | 'image'
+      | 'file'
+      | 'markdown'
+      | 'timeline'
+      | 'list'
+      | 'write_batch'
+      | 'help_article'
+      | 'video'
+      | 'learning_path';
     version?: number;
     spec?: Record<string, any>;
     data?: unknown;
@@ -249,6 +336,9 @@ export interface AIStreamChunk {
 
 export interface AIImageResponse {
   success: boolean;
+  error_code?: string;
+  retryable?: boolean;
+  failure_reason?: AIProviderFailureReason;
   imageBase64?: string;
   revisedPrompt?: string;
   model?: string;

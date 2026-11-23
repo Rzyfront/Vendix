@@ -1,5 +1,5 @@
-import { inject } from '@angular/core';
-import { Router, Routes } from '@angular/router';
+import { inject, provideEnvironmentInitializer } from '@angular/core';
+import { Router, Routes, UrlMatchResult, UrlSegment } from '@angular/router';
 import { provideState } from '@ngrx/store';
 import { provideEffects } from '@ngrx/effects';
 import { AuthGuard } from '../../core/guards/auth.guard';
@@ -10,6 +10,7 @@ import { manageUsersGuard } from '../../core/guards/manage-users.guard';
 import { aiAgentsSettingsGuard } from '../../core/guards/vexi-settings.guard';
 import { vexAccessGuard } from '../../core/guards/vex-access.guard';
 import { storeDashboardGuard } from '../../core/guards/store-dashboard.guard'; // QUI-418
+import { HomePanelService } from '../../private/modules/store/dashboard/home-panels/home-panel.service';
 import { appKindGuard } from '../../private/modules/store/apps/utils/app-routes.util';
 import {
   panelUiGuard,
@@ -25,12 +26,26 @@ import { StoreUsersEffects } from '../../private/modules/store/settings/users/st
 import { layawayReducer } from '../../private/modules/store/layaway/state/reducers/layaway.reducer';
 import { LayawayEffects } from '../../private/modules/store/layaway/state/effects/layaway.effects';
 
+/** `admin/vex` y `admin/vex/c/:id`: misma ruta, el id llega como parámetro. */
+export function vexRouteMatcher(segments: UrlSegment[]): UrlMatchResult | null {
+  if (segments[0]?.path !== 'admin' || segments[1]?.path !== 'vex') return null;
+  if (segments.length === 2) return { consumed: segments };
+  if (segments.length === 4 && segments[2].path === 'c') {
+    return { consumed: segments, posParams: { id: segments[3] } };
+  }
+  return null;
+}
+
 export const storeAdminRoutes: Routes = [
   // Agente Vex — vista a pantalla completa, fuera del layout admin.
   // `vexAccessGuard` exige owner/admin + `vex.enabled`; el gate del plan
   // (`vex_agent`) lo aplica el backend y no se duplica aquí.
+  // La conversación abierta vive en la URL (`/admin/vex/c/:id`): recargar,
+  // compartir el enlace o usar atrás/adelante conserva el lugar. Un solo
+  // `matcher` (misma ruta) para que cambiar de conversación NO destruya la
+  // página ni su estado.
   {
-    path: 'admin/vex',
+    matcher: vexRouteMatcher,
     canActivate: [AuthGuard, onboardingGuard, vexAccessGuard],
     loadComponent: () =>
       import('../../private/modules/store/vex/vex-page.component').then(
@@ -64,6 +79,10 @@ export const storeAdminRoutes: Routes = [
       import('../../private/layouts/store-admin/store-admin-layout.component').then(
         (c) => c.StoreAdminLayoutComponent,
       ),
+    // QUI-967: create `HomePanelService` with the route injector (before any
+    // guard runs) so it registers the Panel Principal entry rule that the
+    // sidebar, `panelUiGuard` and `storeDashboardGuard` consult.
+    providers: [provideEnvironmentInitializer(() => inject(HomePanelService))],
     // A.4: `panelUiGuard` corre DESPUÉS de AuthGuard. Cierra el bypass de URL
     // directa (deny-by-default): un módulo con `panel_ui=false` rechaza la URL
     // y redirige al primer módulo activo. Es UX, no autorización (ver el
@@ -117,10 +136,12 @@ export const storeAdminRoutes: Routes = [
       {
         path: 'dashboard',
         canActivate: [storeDashboardGuard], // QUI-418
+        // QUI-967: the store's Panel Principal (configured panels as tabs; the
+        // "Resumen" is the former dashboard, unchanged).
         loadComponent: () =>
-          import('../../private/modules/store/dashboard/dashboard.component').then(
-            (c) => c.DashboardComponent,
-          ),
+          import(
+            '../../private/modules/store/dashboard/home-panels/home-panel-host.component'
+          ).then((c) => c.HomePanelHostComponent),
       },
       // POS Routes
       {
@@ -276,6 +297,16 @@ export const storeAdminRoutes: Routes = [
                 (c) => c.TransfersComponent,
               ),
           },
+          // Vista avanzada del movimiento entre bodegas (P1 es esqueleto: recibe
+          // lo llenado en el modal rápido). Va declarada antes de 'transfers'
+          // por claridad; la ruta literal gana igual por segmentos.
+          {
+            path: 'transfers/new',
+            loadComponent: () =>
+              import('../../private/modules/store/inventory/transfers/quick-move/transfer-advanced-page.component').then(
+                (c) => c.TransferAdvancedPageComponent,
+              ),
+          },
           {
             path: 'movements',
             loadComponent: () =>
@@ -418,27 +449,39 @@ export const storeAdminRoutes: Routes = [
                 (c) => c.DispatchNoteDetailPageComponent,
               ),
           },
+          // Módulo "Rutas" (QUI-1024). Las URLs canónicas son `rutas/*`; las
+          // viejas `planillas/*` redirigen conservando el `:id` (y los query
+          // params, por ser redirecciones relativas) para no romper enlaces
+          // guardados. Todas van ANTES de `:id` de órdenes, que si no las
+          // captura como id de orden.
           {
-            path: 'planillas',
+            path: 'rutas',
             loadComponent: () =>
               import('../../private/modules/store/planillas-rutas/planillas-rutas.component').then(
                 (c) => c.PlanillasRutasComponent,
               ),
           },
           {
-            path: 'planillas/:id/recorrido',
+            path: 'rutas/:id/recorrido',
             loadComponent: () =>
               import('../../private/modules/store/planillas-rutas/pages/planilla-route-view-page/planilla-route-view-page.component').then(
                 (c) => c.PlanillaRouteViewPageComponent,
               ),
           },
           {
-            path: 'planillas/:id',
+            path: 'rutas/:id',
             loadComponent: () =>
               import('../../private/modules/store/planillas-rutas/pages/planilla-detail-page/planilla-detail-page.component').then(
                 (c) => c.PlanillaDetailPageComponent,
               ),
           },
+          { path: 'planillas', pathMatch: 'full', redirectTo: 'rutas' },
+          {
+            path: 'planillas/:id/recorrido',
+            pathMatch: 'full',
+            redirectTo: 'rutas/:id/recorrido',
+          },
+          { path: 'planillas/:id', pathMatch: 'full', redirectTo: 'rutas/:id' },
           {
             path: 'fleet',
             loadComponent: () =>
@@ -931,6 +974,15 @@ export const storeAdminRoutes: Routes = [
             pathMatch: 'full',
           },
         ],
+      },
+      // Mis notificaciones: preferencias de avisos del propio usuario. Abierta a
+      // todo el personal de la tienda: sin guard de permisos ni key de panel_ui.
+      {
+        path: 'my-notifications',
+        loadComponent: () =>
+          import('../../private/modules/store/my-notifications/my-notifications.component').then(
+            (c) => c.MyNotificationsComponent,
+          ),
       },
       // Help Routes
       {

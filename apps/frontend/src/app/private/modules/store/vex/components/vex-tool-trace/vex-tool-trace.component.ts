@@ -6,6 +6,7 @@ import {
   signal,
 } from '@angular/core';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { VEX_COPY } from '../../vex-copy';
 import { VexToolStep } from '../../models/vex.models';
 import { vexiIsScaffoldTool } from '../../../../../../core/store/vexi/vexi-user-copy.utils';
 
@@ -22,18 +23,18 @@ import { vexiIsScaffoldTool } from '../../../../../../core/store/vexi/vexi-user-
   template: `
     @if (visibleSteps().length > 0) {
       <div
-        class="rounded-xl border border-[var(--color-border)] bg-[rgba(var(--color-text-primary-rgb,0,0,0),0.03)]"
+        class="rounded-xl border border-border bg-text-primary/5"
       >
         <button
           type="button"
-          class="w-full min-h-10 px-3 flex items-center gap-2 text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+          class="w-full min-h-10 px-3 flex items-center gap-2 text-xs text-text-secondary hover:text-text-primary"
           [attr.aria-expanded]="open()"
           (click)="toggle()"
         >
           <app-icon name="info" [size]="14"></app-icon>
           <span class="font-medium">
             {{
-              running_count() > 0 ? 'Vex está trabajando' : 'Actividad de Vex'
+              running_count() > 0 ? copy.working : copy.activity
             }}
             ({{ visibleSteps().length }})
           </span>
@@ -50,11 +51,11 @@ import { vexiIsScaffoldTool } from '../../../../../../core/store/vexi/vexi-user-
               <li class="flex items-start gap-2 py-1 text-xs">
                 <span
                   class="mt-0.5 shrink-0"
-                  [class.text-[var(--color-primary)]]="
+                  [class.text-primary]="
                     step.status === 'running'
                   "
-                  [class.text-[var(--color-success)]]="step.status === 'done'"
-                  [class.text-[var(--color-error)]]="step.status === 'failed'"
+                  [class.text-success]="step.status === 'done'"
+                  [class.text-error]="step.status === 'failed'"
                   aria-hidden="true"
                 >
                   @switch (step.status) {
@@ -80,12 +81,12 @@ import { vexiIsScaffoldTool } from '../../../../../../core/store/vexi/vexi-user-
                   }
                 </span>
                 <div class="min-w-0">
-                  <p class="font-medium text-[var(--color-text-primary)]">
+                  <p class="font-medium text-text-primary">
                     {{ humanize(step.name) }}
                   </p>
                   @if (step.summary) {
                     <p
-                      class="text-[var(--color-text-secondary)] leading-relaxed"
+                      class="text-text-secondary leading-relaxed"
                     >
                       {{ step.summary }}
                     </p>
@@ -100,6 +101,7 @@ import { vexiIsScaffoldTool } from '../../../../../../core/store/vexi/vexi-user-
   `,
 })
 export class VexToolTraceComponent {
+  protected readonly copy = VEX_COPY.tool_trace;
   readonly steps = input<VexToolStep[]>([]);
   readonly open = signal(false);
 

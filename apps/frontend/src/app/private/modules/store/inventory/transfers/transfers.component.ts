@@ -4,6 +4,8 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 
 import { HttpClient } from '@angular/common/http';
+import { Router } from '@angular/router';
+import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { StatsComponent } from '../../../../../shared/components/stats/stats.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
@@ -14,6 +16,17 @@ import { TransfersService } from './services';
 import { TransferListComponent } from './components/transfer-list.component';
 import { TransferCreateModalComponent } from './components/transfer-create-modal.component';
 import { TransferDetailModalComponent } from './components/transfer-detail-modal.component';
+import { TransferQuickMoveModalComponent } from './quick-move/transfer-quick-move-modal.component';
+import type {
+  TransferCloseWithLossRequest,
+  TransferDispatchRequest,
+} from './advanced/transfer-flow-panel.component';
+import type { TransferFlowNote } from './advanced/transfer-advanced';
+import type {
+  TransferPayload,
+  TransferPickerRow,
+  TransferProductSearchFn,
+} from './quick-move/transfer-draft';
 import {
   StockTransfer,
   TransferStats,
@@ -29,6 +42,7 @@ import {
     TransferListComponent,
     TransferCreateModalComponent,
     TransferDetailModalComponent,
+    TransferQuickMoveModalComponent,
   ],
   template: `
     <div class="w-full">
@@ -89,6 +103,21 @@ import {
         (deleteTransfer)="onDelete($event)"
       ></app-transfer-list>
 
+      <!-- Movimiento rápido (D1): la vía principal para mover inventario -->
+      @defer (when showQuickMoveModal()) {
+        <app-transfer-quick-move-modal
+          [isOpen]="showQuickMoveModal()"
+          [isSubmitting]="isSubmitting()"
+          [locations]="locationOptions()"
+          [searchFn]="searchProductsFn"
+          advancedRoute="/admin/inventory/transfers/new"
+          (isOpenChange)="showQuickMoveModal.set($event)"
+          (cancel)="showQuickMoveModal.set(false)"
+          (quickMove)="onQuickMove($event)"
+          (useDetailedFlow)="onUseDetailedFlow()"
+        ></app-transfer-quick-move-modal>
+      }
+
       @defer (when showCreateModal()) {
         <app-transfer-create-modal
           [isOpen]="showCreateModal()"
@@ -111,6 +140,9 @@ import {
           (approveTransfer)="onApprove($event)"
           (cancelTransfer)="onCancel($event)"
           (completeTransfer)="onComplete($event)"
+          (dispatchTransfer)="onDispatch($event)"
+          (closeWithLoss)="onCloseWithLoss($event)"
+          (openNote)="onOpenNote($event)"
         ></app-transfer-detail-modal>
       }
     </div>
@@ -121,6 +153,7 @@ export class TransfersComponent implements OnInit {
   private toastService = inject(ToastService);
   private dialogService = inject(DialogService);
   private http = inject(HttpClient);
+  private router = inject(Router);
 
   stats = signal<TransferStats>({
     total: 0,
@@ -134,12 +167,14 @@ export class TransfersComponent implements OnInit {
   isSubmitting = signal(false);
 
   showCreateModal = signal(false);
+  showQuickMoveModal = signal(false);
   showDetailModal = signal(false);
   selectedTransfer = signal<StockTransfer | null>(null);
   locationOptions = signal<SelectorOption[]>([]);
 
   searchTerm = '';
   statusFilter = '';
+  alertFilter = false;
 ngOnInit(): void {
     this.loadStats();
     this.loadTransfers();
@@ -165,7 +200,8 @@ loadStats(): void {
     this.loading.set(true);
     const query: TransferQuery = {
       ...(this.searchTerm && { search: this.searchTerm }),
-      ...(this.statusFilter && { status: this.statusFilter as any })};
+      ...(this.statusFilter && { status: this.statusFilter as any }),
+      ...(this.alertFilter && { with_alert: true })};
 
     this.transfersService
       .getAll(query)
@@ -199,6 +235,48 @@ loadStats(): void {
       });
   }
 
+  /**
+   * Búsqueda del picker del modal rápido. Cada variante llega como fila propia
+   * con su disponible en origen y destino.
+   */
+  readonly searchProductsFn: TransferProductSearchFn = (
+    term: string,
+    from: number,
+    to: number,
+  ): Observable<TransferPickerRow[]> =>
+    this.transfersService.searchTransferableProducts(term, from, to, 30);
+
+  /** D1: mover ahora — crea y completa en una transacción. */
+  onQuickMove(payload: TransferPayload): void {
+    if (this.isSubmitting()) return;
+    this.isSubmitting.set(true);
+    this.transfersService
+      .createAndComplete(payload as CreateTransferRequest)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success(
+            'Inventario movido: el origen ya descontó y el destino ya sumó.',
+          );
+          this.isSubmitting.set(false);
+          this.showQuickMoveModal.set(false);
+          this.refresh();
+        },
+        error: (err) => {
+          this.toastService.error(
+            err.message || 'Error al mover el inventario',
+          );
+          this.isSubmitting.set(false);
+        },
+      });
+  }
+
+  /** El comerciante pidió el flujo con borrador, aprobación y despacho. */
+  onUseDetailedFlow(): void {
+    this.showQuickMoveModal.set(false);
+    this.showCreateModal.set(true);
+  }
+
   onSearch(term: string): void {
     this.searchTerm = term;
     this.loadTransfers();
@@ -206,23 +284,101 @@ loadStats(): void {
 
   onFilterChange(values: Record<string, any>): void {
     this.statusFilter = values['status'] || '';
+    this.alertFilter = values['alert'] === 'with_alert';
     this.loadTransfers();
   }
 
   onClearFilters(): void {
     this.searchTerm = '';
     this.statusFilter = '';
+    this.alertFilter = false;
     this.loadTransfers();
   }
 
   onActionClick(action: string): void {
-    if (action === 'create') this.showCreateModal.set(true);
+    if (action === 'create') this.showQuickMoveModal.set(true);
+    if (action === 'advanced') void this.router.navigate(['/admin/inventory/transfers/new']);
     if (action === 'refresh') this.refresh();
   }
 
   onViewDetail(transfer: StockTransfer): void {
     this.selectedTransfer.set(transfer);
     this.showDetailModal.set(true);
+    this.reloadSelected(transfer.id);
+  }
+
+  /**
+   * El listado no trae remisiones ni lotes: el detalle se completa con
+   * `GET :id` (mismo shape que devuelven despachar/recibir).
+   */
+  private reloadSelected(id: number): void {
+    this.transfersService
+      .getById(id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (full) => {
+          if (full && this.selectedTransfer()?.id === id) {
+            this.selectedTransfer.set(full);
+          }
+        },
+        error: () => {
+          /* el detalle del listado sigue sirviendo */
+        },
+      });
+  }
+
+  /** D3 — despacho con conteo de salida. El modal queda abierto con la remisión. */
+  onDispatch(body: TransferDispatchRequest): void {
+    const transfer = this.selectedTransfer();
+    if (!transfer || this.isSubmitting()) return;
+    this.isSubmitting.set(true);
+    this.transfersService
+      .dispatch(transfer.id, body)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (updated) => {
+          this.isSubmitting.set(false);
+          this.toastService.success(
+            updated?.dispatch_note
+              ? `Despachada. Remisión de salida ${updated.dispatch_note.dispatch_number}.`
+              : 'Transferencia despachada.',
+          );
+          if (updated) this.selectedTransfer.set(updated);
+          this.refresh();
+        },
+        error: (err) => {
+          this.isSubmitting.set(false);
+          this.toastService.error(err.message || 'Error al despachar');
+        },
+      });
+  }
+
+  /** D4 — cierra el pendiente como pérdida (solo tras la fecha límite). */
+  onCloseWithLoss(body: TransferCloseWithLossRequest): void {
+    const transfer = this.selectedTransfer();
+    if (!transfer || this.isSubmitting()) return;
+    this.isSubmitting.set(true);
+    this.transfersService
+      .closeWithLoss(transfer.id, body)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (updated) => {
+          this.isSubmitting.set(false);
+          this.toastService.success('Pendiente cerrado como pérdida.');
+          if (updated) this.selectedTransfer.set(updated);
+          this.refresh();
+        },
+        error: (err) => {
+          this.isSubmitting.set(false);
+          this.toastService.error(err.message || 'Error al cerrar como pérdida');
+        },
+      });
+  }
+
+  /** Abre la remisión ligada en su módulo (imprimir / PDF desde ahí). */
+  onOpenNote(note: TransferFlowNote): void {
+    this.showDetailModal.set(false);
+    void this.router.navigate(['/admin/orders/dispatch-notes', note.id]);
   }
 
   onCreate(dto: CreateTransferRequest): void {
@@ -293,8 +449,7 @@ loadStats(): void {
   }
 
   onStartComplete(transfer: StockTransfer): void {
-    this.selectedTransfer.set(transfer);
-    this.showDetailModal.set(true);
+    this.onViewDetail(transfer);
   }
 
   onComplete(items: CompleteTransferItem[]): void {
@@ -306,8 +461,13 @@ loadStats(): void {
       .complete(transfer.id, items)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => {
-          this.toastService.success('Transferencia completada');
+        next: (updated) => {
+          // D4 — una recepción parcial deja la transferencia abierta.
+          this.toastService.success(
+            updated?.status === 'partially_received'
+              ? 'Recepción registrada. Quedan productos por llegar.'
+              : 'Transferencia recibida',
+          );
           this.showDetailModal.set(false);
           this.isSubmitting.set(false);
           this.refresh();

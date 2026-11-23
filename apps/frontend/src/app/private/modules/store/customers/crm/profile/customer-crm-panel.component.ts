@@ -1,4 +1,13 @@
-import { Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
+import {
+  Component,
+  computed,
+  effect,
+  inject,
+  input,
+  signal,
+  untracked,
+  viewChild,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
@@ -27,6 +36,7 @@ import {
   CrmCustomerSource,
   CrmNote,
   CrmOpportunity,
+  CrmPerson,
   CrmPipeline,
   CrmStage,
   CrmTag,
@@ -44,9 +54,19 @@ import {
   CRM_TIMELINE_META,
   crmCanSeeAll,
   formatDateTime,
+  isTaskSupporter,
+  supportLine,
+  taskCompletedMessage,
+  taskMoveLine,
 } from '../shared/crm.utils';
+import { CrmTagsManagerModalComponent } from '../shared/crm-tags-manager-modal.component';
+import { compareCrmTags } from '../shared/crm-tags.constants';
+import { TaskCompleteModalComponent } from '../shared/task-complete-modal.component';
 import { TaskFormModalComponent } from '../shared/task-form-modal.component';
+import { OpportunityFormModalComponent } from '../pipeline/opportunity-form-modal.component';
 import { CustomerSectionComponent, CustomerSectionEmptyComponent } from '../../components/customer-section/customer-section.component';
+import { VendixAccountBlockComponent } from '../../../platform-crm/vendix-account-block.component';
+import { canSeeVendixAccount } from '../../../platform-crm/platform-crm.interface';
 
 const TIMELINE_PAGE = 20;
 /** Pending follow-ups listed in the profile; the rest live in Tareas. */
@@ -86,9 +106,13 @@ const TAG_CHIP = `${CHIP} border-border bg-surface text-text-secondary`;
     SpinnerComponent,
     StoreUserSelectComponent,
     TextareaComponent,
+    CrmTagsManagerModalComponent,
+    TaskCompleteModalComponent,
     TaskFormModalComponent,
+    OpportunityFormModalComponent,
     CustomerSectionComponent,
     CustomerSectionEmptyComponent,
+    VendixAccountBlockComponent,
   ],
   template: `
     @if (loading() && !profile()) {
@@ -190,6 +214,13 @@ const TAG_CHIP = `${CHIP} border-border bg-surface text-text-secondary`;
           </div>
         </app-customer-section>
 
+        <!-- Cuenta Vendix: solo en una tienda de la org plataforma y con el permiso de sistema; si no, el chunk ni se descarga. -->
+        @if (canSeeVendixAccount()) {
+          @defer {
+            <app-vendix-account-block [customerId]="customerId()"></app-vendix-account-block>
+          }
+        }
+
         <div class="grid grid-cols-1 gap-4 md:gap-6 lg:grid-cols-2">
           <!-- Board -->
           @if (canReadPipeline()) {
@@ -244,34 +275,10 @@ const TAG_CHIP = `${CHIP} border-border bg-surface text-text-secondary`;
               }
 
               @if (canManagePipeline() && pipelines().length) {
-                <div class="mt-4 flex flex-col gap-2 border-t border-border pt-4 sm:flex-row sm:items-end">
-                  @if (pipelines().length > 1) {
-                    <app-selector
-                      class="flex-1"
-                      label="Pipeline"
-                      [options]="pipelineOptions()"
-                      [disabled]="boardSaving()"
-                      [ngModel]="placePipelineId()"
-                      (ngModelChange)="onPlacePipeline($event)"
-                    ></app-selector>
-                  }
-                  <app-selector
-                    class="flex-1"
-                    label="Ubicar en la etapa"
-                    placeholder="Elige una etapa"
-                    [options]="placeStageOptions()"
-                    [disabled]="boardSaving()"
-                    [ngModel]="placeStageId() ?? ''"
-                    (ngModelChange)="placeStageId.set($event ? +$event : null)"
-                  ></app-selector>
-                  <app-button
-                    variant="outline"
-                    size="md"
-                    [disabled]="!placeStageId()"
-                    [loading]="boardSaving()"
-                    (clicked)="placeOnBoard()"
-                  >
-                    Agregar al tablero
+                <div class="mt-4 flex border-t border-border pt-4">
+                  <app-button variant="outline" size="md" (clicked)="openNewOpportunity()">
+                    <app-icon slot="icon" name="plus" [size]="14"></app-icon>
+                    Nueva oportunidad
                   </app-button>
                 </div>
               }
@@ -311,10 +318,22 @@ const TAG_CHIP = `${CHIP} border-border bg-surface text-text-secondary`;
                             </span>
                           }
                           <span>{{ name(task.assigned_user) || 'Sin responsable' }}</span>
+                          @if (supportLine(task.support_users); as line) {
+                            <span>· {{ line }}</span>
+                          }
+                          @if (isSupporter(task)) {
+                            <app-badge variant="info" size="xs">Apoyo</app-badge>
+                          }
                           @if (task.is_overdue) {
                             <app-badge variant="error" size="xs">Vencida</app-badge>
                           }
                         </p>
+                        @if (moveLine(task); as line) {
+                          <p class="flex items-center gap-1 text-xs text-text-secondary">
+                            <app-icon name="trending-up" [size]="12"></app-icon>
+                            {{ line }}
+                          </p>
+                        }
                         @if (task.description) {
                           <p class="mt-1 whitespace-pre-line text-xs text-text-secondary">{{ task.description }}</p>
                         }
@@ -410,10 +429,19 @@ const TAG_CHIP = `${CHIP} border-border bg-surface text-text-secondary`;
 
           <!-- Tags -->
           <app-customer-section title="Etiquetas" icon="tag" hint="Marcas manuales para agrupar y filtrar.">
+            @if (canManageSegments()) {
+              <app-button slot="actions" variant="outline" size="sm" (clicked)="tagsManagerOpen.set(true)">
+                <app-icon slot="icon" name="settings-2" [size]="14"></app-icon>
+                Gestionar etiquetas
+              </app-button>
+            }
             <div class="flex flex-wrap gap-2">
               @for (tag of p.tags; track tag.id) {
-                <span [class]="tagChip">
-                  <app-icon name="tag" [size]="12"></app-icon>
+                <span
+                  [class]="tagChip"
+                  [attr.title]="tag.description ? 'Cuándo se pone: ' + tag.description : null"
+                >
+                  <app-icon name="tag" [size]="12" [style.color]="tag.color"></app-icon>
                   <span class="truncate">{{ tag.name }}</span>
                   @if (canUpdate()) {
                     <button
@@ -438,6 +466,7 @@ const TAG_CHIP = `${CHIP} border-border bg-surface text-text-secondary`;
                   label="Agregar etiqueta"
                   placeholder="Elige una etiqueta"
                   [options]="availableTagOptions()"
+                  [helpText]="tagPickHelp()"
                   [disabled]="saving() || !availableTagOptions().length"
                   [ngModel]="tagPick() ?? ''"
                   (ngModelChange)="tagPick.set($event ? +$event : null)"
@@ -650,6 +679,28 @@ const TAG_CHIP = `${CHIP} border-border bg-surface text-text-secondary`;
         [fixedCustomer]="p.customer"
         (saved)="onTaskSaved()"
       ></app-crm-task-form-modal>
+
+      <app-crm-task-complete-modal></app-crm-task-complete-modal>
+
+      @if (canManagePipeline()) {
+        <app-crm-opportunity-form-modal
+          [isOpen]="opportunityModalOpen()"
+          (isOpenChange)="opportunityModalOpen.set($event)"
+          [presetCustomer]="formCustomer()"
+          [lockCustomer]="true"
+          [pipelines]="pipelines()"
+          [presetPipelineId]="defaultPipelineId()"
+          (saved)="onOpportunitySaved()"
+        ></app-crm-opportunity-form-modal>
+      }
+
+      @if (canManageSegments()) {
+        <app-crm-tags-manager-modal
+          [isOpen]="tagsManagerOpen()"
+          (isOpenChange)="onTagsManagerOpenChange($event)"
+          (changed)="onTagsChanged($event)"
+        ></app-crm-tags-manager-modal>
+      }
     }
   `,
 })
@@ -681,6 +732,9 @@ export class CustomerCrmPanelComponent {
   protected readonly tagCatalog = signal<CrmTag[]>([]);
   protected readonly tagPick = signal<number | null>(null);
   protected readonly newTag = signal('');
+  protected readonly tagsManagerOpen = signal(false);
+  /** The catalog changed while the manager was open: refresh on close. */
+  private tagsDirty = false;
   protected readonly notes = signal<CrmNote[]>([]);
   protected readonly noteDraft = signal('');
   protected readonly notePinned = signal(false);
@@ -696,14 +750,16 @@ export class CustomerCrmPanelComponent {
   protected readonly opportunities = signal<CrmOpportunity[]>([]);
   protected readonly boardLoading = signal(false);
   protected readonly boardSaving = signal(false);
-  protected readonly placePipelineId = signal<number | null>(null);
-  protected readonly placeStageId = signal<number | null>(null);
+  /** "Nueva oportunidad": the pipeline's form, with this customer fixed. */
+  protected readonly opportunityModalOpen = signal(false);
 
   // Follow-ups
   protected readonly tasks = signal<CrmTask[]>([]);
   protected readonly tasksTotal = signal(0);
   protected readonly tasksLoading = signal(false);
   protected readonly completingId = signal<number | null>(null);
+  /** Asks whether to move the customer's opportunity when completing. */
+  private readonly completer = viewChild(TaskCompleteModalComponent);
 
   // Segments
   protected readonly memberships = signal<CustomerCrmMemberships | null>(null);
@@ -738,25 +794,42 @@ export class CustomerCrmPanelComponent {
   protected readonly canReadPipeline = computed(
     () => this.auth.isOwner() || this.auth.hasPermission('store:crm_pipeline:read'),
   );
+  /** Sin atajo por owner: `platform:crm_link:read` es de sistema (solo Vendix Platform). */
+  protected readonly canSeeVendixAccount = computed(() => canSeeVendixAccount(this.auth));
   protected readonly canManagePipeline = computed(
     () => this.auth.isOwner() || this.auth.hasPermission('store:crm_pipeline:manage'),
   );
 
   protected readonly ownerName = computed(() => personName(this.profile()?.owner));
-  protected readonly pipelineOptions = computed<SelectorOption[]>(() =>
-    this.pipelines().map((pipeline) => ({ value: pipeline.id, label: pipeline.name })),
+  /** The customer the form opens with, fixed; never copied into the title. */
+  protected readonly formCustomer = computed<CrmPerson>(
+    () => this.profile()?.customer ?? { id: this.customerId(), first_name: null, last_name: null },
   );
-  protected readonly placeStageOptions = computed<SelectorOption[]>(() => {
-    const pipelineId = this.placePipelineId();
-    return pipelineId === null
-      ? []
-      : this.placeableStages(pipelineId).map((stage) => ({ value: stage.id, label: stage.name }));
+  /** Where a new opportunity starts; the user can change it in the form. */
+  protected readonly defaultPipelineId = computed(() => {
+    const pipelines = this.pipelines();
+    return (pipelines.find((row) => row.is_default) ?? pipelines[0])?.id ?? null;
   });
   protected readonly availableTagOptions = computed<SelectorOption[]>(() => {
     const assigned = new Set((this.profile()?.tags ?? []).map((tag) => tag.id));
+    // <select> no tiene encabezados: el grupo va delante del nombre y las
+    // opciones salen agrupadas en el orden de la hoja, con «Sin grupo» al final.
     return this.tagCatalog()
       .filter((tag) => !assigned.has(tag.id))
-      .map((tag) => ({ value: tag.id, label: tag.name }));
+      .sort(compareCrmTags)
+      .map((tag) => ({
+        value: tag.id,
+        label: tag.group_name ? `${tag.group_name} · ${tag.name}` : tag.name,
+      }));
+  });
+  /** The tag chosen in the selector, to show its «cuándo se pone» below it. */
+  protected readonly pickedTag = computed(() => {
+    const id = this.tagPick();
+    return id === null ? null : (this.tagCatalog().find((tag) => tag.id === id) ?? null);
+  });
+  protected readonly tagPickHelp = computed(() => {
+    const description = this.pickedTag()?.description;
+    return description ? `Cuándo se pone: ${description}` : '';
   });
   /** Segments the customer is not in yet; adding to a rule segment pins them by hand too. */
   protected readonly availableSegmentOptions = computed<SelectorOption[]>(() => {
@@ -795,6 +868,11 @@ export class CustomerCrmPanelComponent {
 
   protected readonly name = personName;
   protected readonly dateTime = formatDateTime;
+  protected readonly moveLine = taskMoveLine;
+  protected readonly supportLine = supportLine;
+  /** "Apoyo" badge: the viewer helps with the task without owning it. */
+  protected readonly isSupporter = (task: CrmTask) =>
+    isTaskSupporter(task, this.auth.userId());
   protected meta(type: CrmTimelineType) {
     return CRM_TIMELINE_META[type];
   }
@@ -873,10 +951,6 @@ export class CustomerCrmPanelComponent {
       if (!this.pipelines().length) {
         this.pipelines.set(await firstValueFrom(this.crm.pipelines()));
       }
-      if (this.placePipelineId() === null) {
-        const fallback = this.pipelines().find((row) => row.is_default) ?? this.pipelines()[0];
-        this.placePipelineId.set(fallback?.id ?? null);
-      }
       const customerId = this.customerId();
       const boards = await Promise.all(
         this.pipelines().map((pipeline) =>
@@ -896,34 +970,18 @@ export class CustomerCrmPanelComponent {
     }
   }
 
-  onPlacePipeline(value: string | number | null): void {
-    this.placePipelineId.set(value ? +value : null);
-    this.placeStageId.set(null);
+  /**
+   * Nothing is created here: the form opens with the customer fixed and the
+   * user types the title and the rest before saving.
+   */
+  openNewOpportunity(): void {
+    if (!this.canManagePipeline() || !this.pipelines().length) return;
+    this.opportunityModalOpen.set(true);
   }
 
-  /** Same request the Pipeline screen sends to create a card. */
-  async placeOnBoard(): Promise<void> {
-    const pipelineId = this.placePipelineId();
-    const stageId = this.placeStageId();
-    if (!pipelineId || !stageId || this.boardSaving()) return;
-    this.boardSaving.set(true);
-    try {
-      await firstValueFrom(
-        this.crm.createOpportunity({
-          customer_id: this.customerId(),
-          title: personName(this.profile()?.customer) || 'Cliente',
-          pipeline_id: pipelineId,
-          stage_id: stageId,
-        }),
-      );
-      this.placeStageId.set(null);
-      this.toast.success('Cliente agregado al tablero');
-      this.afterBoardChange();
-    } catch (error) {
-      this.toast.error(parseApiError(error).userMessage);
-    } finally {
-      this.boardSaving.set(false);
-    }
+  /** The form already showed its toast; refresh what the new card changes. */
+  onOpportunitySaved(): void {
+    this.afterBoardChange();
   }
 
   /** Same request the Pipeline screen sends when a card is dragged. */
@@ -978,8 +1036,15 @@ export class CustomerCrmPanelComponent {
     if (this.completingId()) return;
     this.completingId.set(task.id);
     try {
-      await firstValueFrom(this.crm.completeTask(task.id));
-      this.toast.success('Seguimiento completado');
+      const completer = this.completer();
+      const completed = completer
+        ? await completer.complete(task)
+        : await firstValueFrom(this.crm.completeTask(task.id));
+      // Dismissed: nothing changed.
+      if (!completed) return;
+      this.toast.success(taskCompletedMessage(completed, 'Seguimiento completado'));
+      // The task may have moved one of the opportunities listed above.
+      if (completed.opportunity_move?.moved) void this.loadBoard();
       void this.loadTasks();
       this.refreshProfile();
       void this.loadTimeline(true);
@@ -1129,6 +1194,49 @@ export class CustomerCrmPanelComponent {
       this.saving.set(false);
     }
     await this.addTag(created.id);
+  }
+
+  onTagsManagerOpenChange(open: boolean): void {
+    this.tagsManagerOpen.set(open);
+    if (open || !this.tagsDirty) return;
+    this.tagsDirty = false;
+    // Server truth after the local reconcile: a deleted tag can also change
+    // which rule segments the customer matches.
+    this.refreshProfile();
+    void this.loadMemberships();
+  }
+
+  /**
+   * The tag manager changed the catalog: renamed or recolored tags update in
+   * place and deleted ones leave the customer, without reloading the panel.
+   */
+  onTagsChanged(catalog: CrmTag[]): void {
+    this.tagsDirty = true;
+    this.tagCatalog.set(catalog);
+    const byId = new Map(catalog.map((tag) => [tag.id, tag]));
+    this.profile.update((profile) =>
+      profile
+        ? {
+            ...profile,
+            tags: profile.tags.flatMap((tag) => {
+              const current = byId.get(tag.id);
+              return current
+                ? [
+                    {
+                      ...tag,
+                      name: current.name,
+                      color: current.color,
+                      group_name: current.group_name,
+                      description: current.description,
+                    },
+                  ]
+                : [];
+            }),
+          }
+        : profile,
+    );
+    const picked = this.tagPick();
+    if (picked !== null && !byId.has(picked)) this.tagPick.set(null);
   }
 
   private async saveTags(tagIds: number[]): Promise<void> {

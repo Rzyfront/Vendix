@@ -30,6 +30,7 @@ export const AI_SDK_TYPES: readonly SdkType[] = [
   'openai_compatible',
   'anthropic_compatible',
   'minimax_t2a',
+  'gemini_tts',
 ] as const;
 
 export const AI_MODEL_TYPES: readonly AIModelType[] = [

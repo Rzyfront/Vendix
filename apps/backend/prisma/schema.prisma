@@ -8,6 +8,9 @@ datasource db {
 }
 
 model users {
+  platform_crm_links_as_customer platform_crm_links[] @relation("platform_crm_links_customer")
+  platform_crm_links_linked      platform_crm_links[] @relation("platform_crm_links_linked_by")
+  platform_crm_links_unlinked    platform_crm_links[] @relation("platform_crm_links_unlinked_by")
   bulk_upload_logs             bulk_upload_logs[]
   workflow_definitions_created workflow_definitions[] @relation("workflow_definitions_created_by")
   workflow_instance_comments   workflow_instance_comments[]
@@ -114,6 +117,8 @@ model users {
   stock_transfers            stock_transfers[]            @relation("stock_transfers_created_by")
   stock_transfers_dispatched stock_transfers[]            @relation("stock_transfers_dispatched_by")
   stock_transfers_cancelled  stock_transfers[]            @relation("stock_transfers_cancelled_by")
+  stock_transfers_driver     stock_transfers[]            @relation("stock_transfers_driver")
+  stock_transfers_loss_closed stock_transfers[]           @relation("stock_transfers_loss_closed")
   store_users                store_users[]                @relation("store_users_user")
   user_roles                 user_roles[]
   user_sessions              user_sessions[]
@@ -126,6 +131,7 @@ model users {
   document_acceptances       document_acceptances[]
   notification_subscriptions notification_subscriptions[]
   push_subscriptions         push_subscriptions[]
+  notification_deliveries    notification_deliveries[]
   created_tickets            support_tickets[]            @relation("ticket_creator")
   assigned_tickets           support_tickets[]            @relation("ticket_assigned")
   uploaded_attachments       support_attachments[]        @relation("attachment_uploaded_by")
@@ -194,6 +200,8 @@ model users {
   layaway_plans_as_customer layaway_plans[]    @relation("layaway_customer")
   layaway_plans_created     layaway_plans[]    @relation("layaway_created_by")
   layaway_payments_received layaway_payments[] @relation("layaway_payment_received_by")
+  // QUI-1013: plants this user is the manager of (optional).
+  manufacturing_plants_managed manufacturing_plants[] @relation("manufacturing_plants_manager")
 
   // Bank Reconciliation & Advanced Accounting
   bank_reconciliations_created      bank_reconciliations[]        @relation("bank_reconciliations_created_by")
@@ -318,6 +326,7 @@ model users {
   crm_tasks                  crm_tasks[]                  @relation("crm_tasks_customer")
   crm_assigned_tasks         crm_tasks[]                  @relation("crm_tasks_assigned")
   crm_created_tasks          crm_tasks[]                  @relation("crm_tasks_created_by")
+  crm_supported_tasks        crm_task_assignees[]
   user_reminders             user_reminders[]
   crm_notes                  crm_notes[]                  @relation("crm_notes_customer")
   crm_created_notes          crm_notes[]                  @relation("crm_notes_created_by")
@@ -376,6 +385,10 @@ model store_users {
   consent_updated_at  DateTime?                @db.Timestamp(6)
   crm_owner           users?                   @relation("store_users_crm_owner", fields: [crm_owner_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   crm_stage           crm_pipeline_stages?     @relation(fields: [crm_stage_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  /// Data sheet (data collection template) chosen for this customer (QUI-1043).
+  /// Null = the store's CRM default template.
+  crm_data_template_id Int?
+  crm_data_template    data_collection_templates? @relation("store_users_crm_data_template", fields: [crm_data_template_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@unique([store_id, user_id])
   @@index([price_tier_id])
@@ -383,6 +396,7 @@ model store_users {
   @@index([store_id, crm_source])
   @@index([store_id, crm_stage_id])
   @@index([store_id, crm_last_contact_at])
+  @@index([crm_data_template_id])
 }
 
 model roles {
@@ -656,6 +670,7 @@ model order_events {
 }
 
 model organizations {
+  platform_crm_links   platform_crm_links[]
   workflow_definitions workflow_definitions[]
   workflow_instance_comments workflow_instance_comments[]
   workflow_public_links workflow_public_links[]
@@ -965,6 +980,8 @@ model organization_payment_policies {
 }
 
 model stores {
+  platform_crm_links         platform_crm_links[]                  @relation("platform_crm_links_store")
+  platform_crm_links_linked_store platform_crm_links[]             @relation("platform_crm_links_linked_store")
   workflow_definitions       workflow_definitions[]
   workflow_versions          workflow_versions[]
   work_groups                work_groups[]
@@ -1065,6 +1082,8 @@ model stores {
   suppliers                   suppliers[]
   notification_subscriptions  notification_subscriptions[]
   push_subscriptions          push_subscriptions[]
+  notification_deliveries     notification_deliveries[]
+  scheduled_reminders         scheduled_reminders[]
   support_tickets             support_tickets[]
   invoices                    invoices[]
   invoice_resolutions         invoice_resolutions[]
@@ -1227,6 +1246,7 @@ model stores {
   recipes                   recipes[]
   production_orders         production_orders[]
   manufacturing_settings    manufacturing_settings?
+  manufacturing_plants      manufacturing_plants[]
   store_sequences           store_sequences[]
   tables                    tables[]
   table_sessions            table_sessions[]
@@ -1260,9 +1280,11 @@ model stores {
   crm_segment_members   crm_segment_members[]
   crm_segments          crm_segments[]
   crm_pipelines         crm_pipelines[]
+  crm_stage_templates   crm_stage_templates[]
   crm_pipeline_stages   crm_pipeline_stages[]
   crm_opportunities     crm_opportunities[]
   crm_tasks             crm_tasks[]
+  crm_task_assignees    crm_task_assignees[]
   crm_notes             crm_notes[]
   user_reminders        user_reminders[]
   crm_campaigns         crm_campaigns[]
@@ -2333,6 +2355,12 @@ model products {
   is_ingredient                  Boolean                          @default(false)
   is_combo                       Boolean                          @default(false)
   is_batch_produced              Boolean                          @default(false)
+  /// Dónde se produce (producible: `is_batch_produced` + receta/fórmula):
+  /// `kitchen` = Producción (cocina), `plant` = Planta. NULL = lo decide la
+  /// industria de la tienda (solo manufactura → planta, si no → cocina).
+  production_site                String?                          @db.VarChar(20)
+  /// Planta concreta cuando `production_site = plant`; NULL = planta principal.
+  production_plant_id            Int?
   /// Naturaleza de uso: para qué existe el producto. `sale` se vende; `supply`
   /// (insumo) solo entra en recetas/producción/fórmulas; `internal_use` lo
   /// consume la operación. `supply` e `internal_use` NUNCA son vendibles en
@@ -2525,6 +2553,9 @@ model products {
   // Adiciones
   product_option_components  product_options[]                  @relation("product_option_component")
   product_option_assignments product_option_group_assignments[] @relation("product_option_group_assignment_product")
+  production_plant               manufacturing_plants?            @relation("products_production_plant", fields: [production_plant_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([production_plant_id])
 }
 
 /// CP-pos-smart-search E.4 (F-069) — log append-only de selecciones del
@@ -3828,6 +3859,10 @@ model inventory_locations {
   // Dispatch Routes
   dispatch_routes_origin_location dispatch_routes[] @relation("dispatch_routes_origin_location")
 
+  // QUI-1013: manufacturing plants that consume from / produce into this location.
+  manufacturing_plants_input  manufacturing_plants[] @relation("manufacturing_plants_input_location")
+  manufacturing_plants_output manufacturing_plants[] @relation("manufacturing_plants_output_location")
+
   @@unique([store_id, code])
   @@index([organization_id, store_id])
   @@index([organization_id, type])
@@ -3904,6 +3939,7 @@ model inventory_batches {
   product_variants         product_variants?          @relation(fields: [product_variant_id], references: [id], onDelete: Cascade)
   inventory_serial_numbers inventory_serial_numbers[]
   inventory_adjustments    inventory_adjustments[]
+  stock_transfer_items     stock_transfer_items[]
 
   @@unique([product_id, batch_number])
 }
@@ -4238,6 +4274,7 @@ model purchase_orders {
   receptions              purchase_order_receptions[]
   purchase_vat_contributions purchase_vat_contributions[]
   dispatch_notes          dispatch_notes[]                   @relation("dispatch_notes_purchase_order")
+  support_documents       invoices[]                         @relation("invoices_purchase_order")
   received_document_links received_document_links[]          @relation("received_document_link_purchase_order")
   received_document_match_allocations received_document_match_allocations[]
 
@@ -4540,7 +4577,7 @@ model stock_transfers {
   transfer_number       String                 @db.VarChar(50)
   organization_id       Int
   from_location_id      Int
-  to_location_id        Int
+  to_location_id        Int?
   status                transfer_status_enum   @default(pending)
   transfer_date         DateTime?              @default(now()) @db.Timestamp(6)
   expected_date         DateTime?              @db.Timestamp(6)
@@ -4556,6 +4593,32 @@ model stock_transfers {
   cancellation_reason   String?
   source_order_id       Int?
   source_order_type     String?                @db.VarChar(50)
+  // P2 (transferencias multi-producto) — ejecución, transporte, remisiones,
+  // destino externo y cierre con pérdida. Todo nullable o con default para no
+  // reescribir las filas históricas: `movement_mode` NULL = flujo anterior
+  // (aprobar → despachar/recibir sin documentos).
+  movement_mode          transfer_movement_mode_enum?
+  transport_method       transfer_transport_method_enum?
+  vehicle_id             Int?
+  driver_user_id         Int?
+  driver_name            String?                @db.VarChar(255)
+  shipping_method_id     Int?
+  carrier_name           String?                @db.VarChar(255)
+  tracking_number        String?                @db.VarChar(120)
+  shipping_cost          Decimal                @default(0) @db.Decimal(12, 2)
+  dispatch_note_id       Int?
+  receipt_note_id        Int?
+  is_external_destination Boolean               @default(false)
+  external_destination_name    String?          @db.VarChar(255)
+  external_destination_tax_id  String?          @db.VarChar(50)
+  external_destination_address String?          @db.Text
+  support_document_type  transfer_support_document_type_enum?
+  support_document_id    String?                @db.VarChar(100)
+  exit_reason            String?                @db.Text
+  no_support_alert       Boolean                @default(false)
+  loss_closed_at         DateTime?              @db.Timestamp(6)
+  loss_closed_by_user_id Int?
+  loss_reason            String?                @db.Text
   created_at            DateTime?              @default(now()) @db.Timestamp(6)
   updated_at            DateTime?              @default(now()) @db.Timestamp(6)
   stock_transfer_items  stock_transfer_items[]
@@ -4565,11 +4628,23 @@ model stock_transfers {
   canceller             users?                 @relation("stock_transfers_cancelled_by", fields: [cancelled_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   from_location         inventory_locations    @relation("from_location", fields: [from_location_id], references: [id], onUpdate: NoAction)
   organizations         organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  to_location           inventory_locations    @relation("to_location", fields: [to_location_id], references: [id], onUpdate: NoAction)
+  // D8 — un destino externo no tiene bodega interna: la columna es nullable
+  // desde P2 y el servicio exige `to_location_id` para todo destino interno.
+  to_location           inventory_locations?   @relation("to_location", fields: [to_location_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  vehicle               vehicles?              @relation("stock_transfers_vehicle", fields: [vehicle_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  driver                users?                 @relation("stock_transfers_driver", fields: [driver_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  shipping_method       shipping_methods?      @relation("stock_transfers_shipping_method", fields: [shipping_method_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  dispatch_note         dispatch_notes?        @relation("stock_transfers_dispatch_note", fields: [dispatch_note_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  receipt_note          dispatch_notes?        @relation("stock_transfers_receipt_note", fields: [receipt_note_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  loss_closed_by        users?                 @relation("stock_transfers_loss_closed", fields: [loss_closed_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@unique([organization_id, transfer_number])
   @@index([source_order_type, source_order_id], map: "stock_transfers_source_order_idx")
   @@index([status], map: "stock_transfers_status_idx")
+  @@index([dispatch_note_id])
+  @@index([receipt_note_id])
+  @@index([vehicle_id])
+  @@index([is_external_destination])
 }
 
 model stock_transfer_items {
@@ -4579,14 +4654,23 @@ model stock_transfer_items {
   product_variant_id Int?
   quantity           Int
   quantity_received  Int               @default(0)
+  /// D5 — lote elegido por fila (o el más antiguo por FIFO/FEFO al despachar).
+  batch_id           Int?
+  /// Conteo de salida (D3): unidades que realmente salieron del origen. NULL en
+  /// filas históricas, donde se asume que salió `quantity`.
+  quantity_dispatched Int?
+  /// Unidades del saldo pendiente dadas de baja en un cierre con pérdida (D4).
+  quantity_lost      Int               @default(0)
   notes              String?
   created_at         DateTime?         @default(now()) @db.Timestamp(6)
   products           products          @relation(fields: [product_id], references: [id], onDelete: Cascade)
   product_variants   product_variants? @relation(fields: [product_variant_id], references: [id], onDelete: Cascade)
   stock_transfers    stock_transfers   @relation(fields: [stock_transfer_id], references: [id], onDelete: Cascade)
+  inventory_batches  inventory_batches? @relation(fields: [batch_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([stock_transfer_id])
   @@index([product_id, stock_transfer_id])
+  @@index([batch_id])
 }
 
 model return_orders {
@@ -4712,6 +4796,7 @@ model shipping_methods {
   // Plan Despacho Economía — FASE 3 paso 11. Contraparte de
   // dispatch_routes.shipping_method_id → shipping_methods.id.
   dispatch_routes_using_method dispatch_routes[]  @relation("dispatch_routes_shipping_method")
+  stock_transfers              stock_transfers[]  @relation("stock_transfers_shipping_method")
 
   @@index([store_id])
   @@index([is_system])
@@ -4945,6 +5030,10 @@ model promotions {
   state               promotion_state_enum             @default(draft)
   is_auto_apply       Boolean                          @default(false)
   priority            Int                              @default(0)
+  // Días de la semana en que aplica (0 = domingo … 6 = sábado), evaluados en
+  // la zona horaria de la tienda. Vacío = todos los días (comportamiento
+  // histórico de todas las promociones existentes).
+  active_weekdays     Int[]                            @default([])
   created_at          DateTime?                        @default(now()) @db.Timestamp(6)
   updated_at          DateTime?                        @default(now()) @db.Timestamp(6)
 
@@ -5238,6 +5327,12 @@ enum notification_type_enum {
   checkout_reconciliation_required
   /// H4.3 — yearly reminder (March) to renew the hotel's RNT before March 31.
   lodging_rnt_renewal
+  /// Recordatorios CRM (odd/tasks/recordatorios-notificaciones.md §2.1):
+  /// tarea por vencer, reasignada, cerrada por otro y resumen diario.
+  crm_task_due_soon
+  crm_task_reassigned
+  crm_task_closed
+  crm_task_digest
 }
 
 model notifications {
@@ -5257,6 +5352,7 @@ model notifications {
   created_at DateTime                   @default(now()) @db.Timestamp(6)
   updated_at DateTime                   @default(now()) @db.Timestamp(6)
   stores     stores?                    @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  deliveries notification_deliveries[]
 
   @@index([store_id])
   @@index([store_id, is_read])
@@ -5315,6 +5411,89 @@ model push_subscriptions {
 
   @@unique([store_id, user_id, endpoint])
   @@index([store_id, user_id])
+}
+
+/// Canal de entrega de un aviso personal (odd/tasks/recordatorios-notificaciones.md §3.1c).
+enum notification_channel_enum {
+  push
+  email
+}
+
+enum notification_delivery_status_enum {
+  pending
+  sent
+  failed
+  skipped
+}
+
+/// Outbox por destinatario y canal de los avisos personales. Una fila por
+/// (tienda, usuario, canal, dedupe_key): un mismo aviso nunca se entrega dos
+/// veces aunque el worker se reinicie. Hoy solo el correo pasa por aquí; lo
+/// drena `NotificationDeliveriesJob` (solo worker) con reintentos y backoff.
+/// Migración aditiva: 20261228100500_notification_deliveries.
+model notification_deliveries {
+  id              Int                               @id @default(autoincrement())
+  store_id        Int
+  /// Fila de la campana que originó la entrega (null si ya no existe).
+  notification_id Int?
+  user_id         Int
+  channel         notification_channel_enum
+  type            notification_type_enum
+  dedupe_key      String                            @db.VarChar(191)
+  status          notification_delivery_status_enum @default(pending)
+  attempts        Int                               @default(0)
+  /// Próximo intento; mientras un worker la procesa, fin de su lease.
+  next_attempt_at DateTime                          @default(now()) @db.Timestamp(6)
+  sent_at         DateTime?                         @db.Timestamp(6)
+  error           String?                           @db.Text
+  /// `{ title, body, url }` del aviso, tal como se mostró en la campana.
+  payload         Json
+  created_at      DateTime                          @default(now()) @db.Timestamp(6)
+  updated_at      DateTime                          @default(now()) @updatedAt @db.Timestamp(6)
+
+  store        stores         @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  user         users          @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  notification notifications? @relation(fields: [notification_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@unique([store_id, user_id, channel, dedupe_key])
+  @@index([status, next_attempt_at])
+  @@index([store_id, created_at(sort: Desc)])
+  @@index([notification_id])
+}
+
+enum scheduled_reminder_status_enum {
+  pending
+  sent
+  cancelled
+  skipped
+}
+
+/// Disparos futuros de avisos con fecha (por vencer, vencida, escalamiento,
+/// resumen). Los escribe `ReminderScheduler.sync` (F1) y los toma un cron del
+/// worker con `FOR UPDATE SKIP LOCKED`. Cada fila nombra su tienda: el cron
+/// corre sin contexto. Migración aditiva: 20261228100400_scheduled_reminders.
+model scheduled_reminders {
+  id          Int                            @id @default(autoincrement())
+  store_id    Int
+  /// Módulo dueño de la fecha, p. ej. `crm_task`.
+  source_type String                         @db.VarChar(40)
+  source_id   Int
+  /// `due_soon`, `due`, `overdue_escalation`, `digest`…
+  kind        String                         @db.VarChar(40)
+  fire_at     DateTime                       @db.Timestamp(6)
+  /// Destinatarios congelados al programar (null = se resuelven al disparar).
+  recipients  Json?
+  status      scheduled_reminder_status_enum @default(pending)
+  attempts    Int                            @default(0)
+  last_error  String?                        @db.Text
+  created_at  DateTime                       @default(now()) @db.Timestamp(6)
+  updated_at  DateTime                       @default(now()) @updatedAt @db.Timestamp(6)
+
+  store stores @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([source_type, source_id, kind, fire_at])
+  @@index([status, fire_at])
+  @@index([store_id])
 }
 
 enum address_type_enum {
@@ -6137,6 +6316,41 @@ enum transfer_status_enum {
   received
   completed // legacy, deferred drop per Plan §13#2
   cancelled
+  /// Recepción parcial (D4): parte de lo despachado ya entró a destino y
+  /// queda saldo pendiente por recibir. No es terminal.
+  partially_received
+  /// Cierre con pérdida (D4): el saldo pendiente se dio de baja con motivo
+  /// después de vencer `expected_date`. Terminal, distinto de `received`
+  /// (no entró mercancía) y de `cancelled` (el despacho no se revierte).
+  closed_with_loss
+}
+
+/// D3 — cómo se ejecuta la orden avanzada de transferencia.
+/// `quick` es el movimiento rápido (D1); `mass_only` aplica el movimiento
+/// completo tras la aprobación, sin remisiones; `with_dispatch_notes` genera
+/// remisión de salida al despachar y de entrada al recibir.
+enum transfer_movement_mode_enum {
+  quick
+  mass_only
+  with_dispatch_notes
+}
+
+/// D6 — cómo viaja la mercancía entre bodegas.
+enum transfer_transport_method_enum {
+  none
+  internal_carrier
+  internal_vehicle
+  internal_shipping_method
+  external_shipping_method
+}
+
+/// D8 — documento que respalda una salida a un destino externo.
+enum transfer_support_document_type_enum {
+  sales_order
+  invoice
+  purchase_order
+  return
+  other
 }
 
 enum return_order_type_enum {
@@ -6891,8 +7105,11 @@ model ai_engine_configs {
   created_at     DateTime?          @default(now()) @db.Timestamp(6)
   updated_at     DateTime?          @default(now()) @db.Timestamp(6)
 
-  applications ai_engine_applications[]
+  applications          ai_engine_applications[] @relation("ai_engine_application_config")
+  /// F3 T24: aplicaciones que usan esta configuración como respaldo.
+  fallback_applications ai_engine_applications[] @relation("ai_engine_application_fallback_config")
   logs         ai_engine_logs[]
+  voice_profiles        ai_voice_profiles[]
 
   @@unique([provider, model_id])
   @@index([model_type])
@@ -6904,6 +7121,8 @@ model ai_engine_applications {
   name                String             @db.VarChar(255)
   description         String?            @db.Text
   config_id           Int?
+  /// F3 T24: configuración de respaldo; ante error del proveedor o timeout el motor reintenta una vez con ella.
+  fallback_config_id  Int?
   system_prompt       String?            @db.Text
   prompt_template     String?            @db.Text
   temperature         Decimal?           @db.Decimal(3, 2)
@@ -6918,9 +7137,11 @@ model ai_engine_applications {
   created_at          DateTime?          @default(now()) @db.Timestamp(6)
   updated_at          DateTime?          @default(now()) @db.Timestamp(6)
 
-  config ai_engine_configs? @relation(fields: [config_id], references: [id], onDelete: SetNull)
+  config          ai_engine_configs? @relation("ai_engine_application_config", fields: [config_id], references: [id], onDelete: SetNull)
+  fallback_config ai_engine_configs? @relation("ai_engine_application_fallback_config", fields: [fallback_config_id], references: [id], onDelete: SetNull)
 
   @@index([config_id])
+  @@index([fallback_config_id])
   @@index([ai_feature_category])
   @@index([model_type])
 }
@@ -6964,11 +7185,38 @@ model ai_agents {
   timeout_seconds               Int?
   requires_confirmation_default Boolean   @default(false)
   is_active                     Boolean   @default(true)
+  /// F8 T49: voz del catálogo que lee las respuestas de este agente. NULL = respaldo (`metadata.speech`).
+  voice_profile_id              Int?
   created_at                    DateTime? @default(now()) @db.Timestamp(6)
   updated_at                    DateTime? @default(now()) @db.Timestamp(6)
 
+  voice_profile ai_voice_profiles? @relation(fields: [voice_profile_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
   @@index([is_active])
   @@index([app_key])
+  @@index([voice_profile_id])
+}
+
+/// F8 T49: catálogo de voces de lectura (TTS) que arma superadmin. Una voz = un
+/// proveedor de voz (`ai_engine_configs`) + el id de voz de ese proveedor.
+model ai_voice_profiles {
+  id          Int       @id @default(autoincrement())
+  config_id   Int
+  voice_id    String    @db.VarChar(150)
+  name        String    @db.VarChar(120)
+  language    String    @default("es") @db.VarChar(16)
+  speed       Decimal?  @db.Decimal(4, 2)
+  vol         Decimal?  @db.Decimal(4, 2)
+  sample_text String?   @db.VarChar(120)
+  is_active   Boolean   @default(true)
+  created_at  DateTime? @default(now()) @db.Timestamp(6)
+  updated_at  DateTime? @default(now()) @db.Timestamp(6)
+
+  config ai_engine_configs @relation(fields: [config_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  agents ai_agents[]
+
+  @@unique([config_id, voice_id])
+  @@index([is_active])
 }
 
 model ai_engine_logs {
@@ -7002,6 +7250,10 @@ model ai_engine_logs {
   status            String   @default("success") @db.VarChar(20)
   error_message     String?  @db.Text
   input_preview     String?  @db.Text
+  // ia-cargas F6: why a call failed or was cut (all nullable, no backfill).
+  finish_reason     String?  @db.VarChar(32)
+  attempt           Int?
+  validation_error  String?  @db.VarChar(500)
   created_at        DateTime @default(now()) @db.Timestamp(6)
 
   config ai_engine_configs? @relation(fields: [config_id], references: [id], onDelete: SetNull)
@@ -7092,6 +7344,8 @@ model ai_conversations {
   user_id         Int
   title           String?                     @db.VarChar(255)
   summary         String?                     @db.Text
+  /// F3 T22: id del último ai_messages cubierto por `summary` (sin FK: los mensajes solo se borran con la conversación).
+  summary_through_message_id Int?
   app_key         String?                     @db.VarChar(100)
   status          ai_conversation_status_enum @default(active)
   metadata        Json?
@@ -7179,11 +7433,19 @@ model ai_attachments {
   consumed_by_app_key String?   @db.VarChar(100)
   created_at          DateTime  @default(now()) @db.Timestamp(6)
   linked_at           DateTime? @db.Timestamp(6)
+  /// M10 (F6/T41): S3 key of the extracted text (derived). `s3_key` stays the original.
+  derived_text_key    String?   @db.VarChar(500)
+  /// M10 (F6/T44): document-module file this attachment was promoted to. Survives
+  /// a conversation purge because the stored file is owned by the record.
+  stored_file_id      Int?
+
+  stored_file stored_files? @relation(fields: [stored_file_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([store_id])
   @@index([store_id, user_id])
   @@index([conversation_id])
   @@index([linked_entity_type, linked_entity_id])
+  @@index([stored_file_id])
 }
 
 /// Trabajo de Vexi que no cabe en un turno de conversación.
@@ -7290,7 +7552,10 @@ model ai_agent_effects {
   store_id           Int
   organization_id    Int
   user_id            Int
-  objective_id       String   @db.Uuid
+  // Nullable desde el borrado de conversaciones: el efecto aplicado en el negocio
+  // sobrevive a la conversación y queda desvinculado (objective_id = NULL). El FK
+  // compuesto no se aplica con una columna NULL (MATCH SIMPLE).
+  objective_id       String?  @db.Uuid
   operation_id       String   @unique @db.VarChar(200)
   proposal_hash      String   @db.VarChar(64)
   step_id            String   @db.VarChar(200)
@@ -7298,16 +7563,148 @@ model ai_agent_effects {
   domain_receipt     Json?
   domain_reference   String?  @db.VarChar(300)
   evidence_result_id String?  @db.Uuid
+  // F5: lote de escritura de Vex al que pertenece el efecto (NULL fuera de lotes).
+  batch_id           String?  @db.Uuid
   history            Json     @default("[]")
   created_at         DateTime @default(now()) @db.Timestamptz(6)
   updated_at         DateTime @default(now()) @db.Timestamptz(6)
 
   evidence_result ai_agent_tool_results? @relation(fields: [evidence_result_id], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  objective ai_agent_objectives @relation(fields: [objective_id, store_id, organization_id, user_id], references: [id, store_id, organization_id, user_id], onDelete: Restrict, onUpdate: Restrict, map: "ai_agent_effects_objective_scope_fkey")
+  batch           ai_agent_write_batches? @relation(fields: [batch_id], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "ai_agent_effects_batch_id_fkey")
+  objective ai_agent_objectives? @relation(fields: [objective_id, store_id, organization_id, user_id], references: [id, store_id, organization_id, user_id], onDelete: Restrict, onUpdate: Restrict, map: "ai_agent_effects_objective_scope_fkey")
 
   @@unique([objective_id, step_id, proposal_hash], map: "ai_agent_effects_proposal_uq")
   @@index([store_id, organization_id, user_id, objective_id, status], map: "ai_agent_effects_owner_objective_status_idx")
   @@index([evidence_result_id])
+  @@index([batch_id], map: "ai_agent_effects_batch_id_idx")
+}
+
+/// Lote de escrituras de Vex (F5): hasta 25 escrituras reversibles que la persona
+/// aprueba con un clic. `steps` guarda cada paso con sus hashes y estado;
+/// `version` es la concurrencia optimista del deshacer. `conversation_id` es un
+/// entero plano sin FK (la purga puede borrar la conversación y el lote aplicado
+/// sobrevive). Una saga, no una transacción: ver `write-batch.types.ts`.
+model ai_agent_write_batches {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  store_id            Int
+  organization_id     Int
+  user_id             Int
+  conversation_id     Int?
+  goal                String    @db.VarChar(500)
+  status              String    @default("proposed") @db.VarChar(20)
+  steps               Json      @default("[]")
+  step_count          Int
+  affected_records    Int       @default(0)
+  part_index          Int       @default(1)
+  part_total          Int       @default(1)
+  group_id            String?   @db.Uuid
+  version             Int       @default(0)
+  approved_by_user_id Int?
+  approved_at         DateTime? @db.Timestamptz(6)
+  started_at          DateTime? @db.Timestamptz(6)
+  finished_at         DateTime? @db.Timestamptz(6)
+  summary             Json?
+  expires_at          DateTime  @db.Timestamptz(6)
+  created_at          DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime  @default(now()) @db.Timestamptz(6)
+
+  effects ai_agent_effects[]
+
+  @@index([store_id, organization_id, user_id, status], map: "ai_agent_write_batches_owner_status_idx")
+  @@index([conversation_id], map: "ai_agent_write_batches_conversation_id_idx")
+}
+
+/// Constancia del borrado físico de una conversación de Vex: quién, cuándo y
+/// cuántos elementos. NUNCA guarda título ni contenido. `conversation_id` es un
+/// entero plano sin FK (la fila de la conversación ya no existe).
+/// `pending_s3_keys` es la lista de objetos S3 aún por borrar; un job la vacía
+/// con reintentos (`s3_attempts`) y marca `s3_completed_at` al terminar.
+model ai_conversation_purges {
+  id              Int       @id @default(autoincrement())
+  store_id        Int
+  organization_id Int
+  user_id         Int
+  conversation_id Int
+  agent_key       String    @db.VarChar(80)
+  counts          Json
+  pending_s3_keys Json      @default("[]")
+  s3_attempts     Int       @default(0)
+  s3_completed_at DateTime? @db.Timestamp(6)
+  created_at      DateTime  @default(now()) @db.Timestamp(6)
+
+  @@index([store_id])
+  @@index([s3_completed_at, s3_attempts])
+}
+
+/// F4 T31 (M6, D7, N3): store memory, MEMORY.md style, loaded into every Vex session of the store.
+/// user_id NULL = whole store (always NULL today; ready for per-user memory without migration).
+/// Partial unique indexes live in SQL: (store_id, agent_key, key) WHERE user_id IS NULL and
+/// (store_id, agent_key, user_id, key) WHERE user_id IS NOT NULL.
+model ai_agent_memories {
+  id                     Int       @id @default(autoincrement())
+  store_id               Int
+  organization_id        Int
+  agent_key              String    @default("vex") @db.VarChar(80)
+  user_id                Int?
+  key                    String    @db.VarChar(120)
+  content                String    @db.VarChar(500)
+  kind                   String    @default("preference") @db.VarChar(20)
+  origin                 String    @default("agent") @db.VarChar(20)
+  source_conversation_id Int?
+  created_by_user_id     Int?
+  updated_by_user_id     Int?
+  last_used_at           DateTime? @db.Timestamp(6)
+  created_at             DateTime  @default(now()) @db.Timestamp(6)
+  updated_at             DateTime  @default(now()) @db.Timestamp(6)
+
+  @@index([store_id, agent_key])
+  @@index([source_conversation_id])
+}
+
+/// F4 T32 (M8, D5): "how is X done in Vendix" guides, global, editable from superadmin.
+model ai_agent_skills {
+  id                 Int       @id @default(autoincrement())
+  key                String    @unique @db.VarChar(120)
+  title              String    @db.VarChar(200)
+  module             String?   @db.VarChar(50)
+  body               String    @db.Text
+  candidate_tools    String[]  @default([])
+  help_article_id    Int?
+  video_id           Int?
+  agent_keys         String[]  @default(["vex"])
+  status             String    @default("draft") @db.VarChar(20)
+  version            Int       @default(1)
+  published_version  Int?
+  created_by_user_id Int?
+  updated_by_user_id Int?
+  published_at       DateTime? @db.Timestamp(6)
+  created_at         DateTime  @default(now()) @db.Timestamp(6)
+  updated_at         DateTime  @default(now()) @db.Timestamp(6)
+
+  versions ai_agent_skill_versions[]
+
+  @@index([status, module])
+}
+
+/// F4 T32 (M8, D5): immutable skill versions (insert-only; restore creates a new version).
+model ai_agent_skill_versions {
+  id              Int      @id @default(autoincrement())
+  skill_id        Int
+  version         Int
+  title           String   @db.VarChar(200)
+  module          String?  @db.VarChar(50)
+  body            String   @db.Text
+  candidate_tools String[] @default([])
+  help_article_id Int?
+  video_id        Int?
+  agent_keys      String[] @default(["vex"])
+  change_note     String?  @db.VarChar(500)
+  author_user_id  Int?
+  created_at      DateTime @default(now()) @db.Timestamp(6)
+
+  skill ai_agent_skills @relation(fields: [skill_id], references: [id], onDelete: Restrict)
+
+  @@unique([skill_id, version])
 }
 
 /// E system audit sink. Owner ACL and seven-day expiry enforced by SandboxAuditRepository.
@@ -7317,7 +7714,7 @@ model ai_agent_script_runs {
   store_id          Int
   organization_id   Int
   user_id           Int
-  objective_id      String    @db.Uuid
+  objective_id      String?   @db.Uuid
   source_hash       String    @db.VarChar(64)
   source_ciphertext Bytes
   source_nonce      Bytes
@@ -7334,6 +7731,13 @@ model ai_agent_script_runs {
   expires_at        DateTime  @db.Timestamptz(6)
   created_at        DateTime  @default(now()) @db.Timestamptz(6)
   finished_at       DateTime? @db.Timestamptz(6)
+  // F10 Code Mode audit (all nullable; objective_id is NULL for normal turns).
+  executor           String?   @db.VarChar(20)
+  rounds             Int?
+  lambda_request_ids Json?
+  tenant_hash        String?   @db.VarChar(64)
+  cut_reason         String?   @db.VarChar(40)
+  returned_bytes     Int?
 
   @@index([store_id, organization_id, user_id, created_at], map: "ai_agent_script_runs_owner_created_idx")
   @@index([store_id, organization_id, user_id, objective_id], map: "ai_agent_script_runs_owner_objective_idx")
@@ -7448,11 +7852,15 @@ model help_articles {
   created_by_id   Int?
   is_featured     Boolean                  @default(false)
   sort_order      Int                      @default(0)
+  /// F4 T27 (M7): optional video linked to the article (help center <-> video library).
+  video_id        Int?
   created_at      DateTime?                @default(now()) @db.Timestamp(6)
   updated_at      DateTime?                @default(now()) @db.Timestamp(6)
 
-  category   help_article_categories @relation(fields: [category_id], references: [id])
-  created_by users?                  @relation("help_article_author", fields: [created_by_id], references: [id], onDelete: SetNull)
+  category           help_article_categories @relation(fields: [category_id], references: [id])
+  created_by         users?                  @relation("help_article_author", fields: [created_by_id], references: [id], onDelete: SetNull)
+  video              videos?                 @relation("help_article_video", fields: [video_id], references: [id], onDelete: SetNull)
+  video_series_items video_series_items[]
 
   @@index([category_id])
   @@index([status])
@@ -7460,6 +7868,7 @@ model help_articles {
   @@index([module])
   @@index([is_featured])
   @@index([created_by_id])
+  @@index([video_id])
 }
 
 // ── Video Library ────────────────────────────────────────────────
@@ -7516,8 +7925,10 @@ model videos {
   created_at       DateTime?              @default(now()) @db.Timestamp(6)
   updated_at       DateTime?              @default(now()) @db.Timestamp(6)
 
-  category   video_categories @relation(fields: [category_id], references: [id])
-  created_by users?           @relation("video_author", fields: [created_by_id], references: [id], onDelete: SetNull)
+  category           video_categories     @relation(fields: [category_id], references: [id])
+  created_by         users?               @relation("video_author", fields: [created_by_id], references: [id], onDelete: SetNull)
+  help_articles      help_articles[]      @relation("help_article_video")
+  video_series_items video_series_items[]
 
   @@index([category_id])
   @@index([status])
@@ -7526,6 +7937,61 @@ model videos {
   @@index([is_featured])
   @@index([created_by_id])
   @@index([store_id])
+}
+
+/// F4 T27 (M7): ordered series of published videos (learning paths). Global content.
+model video_series {
+  id            Int               @id @default(autoincrement())
+  title         String            @db.VarChar(255)
+  slug          String            @unique @db.VarChar(280)
+  summary       String?           @db.VarChar(500)
+  description   String?           @db.Text
+  module        String?           @db.VarChar(50)
+  thumbnail_url String?           @db.Text
+  status        video_status_enum @default(DRAFT)
+  sort_order    Int               @default(0)
+  created_by_id Int?
+  created_at    DateTime          @default(now()) @db.Timestamp(6)
+  updated_at    DateTime          @default(now()) @db.Timestamp(6)
+
+  items video_series_items[]
+
+  @@index([status])
+  @@index([module])
+}
+
+/// F4 T27 (M7): items of a series. FKs RESTRICT on purpose: the app deletes items explicitly.
+model video_series_items {
+  id         Int      @id @default(autoincrement())
+  series_id  Int
+  video_id   Int
+  article_id Int?
+  position   Int
+  created_at DateTime @default(now()) @db.Timestamp(6)
+
+  series  video_series   @relation(fields: [series_id], references: [id], onDelete: Restrict)
+  video   videos         @relation(fields: [video_id], references: [id], onDelete: Restrict)
+  article help_articles? @relation(fields: [article_id], references: [id], onDelete: SetNull)
+
+  @@unique([series_id, video_id])
+  @@index([series_id, position])
+  @@index([video_id])
+}
+
+/// F4 T27 (M7): per-user learning progress on help videos. No FK to users on purpose (content progress).
+model user_learning_progress {
+  id              Int       @id @default(autoincrement())
+  user_id         Int
+  series_id       Int?
+  video_id        Int
+  seconds_watched Int       @default(0)
+  completed       Boolean   @default(false)
+  completed_at    DateTime? @db.Timestamp(6)
+  created_at      DateTime  @default(now()) @db.Timestamp(6)
+  updated_at      DateTime  @default(now()) @db.Timestamp(6)
+
+  @@unique([user_id, video_id])
+  @@index([user_id, series_id])
 }
 
 // ===== ELECTRONIC INVOICING DOMAIN =====
@@ -7696,6 +8162,13 @@ model invoices {
   customer_person_type             persona_type_enum?
   order_id                         Int?
   sales_order_id                   Int?
+  /// QUI-684 — orden de compra de la que se generó este DOCUMENTO SOPORTE.
+  /// Sólo la escribe `POST /store/invoicing/purchase-orders/:id/support-document`;
+  /// el POST genérico de facturación no la acepta. Una OC admite un único
+  /// documento soporte vigente (todo estado salvo `cancelled`/`voided`): lo
+  /// impone el único parcial `invoices_po_active_support_document_key`,
+  /// mantenido en SQL (Prisma no expresa índices parciales).
+  purchase_order_id                Int?
   related_invoice_id               Int?
   /// CP-REFUND-FLOW-REDESIGN paso 7 — reembolso que esta NOTA CRÉDITO
   /// acredita. Sólo `invoice_type = 'credit_note'` lo puebla, vía
@@ -7784,6 +8257,7 @@ model invoices {
   supplier                 suppliers?                 @relation(fields: [supplier_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   order                    orders?                    @relation(fields: [order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   sales_order              sales_orders?              @relation(fields: [sales_order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  purchase_order           purchase_orders?           @relation("invoices_purchase_order", fields: [purchase_order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   contract                 contracts?                 @relation(fields: [contract_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   related_invoice          invoices?                  @relation("invoice_credit_debit_notes", fields: [related_invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   credit_debit_notes       invoices[]                 @relation("invoice_credit_debit_notes")
@@ -7809,6 +8283,7 @@ model invoices {
   @@unique([accounting_entity_id, invoice_type, invoice_number])
   @@index([profile_id, profile_version])
   @@index([store_id, status])
+  @@index([purchase_order_id])
   @@index([accounting_entity_id])
   @@index([organization_id, accounting_entity_id])
   @@index([accounting_entity_id, fiscal_document_type])
@@ -9129,6 +9604,7 @@ model fiscal_obligations {
   declaration_drafts tax_declaration_drafts[]
   operation_events   fiscal_operation_events[]
   fiscal_tax_payments fiscal_tax_payments[]
+  user_reminders     user_reminders[]
 
   @@unique([accounting_entity_id, type, period_start, period_end, jurisdiction_key], map: "fiscal_obligations_entity_type_range_jurisdiction_key")
   @@index([organization_id, accounting_entity_id, type, period_year], map: "fiscal_obligations_org_entity_type_year_idx")
@@ -11167,6 +11643,8 @@ model dispatch_notes {
   voided_by_user       users?                 @relation("dispatch_notes_voided_by", fields: [voided_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   return_orders        return_orders[]        @relation("return_orders_related_dispatch")
   dispatch_route_stops dispatch_route_stops[]
+  stock_transfers_dispatch stock_transfers[]  @relation("stock_transfers_dispatch_note")
+  stock_transfers_receipt  stock_transfers[]  @relation("stock_transfers_receipt_note")
 
   @@unique([store_id, dispatch_number])
   @@index([store_id, status])
@@ -11717,10 +12195,16 @@ model data_collection_templates {
   checkin_show_products Boolean @default(true)
   checkin_show_notes    Boolean @default(true)
   is_default  Boolean              @default(false)
+  /// Data sheet of the CRM (pipeline card detail and customer profile), QUI-1043.
+  /// Only `entity_type = customer` templates. The DB also has a partial unique
+  /// index (`data_collection_templates_one_crm_default_per_store`,
+  /// `WHERE is_crm_default`): one CRM default per store.
+  is_crm_default Boolean             @default(false)
   created_at  DateTime             @default(now()) @db.Timestamp(6)
   updated_at  DateTime             @default(now()) @db.Timestamp(6)
 
   store                    stores                              @relation(fields: [store_id], references: [id])
+  crm_customers            store_users[]                       @relation("store_users_crm_data_template")
   sections                 data_collection_sections[]
   tabs                     data_collection_tabs[]
   products                 data_collection_template_products[]
@@ -12335,6 +12819,7 @@ model subscription_plans {
   invoice_to_subs         subscription_invoices[]         @relation("invoice_to_plan")
   redemption_consumptions redemption_consumptions[]
   module_rules            plan_module_rules[]
+  ai_entitlements         plan_ai_entitlements[]
   created_at              DateTime                        @default(now()) @db.Timestamp(6)
   updated_at              DateTime                        @default(now()) @db.Timestamp(6)
   created_by              Int?
@@ -12364,6 +12849,32 @@ model plan_module_rules {
 enum plan_module_rule_mode_enum {
   exclusive
   blocked
+}
+
+/// Derechos de IA por plan (odd/tasks/vex-agente-avanzado.md §3.11, T9). Una
+/// fila = una capacidad de un agente (vex, vexi, platform) en un plan.
+/// `cap_value` NULL = sin limite, 0 = nada. Catalogo canonico y mapeo desde
+/// `ai_feature_flags`: `domains/store/subscriptions/types/ai-capabilities.ts`.
+/// Mientras dure el modo sombra (T10) el gate sigue leyendo `ai_feature_flags`.
+model plan_ai_entitlements {
+  id             Int                          @id @default(autoincrement())
+  plan_id        Int
+  agent_key      String                       @db.VarChar(16)
+  capability_key String                       @db.VarChar(64)
+  enabled        Boolean                      @default(false)
+  cap_value      BigInt?
+  on_limit       ai_entitlement_on_limit_enum @default(block)
+  created_at     DateTime                     @default(now()) @db.Timestamp(6)
+  updated_at     DateTime                     @default(now()) @updatedAt @db.Timestamp(6)
+  plan           subscription_plans           @relation(fields: [plan_id], references: [id], onDelete: Restrict)
+
+  @@unique([plan_id, agent_key, capability_key])
+  @@index([agent_key, capability_key])
+}
+
+enum ai_entitlement_on_limit_enum {
+  block
+  warn
 }
 
 model partner_plan_overrides {
@@ -13037,12 +13548,20 @@ model production_orders {
   order_id     Int?
   /// QUI-995: sold variant this order makes (one order per product+variant of a sale). NULL for base products and manual orders.
   product_variant_id Int?
+  /// QUI-1013: plant where the order is made (input/output locations come from it).
+  /// NULL for restaurant orders and for stores without any plant (they keep the
+  /// `manufacturing_settings` defaults, i.e. today's behaviour).
+  plant_id     Int?
+  /// Pantalla dueña de la orden: `kitchen` (Producción) | `plant` (Planta).
+  /// NULL = filas anteriores: Planta las manuales con consecutivo, Producción el resto.
+  production_site String?                  @db.VarChar(20)
 
   store      stores   @relation(fields: [store_id], references: [id], onUpdate: NoAction)
   product    products @relation(fields: [product_id], references: [id], onUpdate: NoAction)
   recipe     recipes  @relation(fields: [recipe_id], references: [id], onUpdate: NoAction)
   sale_order orders?  @relation(fields: [order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   product_variant product_variants? @relation(fields: [product_variant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  plant      manufacturing_plants? @relation(fields: [plant_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   lines      production_order_lines[]
 
   @@unique([store_id, order_number])
@@ -13058,6 +13577,7 @@ model production_orders {
   @@index([store_id, status])
   @@index([store_id, product_id])
   @@index([store_id, created_at])
+  @@index([store_id, plant_id])
 }
 
 /// Planned vs consumed component line of a production order (manufacturing).
@@ -13098,6 +13618,35 @@ model manufacturing_settings {
   updated_at                 DateTime? @default(now()) @db.Timestamp(6)
 
   store stores @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+}
+
+/// QUI-1013: a production plant of the store (e.g. "Camisas", "Zapatos").
+/// Each plant consumes inputs from its own input location and puts finished
+/// goods into its own output location. Plants are deactivated, never deleted
+/// (production_orders.plant_id is ON DELETE RESTRICT). Locations are nullable
+/// only for the plant backfilled from a `manufacturing_settings` row without
+/// defaults: NULL keeps today's resolution (the component's / product's own
+/// default location). The "main" plant is the active plant with the lowest id.
+model manufacturing_plants {
+  id                 Int       @id @default(autoincrement())
+  store_id           Int
+  name               String    @db.VarChar(100)
+  input_location_id  Int?
+  output_location_id Int?
+  manager_user_id    Int?
+  is_active          Boolean   @default(true)
+  created_at         DateTime? @default(now()) @db.Timestamp(6)
+  updated_at         DateTime? @default(now()) @db.Timestamp(6)
+
+  store             stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  input_location    inventory_locations? @relation("manufacturing_plants_input_location", fields: [input_location_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  output_location   inventory_locations? @relation("manufacturing_plants_output_location", fields: [output_location_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  manager           users?               @relation("manufacturing_plants_manager", fields: [manager_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  production_orders production_orders[]
+  products_produced products[]           @relation("products_production_plant")
+
+  @@unique([store_id, name])
+  @@index([store_id, is_active])
 }
 
 /// Generic per-store consecutive counters (e.g. key=production_order, prefix=OP-).
@@ -13476,6 +14025,7 @@ model vehicles {
   // Plan Despacho Economía — FASE 2 paso 8. Contraparte de la relación
   // shipping_methods.default_vehicle_id → vehicles.id.
   default_for_methods shipping_methods[] @relation("shipping_methods_default_vehicle")
+  stock_transfers     stock_transfers[]  @relation("stock_transfers_vehicle")
 
   @@unique([store_id, plate])
   @@index([store_id, is_active])
@@ -15235,6 +15785,8 @@ model user_reminders {
   link_id      Int?
   link_label   String?                     @db.VarChar(200)
   source       user_reminder_source_enum   @default(manual)
+  /// Obligación fiscal que originó el recordatorio (source = fiscal). SET NULL al borrarla.
+  fiscal_obligation_id Int?
   notified_at  DateTime?                   @db.Timestamp(6)
   completed_at DateTime?                   @db.Timestamp(6)
   created_at   DateTime                    @default(now()) @db.Timestamp(6)
@@ -15242,9 +15794,11 @@ model user_reminders {
 
   store stores @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   user  users  @relation(fields: [user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  fiscal_obligation fiscal_obligations? @relation(fields: [fiscal_obligation_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([store_id, user_id, status, remind_at])
   @@index([status, notified_at, remind_at])
+  @@index([fiscal_obligation_id])
 }
 
 enum user_reminder_status_enum {
@@ -15255,6 +15809,7 @@ enum user_reminder_status_enum {
 enum user_reminder_source_enum {
   manual
   vex
+  fiscal
 }
 
 enum crm_task_status_enum {
@@ -15362,17 +15917,23 @@ model crm_messages {
 }
 
 model crm_tags {
-  id         Int      @id @default(autoincrement())
-  store_id   Int
-  name       String   @db.VarChar(60)
-  color      String?  @db.VarChar(20)
-  created_at DateTime @default(now()) @db.Timestamp(6)
-  updated_at DateTime @default(now()) @updatedAt @db.Timestamp(6)
+  id          Int      @id @default(autoincrement())
+  store_id    Int
+  name        String   @db.VarChar(60)
+  color       String?  @db.VarChar(20)
+  /// Grupo del catálogo (Temperatura, Prioridad, …) para agrupar el gestor y
+  /// el selector; NULL = sin grupo.
+  group_name  String?  @db.VarChar(30)
+  /// «Cuándo se pone»: la regla humana para usar la etiqueta.
+  description String?  @db.VarChar(200)
+  created_at  DateTime @default(now()) @db.Timestamp(6)
+  updated_at  DateTime @default(now()) @updatedAt @db.Timestamp(6)
 
   store         stores              @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   customer_tags crm_customer_tags[]
 
   @@unique([store_id, name])
+  @@index([store_id, group_name])
 }
 
 /// Puente cliente↔etiqueta. Borrar una etiqueta quita sus asignaciones,
@@ -15454,6 +16015,22 @@ model crm_pipelines {
   @@unique([store_id, name])
 }
 
+/// Reusable stage lists for CRM pipelines (QUI-1043). `stages` is the ordered
+/// array `{ name, kind: open|won|lost, color, probability }`; the order is the
+/// array index. Applied to a pipeline by reconciling stages by name.
+model crm_stage_templates {
+  id         Int      @id @default(autoincrement())
+  store_id   Int
+  name       String   @db.VarChar(80)
+  stages     Json     @default("[]")
+  created_at DateTime @default(now()) @db.Timestamp(6)
+  updated_at DateTime @default(now()) @updatedAt @db.Timestamp(6)
+
+  store stores @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([store_id, name])
+}
+
 model crm_pipeline_stages {
   id          Int     @id @default(autoincrement())
   store_id    Int
@@ -15471,6 +16048,8 @@ model crm_pipeline_stages {
   pipeline      crm_pipelines       @relation(fields: [pipeline_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   opportunities crm_opportunities[]
   store_users   store_users[]
+  /// Tareas que, al completarse, mueven su oportunidad a esta etapa.
+  moving_tasks  crm_tasks[]
 
   @@unique([pipeline_id, name])
   @@index([pipeline_id, sort_order])
@@ -15525,19 +16104,41 @@ model crm_tasks {
   status             crm_task_status_enum @default(pending)
   assigned_user_id   Int?
   created_by_user_id Int?
+  /// Etapa a la que se mueve la oportunidad ligada al completar la tarea.
+  move_to_stage_id   Int?
   completed_at       DateTime?            @db.Timestamp(6)
   created_at         DateTime             @default(now()) @db.Timestamp(6)
   updated_at         DateTime             @default(now()) @updatedAt @db.Timestamp(6)
 
-  store         stores             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  customer      users?             @relation("crm_tasks_customer", fields: [customer_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  opportunity   crm_opportunities? @relation(fields: [opportunity_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  conversation  crm_conversations? @relation(fields: [conversation_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  assigned_user users?             @relation("crm_tasks_assigned", fields: [assigned_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  created_by    users?             @relation("crm_tasks_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  store         stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  customer      users?               @relation("crm_tasks_customer", fields: [customer_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  opportunity   crm_opportunities?   @relation(fields: [opportunity_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  conversation  crm_conversations?   @relation(fields: [conversation_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  assigned_user users?               @relation("crm_tasks_assigned", fields: [assigned_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  created_by    users?               @relation("crm_tasks_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  move_to_stage crm_pipeline_stages? @relation(fields: [move_to_stage_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  supporters    crm_task_assignees[]
 
   @@index([store_id, assigned_user_id, status, due_at])
   @@index([customer_id])
+  @@index([move_to_stage_id])
+}
+
+/// Personas de apoyo de una tarea CRM. El responsable sigue siendo uno
+/// (`crm_tasks.assigned_user_id`); el apoyo ve la tarea y puede completarla.
+model crm_task_assignees {
+  id         Int      @id @default(autoincrement())
+  store_id   Int
+  task_id    Int
+  user_id    Int
+  created_at DateTime @default(now()) @db.Timestamp(6)
+
+  store stores    @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  task  crm_tasks @relation(fields: [task_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user  users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([task_id, user_id])
+  @@index([store_id, user_id])
 }
 
 /// Notas CRM del cliente. No reutiliza `customer_consultation_notes`, que está
@@ -16034,6 +16635,7 @@ model stored_files {
   store        stores          @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   items        dossier_items[]
   profile      document_file_profiles?
+  ai_attachments ai_attachments[]
 
   @@index([store_id, sha256])
 }
@@ -17146,4 +17748,91 @@ model workflow_exports {
 
   @@index([store_id, created_at])
   @@index([status, created_at])
+}
+
+// ============================================
+// Vendix Platform · enlace prospecto CRM ↔ organización cliente
+// (odd/tasks/vendix-platform-crm-enlace.md). Solo la tienda de la org
+// `is_platform` escribe aquí: lo impone el guard del módulo `platform-crm` y,
+// en la base, el trigger `platform_crm_links_platform_store_guard`.
+// Unicidad en índices únicos PARCIALES `WHERE status = 'linked'` que Prisma no
+// puede expresar: un enlace activo por cliente, por organización cuando el
+// enlace es a la org entera y por tienda cuando es a una tienda. Viven solo en
+// las migraciones 20261204090000_platform_crm_links y
+// 20261207090000_platform_crm_links_linked_store (con el trigger que exige que
+// la tienda enlazada sea de la organización enlazada).
+// ============================================
+
+enum platform_crm_link_status_enum {
+  linked
+  unlinked
+}
+
+/// Enlace prospecto/cliente del CRM de Vendix Platform ↔ organización cliente.
+/// Solo filas de tiendas de la org `is_platform` (trigger). Nunca fusiona cuentas
+/// ni escribe en la organización enlazada. Desenlazar cambia `status`, no borra.
+model platform_crm_links {
+  id                  Int                           @id @default(autoincrement())
+  store_id            Int
+  customer_id         Int
+  organization_id     Int
+  status              platform_crm_link_status_enum @default(linked)
+  note                String?                       @db.VarChar(300)
+  linked_by_user_id   Int
+  linked_at           DateTime                      @default(now()) @db.Timestamp(6)
+  unlinked_by_user_id Int?
+  unlinked_at         DateTime?                     @db.Timestamp(6)
+  /// Tienda concreta de la org cliente; NULL = la organización entera.
+  linked_store_id     Int?
+
+  store        stores        @relation("platform_crm_links_store", fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  linked_store stores?       @relation("platform_crm_links_linked_store", fields: [linked_store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  customer     users         @relation("platform_crm_links_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  linked_by    users         @relation("platform_crm_links_linked_by", fields: [linked_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  unlinked_by  users?        @relation("platform_crm_links_unlinked_by", fields: [unlinked_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([store_id, customer_id])
+  @@index([organization_id])
+}
+
+/// QUI-1010 — bot de monitoreo de la API. Una fila por episodio de una falla
+/// agrupada por `fingerprint` (origen + proceso + tipo): las repeticiones suben
+/// `occurrences` en vez de crear filas. Solo puede haber UNA fila `open` por
+/// huella (índice único parcial `platform_alerts_open_fingerprint_key`, creado
+/// en la migración porque Prisma no expresa índices parciales).
+/// Sin FKs a propósito: es un registro de plataforma que debe sobrevivir a la
+/// tienda u organización afectada, y nunca debe arrastrar ni frenar su borrado.
+/// `severity`: info | warning | critical. `status`: open | resolved.
+/// `message` y `details` llegan ya saneados (sin cuerpos, cabeceras ni PII).
+model platform_alerts {
+  id                   Int       @id @default(autoincrement())
+  fingerprint          String    @db.VarChar(64)
+  source               String    @db.VarChar(40)
+  process              String    @db.VarChar(255)
+  error_type           String    @db.VarChar(120)
+  severity             String    @db.VarChar(16)
+  status               String    @default("open") @db.VarChar(16)
+  title                String    @db.VarChar(255)
+  message              String?   @db.Text
+  details              Json?
+  organization_id      Int?
+  store_id             Int?
+  affected_store_ids   Int[]     @default([])
+  occurrences          Int       @default(1)
+  notified_occurrences Int       @default(0)
+  first_seen_at        DateTime  @default(now()) @db.Timestamp(6)
+  last_seen_at         DateTime  @default(now()) @db.Timestamp(6)
+  escalated_at         DateTime? @db.Timestamp(6)
+  resolved_at          DateTime? @db.Timestamp(6)
+  resolution           String?   @db.VarChar(32)
+  resolved_by_user_id  Int?
+  ticket_number        String?   @db.VarChar(40)
+  telegram_message_id  String?   @db.VarChar(32)
+  created_at           DateTime  @default(now()) @db.Timestamp(6)
+  updated_at           DateTime  @default(now()) @updatedAt @db.Timestamp(6)
+
+  @@index([status, severity])
+  @@index([last_seen_at])
+  @@index([fingerprint])
 }

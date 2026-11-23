@@ -60,15 +60,31 @@ export class UserRoleAssignmentService {
 
   // ===== READ =====
 
-  /** Usuarios asignados a un rol, en el alcance visible para el actor. */
-  async listRoleUsers(role_id: number, actor: RoleActor) {
+  /**
+   * Usuarios asignados a un rol, en el alcance visible para el actor.
+   *
+   * `options.userWhere` acota además QUÉ usuarios se listan (p. ej. el Super
+   * Admin pasa `vendixUserWhere()` para no listar clientes finales). Sin él,
+   * el comportamiento es el de siempre.
+   */
+  async listRoleUsers(
+    role_id: number,
+    actor: RoleActor,
+    options: { userWhere?: Prisma.usersWhereInput } = {},
+  ) {
     const role = await this.loadVisibleRole(role_id, actor);
 
+    const actorFilter = this.buildActorAssignmentFilter(actor);
     const assignments = await this.prisma.user_roles.findMany({
-      where: {
-        role_id: role.id,
-        ...this.buildActorAssignmentFilter(actor),
-      },
+      // Con `userWhere` se compone en `AND` y no por spread: el filtro del
+      // actor de org/tienda ya usa la clave `users`, y pisarla quitaría el
+      // acotamiento por tenant. Sin él, el `where` es el de siempre.
+      where: options.userWhere
+        ? {
+            role_id: role.id,
+            AND: [actorFilter, { users: options.userWhere }],
+          }
+        : { role_id: role.id, ...actorFilter },
       include: {
         users: {
           select: {

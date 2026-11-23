@@ -48,7 +48,8 @@ describe('ManufacturingOrdersController — shared production day and stream', (
   it('GET day delegates to the shared production day with the query', async () => {
     const result = await controller.findDay({ date: '2026-11-10' });
 
-    expect(production.findDay).toHaveBeenCalledWith({ date: '2026-11-10' });
+    // Planta only sees its own (plant) orders.
+    expect(production.findDay).toHaveBeenCalledWith({ date: '2026-11-10' }, 'plant');
     expect(result).toEqual({
       success: true,
       data: { date: '2026-11-10', cards: [] },
@@ -110,7 +111,7 @@ describe('ManufacturingOrdersController — shared production day and stream', (
   it('S4: GET day/supplies delegates to the shared supplies of the day, with the Planta read permission, before :id', async () => {
     const result = await controller.findDaySupplies({ date: '2026-11-10' });
 
-    expect(production.findDaySupplies).toHaveBeenCalledWith({ date: '2026-11-10' });
+    expect(production.findDaySupplies).toHaveBeenCalledWith({ date: '2026-11-10' }, 'plant');
     expect(result).toEqual({
       success: true,
       data: { date: '2026-11-10', supplies: [] },

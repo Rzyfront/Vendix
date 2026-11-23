@@ -6,6 +6,7 @@ import { HttpClient } from '@angular/common/http';
 import { environment } from '../../../../../../environments/environment';
 import { DynamicFieldComponent } from './components/dynamic-field/dynamic-field.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { buildFieldResponse, restoreResponseValue } from '../../../store/data-collection/utils/document-responses.util';
 import { getItemWidth, getItemWidthClass, DEFAULT_TEMPLATE_ICON, DEFAULT_SECTION_ICON, DEFAULT_TAB_ICON } from '../../../store/data-collection/utils/item-width.util';
 
 @Component({
@@ -249,6 +250,7 @@ import { getItemWidth, getItemWidthClass, DEFAULT_TEMPLATE_ICON, DEFAULT_SECTION
                     [placeholder]="item.placeholder || ''"
                     [helpText]="item.help_text || ''"
                     [icon]="item.icon || ''"
+                    [validationRules]="item.validation_rules"
                     [uploadToken]="submission()?.token || ''"
                     (valueChange)="
                       onFieldChange(
@@ -296,6 +298,7 @@ import { getItemWidth, getItemWidthClass, DEFAULT_TEMPLATE_ICON, DEFAULT_SECTION
                         [required]="item.is_required"
                         [placeholder]="item.placeholder || ''"
                         [helpText]="item.help_text || ''"
+                        [validationRules]="item.validation_rules"
                         [uploadToken]="submission()?.token || ''"
                         (valueChange)="
                           onFieldChange(
@@ -449,12 +452,7 @@ export class DataCollectionFormComponent implements OnInit {
           if (data.responses?.length) {
             const map = new Map<number, any>();
             for (const r of data.responses) {
-              const val =
-                r.value_text ??
-                r.value_number ??
-                r.value_bool ??
-                r.value_date ??
-                r.value_json;
+              const val = restoreResponseValue(r);
               map.set(r.field_id, val);
             }
             this.fieldValues.set(map);
@@ -585,19 +583,7 @@ export class DataCollectionFormComponent implements OnInit {
       const rawValue = this.fieldValues().get(fieldId);
       const fieldType = item.metadata_field.field_type;
 
-      const response: any = { field_id: fieldId };
-
-      if (fieldType === 'number') {
-        response.value_number = rawValue ? parseFloat(rawValue) : null;
-      } else if (fieldType === 'checkbox') {
-        response.value_bool = rawValue === true || rawValue === 'true';
-      } else if (fieldType === 'date') {
-        response.value_date = rawValue || null;
-      } else {
-        response.value_text = rawValue?.toString() || null;
-      }
-
-      return response;
+      return buildFieldResponse(fieldId, fieldType, rawValue);
     });
   }
 }

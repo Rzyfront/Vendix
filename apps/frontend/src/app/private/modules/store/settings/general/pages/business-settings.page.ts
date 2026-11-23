@@ -6,6 +6,7 @@ import { SettingToggleComponent } from '../../../../../../shared/components/sett
 
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { AppSettingsForm } from '../components/app-settings-form/app-settings-form.component';
+import { HomePanelSettingsForm } from '../components/home-panel-settings-form/home-panel-settings-form.component';
 import { GeneralSettingsForm } from '../components/general-settings-form/general-settings-form.component';
 import { SettingsSectionComponent } from '../components/settings-section/settings-section.component';
 import { GeneralSettingsStore } from '../services/general-settings.store';
@@ -29,6 +30,7 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
     SettingsSectionComponent,
     GeneralSettingsForm,
     AppSettingsForm,
+    HomePanelSettingsForm,
   ],
   templateUrl: './business-settings.page.html',
   styleUrls: ['./_settings-page.scss', './business-settings.page.scss'],

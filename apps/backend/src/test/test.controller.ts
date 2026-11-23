@@ -112,9 +112,9 @@ export class TestController {
 
     return {
       message: 'Verification email test sent and token created in database',
+      // The token travels only in the email: a response never carries it.
       data: {
         ...result,
-        testToken, // Para que puedas usar el token para verificar
         userId: user.id,
       },
     };

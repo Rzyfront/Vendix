@@ -167,6 +167,29 @@ describe('E sandbox broker (synthetic transport, real registry)', () => {
     expect(f.policy.authorize).toHaveBeenCalledTimes(4);
   });
 
+  it('keeps the shared dispatch contract: intent audited before the handler, evidence ref bound to execution and seq (previous behavior)', async () => {
+    const f = fixture();
+    const execute = jest.spyOn(f.registry, 'executeToolResult');
+    const response = await f.run();
+    const executionId = response.data.script_run_ref;
+    expect(f.audit.appendCall.mock.invocationCallOrder[0]).toBeLessThan(
+      execute.mock.invocationCallOrder[0],
+    );
+    expect(f.audit.appendCall.mock.calls[0][1]).toMatchObject({
+      seq: 1,
+      tool: 'list_products',
+      status: 'dispatching',
+    });
+    expect(execute).toHaveBeenCalledWith(
+      'list_products',
+      { page: 1 },
+      { evidenceRef: `sandbox:${executionId}:1` },
+    );
+    expect(f.handler.mock.invocationCallOrder[0]).toBeGreaterThan(
+      f.audit.appendCall.mock.invocationCallOrder[0],
+    );
+  });
+
   it('missing source encryption key is unavailable without audit writes or blocking other tools', async () => {
     const f = fixture();
     f.audit.sourceAvailable.mockReturnValue(false);

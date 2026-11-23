@@ -1,3 +1,4 @@
+import { jobOrigin } from '../../../../common/queue/job-origin';
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -190,6 +191,7 @@ export class SubscriptionPaymentBillingWarningListener {
             invoiceId: latestInvoice?.id,
             amount: latestInvoice?.total ? Number(latestInvoice.total) : null,
             dueAt: latestInvoice?.due_at ? latestInvoice.due_at.toISOString() : null,
+            ...jobOrigin('event:subscription.payment.no_credential'),
           },
           {
             attempts: 3,
@@ -293,6 +295,7 @@ export class SubscriptionPaymentBillingWarningListener {
             storeId,
             subscriptionId: payload?.subscriptionId ?? null,
             paymentMethodId: anchorId,
+            ...jobOrigin('event:subscription.auto_renew.rearmed'),
           },
           {
             attempts: 3,

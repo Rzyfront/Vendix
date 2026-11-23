@@ -7,12 +7,31 @@ import { VexiModule } from '../vexi/vexi.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { VexiActivityService } from '../vexi/vexi-activity.service';
 import { VexController } from './vex.controller';
+import { AgentHistoryController } from './agent-history.controller';
+import { AgentHistoryService } from './services/agent-history.service';
 import { VexEnabledGuard } from './guards/vex-enabled.guard';
 import { PlanApprovalService } from './services/plan-approval.service';
 import { VexBlockService } from './services/vex-block.service';
 import { VexActivityFeedService } from './services/vex-activity-feed.service';
+import { VexSuggestionsService } from './services/vex-suggestions.service';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+import { createComputeTools } from '../../../ai-engine/tools/domains/compute.tools';
+import {
+  createAnalysisTools,
+  createCodeModeTools,
+  planGrantsVexCapability,
+} from '../../../ai-engine/tools/domains/code-execution.tools';
+import { CodeModeBridgeService } from '../../../ai-engine/sandbox/codemode-bridge.service';
+import { CodeModePolicyService } from '../../../ai-engine/sandbox/codemode-policy.service';
+import { SandboxAnalysisBrokerService } from '../../../ai-engine/sandbox/sandbox-analysis-broker.service';
+import { AIEntitlementsResolverService } from '../subscriptions/services/ai-entitlements-resolver.service';
 import { createVexBlockTools } from '../../../ai-engine/tools/domains/vex-blocks.tools';
+import { createVexLearningBlockTools } from '../../../ai-engine/tools/domains/vex-learning-blocks.tools';
+import { HelpKnowledgeIndexerService } from '../../../ai-engine/embeddings/help-knowledge-indexer.service';
+import { createWriteBatchTools } from '../../../ai-engine/tools/domains/write-batch.tools';
+import { WriteBatchService } from './services/write-batch.service';
+import { WriteBatchExecutorService } from './services/write-batch-executor.service';
+import { WriteBatchCompensationService } from './services/write-batch-compensation.service';
 import { VexiVoiceConfirmationService } from '../vexi/vexi-voice-confirmation.service';
 import { SubscriptionAccessService } from '../subscriptions/services/subscription-access.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
@@ -41,11 +60,16 @@ import { randomUUID } from 'node:crypto';
     // `VexiActivityService` pushes applied actions over the notifications SSE.
     NotificationsModule,
   ],
-  controllers: [VexController],
+  controllers: [VexController, AgentHistoryController],
   providers: [
     PlanApprovalService,
     VexBlockService,
     VexActivityFeedService,
+    AgentHistoryService,
+    VexSuggestionsService,
+    WriteBatchService,
+    WriteBatchExecutorService,
+    WriteBatchCompensationService,
     VexEnabledGuard,
     VexiActivityService,
   ],
@@ -58,6 +82,13 @@ export class VexModule implements OnModuleInit {
     private readonly voiceConfirmations: VexiVoiceConfirmationService,
     private readonly planApproval: PlanApprovalService,
     private readonly access: SubscriptionAccessService,
+    private readonly writeBatches: WriteBatchService,
+    private readonly analysisRunner: SandboxAnalysisBrokerService,
+    private readonly entitlements: AIEntitlementsResolverService,
+    private readonly codeModeRunner: CodeModeBridgeService,
+    private readonly codeModePolicy: CodeModePolicyService,
+    // From the @Global AIEngineModule (it re-exports EmbeddingModule).
+    private readonly helpKnowledge: HelpKnowledgeIndexerService,
   ) {}
 
   onModuleInit(): void {
@@ -94,6 +125,46 @@ export class VexModule implements OnModuleInit {
     });
     this.toolRegistry.registerMany(
       createVexBlockTools({ blocks: this.blocks }),
+    );
+    // Help videos, posts and learning paths shown and played inside the chat
+    // (T29 blocks): published help-center rows only, never a model-given URL.
+    this.toolRegistry.registerMany(
+      createVexLearningBlockTools({
+        blocks: this.blocks,
+        knowledge: this.helpKnowledge,
+      }),
+    );
+    this.toolRegistry.registerMany(createComputeTools());
+    // F9/T52: code analysis over this conversation's blocks, gated by plan.
+    this.toolRegistry.registerMany(
+      createAnalysisTools({
+        runner: this.analysisRunner,
+        blocks: this.blocks,
+        entitlements: {
+          codeAnalysisEnabled: (storeId) =>
+            planGrantsVexCapability(this.entitlements, storeId, 'code_analysis'),
+        },
+      }),
+    );
+    // F10/T65: Code Mode scripts over allowlisted reads, gated by plan. Only
+    // registered when the Lambda is enabled, configured and certified at boot:
+    // off, the registry (catalog hash, global knowledge index) stays as before.
+    if (this.codeModeRunner.available())
+      this.toolRegistry.registerMany(
+        createCodeModeTools({
+          runner: this.codeModeRunner,
+          blocks: this.blocks,
+          registry: this.toolRegistry,
+          policy: this.codeModePolicy,
+          entitlements: {
+            codeModeEnabled: (storeId) =>
+              planGrantsVexCapability(this.entitlements, storeId, 'code_mode'),
+          },
+        }),
+      );
+    // F5/T34: the batch circuit's entry; it proposes, the card approves.
+    this.toolRegistry.registerMany(
+      createWriteBatchTools({ batches: this.writeBatches }),
     );
   }
 }

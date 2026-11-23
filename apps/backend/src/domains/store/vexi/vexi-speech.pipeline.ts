@@ -44,7 +44,36 @@ export type TimingMark =
   | 'first_audio'
   | 'last_audio';
 
-export type VexiVoiceFrame = VexiAudioFrame | VexiTimingFrame;
+/**
+ * A notice about the voice of this turn (T14): the answer goes out as text and
+ * the client shows `message` instead of the speaker.
+ *
+ * - `voice_quota_exhausted`: the agent's monthly readout seconds ran out.
+ * - `voice_not_in_plan`: the plan does not include this agent's voice.
+ */
+export interface VexiVoiceNoticeFrame {
+  type: 'voice_notice';
+  code: 'voice_quota_exhausted' | 'voice_not_in_plan';
+  message: string;
+}
+
+export type VexiVoiceFrame =
+  | VexiAudioFrame
+  | VexiTimingFrame
+  | VexiVoiceNoticeFrame;
+
+/**
+ * Receives the duration of every segment the provider actually generated
+ * (cache hits and fillers excluded), keyed by its playback index so the
+ * consumer can dedupe. Fire-and-forget: it must never throw into the turn.
+ */
+export type VoiceMeter = (seconds: number, index: number) => void;
+
+/** What `synthesize` returns: the audio plus what the voice quota needs. */
+export type MeteredAudio = CachedAudio & {
+  generated?: boolean;
+  seconds?: number;
+};
 
 /**
  * The subset of `VexiSpeechService` a turn needs.
@@ -58,7 +87,7 @@ export interface SpeechSource {
     text: string,
     params: SpeechCacheParams,
     currency?: string,
-  ): Promise<CachedAudio | null>;
+  ): Promise<MeteredAudio | null>;
   pickFiller(previous?: string | null): string;
   fillerAudio(
     phrase: string,
@@ -115,6 +144,8 @@ export class VexiSpeechTurn {
      * synthesis path is the one place where an extra query is unaffordable.
      */
     private readonly currency?: string,
+    /** Per-agent voice quota (T14); absent = nothing is metered. */
+    private readonly meter?: VoiceMeter,
   ) {}
 
   /**
@@ -311,7 +342,23 @@ export class VexiSpeechTurn {
       // No audio means the provider failed or the segment cleaned down to
       // nothing. Either way the turn degrades to text-only — captions and
       // history are unaffected, which is the correct direction to fail.
-      if (!audio || this.aborted) {
+      if (!audio) {
+        this.skipped.add(job.index);
+        return;
+      }
+
+      // Metered before the abort check: audio the provider already generated
+      // was paid for even when nobody is listening any more.
+      if (audio.generated && audio.seconds && audio.seconds > 0) {
+        try {
+          this.meter?.(audio.seconds, job.index);
+        } catch (error) {
+          this.logger.warn(
+            `Voice meter threw for segment ${job.index}: ${(error as Error).message}`,
+          );
+        }
+      }
+      if (this.aborted) {
         this.skipped.add(job.index);
         return;
       }

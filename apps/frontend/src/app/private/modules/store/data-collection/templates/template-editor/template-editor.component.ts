@@ -34,6 +34,27 @@ import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-h
 import { environment } from '../../../../../../../environments/environment';
 import { DynamicFieldComponent } from '../../../../ecommerce/pages/data-collection-form/components/dynamic-field/dynamic-field.component';
 import { getItemWidth } from '../../utils/item-width.util';
+import {
+  defaultItemWidth,
+  defaultValidationRules,
+  duplicateSectionStructure,
+  moveInList,
+  patchDocumentsRules,
+  reindexSortOrder,
+  toggleAcceptedKind,
+} from '../../utils/template-editor.util';
+import {
+  DOCUMENT_KINDS,
+  DOCUMENT_KIND_KEYS,
+  DOCUMENT_MAX_FILES,
+  DOCUMENT_MAX_SIZE_MB_LIMIT,
+  DocumentKind,
+  resolveDocumentConfig,
+  resolveItemDocumentConfig,
+  templateToJson,
+} from '../../utils/template-json.contract';
+import { templateJsonFilename } from '../../utils/template-json-import.util';
+import { copyTextToClipboard, downloadTextFile } from '../../utils/browser-file.util';
 import { SpinnerComponent } from '../../../../../../shared/components/spinner/spinner.component';
 import { EmptyStateComponent } from '../../../../../../shared/components/empty-state/empty-state.component';
 import { BadgeComponent } from '../../../../../../shared/components/badge/badge.component';
@@ -56,6 +77,8 @@ interface ItemForm {
   icon: string;
   help_text: string;
   placeholder: string;
+  /** Per-item rules; documents fields keep their config in `documents`. */
+  validation_rules: Record<string, unknown> | null;
 }
 
 interface SectionForm {
@@ -113,7 +136,7 @@ interface Selection {
       <div class="flex items-center justify-center h-64">
         <app-spinner size="md" />
       </div>
-    } @else if (template()) {
+    } @else if (template() || isNew()) {
       <app-sticky-header
         [title]="templateName()"
         subtitle="Editor de plantilla"
@@ -222,6 +245,7 @@ interface Selection {
                               [field]="field"
                               [required]="item.is_required"
                               value=""
+                              [validationRules]="item.validation_rules"
                             />
                           </div>
                         } @else {
@@ -279,6 +303,7 @@ interface Selection {
                                   [field]="field"
                                   [required]="item.is_required"
                                   value=""
+                                  [validationRules]="item.validation_rules"
                                 />
                               </div>
                             }
@@ -599,7 +624,7 @@ interface Selection {
                     <app-selector
                       label="Tipo de Entidad"
                       [ngModel]="formData().entity_type"
-                      (ngModelChange)="updateFormData('entity_type', $event)"
+                      (ngModelChange)="onEntityTypeChange($event)"
                       [options]="entityTypeOptions"
                     />
                     <app-selector
@@ -618,10 +643,19 @@ interface Selection {
                     />
                   }
                   <app-setting-toggle
-                    label="Plantilla por defecto"
+                    label="Por defecto en reservas"
+                    description="Se usa en reservas de servicios sin plantilla propia."
                     [ngModel]="formData().is_default"
                     (ngModelChange)="updateFormData('is_default', $event)"
                   />
+                  @if (canBeCrmDefault()) {
+                    <app-setting-toggle
+                      label="Predeterminada del CRM"
+                      description="Es la planilla del cliente en el pipeline y en su ficha."
+                      [ngModel]="formData().is_crm_default"
+                      (ngModelChange)="updateFormData('is_crm_default', $event)"
+                    />
+                  }
                   <app-setting-toggle
                     label="Organizar con pestañas"
                     [ngModel]="formData().use_tabs"
@@ -791,6 +825,52 @@ interface Selection {
                         [ngModel]="selectedItem()?.include_in_summary"
                         (ngModelChange)="updateSelectedItem('include_in_summary', $event)"
                       />
+                      @if (selectedDocsConfig(); as docs) {
+                        <div
+                          class="space-y-3 p-3 rounded-xl"
+                          style="background: var(--color-surface); border: 1px solid var(--color-border)"
+                        >
+                          <div class="flex items-center gap-2">
+                            <app-icon name="paperclip" [size]="14" color="var(--color-primary)"></app-icon>
+                            <h4 class="text-xs font-semibold" style="color: var(--color-text)">
+                              Configuración de documentos
+                            </h4>
+                          </div>
+                          <app-setting-toggle
+                            label="Permitir varios archivos"
+                            [description]="docs.multiple ? 'Hasta ' + documentMaxFiles + ' archivos por respuesta.' : 'Solo un archivo por respuesta.'"
+                            [ngModel]="docs.multiple"
+                            (ngModelChange)="setDocsMultiple($event)"
+                          />
+                          <fieldset>
+                            <legend class="block text-xs font-medium mb-1" style="color: var(--color-text)">
+                              Tipos de archivo permitidos
+                            </legend>
+                            <div class="space-y-1">
+                              @for (kind of documentKindOptions; track kind.key) {
+                                <label class="flex items-center gap-2 text-sm cursor-pointer" style="color: var(--color-text)">
+                                  <input
+                                    type="checkbox"
+                                    [checked]="docs.accept.includes(kind.key)"
+                                    (change)="toggleDocsKind(kind.key)"
+                                  />
+                                  {{ kind.label }}
+                                </label>
+                              }
+                            </div>
+                          </fieldset>
+                          <app-input
+                            label="Tamaño máximo (MB)"
+                            type="number"
+                            [ngModel]="docs.max_size_mb"
+                            (ngModelChange)="setDocsMaxSize($event)"
+                            [placeholder]="'1 a ' + documentMaxSizeLimit"
+                          />
+                          <p class="text-[11px]" style="color: var(--color-text-muted)">
+                            Máximo {{ documentMaxSizeLimit }} MB por archivo. Marca «Requerido» para que sea obligatorio.
+                          </p>
+                        </div>
+                      }
                       <app-input
                         label="Texto de ayuda"
                         [ngModel]="selectedItem()?.help_text"
@@ -874,6 +954,32 @@ interface Selection {
             <app-button
               variant="ghost"
               size="xsm"
+              [disabled]="si === 0"
+              (click)="$event.stopPropagation()"
+              (clicked)="moveSection(si, -1, isChild, parentIndex)"
+            >
+              <app-icon name="arrow-up" [size]="14" slot="icon"></app-icon>
+            </app-button>
+            <app-button
+              variant="ghost"
+              size="xsm"
+              [disabled]="si >= sectionCount(isChild, parentIndex) - 1"
+              (click)="$event.stopPropagation()"
+              (clicked)="moveSection(si, 1, isChild, parentIndex)"
+            >
+              <app-icon name="arrow-down" [size]="14" slot="icon"></app-icon>
+            </app-button>
+            <app-button
+              variant="ghost"
+              size="xsm"
+              (click)="$event.stopPropagation()"
+              (clicked)="duplicateSection(si, isChild, parentIndex)"
+            >
+              <app-icon name="copy" [size]="14" slot="icon"></app-icon>
+            </app-button>
+            <app-button
+              variant="ghost"
+              size="xsm"
               (click)="$event.stopPropagation()"
               (clicked)="isChild ? removeChildSection(parentIndex, si) : removeSection(si)"
             >
@@ -917,6 +1023,24 @@ interface Selection {
                       @if (item.is_required) {
                         <app-badge variant="error">Req</app-badge>
                       }
+                      <app-button
+                        variant="ghost"
+                        size="xsm"
+                        [disabled]="fi === 0"
+                        (click)="$event.stopPropagation()"
+                        (clicked)="moveItem(si, fi, -1, isChild, parentIndex)"
+                      >
+                        <app-icon name="arrow-up" [size]="12" slot="icon"></app-icon>
+                      </app-button>
+                      <app-button
+                        variant="ghost"
+                        size="xsm"
+                        [disabled]="fi >= section.items.length - 1"
+                        (click)="$event.stopPropagation()"
+                        (clicked)="moveItem(si, fi, 1, isChild, parentIndex)"
+                      >
+                        <app-icon name="arrow-down" [size]="12" slot="icon"></app-icon>
+                      </app-button>
                       <app-button
                         variant="ghost"
                         size="xsm"
@@ -996,6 +1120,30 @@ interface Selection {
       />
     }
 
+    @if (exportOpen()) {
+      <app-modal [isOpen]="true" (isOpenChange)="!$event && exportOpen.set(false)" title="Exportar plantilla (JSON)" subtitle="Versión guardada de la plantilla. Puedes importarla en otra tienda con «Crear desde JSON»." size="lg">
+        <textarea
+          readonly
+          rows="16"
+          class="w-full p-3 rounded-xl text-xs font-mono"
+          style="border: 1px solid var(--color-border); background: var(--color-surface-secondary); color: var(--color-text)"
+          aria-label="JSON de la plantilla"
+          [value]="exportText()"
+        ></textarea>
+        <div slot="footer" class="flex flex-col sm:flex-row justify-end gap-2">
+          <app-button variant="outline" (clicked)="exportOpen.set(false)">Cerrar</app-button>
+          <app-button variant="outline" (clicked)="copyExport()">
+            <app-icon name="copy" [size]="16" slot="icon"></app-icon>
+            Copiar
+          </app-button>
+          <app-button variant="primary" (clicked)="downloadExport()">
+            <app-icon name="download" [size]="16" slot="icon"></app-icon>
+            Descargar .json
+          </app-button>
+        </div>
+      </app-modal>
+    }
+
     @if (showSuggested()) {
       <app-modal [isOpen]="true" (isOpenChange)="!$event && showSuggested.set(false)" title="Campos sugeridos" subtitle="Marca los que quieres pedir; se crean si no existen y se agregan a la primera sección" size="lg">
         <div class="space-y-4">
@@ -1037,6 +1185,8 @@ export class TemplateEditorComponent implements OnInit {
 
   template = signal<DataCollectionTemplate | null>(null);
   loading = signal(true);
+  /** True while the route is `templates/new/edit` and nothing was saved yet. */
+  isNew = signal(false);
   saving = signal(false);
   availableFields = signal<MetadataField[]>([]);
   availableProducts = signal<any[]>([]);
@@ -1077,6 +1227,7 @@ export class TemplateEditorComponent implements OnInit {
     station_type: string | null;
     status: string;
     is_default: boolean;
+    is_crm_default: boolean;
     checkin_show_budget: boolean;
     checkin_show_products: boolean;
     checkin_show_notes: boolean;
@@ -1091,6 +1242,7 @@ export class TemplateEditorComponent implements OnInit {
     station_type: null,
     status: 'active',
     is_default: false,
+    is_crm_default: false,
     checkin_show_budget: true,
     checkin_show_products: true,
     checkin_show_notes: true,
@@ -1099,7 +1251,11 @@ export class TemplateEditorComponent implements OnInit {
     sections: [],
   });
 
-  templateName = computed(() => this.formData().name || 'Nueva Plantilla');
+  templateName = computed(() => this.formData().name || 'Nueva plantilla');
+  /** Same rule as the backend (DCOL_CRM_001): active customer templates only. */
+  readonly canBeCrmDefault = computed(
+    () => this.formData().entity_type === 'customer' && this.formData().status === 'active',
+  );
 
   /**
    * Pantalla que abrió el editor (p. ej. Estaciones de servicio al diseñar la
@@ -1149,6 +1305,10 @@ export class TemplateEditorComponent implements OnInit {
       variant: 'outline',
       icon: this.showPreview() ? 'pencil' : 'eye',
     },
+    // Only a saved template can be exported (the JSON is built from the loaded copy).
+    ...(this.template()
+      ? [{ id: 'export', label: 'Exportar JSON', variant: 'outline' as const, icon: 'download' }]
+      : []),
   ]);
 
   activeSections = computed<SectionForm[]>(() => {
@@ -1200,7 +1360,15 @@ export class TemplateEditorComponent implements OnInit {
   ngOnInit() {
     const returnTo = this.route.snapshot.queryParamMap.get('returnTo');
     if (returnTo && /^\/admin\/[\w\-/?=&]*$/.test(returnTo)) this.returnTo.set(returnTo);
-    const id = Number(this.route.snapshot.paramMap.get('id'));
+    const rawId = this.route.snapshot.paramMap.get('id');
+    if (rawId === 'new') {
+      this.isNew.set(true);
+      this.loading.set(false);
+      this.loadAvailableFields();
+      this.loadAvailableProducts();
+      return;
+    }
+    const id = Number(rawId);
     if (!id) {
       this.toastService.error('ID de plantilla no valido');
       this.router.navigate(['/admin/data-collection/templates']);
@@ -1239,6 +1407,7 @@ export class TemplateEditorComponent implements OnInit {
         station_type: t.station_type ?? null,
         status: t.status,
         is_default: t.is_default,
+        is_crm_default: t.is_crm_default ?? false,
         checkin_show_budget: t.checkin_show_budget ?? true,
         checkin_show_products: t.checkin_show_products ?? true,
         checkin_show_notes: t.checkin_show_notes ?? true,
@@ -1261,6 +1430,7 @@ export class TemplateEditorComponent implements OnInit {
         station_type: t.station_type ?? null,
         status: t.status,
         is_default: t.is_default,
+        is_crm_default: t.is_crm_default ?? false,
         checkin_show_budget: t.checkin_show_budget ?? true,
         checkin_show_products: t.checkin_show_products ?? true,
         checkin_show_notes: t.checkin_show_notes ?? true,
@@ -1289,6 +1459,7 @@ export class TemplateEditorComponent implements OnInit {
         icon: i.icon || '',
         help_text: i.help_text || '',
         placeholder: i.placeholder || '',
+        validation_rules: i.validation_rules ?? null,
       })),
       child_sections: (s.child_sections || []).map((cs) =>
         this.mapSectionForm(cs),
@@ -1344,6 +1515,7 @@ export class TemplateEditorComponent implements OnInit {
   onHeaderAction(id: string) {
     if (id === 'save') this.save();
     if (id === 'preview') this.togglePreview();
+    if (id === 'export') this.openExport();
   }
 
   private goBackIfRequested(): void {
@@ -1356,7 +1528,7 @@ export class TemplateEditorComponent implements OnInit {
     if (!fd.name) return;
     this.saving.set(true);
 
-    const t = this.template()!;
+    const t = this.template();
     const payload: any = {
       name: fd.name,
       description: fd.description,
@@ -1365,6 +1537,10 @@ export class TemplateEditorComponent implements OnInit {
       station_type: fd.entity_type === 'service_session' ? fd.station_type || null : undefined,
       status: fd.status,
       is_default: fd.is_default,
+      // Only an active customer template can be the CRM default: archiving or
+      // deactivating it from here sends false, so the backend unmarks it.
+      is_crm_default:
+        fd.entity_type === 'customer' && fd.status === 'active' ? fd.is_crm_default : false,
       checkin_show_budget: fd.entity_type === 'service_session' ? fd.checkin_show_budget : undefined,
       checkin_show_products: fd.entity_type === 'service_session' ? fd.checkin_show_products : undefined,
       checkin_show_notes: fd.entity_type === 'service_session' ? fd.checkin_show_notes : undefined,
@@ -1380,6 +1556,11 @@ export class TemplateEditorComponent implements OnInit {
     }
 
     const productIds = this.selectedProductIds();
+
+    if (!t) {
+      this.createTemplate(payload, productIds);
+      return;
+    }
 
     this.templatesService.update(t.id, payload).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
@@ -1409,6 +1590,45 @@ export class TemplateEditorComponent implements OnInit {
     });
   }
 
+  private createTemplate(payload: any, productIds: number[]) {
+    this.templatesService.create(payload).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (created) => {
+        // From now on this editor behaves as an existing template, so next saves update it.
+        this.template.set(created);
+        this.isNew.set(false);
+        const finish = () => {
+          this.saving.set(false);
+          if (this.returnTo()) {
+            this.goBackIfRequested();
+            return;
+          }
+          this.router.navigate(['/admin', 'data-collection', 'templates', created.id, 'edit'], {
+            replaceUrl: true,
+          });
+        };
+        if (productIds.length === 0) {
+          this.toastService.success('Plantilla creada');
+          finish();
+          return;
+        }
+        this.templatesService.assignProducts(created.id, productIds).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+          next: () => {
+            this.toastService.success('Plantilla creada');
+            finish();
+          },
+          error: () => {
+            this.toastService.warning('Plantilla guardada, pero error asignando productos');
+            finish();
+          },
+        });
+      },
+      error: (err) => {
+        this.saving.set(false);
+        this.toastService.error(extractApiErrorMessage(err));
+      },
+    });
+  }
+
   private cleanSectionForPayload(s: SectionForm): any {
     return {
       title: s.title,
@@ -1424,6 +1644,8 @@ export class TemplateEditorComponent implements OnInit {
         icon: i.icon,
         help_text: i.help_text,
         placeholder: i.placeholder,
+        // Without this the documents config (and any other rule) was lost on save.
+        validation_rules: i.validation_rules ?? undefined,
       })),
       child_sections: (s.child_sections || []).map((cs) =>
         this.cleanSectionForPayload(cs),
@@ -1519,6 +1741,14 @@ export class TemplateEditorComponent implements OnInit {
 
   updateFormData(key: string, value: any) {
     this.formData.update((fd) => ({ ...fd, [key]: value }));
+  }
+
+  onEntityTypeChange(value: string) {
+    this.formData.update((fd) => ({
+      ...fd,
+      entity_type: value,
+      is_crm_default: value === 'customer' ? fd.is_crm_default : false,
+    }));
   }
 
   // --- Tab Management ---
@@ -1695,6 +1925,129 @@ export class TemplateEditorComponent implements OnInit {
     });
   }
 
+  /** Siblings count of a section (top level or inside its parent). */
+  sectionCount(isChild: boolean, parentIndex: number): number {
+    const list = this.getSectionsList(this.formData());
+    return isChild ? (list[parentIndex]?.child_sections?.length ?? 0) : list.length;
+  }
+
+  /** Moves a section one place up (-1) or down (+1) among its siblings and keeps it selected. */
+  moveSection(si: number, delta: -1 | 1, isChild: boolean, parentIndex: number) {
+    const to = si + delta;
+    if (to < 0 || to >= this.sectionCount(isChild, parentIndex)) return;
+    this.mutateActiveSections((sections) => {
+      if (isChild && parentIndex >= 0) {
+        const parent = { ...sections[parentIndex] };
+        parent.child_sections = reindexSortOrder(moveInList(parent.child_sections, si, to));
+        sections[parentIndex] = parent;
+      } else {
+        sections.splice(0, sections.length, ...reindexSortOrder(moveInList(sections, si, to)));
+      }
+    });
+    this.selectSectionElement(to, isChild, parentIndex);
+  }
+
+  /**
+   * Duplicates a section's structure (title, description, icon, subsections)
+   * right after it, without fields: a field can appear only once per template.
+   */
+  duplicateSection(si: number, isChild: boolean, parentIndex: number) {
+    this.mutateActiveSections((sections) => {
+      if (isChild && parentIndex >= 0) {
+        const parent = { ...sections[parentIndex], child_sections: [...sections[parentIndex].child_sections] };
+        parent.child_sections.splice(si + 1, 0, duplicateSectionStructure(parent.child_sections[si]));
+        parent.child_sections = reindexSortOrder(parent.child_sections);
+        sections[parentIndex] = parent;
+      } else {
+        sections.splice(si + 1, 0, duplicateSectionStructure(sections[si]));
+        sections.splice(0, sections.length, ...reindexSortOrder(sections));
+      }
+    });
+    this.selectSectionElement(si + 1, isChild, parentIndex);
+    this.toastService.info('Sección duplicada sin campos: cada campo solo puede estar una vez en la plantilla.', undefined, 5000);
+  }
+
+  /** Moves a field one place up (-1) or down (+1) inside its section and keeps it selected. */
+  moveItem(si: number, fi: number, delta: -1 | 1, isChild: boolean, parentIndex: number) {
+    const to = fi + delta;
+    const list = this.getSectionsList(this.formData());
+    const owner = isChild ? list[parentIndex]?.child_sections?.[si] : list[si];
+    if (!owner || to < 0 || to >= owner.items.length) return;
+    this.mutateActiveSections((sections) => {
+      const reorder = (section: SectionForm): SectionForm =>
+        to < 0 || to >= section.items.length
+          ? section
+          : { ...section, items: reindexSortOrder(moveInList(section.items, fi, to)) };
+      if (isChild && parentIndex >= 0) {
+        const parent = { ...sections[parentIndex], child_sections: [...sections[parentIndex].child_sections] };
+        parent.child_sections[si] = reorder(parent.child_sections[si]);
+        sections[parentIndex] = parent;
+      } else {
+        sections[si] = reorder(sections[si]);
+      }
+    });
+    this.selectItem(si, to, isChild, parentIndex);
+  }
+
+  // --- Documents field config (item properties panel) ---
+
+  readonly documentKindOptions = DOCUMENT_KIND_KEYS.map((key) => ({ key, label: DOCUMENT_KINDS[key].label }));
+  readonly documentMaxSizeLimit = DOCUMENT_MAX_SIZE_MB_LIMIT;
+  readonly documentMaxFiles = DOCUMENT_MAX_FILES;
+
+  /** Documents config of the selected item, or null when it is not a documents field. */
+  readonly selectedDocsConfig = computed(() => {
+    const item = this.selectedItem();
+    if (!item || this.getFieldType(item.metadata_field_id) !== 'file') return null;
+    return resolveItemDocumentConfig(item.validation_rules);
+  });
+
+  setDocsMultiple(multiple: boolean) {
+    this.patchSelectedDocs({ multiple });
+  }
+
+  toggleDocsKind(kind: DocumentKind) {
+    const config = this.selectedDocsConfig();
+    if (!config) return;
+    this.patchSelectedDocs({ accept: toggleAcceptedKind(config.accept, kind) });
+  }
+
+  setDocsMaxSize(value: string | number | null) {
+    // Ignore the transient empty value while the user retypes the number.
+    if (value === '' || value === null) return;
+    const size = Number(value);
+    if (!Number.isFinite(size)) return;
+    this.patchSelectedDocs({ max_size_mb: size });
+  }
+
+  private patchSelectedDocs(patch: Partial<ReturnType<typeof resolveDocumentConfig>>) {
+    const item = this.selectedItem();
+    if (!item) return;
+    this.updateSelectedItem('validation_rules', patchDocumentsRules(item.validation_rules, patch));
+  }
+
+  // --- Export JSON ---
+
+  readonly exportOpen = signal(false);
+  readonly exportText = signal('');
+
+  openExport() {
+    const t = this.template();
+    if (!t) return;
+    this.exportText.set(JSON.stringify(templateToJson(t), null, 2));
+    this.exportOpen.set(true);
+  }
+
+  async copyExport() {
+    const ok = await copyTextToClipboard(this.exportText());
+    if (ok) this.toastService.success('JSON copiado');
+    else this.toastService.error('No se pudo copiar; selecciona el texto y cópialo manualmente.');
+  }
+
+  downloadExport() {
+    downloadTextFile(templateJsonFilename(this.template()?.name), this.exportText());
+  }
+
   // --- Item/Field Management ---
 
   onFieldSelect(sectionIndex: number, event: Event) {
@@ -1718,11 +2071,16 @@ export class TemplateEditorComponent implements OnInit {
   onFieldSelectByValue(parentIndex: number, sectionIndex: number, value: string | number | null) {
     const fieldId = parseInt(String(value), 10);
     if (!fieldId) return;
+    const list = this.getSectionsList(this.formData());
+    const target = parentIndex >= 0 ? list[parentIndex]?.child_sections?.[sectionIndex] : list[sectionIndex];
+    const newIndex = target?.items.length ?? 0;
     if (parentIndex >= 0) {
       this.addFieldToChildSection(parentIndex, sectionIndex, fieldId);
     } else {
       this.addFieldToSection(sectionIndex, fieldId);
     }
+    // Select the new field so its properties (width, required, documents…) are one step away.
+    this.selectItem(sectionIndex, newIndex, parentIndex >= 0, parentIndex);
   }
 
   getFieldOptionsForSection(si: number, isChild: boolean, parentIndex: number) {
@@ -1730,6 +2088,22 @@ export class TemplateEditorComponent implements OnInit {
       value: String(f.id),
       label: `${f.label} (${FIELD_TYPE_LABELS[f.field_type] ?? f.field_type})`,
     }));
+  }
+
+  /** New item with defaults by field type (width, documents config). */
+  private newItem(fieldId: number, sortOrder: number): ItemForm {
+    const type = this.availableFields().find((f) => f.id === fieldId)?.field_type;
+    return {
+      metadata_field_id: fieldId,
+      sort_order: sortOrder,
+      is_required: false,
+      include_in_summary: false,
+      width: defaultItemWidth(type),
+      icon: '',
+      help_text: '',
+      placeholder: '',
+      validation_rules: defaultValidationRules(type),
+    };
   }
 
   addFieldToSection(sectionIndex: number, fieldId: number) {
@@ -1740,16 +2114,7 @@ export class TemplateEditorComponent implements OnInit {
           ...section,
           items: [
             ...section.items,
-            {
-              metadata_field_id: fieldId,
-              sort_order: section.items.length,
-              is_required: false,
-              include_in_summary: false,
-              width: '100',
-              icon: '',
-              help_text: '',
-              placeholder: '',
-            },
+            this.newItem(fieldId, section.items.length),
           ],
         };
       }
@@ -1772,16 +2137,7 @@ export class TemplateEditorComponent implements OnInit {
           ...child,
           items: [
             ...child.items,
-            {
-              metadata_field_id: fieldId,
-              sort_order: child.items.length,
-              is_required: false,
-              include_in_summary: false,
-              width: '100',
-              icon: '',
-              help_text: '',
-              placeholder: '',
-            },
+            this.newItem(fieldId, child.items.length),
           ],
         };
         sections[parentIndex] = parent;
@@ -1796,6 +2152,8 @@ export class TemplateEditorComponent implements OnInit {
       items.forEach((item, i) => (item.sort_order = i));
       sections[sectionIndex] = { ...section, items };
     });
+    // Indexes shift after a removal: drop a stale item selection.
+    if (this.selection()?.type === 'item') this.selection.set(null);
   }
 
   removeFieldFromChildSection(
@@ -1814,6 +2172,7 @@ export class TemplateEditorComponent implements OnInit {
       parent.child_sections[childIndex] = { ...child, items };
       sections[parentIndex] = parent;
     });
+    if (this.selection()?.type === 'item') this.selection.set(null);
   }
 
   updateSelectedItem(key: string, value: any) {

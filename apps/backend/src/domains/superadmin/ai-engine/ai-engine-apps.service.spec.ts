@@ -1,4 +1,9 @@
-import { AIEngineAppsService } from './ai-engine-apps.service';
+import {
+  AIEngineAppsService,
+  AI_APP_TEST_TIMEOUT_BY_TYPE_MS,
+  AI_APP_TEST_TIMEOUT_MS,
+} from './ai-engine-apps.service';
+import { agentDeadlineContext } from '../../../ai-engine/tasks/agent-deadline';
 
 describe('AIEngineAppsService', () => {
   let service: AIEngineAppsService;
@@ -132,6 +137,134 @@ describe('AIEngineAppsService', () => {
         }),
       ],
     );
+  });
+
+  describe('testApplication: un fallo de la prueba es un resultado, no una caída', () => {
+    it('app desactivada → success:false inmediato, sin llamar al proveedor', async () => {
+      prisma.ai_engine_applications.findUnique.mockResolvedValueOnce({
+        ...app,
+        is_active: false,
+      });
+
+      const result = await service.testApplication(10);
+
+      expect(result).toMatchObject({
+        success: false,
+        error_code: 'AI_APP_003',
+      });
+      expect(aiEngine.getApplicationModelType).not.toHaveBeenCalled();
+      expect(aiEngine.run).not.toHaveBeenCalled();
+    });
+
+    it('proveedor que no responde → error controlado al vencer el plazo', async () => {
+      prisma.ai_engine_applications.findUnique.mockResolvedValueOnce(app);
+      aiEngine.getApplicationModelType.mockResolvedValueOnce('text');
+      aiEngine.run.mockReturnValueOnce(new Promise(() => undefined));
+      (service as unknown as { testTimeoutMs: number }).testTimeoutMs = 30;
+
+      const started = Date.now();
+      const result = await service.testApplication(10);
+
+      expect(Date.now() - started).toBeLessThan(2000);
+      expect(result).toMatchObject({
+        success: false,
+        error_code: 'AI_APP_TEST_TIMEOUT',
+        model_type: 'text',
+      });
+    });
+
+    /** `aiEngine.run` falso que no responde y guarda la señal que recibe. */
+    function hangingProvider(): { signal: () => AbortSignal | undefined } {
+      let captured: AbortSignal | undefined;
+      aiEngine.run.mockImplementationOnce(() => {
+        captured = agentDeadlineContext.getStore()?.signal;
+        return new Promise(() => undefined);
+      });
+      return { signal: () => captured };
+    }
+
+    it('al vencer el plazo, la señal que recibe el proveedor queda abortada', async () => {
+      prisma.ai_engine_applications.findUnique.mockResolvedValueOnce(app);
+      aiEngine.getApplicationModelType.mockResolvedValueOnce('text');
+      const provider = hangingProvider();
+      (service as unknown as { testTimeoutMs: number }).testTimeoutMs = 30;
+
+      const result = await service.testApplication(10);
+
+      expect(result).toMatchObject({ error_code: 'AI_APP_TEST_TIMEOUT' });
+      expect(provider.signal()).toBeDefined();
+      expect(provider.signal()!.aborted).toBe(true);
+    });
+
+    it('el cliente cierra la conexión → se cancela la llamada al proveedor', async () => {
+      prisma.ai_engine_applications.findUnique.mockResolvedValueOnce(app);
+      aiEngine.getApplicationModelType.mockResolvedValueOnce('text');
+      const provider = hangingProvider();
+      const client = new AbortController();
+
+      const pending = service.testApplication(10, client.signal);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(provider.signal()!.aborted).toBe(false);
+      client.abort();
+      const result = await pending;
+
+      expect(provider.signal()!.aborted).toBe(true);
+      expect(result).toMatchObject({
+        success: false,
+        error_code: 'AI_APP_TEST_CANCELLED',
+      });
+    });
+
+    it('plazo por tipo: video usa su plazo largo, texto el de por defecto', () => {
+      expect(AI_APP_TEST_TIMEOUT_BY_TYPE_MS.video).toBeGreaterThanOrEqual(
+        180_000,
+      );
+      expect(AI_APP_TEST_TIMEOUT_BY_TYPE_MS.image).toBeGreaterThan(
+        AI_APP_TEST_TIMEOUT_MS,
+      );
+      expect(AI_APP_TEST_TIMEOUT_BY_TYPE_MS.text).toBeUndefined();
+    });
+
+    it('una prueba de video no se corta con el plazo de texto', async () => {
+      prisma.ai_engine_applications.findUnique.mockResolvedValueOnce({
+        ...app,
+        output_format: 'video',
+      });
+      aiEngine.getApplicationModelType.mockResolvedValueOnce('video');
+      aiEngine.runVideo.mockImplementationOnce(
+        () =>
+          new Promise((resolve) =>
+            setTimeout(
+              () => resolve({ success: true, id: 'job_1', status: 'queued' }),
+              60,
+            ),
+          ),
+      );
+      const svc = service as unknown as {
+        testTimeoutMs: number;
+        testTimeoutByTypeMs: Record<string, number>;
+      };
+      svc.testTimeoutMs = 20; // texto: se cortaría
+      svc.testTimeoutByTypeMs = { video: 2_000 };
+
+      const result = await service.testApplication(10);
+
+      expect(result).toMatchObject({ success: true, model_type: 'video' });
+    });
+
+    it('el proveedor lanza → success:false con el motivo, sin propagar la excepción', async () => {
+      prisma.ai_engine_applications.findUnique.mockResolvedValueOnce(app);
+      aiEngine.getApplicationModelType.mockResolvedValueOnce('text');
+      aiEngine.run.mockRejectedValueOnce(new Error('401 invalid api key'));
+
+      const result = await service.testApplication(10);
+
+      expect(result).toMatchObject({
+        success: false,
+        error_code: 'AI_APP_TEST_FAILED',
+      });
+      expect(result.error).toContain('401 invalid api key');
+    });
   });
 
   describe('model_type cross-validation', () => {
@@ -333,6 +466,63 @@ describe('AIEngineAppsService', () => {
         } as any),
       ).rejects.toMatchObject({ errorCode: 'AI_APP_005' });
 
+      expect(prismaFull.ai_engine_applications.update).not.toHaveBeenCalled();
+    });
+
+    it('create: rejects a fallback config of another model_type (AI_APP_005)', async () => {
+      prismaFull.ai_engine_applications.findUnique.mockResolvedValueOnce(null);
+      prismaFull.ai_engine_configs.findUnique
+        .mockResolvedValueOnce({ id: 1, model_type: 'text' })
+        .mockResolvedValueOnce({ id: 2, is_active: true, model_type: 'image' });
+
+      await expect(
+        serviceFull.create({
+          key: 'chat_app',
+          name: 'Chat',
+          config_id: 1,
+          fallback_config_id: 2,
+        } as any),
+      ).rejects.toMatchObject({ errorCode: 'AI_APP_005' });
+      expect(prismaFull.ai_engine_applications.create).not.toHaveBeenCalled();
+    });
+
+    it('create: accepts an active fallback of the same model_type', async () => {
+      prismaFull.ai_engine_applications.findUnique.mockResolvedValueOnce(null);
+      prismaFull.ai_engine_configs.findUnique
+        .mockResolvedValueOnce({ id: 1, model_type: 'text' })
+        .mockResolvedValueOnce({ id: 2, is_active: true, model_type: 'text' });
+      prismaFull.ai_engine_applications.create.mockResolvedValueOnce({ id: 5 });
+
+      await serviceFull.create({
+        key: 'chat_app',
+        name: 'Chat',
+        config_id: 1,
+        fallback_config_id: 2,
+      } as any);
+      expect(prismaFull.ai_engine_applications.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ fallback_config_id: 2 }),
+        }),
+      );
+    });
+
+    it('update: changing model_type re-validates the stored fallback (AI_APP_005)', async () => {
+      prismaFull.ai_engine_applications.findUnique.mockResolvedValueOnce({
+        id: 50,
+        key: 'chat_app',
+        model_type: 'text',
+        config_id: null,
+        fallback_config_id: 9,
+      });
+      prismaFull.ai_engine_configs.findUnique.mockResolvedValueOnce({
+        id: 9,
+        is_active: true,
+        model_type: 'text',
+      });
+
+      await expect(
+        serviceFull.update(50, { model_type: 'image' } as any),
+      ).rejects.toMatchObject({ errorCode: 'AI_APP_005' });
       expect(prismaFull.ai_engine_applications.update).not.toHaveBeenCalled();
     });
 

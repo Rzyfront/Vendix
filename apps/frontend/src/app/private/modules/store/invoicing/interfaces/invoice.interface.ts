@@ -88,6 +88,8 @@ export interface Invoice {
   due_date?: string;
   notes?: string;
   order_id?: number;
+  /** Orden de compra de origen (documentos soporte generados desde una OC); `null` si no aplica. */
+  purchase_order?: { id: number; order_number: string } | null;
   sales_order_id?: number;
   /** Contract relation; linked draft economics are frozen and cannot be edited here. */
   contract_id?: number | null;

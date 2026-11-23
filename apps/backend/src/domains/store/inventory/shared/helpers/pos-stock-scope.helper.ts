@@ -48,6 +48,8 @@ export type ResolvedInventoryScope =
  *      session, or a register with no location) it degrades to
  *      `main_location`: the sale itself is gated elsewhere (session + register
  *      location are mandatory under this scope), this only drives display.
+ *      The POS catalog does not use that degradation: it lists nothing (see
+ *      {@link isPosCatalogBlockedWithoutRegister}).
  *
  * @param store              Store row (or narrowed select) carrying `default_location_id`.
  * @param settings           Store settings already merged with hardcoded defaults.
@@ -161,6 +163,63 @@ export function displayableStockLevelsWhere(
   return scope.scope === 'all_locations'
     ? sellable
     : { ...sellable, location_id: scope.mainLocationId };
+}
+
+/**
+ * QUI-1006 — under "Bodega de la caja" the POS catalog has no stock source
+ * until the operator has an open register with a warehouse, so it must list
+ * nothing. {@link resolvePosStockScope} keeps degrading to the main location
+ * for its other consumers (stock reads, dispatch); the catalog does not.
+ *
+ * @param settings           Store settings already merged with defaults.
+ * @param registerLocationId Location of the operator's open register, if any.
+ */
+export function isPosCatalogBlockedWithoutRegister(
+  settings: StoreSettings,
+  registerLocationId: number | null | undefined,
+): boolean {
+  return (
+    settings.inventory?.pos_stock_scope === 'register_location' &&
+    registerLocationId == null
+  );
+}
+
+/**
+ * QUI-1006 — `products` filter of the POS catalog under "Bodega de la caja":
+ * only what the register's warehouse physically holds.
+ *
+ * Every product gets a zero `stock_levels` row in every location at creation,
+ * so "has a row there" proves nothing: membership is `quantity_on_hand > 0`
+ * in the register's (sellable) location. Products that do not track inventory
+ * — the product itself or any variant override — are not bound to a warehouse
+ * and stay listed. A listed product whose units are all reserved still shows,
+ * and the existing availability/no-overselling rules decide if it sells.
+ *
+ * Returns `null` for any other scope: `main_location` / `all_locations` keep
+ * listing the whole catalog exactly as before.
+ *
+ * @param storeId Store being displayed.
+ * @param scope   Result of {@link resolvePosStockScope}.
+ */
+export function registerCatalogProductsWhere(
+  storeId: number,
+  scope: ResolvedInventoryScope,
+) {
+  if (scope.scope !== 'register_location') return null;
+  return {
+    OR: [
+      { track_inventory: false },
+      { product_variants: { some: { track_inventory_override: false } } },
+      {
+        stock_levels: {
+          some: {
+            ...displayableStockLevelsWhere(storeId, scope),
+            quantity_on_hand: { gt: 0 },
+          },
+        },
+      },
+    ],
+  };
 }
 
 function resolveScope(

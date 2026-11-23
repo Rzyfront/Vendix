@@ -44,6 +44,7 @@ import { TaxFiscalType } from '../../taxes/dto';
 import { OrderItemChangesDto } from './dto/order-item-changes.dto';
 import { resolveLineDestinations } from '../utils/line-destination.loader';
 import { ResolvedLineDestination } from '../utils/resolve-line-destination.util';
+import { promotionDiscountByLine } from '../../promotions/promotion-line-discount.util';
 
 type Client = Prisma.TransactionClient | StorePrismaService;
 
@@ -1731,7 +1732,11 @@ export class OrderItemChangesService {
           quantity: a.quantity,
           tier: null,
         })),
-      ].filter((it) => it.product_id);
+      ]
+        // `index` = posición en `plannedLines` (antes del filtro): el reparto
+        // por línea (F1) ubica con él el descuento de cada línea cotizada.
+        .map((it, index) => ({ ...it, index }))
+        .filter((it) => it.product_id);
 
       // Categorías por producto (igual que checkout): sin ellas las promos y
       // cupones por categoría cotizan 0 / lanzan CPN_APPLY_001.
@@ -1755,6 +1760,9 @@ export class OrderItemChangesService {
         productId != null ? (categoryMap.get(productId) ?? []) : [];
 
       let promotionDiscount = 0;
+      // F1: descuento promocional por línea de `plannedLines` (null = reparto
+      // por bruto: promoción de orden o sin desglose).
+      let promotionByLine: number[] | null = null;
       let promoSnapshot: Array<{ promotion_id: number; discount_amount: number }> = [];
       let quoted = true;
       try {
@@ -1768,8 +1776,8 @@ export class OrderItemChangesService {
           // Re-cotiza A LA FECHA DE LA ORDEN: lo que aplicaba al crearla no se
           // cae por vencer después ni entran automáticas creadas después.
           as_of: order.created_at ? new Date(order.created_at) : undefined,
-          items: quoteItems.map((it, index) => ({
-            line_id: index,
+          items: quoteItems.map((it) => ({
+            line_id: it.index,
             product_id: it.product_id as number,
             variant_id: it.variant_id,
             category_id: null,
@@ -1781,6 +1789,11 @@ export class OrderItemChangesService {
           })),
         } as any);
         promotionDiscount = Number(quote?.total_discount ?? 0);
+        promotionByLine = promotionDiscountByLine(
+          quote,
+          plannedLines.length,
+          (lineId) => (Number.isInteger(Number(lineId)) ? Number(lineId) : null),
+        );
         promoSnapshot = (quote?.order_promotions_snapshot ?? []).map((sn: any) => ({
           promotion_id: sn.promotion_id,
           discount_amount: Number(sn.discount_amount || 0),
@@ -1993,6 +2006,11 @@ export class OrderItemChangesService {
         const kernel = this.ordersService.applyGrossDiscountToPlannedLines(
           plannedLines,
           grossDiscount,
+          {
+            promotionTotal: promotionDiscount,
+            promotionByLine,
+            couponTotal: couponDiscount,
+          },
         );
         const lineSum = resulting.reduce((sum, r) => sum + (r.discount ?? 0), 0);
         const redistributes = Math.abs(kernel.baseDiscount - lineSum) > 0.01;

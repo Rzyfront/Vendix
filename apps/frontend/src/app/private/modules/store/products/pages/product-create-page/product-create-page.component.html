@@ -1124,6 +1124,54 @@
               }
             }
 
+            <!-- Dónde se produce: Cocina (Producción) o Planta. Solo con
+                 manufactura; obligatorio si la tienda también es restaurante. -->
+            @if (showProductionSite()) {
+              <div
+                id="production_site"
+                class="md:col-span-2 w-full rounded-xl border p-4 space-y-3 mt-1"
+                [class.border-border]="!productionSiteMissing()"
+                [class.bg-bg]="!productionSiteMissing()"
+                [class.border-warning]="productionSiteMissing()"
+                [class.bg-warning-light]="productionSiteMissing()"
+              >
+                @if (productionSiteMissing()) {
+                  <div class="flex items-start gap-2">
+                    <app-icon
+                      name="alert-triangle"
+                      size="18"
+                      class="text-warning shrink-0 mt-0.5"
+                    ></app-icon>
+                    <p class="text-sm font-semibold text-text-primary">
+                      Elige dónde se produce
+                    </p>
+                  </div>
+                }
+                <app-selector
+                  formControlName="production_site"
+                  label="Dónde se produce"
+                  [required]="productionSiteRequired()"
+                  [helpText]="
+                    productionSiteRequired()
+                      ? 'Obligatorio: la tienda es restaurante y manufactura. Las ventas de este producto crean su orden en esa pantalla.'
+                      : 'Sin elegir, se produce en la planta principal.'
+                  "
+                  [options]="productionSiteOptions()"
+                  placeholder="Elige Cocina o Planta"
+                  (valueChange)="onProductionSiteChange()"
+                ></app-selector>
+                @if (productionSiteIsPlant()) {
+                  <app-selector
+                    formControlName="production_plant_id"
+                    label="Planta"
+                    helpText="Vacío = planta principal."
+                    [options]="productionPlantOptions()"
+                    placeholder="Planta principal"
+                  ></app-selector>
+                }
+              </div>
+            }
+
             <!-- ===== Unidad de medida y escala de precio (QUI-648) =====
                  Deja de ser exclusivo del insumo: una ferretería mide su cable
                  en milímetros y lo cobra por metro sin que el cable sea insumo
@@ -4402,6 +4450,7 @@
   (isOpenChange)="isImageAiEnhanceModalOpen.set($event)"
   [mode]="aiModalMode()"
   [sourceImageUrl]="aiEnhanceImageUrl()"
+  [productId]="productId"
   [productName]="productForm.get('name')?.value || ''"
   [productType]="isService ? 'service' : 'physical'"
   [description]="productForm.get('description')?.value || ''"
@@ -4440,6 +4489,8 @@
   (isOpenChange)="isVariantAiModalOpen.set($event)"
   [mode]="variantAiModalMode()"
   [sourceImageUrl]="variantAiSourceImageUrl()"
+  [productId]="'variant-' + (productId ?? 'new')"
+  [targetKey]="'variant:' + (editingVariantIndex() ?? 'new')"
   [productName]="productForm.get('name')?.value || ''"
   [productType]="isService ? 'service' : 'physical'"
   [description]="productForm.get('description')?.value || ''"

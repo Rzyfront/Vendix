@@ -29,6 +29,7 @@ import { DomainScopeGuard } from './common/guards/domain-scope.guard';
 import { StoreOperationsGuard } from './domains/store/subscriptions/guards/store-operations.guard';
 import { RequestContextService } from '@common/context/request-context.service';
 import { RequestContextInterceptor } from '@common/interceptors/request-context.interceptor';
+import { ResponseSecretsInterceptor } from '@common/interceptors/response-secrets.interceptor';
 
 import { AuditModule } from './common/audit/audit.module';
 import { AuditInterceptor } from './common/audit/audit.interceptor';
@@ -54,6 +55,8 @@ import { CorsModule } from './common/cors/cors.module';
 import { BlocklistModule } from './common/services/blocklist/blocklist.module';
 import { RateLimitModule } from './common/services/rate-limit/rate-limit.module';
 import { AiScanJobsModule } from './common/ai-scan-jobs';
+import { PlatformIncidentsModule } from './common/incidents/platform-incidents.module';
+import { PlatformAlertsModule } from './common/platform-alerts/platform-alerts.module';
 import { InventoryCostingModule } from './domains/store/inventory/shared/inventory-costing.module';
 
 /**
@@ -185,6 +188,8 @@ function resolveThrottleSetting(
     BlocklistModule,
     RateLimitModule,
     AiScanJobsModule,
+    PlatformIncidentsModule,
+    PlatformAlertsModule,
   ],
   controllers: [AppController],
   providers: [
@@ -246,6 +251,13 @@ function resolveThrottleSetting(
     {
       provide: APP_INTERCEPTOR,
       useClass: WorkflowAuditInterceptor,
+    },
+    // Registered after AuditInterceptor, so it runs inside it: both the body
+    // AuditInterceptor persists and the body the client receives come
+    // without user credentials. See ResponseSecretsInterceptor.
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: ResponseSecretsInterceptor,
     },
   ],
 })

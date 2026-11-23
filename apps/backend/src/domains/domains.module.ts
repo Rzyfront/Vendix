@@ -9,6 +9,7 @@ import { SupportModule } from './support/support.module';
 import { HelpCenterModule } from './help-center/help-center.module';
 import { VideoLibraryModule } from './video-library/video-library.module';
 import { FiscalOperationsModule } from './fiscal-operations/fiscal-operations.module';
+import { PlatformCrmModule } from './platform-crm/platform-crm.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { FiscalOperationsModule } from './fiscal-operations/fiscal-operations.mo
     HelpCenterModule,
     VideoLibraryModule,
     FiscalOperationsModule,
+    PlatformCrmModule,
   ],
 })
 export class DomainsModule {}

@@ -31,6 +31,8 @@ const SUPERADMIN_ROLE_ERROR_MESSAGES: Record<string, string> = {
   ROLE_ASSIGN_007:
     'La tienda de la asignación no corresponde a la organización del rol.',
   SUP_ADMIN_ROLE_001: 'El rol no existe.',
+  SUP_ADMIN_ROLE_002:
+    'El rol cliente no se asigna desde el Super Admin: identifica a los clientes finales de las tiendas.',
   SUP_ADMIN_PERM_001:
     'Los roles núcleo (owner, super_admin) sólo admiten cambiar la descripción: se resuelven por nombre en seeds y guards.',
   SYS_VALIDATION_001:

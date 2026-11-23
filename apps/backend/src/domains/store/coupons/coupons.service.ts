@@ -49,6 +49,7 @@ export class CouponsService {
     if (existing) {
       throw new VendixHttpException(ErrorCodes.CPN_DUP_001);
     }
+    await this.assertCodeNotUsedByPromotion(dto.code);
 
     return this.prisma.$transaction(async (tx: any) => {
       const coupon = await tx.coupons.create({
@@ -103,6 +104,26 @@ export class CouponsService {
         },
       });
     });
+  }
+
+  /**
+   * Cupones y promociones comparten la casilla de código del POS y del
+   * checkout (el cupón gana). Un cupón no puede reutilizar el código de una
+   * promoción de la tienda, o esa promoción quedaría inalcanzable.
+   */
+  private async assertCodeNotUsedByPromotion(code?: string | null) {
+    const normalized = String(code ?? '').trim();
+    if (!normalized) return;
+    const promotion = await this.prisma.promotions.findFirst({
+      where: { code: { equals: normalized, mode: 'insensitive' } },
+      select: { id: true },
+    });
+    if (promotion) {
+      throw new VendixHttpException(
+        ErrorCodes.CPN_DUP_001,
+        'Ya existe una promoción con ese código',
+      );
+    }
   }
 
   async findAll(query: CouponQueryDto) {
@@ -207,6 +228,10 @@ export class CouponsService {
         existing.coupon_categories?.map((cc: any) => cc.category_id) ??
         [],
     );
+
+    if (dto.code !== undefined && dto.code !== existing.code) {
+      await this.assertCodeNotUsedByPromotion(dto.code);
+    }
 
     return this.prisma.$transaction(async (tx: any) => {
       const updateData: any = {};

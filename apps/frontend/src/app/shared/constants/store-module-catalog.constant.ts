@@ -71,7 +71,7 @@ export const MODULE_ROUTES: Record<string, string> = {
   // Despacho
   dispatch: '/admin/orders/dispatch-notes',
   orders_dispatch_notes: '/admin/orders/dispatch-notes',
-  orders_dispatch_routes: '/admin/orders/planillas',
+  orders_dispatch_routes: '/admin/orders/rutas',
   settings_shipping: '/admin/settings/shipping',
   dispatch_fleet: '/admin/orders/fleet',
 

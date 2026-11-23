@@ -229,6 +229,36 @@ describe('InvoicingService support adjustment notes', () => {
     expect(generator.generateNextNumber).not.toHaveBeenCalled();
   });
 
+  // QUI-683: el estado `accepted` solo no basta; sin el CUDS del original la
+  // nota no tiene a qué referirse y no consume consecutivo.
+  it('rejects an adjustment note over an accepted original without CUDS', async () => {
+    const { service, generator, prisma } = createService({
+      prisma: {
+        invoices: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: 100,
+            invoice_number: 'DS100',
+            invoice_type: 'support_document',
+            status: 'accepted',
+            cufe: null,
+          }),
+          create: jest.fn(),
+        },
+      },
+    });
+
+    await expect(
+      RequestContextService.run(requestContext, () => service.create(dto)),
+    ).rejects.toMatchObject({
+      errorCode: 'INVOICING_STATUS_002',
+      response: expect.objectContaining({
+        details: expect.objectContaining({ has_cuds: false }),
+      }),
+    });
+    expect(generator.generateNextNumber).not.toHaveBeenCalled();
+    expect(prisma.invoices.create).not.toHaveBeenCalled();
+  });
+
   it('blocks creation when the fiscal period is closed', async () => {
     const { service, generator } = createService({
       prisma: {

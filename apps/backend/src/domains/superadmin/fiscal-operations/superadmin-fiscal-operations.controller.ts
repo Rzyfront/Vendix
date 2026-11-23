@@ -596,29 +596,6 @@ export class SuperadminFiscalOperationsController {
    * (it reads a document and returns fields; it touches no tenant data), so the
    * platform scope needs the route, not a different implementation.
    */
-  /**
-   * @deprecated Usar POST super-admin/fiscal/identity/rut-scanner/scan/async (el síncrono muere en 504 tras 60 s de proxy).
-   */
-  @Post('identity/rut-scanner/scan')
-  @Permissions('superadmin:fiscal:identity:write')
-  @UseInterceptors(FileInterceptor('file'))
-  async scanRut(@UploadedFile() file: Express.Multer.File) {
-    if (!file) {
-      throw new VendixHttpException(ErrorCodes.RUT_SCAN_NO_FILE);
-    }
-    const allowedTypes = [
-      'image/jpeg',
-      'image/png',
-      'image/webp',
-      'application/pdf',
-    ];
-    if (!allowedTypes.includes(file.mimetype)) {
-      throw new VendixHttpException(ErrorCodes.RUT_SCAN_INVALID_FILE);
-    }
-    const result = await this.rutScanner.scanRutDocument(file);
-    return this.response.success(result, 'RUT escaneado exitosamente');
-  }
-
   @Post('identity/rut-scanner/scan/async')
   @HttpCode(HttpStatus.ACCEPTED)
   @Permissions('superadmin:fiscal:identity:write')
@@ -668,7 +645,10 @@ export class SuperadminFiscalOperationsController {
           // comparte DTO y formulario con el de organización, así que necesita
           // la misma regla de que un `undefined` (campo del formulario sin
           // seleccionar) NO borre lo guardado.
-          const nextFiscalData = mergeFiscalData(previousFiscalData, dto as Record<string, unknown>);
+          // `vat_calendar_change` es una decisión de la petición (calendario
+          // tributario de tenants), no un dato fiscal: nunca se persiste.
+          const { vat_calendar_change: _decision, ...fiscalPatch } = dto;
+          const nextFiscalData = mergeFiscalData(previousFiscalData, fiscalPatch as Record<string, unknown>);
           const nextSettings = { ...currentSettings, fiscal_data: nextFiscalData };
 
           if (existing) {

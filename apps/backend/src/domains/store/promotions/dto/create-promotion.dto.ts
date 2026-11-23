@@ -13,6 +13,8 @@ import {
   ArrayUnique,
   ValidateNested,
   IsIn,
+  ArrayMaxSize,
+  Max,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import {
@@ -121,6 +123,22 @@ export class CreatePromotionDto {
   @Min(0)
   @Type(() => Number)
   priority?: number;
+
+  /**
+   * Días de la semana en que aplica la promoción, evaluados en la zona
+   * horaria de la tienda: 0 = domingo, 1 = lunes … 6 = sábado (convención de
+   * `Date#getDay`). Vacío, null u omitido = todos los días. Los 7 días se
+   * guardan como lista vacía.
+   */
+  @IsOptional()
+  @IsArray({ message: 'active_weekdays debe ser una lista de días' })
+  @ArrayMaxSize(7, { message: 'Una semana tiene máximo 7 días' })
+  @ArrayUnique({ message: 'No se permiten días repetidos' })
+  @IsInt({ each: true, message: 'Cada día debe ser un número de 0 a 6' })
+  @Min(0, { each: true, message: 'Cada día debe ser un número de 0 a 6' })
+  @Max(6, { each: true, message: 'Cada día debe ser un número de 0 a 6' })
+  @Type(() => Number)
+  active_weekdays?: number[] | null;
 
   @ValidateIf((o) => o.scope === 'product')
   @IsArray({ message: 'Debes proporcionar la lista de productos' })

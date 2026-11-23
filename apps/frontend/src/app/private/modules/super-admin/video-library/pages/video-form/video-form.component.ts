@@ -107,7 +107,7 @@ import { dataUrlToFile } from '../../../../../../shared/utils/data-url.util';
                 placeholder="https://www.youtube.com/watch?v=... o https://youtu.be/..."
                 [formControl]="$any(form.get('video_url'))"
                 [required]="true"
-                (blur)="onVideoUrlBlur()"
+                (inputBlur)="onVideoUrlBlur()"
               ></app-input>
 
               <app-selector
@@ -375,25 +375,36 @@ export class VideoFormComponent implements OnInit {
   }
 
   onVideoUrlBlur() {
-    const url = this.form.get('video_url')?.value;
+    const url: string = this.form.get('video_url')?.value?.trim();
     if (!url) return;
 
-    // Detect YouTube
-    const ytMatch = url.match(
+    const detected = this.detectVideoPlatform(url);
+    if (!detected) return;
+
+    // The new link wins over the platform/ID loaded from the previous video.
+    this.form.patchValue({ video_source: detected.source, external_id: detected.id });
+
+    // Swap the thumbnail only when it is empty or the auto YouTube one;
+    // an uploaded thumbnail is kept.
+    const thumbnail: string = this.form.get('thumbnail_url')?.value || '';
+    if (detected.source === 'YOUTUBE' && (!thumbnail || thumbnail.includes('img.youtube.com/vi/'))) {
+      this.form.patchValue({
+        thumbnail_url: `https://img.youtube.com/vi/${detected.id}/maxresdefault.jpg`,
+      });
+    }
+  }
+
+  /** Same patterns as the backend `parseVideoUrl`. */
+  private detectVideoPlatform(url: string): { source: 'YOUTUBE' | 'LOOM' | 'VIMEO'; id: string } | null {
+    const yt = url.match(
       /(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/,
     );
-    if (ytMatch) {
-      const ytId = ytMatch[1];
-      this.form.patchValue({
-        video_source: 'YOUTUBE',
-        external_id: ytId,
-      });
-      if (!this.form.get('thumbnail_url')?.value) {
-        this.form.patchValue({
-          thumbnail_url: `https://img.youtube.com/vi/${ytId}/maxresdefault.jpg`,
-        });
-      }
-    }
+    if (yt) return { source: 'YOUTUBE', id: yt[1] };
+    const loom = url.match(/loom\.com\/share\/([a-zA-Z0-9]+)/);
+    if (loom) return { source: 'LOOM', id: loom[1] };
+    const vimeo = url.match(/vimeo\.com\/(\d+)/);
+    if (vimeo) return { source: 'VIMEO', id: vimeo[1] };
+    return null;
   }
 
   onImagesAdded(images: string[]) {

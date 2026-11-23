@@ -26,6 +26,13 @@ import { TextareaComponent } from '../../../../../../shared/components/textarea/
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { CustomerAddressPickerComponent, CustomerAddressPickerAddress } from '../../../../../../shared/components/customer-address-picker/customer-address-picker.component';
 import { CustomerLocationsService } from '../../../../../../shared/services/customer-locations.service';
+import {
+  buildCustomerEstablishmentRows,
+  CustomerEstablishmentRow,
+  CustomerWithEstablishmentsLike,
+  establishmentSummary,
+  EstablishmentLike,
+} from '../../../../../../shared/utils/customer-establishment-rows.util';
 import type { PriceTier, ProductPriceTierOverride } from '../../../price-tiers/interfaces/price-tier.interface';
 import { PriceTierCacheService } from '../../../price-tiers/services/price-tier-cache.service';
 import { PriceTierSelectorComponent } from '../../../price-tiers/components/price-tier-selector/price-tier-selector.component';
@@ -245,17 +252,28 @@ function taxEntriesFromAssignments(assignments: any[] | null | undefined): Quota
                     class="absolute left-0 right-0 top-full z-10 max-h-[200px] overflow-y-auto rounded-b-md border border-t-0 shadow-sm"
                     style="background: var(--color-surface); border-color: var(--color-border);"
                   >
-                    @for (customer of customerResults(); track customer.id) {
+                    @for (row of customerRows(); track row.key) {
+                      @let customer = row.customer;
                       <button
                         type="button"
                         role="option"
                         class="w-full cursor-pointer px-3 py-2 text-left text-sm transition-colors hover:opacity-80"
                         style="color: var(--color-text-primary);"
-                        (click)="selectCustomer(customer)"
+                        (click)="selectCustomerRow(row)"
                       >
                         {{ displayName(customer) }}
                         @if (customer.email) {
                           <span class="ml-1" style="color: var(--color-text-secondary);">- {{ customer.email }}</span>
+                        }
+                        @if (row.establishment; as establishment) {
+                          <!-- Una línea por establecimiento del cliente -->
+                          <span class="flex min-w-0 items-center gap-1 text-xs text-text-primary">
+                            <app-icon name="map-pin" [size]="12" color="var(--color-primary)"></app-icon>
+                            <span class="truncate">{{ establishmentText(establishment) }}</span>
+                            @if (establishment.is_primary) {
+                              <span class="shrink-0 rounded-full border border-primary/25 bg-primary/10 px-2 font-semibold text-primary-on-tint">Principal</span>
+                            }
+                          </span>
                         }
                       </button>
                     }
@@ -702,6 +720,13 @@ export class QuotationFormModalComponent implements OnInit {
   /** Signals for search state */
   readonly customerSearchTerm = signal('');
   readonly customerResults = signal<any[]>([]);
+  /** Resultados expandidos: una línea por establecimiento si el cliente tiene 2+. */
+  readonly customerRows = computed(() =>
+    buildCustomerEstablishmentRows<CustomerWithEstablishmentsLike>(
+      this.customerResults(),
+      this.customerSearchTerm(),
+    ),
+  );
   readonly selectedCustomer = signal<any>(null);
   /** Saved locations (shipping addresses) of the selected customer. */
   readonly customerLocations = signal<CustomerAddressPickerAddress[]>([]);
@@ -1043,12 +1068,21 @@ export class QuotationFormModalComponent implements OnInit {
     this.customerSearch$.next(value);
   }
 
-  selectCustomer(customer: any): void {
+  selectCustomer(customer: any, preferredLocationId: number | null = null): void {
     this.selectedCustomer.set(customer);
     this.customerRequiredError.set(false);
     this.customerSearchTerm.set('');
     this.customerResults.set([]);
-    this.loadCustomerLocations(customer?.id, null);
+    this.loadCustomerLocations(customer?.id, preferredLocationId);
+  }
+
+  /** Línea del buscador: con establecimiento, la ubicación llega preseleccionada. */
+  selectCustomerRow(row: CustomerEstablishmentRow<CustomerWithEstablishmentsLike>): void {
+    this.selectCustomer(row.customer, row.establishment?.id ?? null);
+  }
+
+  establishmentText(establishment: EstablishmentLike | null): string {
+    return establishmentSummary(establishment);
   }
 
   removeCustomer(): void {

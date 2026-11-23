@@ -45,4 +45,16 @@ describe('store settings defaults', () => {
     expect(merged.pos.cash_register?.auto_create_default_register).toBe(true);
     expect(merged.inventory.track_inventory).toBe(true);
   });
+
+  // QUI-1005: the online store keeps selling add-ons until the owner says no.
+  it('allows add-ons in the online store by default, also for stores that saved the section before the flag', () => {
+    expect(getPersistableDefaultStoreSettings().product_options?.allow_online).toBe(true);
+    expect(
+      mergeStoreSettingsWithDefaults({ product_options: { enabled: true } }).product_options?.allow_online,
+    ).toBe(true);
+    expect(
+      mergeStoreSettingsWithDefaults({ product_options: { enabled: true, allow_online: false } })
+        .product_options?.allow_online,
+    ).toBe(false);
+  });
 });

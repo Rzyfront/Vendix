@@ -453,6 +453,71 @@ export class BreadcrumbService {
       icon: 'edit',
     },
 
+    // Sistema. The parent is looked up by title (first match in this list), so
+    // every title here must not shadow a title another route uses as `parent`:
+    // the super-admin templates page is "Plantillas del sistema" because
+    // `/admin/documents/templates/*` already hangs from "Plantillas".
+    {
+      path: '/super-admin/system/ai-engine',
+      title: 'AI Engine',
+      parent: 'Super Admin',
+      icon: 'cpu',
+    },
+    {
+      path: '/super-admin/system/integrations/meta-whatsapp',
+      title: 'Meta / WhatsApp',
+      parent: 'Super Admin',
+      icon: 'message-circle',
+    },
+    {
+      path: '/super-admin/system/integrations/messaging-prices',
+      title: 'Precios de mensajería',
+      parent: 'Super Admin',
+      icon: 'dollar-sign',
+    },
+    {
+      path: '/super-admin/system/templates',
+      title: 'Plantillas del sistema',
+      parent: 'Super Admin',
+      icon: 'file-text',
+    },
+    {
+      path: '/super-admin/system/backups',
+      title: 'Copias de Seguridad',
+      parent: 'Super Admin',
+      icon: 'database',
+    },
+    {
+      path: '/super-admin/system/payroll-defaults',
+      title: 'Parámetros de Nómina',
+      parent: 'Super Admin',
+      icon: 'calculator',
+    },
+    {
+      path: '/super-admin/system/settings-sync',
+      title: 'Sincronización de Settings',
+      parent: 'Super Admin',
+      icon: 'refresh-cw',
+    },
+    {
+      path: '/super-admin/system/notification-sounds',
+      title: 'Sonidos de notificación',
+      parent: 'Super Admin',
+      icon: 'bell',
+    },
+    {
+      path: '/super-admin/legal-documents',
+      title: 'Documentos Legales',
+      parent: 'Super Admin',
+      icon: 'scale',
+    },
+    {
+      path: '/super-admin/settings/shipping',
+      title: 'Envíos del Sistema',
+      parent: 'Super Admin',
+      icon: 'truck',
+    },
+
     // Admin - Organization Admin Routes
     { path: '/admin', title: 'Panel Administrativo', icon: 'settings' },
     {
@@ -1688,6 +1753,14 @@ export class BreadcrumbService {
       title: 'Configuración Nómina',
       parent: 'Nómina',
       icon: 'settings',
+    },
+
+    // Mis notificaciones (preferencias de avisos del usuario)
+    {
+      path: '/admin/my-notifications',
+      title: 'Mis notificaciones',
+      parent: 'Tienda',
+      icon: 'bell',
     },
 
     // Help

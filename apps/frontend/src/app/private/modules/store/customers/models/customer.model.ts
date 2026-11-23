@@ -161,6 +161,10 @@ export interface CustomerStats {
 
 export interface CustomerFilters {
     search?: string;
+    /** Department name as stored in `addresses.state_province` (DANE catalog). */
+    state_province?: string;
+    /** City/municipality name as stored in `addresses.city`. */
+    city?: string;
     state?: 'active' | 'inactive';
     sort_by?: string;
     sort_order?: 'asc' | 'desc';

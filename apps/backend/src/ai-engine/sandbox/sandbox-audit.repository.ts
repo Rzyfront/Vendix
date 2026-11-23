@@ -7,9 +7,17 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { createCipheriv, createHash, randomBytes } from 'crypto';
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+} from 'crypto';
 import { RequestContextService } from '../../common/context/request-context.service';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
+import { normalizeSandboxSource } from './sandbox-invocation.context';
+
+export { normalizeSandboxSource };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const HASH = /^[a-f0-9]{64}$/;
@@ -31,7 +39,12 @@ const LIMIT_FIELDS = new Set([
   'input_bytes',
   'output_bytes',
   'source_bytes',
+  // F10 Code Mode: Lambda invocations per execution.
+  'rounds',
 ]);
+const EXECUTOR = /^[a-z][a-z0-9-]{0,19}$/;
+const REQUEST_ID = /^[A-Za-z0-9-]{1,64}$/;
+const CUT_REASON = /^[A-Z][A-Z_]{0,39}$/;
 const OUTCOMES = new Set([
   'ok',
   'partial',
@@ -78,13 +91,31 @@ interface AuditScope {
 
 export interface SandboxAuditStart {
   id: string;
-  objective_id: string;
+  /**
+   * Durable objective the run belongs to. OMITTED for scripts that run in
+   * normal turns (F10 Code Mode): no objective admission/attempt checks apply
+   * and `objective_id` is stored NULL. The per-store and global admission
+   * checks always apply.
+   */
+  objective_id?: string;
   source: string;
   source_hash: string;
   policy_digest: string;
   runtime_digest: string;
   limits: Record<string, number>;
   manifest: string[];
+  /** e.g. 'lambda-js'. Present for Code Mode runs. */
+  executor?: string;
+  /** Opaque per-store key sent to Lambda (never the store id). */
+  tenant_hash?: string;
+}
+
+/** Terminal facts of a Code Mode run. Passing it also releases the admission lease. */
+export interface SandboxAuditFinishExtra {
+  rounds?: number;
+  lambda_request_ids?: string[];
+  cut_reason?: string;
+  returned_bytes?: number;
 }
 
 export interface SandboxAuditCall {
@@ -94,12 +125,52 @@ export interface SandboxAuditCall {
   status: string;
   result_ref?: string;
   denial?: string;
+  /** F10 T67: row count and duration of the call, for the owner's «Ver cómo lo calculé». */
+  rows?: number;
+  duration_ms?: number;
+}
+
+/** Why the owner view carries no source. Person-facing Spanish. */
+export const SANDBOX_SOURCE_HIDDEN_REASON = {
+  not_owner:
+    'Solo quien pidió el análisis puede ver el código; los demás ven el resumen.',
+  expired:
+    'El código se conserva 7 días y esta ejecución ya venció; queda solo el resumen.',
+  unavailable: 'El código no está disponible para esta ejecución.',
+} as const;
+
+/**
+ * Store-scoped view of one run for «Ver cómo lo calculé». `source` is plaintext
+ * ONLY when the requester is the run's owner and the retention window is open.
+ * Never carries args, results, ciphertext, key id, nonce or tag.
+ */
+export interface SandboxOwnerView {
+  id: string;
+  executor: string | null;
+  outcome: string;
+  manifest: string[];
+  calls: Array<{
+    seq: number;
+    tool: string;
+    status: string;
+    rows: number | null;
+    duration_ms: number | null;
+  }>;
+  rounds: number | null;
+  duration_ms: number | null;
+  cut_reason: string | null;
+  created_at: Date;
+  expires_at: Date;
+  is_owner: boolean;
+  expired: boolean;
+  source: string | null;
+  source_hidden_reason: string | null;
 }
 
 /** Deliberately contains neither plaintext nor ciphertext/key/nonce/tag fields. */
 export interface SandboxAuditRecord extends AuditScope {
   id: string;
-  objective_id: string;
+  objective_id: string | null;
   source_hash: string;
   policy_digest: string;
   runtime_digest: string;
@@ -112,11 +183,6 @@ export interface SandboxAuditRecord extends AuditScope {
   expires_at: Date;
   created_at: Date;
   finished_at: Date | null;
-}
-
-/** Execute precisely this normalized source, not a different pre-normalized string. */
-export function normalizeSandboxSource(source: string): string {
-  return source.replace(/\r\n?/g, '\n').normalize('NFC');
 }
 
 export function sandboxSourceHash(source: string): string {
@@ -199,7 +265,8 @@ function redactUsage(usage: Record<string, unknown>): Record<string, unknown> {
 /**
  * System sink with explicit owner ACL in EVERY data query. No generic Store/Org
  * delegate is exposed: their ordinary scopes do not enforce user ownership.
- * No source decryption API, raw args/results, bearer tokens, or logging here.
+ * Source decryption exists only in `readOwnerView` (owner + retention window);
+ * no raw args/results, bearer tokens, or logging here.
  */
 @Injectable()
 export class SandboxAuditRepository {
@@ -232,7 +299,16 @@ export class SandboxAuditRepository {
   async start(input: SandboxAuditStart): Promise<void> {
     const scope = requireScope();
     this.validId(input.id);
-    this.validId(input.objective_id);
+    if (input.objective_id !== undefined) this.validId(input.objective_id);
+    if (
+      (input.executor !== undefined &&
+        (typeof input.executor !== 'string' ||
+          !EXECUTOR.test(input.executor))) ||
+      (input.tenant_hash !== undefined &&
+        (typeof input.tenant_hash !== 'string' ||
+          !HASH.test(input.tenant_hash)))
+    )
+      throw new BadRequestException('Invalid sandbox audit metadata');
     if (
       typeof input.source !== 'string' ||
       !HASH.test(input.source_hash) ||
@@ -292,7 +368,8 @@ export class SandboxAuditRepository {
           JSON.stringify([
             'vendix-sandbox-source-v1',
             input.id,
-            input.objective_id,
+            // Legacy rows bind the objective UUID; objective-less rows bind null.
+            input.objective_id ?? null,
             scope.organization_id,
             scope.store_id,
             scope.user_id,
@@ -320,29 +397,31 @@ export class SandboxAuditRepository {
       await tx.$executeRaw(
         Prisma.sql`SELECT pg_advisory_xact_lock(${ADMISSION_LOCK}::bigint)`,
       );
-      const objective = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-        SELECT id FROM ai_agent_objectives WHERE id = ${input.objective_id}::uuid
-        AND ${scopeSql(scope)} AND expires_at > CURRENT_TIMESTAMP
-        AND semantic_status NOT IN ('cancelled', 'superseded', 'completed_verified', 'expired')
-        FOR KEY SHARE`);
-      if (!objective[0])
-        throw new NotFoundException('Sandbox objective not found');
-      // One original script plus at most one repair for this durable objective.
-      // Count terminal/expired leases too: new source, turn or cooldown is not a reset.
-      const attempts = await tx.$queryRaw<
-        Array<{ attempt_count: number }>
-      >(Prisma.sql`
-        SELECT COUNT(*)::int AS attempt_count FROM ai_agent_script_runs
-        WHERE objective_id = ${input.objective_id}::uuid AND ${scopeSql(scope)}`);
-      if (
-        !attempts[0] ||
-        !Number.isSafeInteger(attempts[0].attempt_count) ||
-        attempts[0].attempt_count < 0 ||
-        attempts[0].attempt_count >= 2
-      )
-        throw new ConflictException(
-          'Sandbox objective script attempts are exhausted',
-        );
+      if (input.objective_id !== undefined) {
+        const objective = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          SELECT id FROM ai_agent_objectives WHERE id = ${input.objective_id}::uuid
+          AND ${scopeSql(scope)} AND expires_at > CURRENT_TIMESTAMP
+          AND semantic_status NOT IN ('cancelled', 'superseded', 'completed_verified', 'expired')
+          FOR KEY SHARE`);
+        if (!objective[0])
+          throw new NotFoundException('Sandbox objective not found');
+        // One original script plus at most one repair for this durable objective.
+        // Count terminal/expired leases too: new source, turn or cooldown is not a reset.
+        const attempts = await tx.$queryRaw<
+          Array<{ attempt_count: number }>
+        >(Prisma.sql`
+          SELECT COUNT(*)::int AS attempt_count FROM ai_agent_script_runs
+          WHERE objective_id = ${input.objective_id}::uuid AND ${scopeSql(scope)}`);
+        if (
+          !attempts[0] ||
+          !Number.isSafeInteger(attempts[0].attempt_count) ||
+          attempts[0].attempt_count < 0 ||
+          attempts[0].attempt_count >= 2
+        )
+          throw new ConflictException(
+            'Sandbox objective script attempts are exhausted',
+          );
+      }
       const admission = await tx.$queryRaw<
         Array<{ global_count: number; store_count: number }>
       >(Prisma.sql`
@@ -360,6 +439,27 @@ export class SandboxAuditRepository {
         admission[0].global_count >= globalLimit
       )
         throw new ConflictException('Sandbox runner capacity is unavailable');
+      // Legacy statement (durable objective, no Code Mode metadata) is kept
+      // byte-for-byte below; Code Mode rows add executor/tenant_hash and may
+      // have no objective.
+      if (
+        input.objective_id === undefined ||
+        input.executor !== undefined ||
+        input.tenant_hash !== undefined
+      ) {
+        await tx.$executeRaw(Prisma.sql`
+        INSERT INTO ai_agent_script_runs
+          (id, store_id, organization_id, user_id, objective_id, source_hash,
+           source_ciphertext, source_nonce, source_auth_tag, source_key_id,
+           policy_digest, runtime_digest, limits, manifest, lease_until, expires_at,
+           executor, tenant_hash)
+        VALUES (${input.id}::uuid, ${scope.store_id}, ${scope.organization_id}, ${scope.user_id},
+          ${input.objective_id ?? null}::uuid, ${input.source_hash}, ${ciphertext}, ${nonce}, ${authTag}, ${keyId},
+          ${input.policy_digest}, ${input.runtime_digest}, ${json(limits)}, ${json(manifest)},
+          CURRENT_TIMESTAMP + INTERVAL '30 seconds', CURRENT_TIMESTAMP + INTERVAL '7 days',
+          ${input.executor ?? null}, ${input.tenant_hash ?? null})`);
+        return;
+      }
       await tx.$executeRaw(Prisma.sql`
         INSERT INTO ai_agent_script_runs
           (id, store_id, organization_id, user_id, objective_id, source_hash,
@@ -398,6 +498,12 @@ export class SandboxAuditRepository {
       status: entry.status,
       ...(entry.result_ref ? { result_ref: entry.result_ref } : {}),
       ...(entry.denial ? { denial: entry.denial } : {}),
+      ...(Number.isSafeInteger(entry.rows) && entry.rows! >= 0
+        ? { rows: entry.rows }
+        : {}),
+      ...(Number.isSafeInteger(entry.duration_ms) && entry.duration_ms! >= 0
+        ? { duration_ms: entry.duration_ms }
+        : {}),
     };
     await this.transaction(async (tx) => {
       const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
@@ -434,6 +540,7 @@ export class SandboxAuditRepository {
     id: string,
     outcome: string,
     usage: Record<string, unknown>,
+    extra?: SandboxAuditFinishExtra,
   ): Promise<void> {
     const scope = requireScope();
     this.validId(id);
@@ -445,12 +552,30 @@ export class SandboxAuditRepository {
     )
       throw new BadRequestException('Invalid sandbox final audit metadata');
     const safeUsage = redactUsage(usage);
+    const codeMode = extra === undefined ? undefined : this.safeExtra(extra);
     await this.transaction(async (tx) => {
-      const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      const rows = await tx.$queryRaw<Array<{ id: string }>>(
+        codeMode
+          ? // Code Mode runs release the admission lease on finish: up to three
+            // scripts per turn run back to back and the 30 s cooldown of the
+            // durable flow would block the second one. Capacity while RUNNING
+            // is unchanged (store 1, global AI_SANDBOX_MAX_RUNNERS).
+            Prisma.sql`
+        UPDATE ai_agent_script_runs SET outcome = ${outcome}, usage = ${json(safeUsage)},
+          finished_at = CURRENT_TIMESTAMP,
+          lease_until = LEAST(lease_until, CURRENT_TIMESTAMP),
+          rounds = ${codeMode.rounds}::int,
+          lambda_request_ids = ${json(codeMode.lambda_request_ids)},
+          cut_reason = ${codeMode.cut_reason},
+          returned_bytes = ${codeMode.returned_bytes}::int
+        WHERE id = ${id}::uuid AND ${scopeSql(scope)} AND outcome = 'running'
+        AND expires_at > CURRENT_TIMESTAMP RETURNING id`
+          : Prisma.sql`
         UPDATE ai_agent_script_runs SET outcome = ${outcome}, usage = ${json(safeUsage)},
           finished_at = CURRENT_TIMESTAMP
         WHERE id = ${id}::uuid AND ${scopeSql(scope)} AND outcome = 'running'
-        AND expires_at > CURRENT_TIMESTAMP RETURNING id`);
+        AND expires_at > CURRENT_TIMESTAMP RETURNING id`,
+      );
       if (rows[0]) return;
       const previous = await tx.$queryRaw<
         Array<{ outcome: string }>
@@ -461,6 +586,184 @@ export class SandboxAuditRepository {
       if (previous[0]?.outcome === outcome) return;
       throw new ConflictException('Sandbox run is not current');
     });
+  }
+
+  private safeExtra(extra: SandboxAuditFinishExtra): {
+    rounds: number | null;
+    lambda_request_ids: string[];
+    cut_reason: string | null;
+    returned_bytes: number | null;
+  } {
+    const nonnegative = (value: unknown, max: number): boolean =>
+      Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= max;
+    const ids = extra.lambda_request_ids ?? [];
+    if (
+      !extra ||
+      typeof extra !== 'object' ||
+      (extra.rounds !== undefined && !nonnegative(extra.rounds, 100)) ||
+      (extra.returned_bytes !== undefined &&
+        !nonnegative(extra.returned_bytes, 1_073_741_823)) ||
+      (extra.cut_reason !== undefined &&
+        (typeof extra.cut_reason !== 'string' ||
+          !CUT_REASON.test(extra.cut_reason))) ||
+      !Array.isArray(ids) ||
+      ids.length > 20 ||
+      !ids.every((requestId) => typeof requestId === 'string' && REQUEST_ID.test(requestId))
+    )
+      throw new BadRequestException('Invalid sandbox final audit metadata');
+    return {
+      rounds: extra.rounds ?? null,
+      lambda_request_ids: [...ids],
+      cut_reason: extra.cut_reason ?? null,
+      returned_bytes: extra.returned_bytes ?? null,
+    };
+  }
+
+  /**
+   * «Ver cómo lo calculé». Pinned to the caller's store AND organization (a run
+   * of another store is indistinguishable from a missing one: same 404). The
+   * user ACL is NOT in the WHERE so a colleague of the same store still sees the
+   * summary; the source is decrypted only when `user_id` equals the caller's
+   * (the same ACL `get()` enforces in SQL) and the 7-day window is open.
+   */
+  async readOwnerView(id: string): Promise<SandboxOwnerView> {
+    const scope = requireScope();
+    this.validId(id);
+    const rows = await this.transaction((tx) =>
+      tx.$queryRaw<
+        Array<{
+          id: string;
+          store_id: number;
+          organization_id: number;
+          user_id: number;
+          objective_id: string | null;
+          source_hash: string;
+          source_ciphertext: Buffer;
+          source_nonce: Buffer;
+          source_auth_tag: Buffer;
+          policy_digest: string;
+          runtime_digest: string;
+          manifest: string[];
+          calls: SandboxAuditCall[];
+          outcome: string;
+          lease_until: Date;
+          expires_at: Date;
+          created_at: Date;
+          finished_at: Date | null;
+          executor: string | null;
+          rounds: number | null;
+          cut_reason: string | null;
+          expired: boolean;
+        }>
+      >(Prisma.sql`
+        SELECT id, store_id, organization_id, user_id, objective_id, source_hash,
+          source_ciphertext, source_nonce, source_auth_tag, policy_digest,
+          runtime_digest, manifest, calls, outcome, lease_until, expires_at,
+          created_at, finished_at, executor, rounds, cut_reason,
+          (expires_at <= CURRENT_TIMESTAMP) AS expired
+        FROM ai_agent_script_runs
+        WHERE id = ${id}::uuid AND store_id = ${scope.store_id}
+        AND organization_id = ${scope.organization_id}`),
+    );
+    const row = rows[0];
+    if (!row) throw new NotFoundException('Sandbox run not found');
+    const isOwner = row.user_id === scope.user_id;
+    let source: string | null = null;
+    let reason: string | null = null;
+    if (!isOwner) reason = SANDBOX_SOURCE_HIDDEN_REASON.not_owner;
+    else if (row.expired) reason = SANDBOX_SOURCE_HIDDEN_REASON.expired;
+    else {
+      source = this.decryptSource(row);
+      if (source === null) reason = SANDBOX_SOURCE_HIDDEN_REASON.unavailable;
+    }
+    // Rows hold a `dispatching` entry and then the final one per seq: keep the last.
+    const bySeq = new Map<number, SandboxAuditCall>();
+    for (const entry of Array.isArray(row.calls) ? row.calls : [])
+      bySeq.set(entry.seq, entry);
+    const calls = [...bySeq.values()]
+      .sort((a, b) => a.seq - b.seq)
+      .map((entry) => ({
+        seq: entry.seq,
+        tool: entry.tool,
+        status: entry.status,
+        rows: typeof entry.rows === 'number' ? entry.rows : null,
+        duration_ms:
+          typeof entry.duration_ms === 'number' ? entry.duration_ms : null,
+      }));
+    return {
+      id: row.id,
+      executor: row.executor,
+      outcome:
+        row.outcome === 'running' && row.lease_until.getTime() <= Date.now()
+          ? 'timeout'
+          : row.outcome,
+      manifest: Array.isArray(row.manifest) ? row.manifest : [],
+      calls,
+      rounds: row.rounds,
+      duration_ms: row.finished_at
+        ? row.finished_at.getTime() - row.created_at.getTime()
+        : null,
+      cut_reason: row.cut_reason,
+      created_at: row.created_at,
+      expires_at: row.expires_at,
+      is_owner: isOwner,
+      expired: row.expired,
+      source,
+      source_hidden_reason: reason,
+    };
+  }
+
+  /** AAD mirrors `start()`; any mismatch (wrong key, tampered row) yields null. */
+  private decryptSource(row: {
+    id: string;
+    objective_id: string | null;
+    organization_id: number;
+    store_id: number;
+    user_id: number;
+    source_hash: string;
+    policy_digest: string;
+    runtime_digest: string;
+    source_ciphertext: Buffer;
+    source_nonce: Buffer;
+    source_auth_tag: Buffer;
+  }): string | null {
+    let key: Buffer;
+    try {
+      key = sourceKey();
+    } catch {
+      return null;
+    }
+    try {
+      const decipher = createDecipheriv(
+        'aes-256-gcm',
+        key,
+        Buffer.from(row.source_nonce),
+      );
+      decipher.setAAD(
+        Buffer.from(
+          JSON.stringify([
+            'vendix-sandbox-source-v1',
+            row.id,
+            row.objective_id ?? null,
+            row.organization_id,
+            row.store_id,
+            row.user_id,
+            row.source_hash,
+            row.policy_digest,
+            row.runtime_digest,
+          ]),
+        ),
+      );
+      decipher.setAuthTag(Buffer.from(row.source_auth_tag));
+      return Buffer.concat([
+        decipher.update(Buffer.from(row.source_ciphertext)),
+        decipher.final(),
+      ]).toString('utf8');
+    } catch {
+      return null;
+    } finally {
+      key.fill(0);
+    }
   }
 
   async get(id: string): Promise<SandboxAuditRecord> {

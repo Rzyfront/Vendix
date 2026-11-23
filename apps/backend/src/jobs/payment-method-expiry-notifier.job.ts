@@ -1,3 +1,4 @@
+import { jobOrigin } from '../common/queue/job-origin';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -194,6 +195,7 @@ export class PaymentMethodExpiryNotifierJob {
             brand: pm.brand ?? null,
             expiry_month: pm.expiry_month,
             expiry_year: pm.expiry_year,
+            ...jobOrigin('cron:payment-method-expiry-notifier'),
           },
           {
             attempts: 3,
@@ -409,6 +411,7 @@ export class PaymentMethodExpiryNotifierJob {
             expiry_month: pm.expiry_month,
             expiry_year: pm.expiry_year,
             expired_on: expiresOn.toISOString(),
+            ...jobOrigin('cron:payment-method-expiry-notifier'),
           },
           {
             attempts: 3,

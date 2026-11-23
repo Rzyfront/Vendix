@@ -45,7 +45,10 @@ export class PublicDocumentReceptionWebhookController {
     const claim = await this.webhook.accept(publicToken, headers, rawBody);
     let queued = true;
     try {
-      await this.syncQueue.enqueue(claim.run_id);
+      await this.syncQueue.enqueue(
+        claim.run_id,
+        'webhook:recepcion-documentos',
+      );
     } catch {
       // The durable run remains recoverable by the scheduler/outbox sweeper.
       queued = false;

@@ -107,6 +107,8 @@ import {
   resolvePosStockScope,
   ResolvedInventoryScope,
   displayableStockLevelsWhere,
+  isPosCatalogBlockedWithoutRegister,
+  registerCatalogProductsWhere,
 } from '../inventory/shared/helpers/pos-stock-scope.helper';
 import { resolveProductLowStockThreshold } from '../inventory/shared/helpers/low-stock-threshold.helper';
 import { mergeStoreSettingsWithDefaults } from '../settings/defaults/default-store-settings';
@@ -114,6 +116,7 @@ import type { StoreSettings } from '../settings/interfaces/store-settings.interf
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
 import { AutoEntryService } from '../accounting/auto-entries/auto-entry.service';
 import { storeIndustriesSupportIngredients } from '@common/helpers/industry-capabilities.helper';
+import { productionSiteRequired } from '../production/production-site.util';
 import { assertCanChargeVat } from '@common/helpers/vat-responsibility.helper';
 import { SettingsService } from '../settings/settings.service';
 // B.1 — cutover por capability (A.0) + tokenizado/ensamblaje canónicos
@@ -886,6 +889,69 @@ export class ProductsService {
   }
 
   /**
+   * Dónde se produce (kitchen / plant). Solo trabaja si el payload toca
+   * `production_site`, `production_plant_id` o `is_batch_produced`:
+   * - fuera de `plant` la planta concreta se limpia;
+   * - una planta concreta debe ser de la tienda;
+   * - en tienda restaurante + manufactura un producto por lote debe decirlo
+   *   (`PRODUCTION_SITE_REQUIRED`). Una edición que no toca esos campos (precio,
+   *   nombre…) nunca se bloquea: el aviso "Elige dónde se produce" queda en el
+   *   formulario y la venta usa Cocina como respaldo.
+   */
+  private async applyProductionSite<
+    T extends {
+      production_site?: string | null;
+      production_plant_id?: number | null;
+      is_batch_produced?: boolean;
+    },
+  >(
+    dto: T,
+    storeId: number,
+    existing?: {
+      is_batch_produced?: boolean | null;
+      production_site?: string | null;
+    } | null,
+  ): Promise<T> {
+    if (
+      dto.production_site === undefined &&
+      dto.production_plant_id === undefined &&
+      dto.is_batch_produced === undefined
+    ) {
+      return dto;
+    }
+    const out = { ...dto };
+    const site =
+      dto.production_site !== undefined
+        ? dto.production_site
+        : (existing?.production_site ?? null);
+    if (site !== 'plant') {
+      if (dto.production_site !== undefined || dto.production_plant_id != null) {
+        out.production_plant_id = null;
+      }
+    } else if (out.production_plant_id != null) {
+      const plant = await this.prisma.manufacturing_plants.findFirst({
+        where: { id: out.production_plant_id, store_id: storeId },
+        select: { id: true },
+      });
+      if (!plant) {
+        throw new VendixHttpException(ErrorCodes.PRODUCTION_SITE_PLANT_INVALID);
+      }
+    }
+    const batch = dto.is_batch_produced ?? existing?.is_batch_produced ?? false;
+    const decides = dto.is_batch_produced === true || dto.production_site === null;
+    if (batch === true && site == null && decides) {
+      const store = await this.prisma.stores.findUnique({
+        where: { id: storeId },
+        select: { industries: true },
+      });
+      if (productionSiteRequired(store?.industries as string[] | undefined)) {
+        throw new VendixHttpException(ErrorCodes.PRODUCTION_SITE_REQUIRED);
+      }
+    }
+    return out;
+  }
+
+  /**
    * S13: las subconsultas de receta solo aportan algo si la tienda tiene al
    * menos una receta activa. Se decide por el dato y no por la industria, así
    * una tienda que cambió de industria conserva `is_producible` y
@@ -1116,6 +1182,8 @@ export class ProductsService {
       );
 
       assertProductSaleValid(sanitizedDto, sanitizedDto);
+
+      sanitizedDto = await this.applyProductionSite(sanitizedDto, store_id);
 
       // Verify user context for audit
       const user_id = context?.user_id;
@@ -2368,6 +2436,7 @@ export class ProductsService {
     storeId: number,
     search: string,
     query: ProductQueryDto,
+    registerLocationId: number | null = null,
   ): string {
     const qhash = this.hashSearchQuery(search);
     const filter = [
@@ -2389,7 +2458,10 @@ export class ProductsService {
     const unassigned =
       (query.without_category === true ? '|wc' : '') +
       (query.without_brand === true ? '|wb' : '') +
-      (query.usage_nature ? `|un:${query.usage_nature}` : '');
+      (query.usage_nature ? `|un:${query.usage_nature}` : '') +
+      // QUI-1006 — el conjunto depende de la bodega de la caja: dos cajeros
+      // de la misma tienda nunca comparten la lista rankeada.
+      (registerLocationId != null ? `|rl:${registerLocationId}` : '');
     let fhash = 'nofilter';
     try {
       fhash = createHash('sha256').update(filter + unassigned).digest('hex').slice(0, 12);
@@ -2451,10 +2523,16 @@ export class ProductsService {
     limit: number;
     skip: number;
     scanCap: number;
+    registerLocationId?: number | null;
   }): Promise<SmartSearchRankOutcome | null> {
     const { where, search, tokens, storeId, query, page, limit, skip, scanCap } =
       args;
-    const key = this.buildSmartSearchCacheKey(storeId, search, query);
+    const key = this.buildSmartSearchCacheKey(
+      storeId,
+      search,
+      query,
+      args.registerLocationId ?? null,
+    );
 
     const cacheStart = Date.now();
     let cached: SmartSearchRankCacheEntry | null = null;
@@ -2804,12 +2882,15 @@ export class ProductsService {
     // B.2 (A.0): cutover capability×kill-switch — smartAllowed para el
     // where + path para el gate del rank. Fail-closed a legacy.
     const pathStart = Date.now();
-    const smartSearch = await this.resolveSmartSearchFor(
+    const resolvedSearch = await this.resolveSmartSearchFor(
       query,
       context?.store_id,
     );
     const msPath = Date.now() - pathStart;
-    const where = this.buildProductWhere(query, smartSearch.smartAllowed);
+    const baseWhere = this.buildProductWhere(
+      query,
+      resolvedSearch.smartAllowed,
+    );
 
     // B.2 (F-089): settings en single-flight por request — antes se leían 2
     // veces con search+pos_optimized (resolvePosScope + Promise.all); ahora
@@ -2827,9 +2908,20 @@ export class ProductsService {
     });
     // Resolve POS stock scope so we can constrain the stock_levels includes at
     // the Prisma layer (server-side filtering) instead of post-filtering rows.
-    const posStockScope: ResolvedInventoryScope | null = pos_optimized
+    const posScope = pos_optimized
       ? await this.resolvePosScope(settingsPromise)
       : null;
+    // QUI-1006 — "Bodega de la caja" sin caja abierta (o caja sin bodega): el
+    // POS no tiene de dónde vender, así que grilla, búsqueda y escaneo
+    // devuelven vacío en vez de caer a la bodega principal.
+    if (posScope?.registerMissing) {
+      return {
+        data: [],
+        meta: { total: 0, page, limit, totalPages: 0, search: undefined },
+      };
+    }
+    const posStockScope: ResolvedInventoryScope | null =
+      posScope?.scope ?? null;
     // QUI-559: the POS must only display stock it can actually charge. The
     // filter is the configured scope INTERSECTED with the store's sellable
     // locations — previously `all_locations` meant "no filter at all", so the
@@ -2842,6 +2934,32 @@ export class ProductsService {
         : posStockScope && posStockScope.scope !== 'all_locations'
           ? { location_id: posStockScope.mainLocationId }
           : undefined;
+    // QUI-1006 — con caja abierta, el catálogo es solo lo que su bodega tiene
+    // (ni otras cajas ni la bodega general). `null` en main/all: sin cambio.
+    const registerCatalogWhere =
+      posStockScope && context?.store_id
+        ? registerCatalogProductsWhere(context.store_id, posStockScope)
+        : null;
+    const baseAnd = baseWhere.AND;
+    const where: Prisma.productsWhereInput = registerCatalogWhere
+      ? {
+          ...baseWhere,
+          AND: [
+            ...(baseAnd === undefined
+              ? []
+              : Array.isArray(baseAnd)
+                ? baseAnd
+                : [baseAnd]),
+            registerCatalogWhere,
+          ],
+        }
+      : baseWhere;
+    // El raw trigram no conoce ese filtro (y su hidratación descarta el AND):
+    // bajo la bodega de la caja el rank corre en memoria (l2) sobre `where`.
+    const smartSearch =
+      registerCatalogWhere && resolvedSearch.path === 'trigram'
+        ? { ...resolvedSearch, path: 'l2' as PosSearchPath }
+        : resolvedSearch;
     // Force stock_levels include under pos_optimized so the recomputed
     // stock_quantity always reflects the resolved scope, never the
     // denormalized cross-location aggregate.
@@ -2909,6 +3027,9 @@ export class ProductsService {
                 limit: rankLimit,
                 skip,
                 scanCap,
+                registerLocationId: registerCatalogWhere
+                  ? posStockScope?.mainLocationId
+                  : null,
               });
         if (outcome === null) {
           rankDegraded = true;
@@ -4511,6 +4632,12 @@ export class ProductsService {
       // después) se sigue pudiendo editar en precio, nombre o stock; sólo se le
       // exige una cuenta contabilizable a quien la está escribiendo ahora.
       await this.assertAccountCodesArePostable(sanitizedDto);
+
+      sanitizedDto = await this.applyProductionSite(
+        sanitizedDto,
+        existingProduct.store_id,
+        existingProduct,
+      );
 
       // IMPORTANTE: se destructura `sanitizedDto`, NO `updateProductDto`.
       // `sanitizeIngredientPayload()` y `enforceIngredientCapability()`
@@ -7302,7 +7429,7 @@ export class ProductsService {
     // settings para no leer `store_settings` 2 veces por request. Ausente ⇒
     // comportamiento de siempre (único otro llamador: ninguno hoy).
     settingsPromise?: Promise<StoreSettings>,
-  ): Promise<ResolvedInventoryScope> {
+  ): Promise<{ scope: ResolvedInventoryScope; registerMissing: boolean }> {
     const [store, settings] = await Promise.all([
       this.loadStoreScopeRef(),
       settingsPromise ?? this.loadMergedSettings(),
@@ -7313,7 +7440,15 @@ export class ProductsService {
       settings.inventory?.pos_stock_scope === 'register_location'
         ? await this.loadOpenRegisterLocationId()
         : null;
-    return resolvePosStockScope(store, settings, registerLocationId);
+    return {
+      scope: resolvePosStockScope(store, settings, registerLocationId),
+      // QUI-1006 — sin caja abierta (o caja sin bodega) el catálogo del POS
+      // queda vacío en vez de caer a la bodega principal.
+      registerMissing: isPosCatalogBlockedWithoutRegister(
+        settings,
+        registerLocationId,
+      ),
+    };
   }
 
   /**

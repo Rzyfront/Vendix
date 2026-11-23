@@ -596,6 +596,21 @@ export class CartService {
     }
   }
 
+  /**
+   * QUI-1005: la tienda no permite adiciones en la tienda en línea. Olvida las
+   * adiciones guardadas y recarga el carrito: las líneas quedan a su precio sin
+   * delta y el checkout ya no las envía. No-op si no hay adiciones guardadas.
+   */
+  discardOptions(): void {
+    if (Object.keys(this.readOptionsMap()).length === 0) return;
+    this.writeOptionsMap({});
+    if (this.is_authenticated) {
+      this.getCart().subscribe({ error: () => undefined });
+    } else {
+      this.loadLocalCart();
+    }
+  }
+
   /** Firma estable de un conjunto de adiciones ('' = sin adiciones). */
   private optionsSignature(ids?: number[] | null): string {
     return [...(ids ?? [])].sort((a, b) => a - b).join(',');

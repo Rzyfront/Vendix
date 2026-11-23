@@ -290,6 +290,8 @@ describe('InvoicingController — cableado de la compuerta de correo', () => {
       {} as any,
       // ManualInvoiceEmissionService: sólo corre con `emit_immediately`.
       {} as any,
+      // PurchaseOrderSupportDocumentService (QUI-684): no participa aquí.
+      {} as any,
     );
 
   it('POST store/invoicing permite guardar borrador sin correo', async () => {

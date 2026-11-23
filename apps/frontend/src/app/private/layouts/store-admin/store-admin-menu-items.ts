@@ -377,7 +377,7 @@ export const STORE_ADMIN_MENU_ITEMS: readonly MenuItem[] = [
       {
         label: 'Rutas',
         icon: 'truck',
-        route: '/admin/orders/planillas',
+        route: '/admin/orders/rutas',
       },
       {
         label: 'Métodos de Envío',

@@ -1,16 +1,77 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, ai_model_type_enum } from '@prisma/client';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
+import {
+  AgentDeadline,
+  agentDeadlineContext,
+  isAgentAbort,
+} from '../../../ai-engine/tasks/agent-deadline';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { CreateAIAppDto, UpdateAIAppDto, AIAppQueryDto } from './dto';
 
+/**
+ * Plazo máximo de la prueba manual de una aplicación (Super Admin › AI Engine).
+ * Sin él, el SDK del proveedor espera hasta 10 min por defecto: la petición del
+ * navegador queda colgada ocupando una conexión y la pantalla no responde.
+ * Es el plazo por defecto (texto, audio, embeddings…). Imagen y video tardan
+ * más: ver `AI_APP_TEST_TIMEOUT_BY_TYPE_MS`. El frontend corta a los 200 s
+ * (`AI_TEST_ACTION_TIMEOUT_MS`), así que ningún plazo de aquí debe llegar a él.
+ */
+export const AI_APP_TEST_TIMEOUT_MS = 90_000;
+
+/**
+ * Plazo de la prueba según el tipo de ejecución. La generación de video suele
+ * pasar de 90 s; con el plazo por defecto la prueba de una app de video
+ * quedaría siempre en `AI_APP_TEST_TIMEOUT`. Para cambiarlo, edita este mapa y
+ * mantén el máximo por debajo del plazo del frontend.
+ */
+export const AI_APP_TEST_TIMEOUT_BY_TYPE_MS: Readonly<Record<string, number>> =
+  {
+    image: 120_000,
+    video: 180_000,
+  };
+
 @Injectable()
 export class AIEngineAppsService {
+  private readonly logger = new Logger(AIEngineAppsService.name);
+  /** Sobrescribible solo en specs. */
+  protected testTimeoutMs = AI_APP_TEST_TIMEOUT_MS;
+  /** Sobrescribible solo en specs. */
+  protected testTimeoutByTypeMs: Readonly<Record<string, number>> =
+    AI_APP_TEST_TIMEOUT_BY_TYPE_MS;
+
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly aiEngine: AIEngineService,
   ) {}
+
+  /**
+   * `fallback_config_id` must be an active config different from the primary.
+   * Reuses AI_CONFIG_001 (missing/inactive) and AI_APP_005 (same as primary).
+   */
+  private async assertValidFallback(
+    fallbackConfigId: number | null | undefined,
+    primaryConfigId: number | null | undefined,
+    appModelType?: ai_model_type_enum,
+  ): Promise<void> {
+    if (!fallbackConfigId) return;
+    if (fallbackConfigId === primaryConfigId) {
+      throw new VendixHttpException(ErrorCodes.AI_APP_005);
+    }
+    const config = await this.prisma.ai_engine_configs.findUnique({
+      where: { id: fallbackConfigId },
+      select: { id: true, is_active: true, model_type: true },
+    });
+    if (!config || !config.is_active) {
+      throw new VendixHttpException(ErrorCodes.AI_CONFIG_001);
+    }
+    // A fallback of another kind (e.g. image model behind a text app) would
+    // "answer" with the wrong modality exactly when the primary is down.
+    if (appModelType && config.model_type !== appModelType) {
+      throw new VendixHttpException(ErrorCodes.AI_APP_005);
+    }
+  }
 
   async create(dto: CreateAIAppDto) {
     const existing = await this.prisma.ai_engine_applications.findUnique({
@@ -49,12 +110,19 @@ export class AIEngineAppsService {
     const effectiveModelType: ai_model_type_enum =
       dto.model_type ?? configModelType ?? 'text';
 
+    await this.assertValidFallback(
+      dto.fallback_config_id,
+      dto.config_id,
+      effectiveModelType,
+    );
+
     return this.prisma.ai_engine_applications.create({
       data: {
         key: dto.key,
         name: dto.name,
         description: dto.description,
         config_id: dto.config_id || null,
+        fallback_config_id: dto.fallback_config_id || null,
         system_prompt: dto.system_prompt,
         prompt_template: dto.prompt_template,
         temperature: dto.temperature,
@@ -212,6 +280,21 @@ export class AIEngineAppsService {
     const effectiveModelType: ai_model_type_enum | undefined =
       dto.model_type ?? existing.model_type;
 
+    if (
+      dto.fallback_config_id !== undefined ||
+      dto.config_id !== undefined ||
+      dto.model_type !== undefined
+    ) {
+      await this.assertValidFallback(
+        dto.fallback_config_id !== undefined
+          ? dto.fallback_config_id
+          : (existing as { fallback_config_id?: number | null })
+              .fallback_config_id,
+        dto.config_id !== undefined ? dto.config_id : existing.config_id,
+        effectiveModelType,
+      );
+    }
+
     // Cross-validate model_type: when both sides are known, they must match.
     if (
       effectiveModelType &&
@@ -263,8 +346,27 @@ export class AIEngineAppsService {
     await this.prisma.ai_engine_applications.delete({ where: { id } });
   }
 
-  async testApplication(id: number) {
+  /**
+   * Prueba manual de una aplicación. Nunca lanza por un fallo de la prueba:
+   * app desactivada, error del proveedor o plazo vencido vuelven como
+   * `{ success: false, error }` rápido y controlado, para que la pantalla lo
+   * muestre en su propio mensaje. Solo una app inexistente sigue siendo 404.
+   *
+   * `clientSignal` (opcional) se aborta cuando el cliente cierra la conexión:
+   * se enlaza al plazo para cancelar la llamada al proveedor y no dejarla
+   * trabajando para nadie.
+   */
+  async testApplication(id: number, clientSignal?: AbortSignal) {
     const app = await this.findOne(id);
+
+    if (!app.is_active) {
+      return {
+        success: false,
+        error:
+          'La aplicación está desactivada. Actívala para poder probarla.',
+        error_code: ErrorCodes.AI_APP_003.code,
+      };
+    }
 
     // Build a minimal test using the app's template
     const testVars: Record<string, string> = {
@@ -284,11 +386,56 @@ export class AIEngineAppsService {
       app.output_format,
       modelType,
     );
-    const response = await this.executeTestByType(
-      app.key,
-      executionType,
-      testVars,
-    );
+    const timeoutMs =
+      this.testTimeoutByTypeMs[executionType] ?? this.testTimeoutMs;
+    const deadline = new AgentDeadline({
+      wallDeadlineMs: Date.now() + timeoutMs,
+      activeBudgetMs: Infinity,
+      reserveMs: 0,
+      signal: clientSignal,
+    });
+    let response: any;
+    try {
+      // El contexto propaga la señal de aborto a los proveedores que la
+      // honran; `deadline.run` responde a tiempo aunque alguno no la honre.
+      response = await agentDeadlineContext.run(deadline, () =>
+        deadline.run(() =>
+          this.executeTestByType(app.key, executionType, testVars),
+        ),
+      );
+    } catch (error) {
+      const clientGone = !!clientSignal?.aborted;
+      const timedOut = !clientGone && isAgentAbort(error, deadline.signal);
+      this.logger.warn(
+        `Test of AI app #${id} (${app.key}) failed: ${
+          clientGone
+            ? 'client disconnected, provider call cancelled'
+            : timedOut
+              ? `timeout after ${timeoutMs}ms`
+              : error instanceof Error
+                ? error.message
+                : String(error)
+        }`,
+      );
+      return {
+        success: false,
+        error: clientGone
+          ? 'La prueba se canceló porque se cerró la conexión.'
+          : timedOut
+            ? `El proveedor de IA no respondió en ${Math.round(
+                timeoutMs / 1000,
+              )} s. Revisa la configuración o inténtalo más tarde.`
+            : this.describeTestFailure(error),
+        error_code: clientGone
+          ? 'AI_APP_TEST_CANCELLED'
+          : timedOut
+            ? 'AI_APP_TEST_TIMEOUT'
+            : 'AI_APP_TEST_FAILED',
+        model_type: executionType,
+      };
+    } finally {
+      deadline.dispose();
+    }
 
     return {
       success: response.success,
@@ -333,6 +480,13 @@ export class AIEngineAppsService {
         .filter((c) => c.config_id !== null)
         .reduce((sum, c) => sum + c._count, 0),
     };
+  }
+
+  /** Mensaje corto y legible del fallo de la prueba (sin stack ni cuerpo crudo). */
+  private describeTestFailure(error: unknown): string {
+    const detail = error instanceof Error ? error.message.trim() : '';
+    const base = 'La prueba de la aplicación falló';
+    return detail ? `${base}: ${detail.slice(0, 300)}` : `${base}.`;
   }
 
   private resolveExecutionType(

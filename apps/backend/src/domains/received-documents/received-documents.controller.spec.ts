@@ -238,6 +238,8 @@ describe('received-document route controllers', () => {
       deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
       deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
       {} as never,
+      { getJob: jest.fn().mockResolvedValue(null) } as never,
+      { describe: jest.fn() } as never,
     );
 
     await expect(controller.getScanStatus('scan-job-1', { store_id: 21 })).resolves.toEqual({
@@ -252,6 +254,84 @@ describe('received-document route controllers', () => {
     ]);
     expect(Reflect.getMetadata(AI_FEATURE_KEY, handler)).toBeUndefined();
     expect(Reflect.getMetadata('__guards__', handler) ?? []).not.toContain(AiAccessGuard);
+  });
+
+  it('adds the additive AI job meta to the scan status of the store and the organization', async () => {
+    const job = {
+      id: 'scan-job-1',
+      data: { context: { store_id: 21, organization_id: 3, actor_id: 9, request_id: 'req-1' } },
+      getState: jest.fn().mockResolvedValue('active'),
+    };
+    const meta = { progress: { done: 1, total: 3 }, stalled: false };
+    for (const Controller of [StoreReceivedDocumentsController, OrganizationReceivedDocumentsController]) {
+      const deps = dependencies();
+      const queue = { getJob: jest.fn().mockResolvedValue(job) };
+      const monitor = { describe: jest.fn().mockResolvedValue(meta) };
+      const controller = new Controller(
+        deps.documents as unknown as ReceivedDocumentsService,
+        deps.contexts as unknown as ReceivedDocumentsContextService,
+        deps.responses as unknown as ResponseService,
+        deps.scans as unknown as ReceivedDocumentScanQueueService,
+        deps.matchCandidates as unknown as ReceivedDocumentMatchCandidatesService,
+        deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
+        deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
+        deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
+        {} as never,
+        queue as never,
+        monitor as never,
+      );
+
+      await expect(
+        (controller as OrganizationReceivedDocumentsController).getScanStatus('scan-job-1', { store_id: 21 } as never),
+      ).resolves.toEqual({
+        data: { status: 'queued', ...meta },
+      });
+      expect(queue.getJob).toHaveBeenCalledWith('scan-job-1');
+      expect(monitor.describe).toHaveBeenCalledWith(
+        job,
+        'active',
+        expect.objectContaining({ queue: 'received-document-scan' }),
+        { store_id: 21, organization_id: 3, user_id: 9, request_id: 'req-1' },
+        queue,
+      );
+    }
+  });
+
+  it('exposes the Vendix error code of a failed scan job as `error` and keeps `error_code`', async () => {
+    const deps = dependencies();
+    deps.scans.getStatus.mockResolvedValueOnce({
+      status: 'failed',
+      error: 'No se pudo leer el documento. Puedes reintentar.',
+      error_code: 'SCAN_NOT_AVAILABLE',
+    });
+    const job = {
+      id: 'scan-job-1',
+      failedReason: 'AI_PROVIDER_003',
+      data: { context: { store_id: 21, organization_id: 3 } },
+      getState: jest.fn().mockResolvedValue('failed'),
+    };
+    const controller = new StoreReceivedDocumentsController(
+      deps.documents as unknown as ReceivedDocumentsService,
+      deps.contexts as unknown as ReceivedDocumentsContextService,
+      deps.responses as unknown as ResponseService,
+      deps.scans as unknown as ReceivedDocumentScanQueueService,
+      deps.matchCandidates as unknown as ReceivedDocumentMatchCandidatesService,
+      deps.matchAllocations as unknown as ReceivedDocumentMatchAllocationsService,
+      deps.matchExpenses as unknown as ReceivedDocumentMatchExpensesService,
+      deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
+      {} as never,
+      { getJob: jest.fn().mockResolvedValue(job) } as never,
+      { describe: jest.fn().mockResolvedValue({ error_category: 'ai_unavailable' }) } as never,
+    );
+
+    await expect(controller.getScanStatus('scan-job-1')).resolves.toEqual({
+      data: {
+        status: 'failed',
+        error: 'AI_PROVIDER_003',
+        error_code: 'SCAN_NOT_AVAILABLE',
+        error_category: 'ai_unavailable',
+      },
+    });
   });
 
   it('keeps store reads pinned to the authenticated operational store', async () => {

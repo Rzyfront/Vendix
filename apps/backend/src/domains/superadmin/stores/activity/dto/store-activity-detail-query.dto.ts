@@ -21,7 +21,8 @@ export type StoreActivityEventType =
  * Advanced filters for `GET /superadmin/stores/activity/:storeId`.
  *
  * `event_type` selects which timeline kinds are included (`order` = orders,
- * `audit` = audit_logs rows, `login` = successful login_attempts). `channel`
+ * `audit` = audit_logs rows of staff or system, `login` = successful staff
+ * sign-ins; end customers are never included). `channel`
  * and `order_state` only apply to the `order` items. Dates are `YYYY-MM-DD`
  * in UTC (cross-store board exception, see the ranking DTO).
  */

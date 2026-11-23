@@ -77,7 +77,7 @@ describe('DocumentReceptionSyncSchedulerService', () => {
     expect(h.runsFind).toHaveBeenCalledWith(expect.objectContaining({ take: 100 }));
     expect(h.leases.getWorkerContext).toHaveBeenCalledWith(20);
     expect(h.subscriptionAccess.canUseModule).toHaveBeenCalledWith(10, 'received_documents');
-    expect(h.queue.enqueue).toHaveBeenCalledWith(40);
+    expect(h.queue.enqueue).toHaveBeenCalledWith(40, 'cron:recepcion-documentos-sync');
     expect(h.leases.claim).not.toHaveBeenCalled();
     expect(h.runsFind.mock.calls[0][0].where.OR).toEqual(expect.arrayContaining([
       { status: { in: ['pending', 'queued'] } },
@@ -96,7 +96,7 @@ describe('DocumentReceptionSyncSchedulerService', () => {
 
     await h.service.tick();
 
-    expect(h.queue.enqueue).toHaveBeenCalledWith(40);
+    expect(h.queue.enqueue).toHaveBeenCalledWith(40, 'cron:recepcion-documentos-sync');
     expect(h.runsFind.mock.calls[0][0].where.OR).toContainEqual({
       status: 'running',
       connection: { lease_expires_at: { lte: expect.any(Date) } },
@@ -127,7 +127,7 @@ describe('DocumentReceptionSyncSchedulerService', () => {
       idempotency_key: expect.stringMatching(/^scheduler:20:4:\d+$/),
       expected_version: 4,
     });
-    expect(h.queue.enqueue).toHaveBeenCalledWith(51);
+    expect(h.queue.enqueue).toHaveBeenCalledWith(51, 'cron:recepcion-documentos-sync');
   });
 
   it('fails closed for subscription blocks and internal errors', async () => {
@@ -154,8 +154,8 @@ describe('DocumentReceptionSyncSchedulerService', () => {
     await expect(h.service.tick()).resolves.toBeUndefined();
     await expect(h.service.tick()).resolves.toBeUndefined();
 
-    expect(h.queue.enqueue).toHaveBeenNthCalledWith(1, 40);
-    expect(h.queue.enqueue).toHaveBeenNthCalledWith(2, 40);
+    expect(h.queue.enqueue).toHaveBeenNthCalledWith(1, 40, 'cron:recepcion-documentos-sync');
+    expect(h.queue.enqueue).toHaveBeenNthCalledWith(2, 40, 'cron:recepcion-documentos-sync');
     expect(h.runsFind).toHaveBeenCalledTimes(2);
     expect(Object.keys(h.client.document_reception_runs)).toEqual(['findMany']);
   });
@@ -188,7 +188,7 @@ describe('DocumentReceptionSyncSchedulerService', () => {
 
     expect(h.runsFind.mock.calls.map(([query]) => query.where.id.gt)).toEqual([0, 1]);
     expect(h.queue.enqueue).toHaveBeenCalledTimes(1);
-    expect(h.queue.enqueue).toHaveBeenCalledWith(2);
+    expect(h.queue.enqueue).toHaveBeenCalledWith(2, 'cron:recepcion-documentos-sync');
   });
 
   it('rotates due API polls past a blocked tenant instead of starving later connections', async () => {
@@ -206,6 +206,6 @@ describe('DocumentReceptionSyncSchedulerService', () => {
     expect(h.connectionsFind.mock.calls.map(([query]) => query.where.id.gt)).toEqual([0, 20]);
     expect(h.leases.claim).toHaveBeenCalledTimes(1);
     expect(h.leases.claim).toHaveBeenCalledWith(context, 21, expect.objectContaining({ trigger: 'scheduler' }));
-    expect(h.queue.enqueue).toHaveBeenCalledWith(51);
+    expect(h.queue.enqueue).toHaveBeenCalledWith(51, 'cron:recepcion-documentos-sync');
   });
 });

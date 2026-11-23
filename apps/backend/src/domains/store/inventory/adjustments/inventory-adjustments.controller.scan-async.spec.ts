@@ -7,12 +7,14 @@ describe('InventoryAdjustmentsController.scanCountAsync', () => {
   let jobs: any;
   let response: any;
 
-  const file = (mimetype = 'image/jpeg') =>
+  // ia-cargas F5a: the type is detected by signature, so the bytes are real.
+  const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0, 1]);
+  const file = (mimetype = 'image/jpeg', buffer = JPEG, originalname = 'c.jpg') =>
     ({
-      buffer: Buffer.from('x'),
+      buffer,
       mimetype,
-      originalname: 'c.jpg',
-      size: 1,
+      originalname,
+      size: buffer.length,
     }) as Express.Multer.File;
 
   beforeEach(() => {
@@ -31,9 +33,28 @@ describe('InventoryAdjustmentsController.scanCountAsync', () => {
 
   it('mime invalido -> error sin encolar', async () => {
     await expect(
-      controller.scanCountAsync(file('text/plain'), '5'),
+      controller.scanCountAsync(file('application/octet-stream', Buffer.from([0, 1, 2, 3, 4]), 'c.bin'), '5'),
     ).rejects.toBeInstanceOf(VendixHttpException);
     expect(jobs.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('un archivo que dice ser JPG pero no lo es -> AI_INGEST_INVALID_FILE sin encolar', async () => {
+    await expect(
+      controller.scanCountAsync(file('image/jpeg', Buffer.from('no soy foto')), '5'),
+    ).rejects.toMatchObject({ errorCode: 'AI_INGEST_INVALID_FILE' });
+    expect(jobs.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('ia-cargas F5a: un CSV de conteo se acepta y se encola', async () => {
+    await controller.scanCountAsync(
+      file('text/csv', Buffer.from('Producto;Cantidad\nArroz;4'), 'conteo.csv'),
+      '5',
+    );
+    expect(jobs.enqueue).toHaveBeenCalledWith(
+      'inventory_count',
+      [expect.objectContaining({ originalName: 'conteo.csv' })],
+      { location_id: 5 },
+    );
   });
 
   it.each([undefined, '', 'abc', '0', '-3', '1.5'])(

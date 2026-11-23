@@ -82,6 +82,8 @@ import { PromotionEngineService } from '../../store/promotions/promotion-engine/
 import { CouponsService } from '../../store/coupons/coupons.service';
 import { CouponAppliesTo } from '../../store/coupons/dto';
 import { PromotionQuoteResult } from '../../store/promotions/dto/promotion-quote.interface';
+import { promotionDiscountByLine } from '../../store/promotions/promotion-line-discount.util';
+import { applyCheckoutLineDiscounts } from './utils/checkout-line-discount.util';
 import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper';
 import { resolveLineDestinations } from '../../store/orders/utils/line-destination.loader';
 import {
@@ -401,9 +403,11 @@ export class CheckoutService {
       });
       restaurant = storeIsRestaurant(store?.industries);
     }
+    // QUI-1005: tienda en línea → respeta «Permitir adiciones en la tienda en línea».
     return this.optionPricingService.resolve(store_id, item.product_id, option_ids, Number(item.quantity) || 1, {
       scheduled,
       restaurant,
+      channel: 'ecommerce',
     });
   }
 
@@ -1246,11 +1250,52 @@ export class CheckoutService {
     total_price: Prisma.Decimal | number | string;
     tax_amount_item?: Prisma.Decimal | number | string | null;
     quantity: number;
+    unit_price?: Prisma.Decimal | number | string | null;
+    final_unit_price?: Prisma.Decimal | number | string | null;
   }): number {
+    // Contrato nuevo con descuento: el impuesto persistido es post-descuento,
+    // así que el bruto de línea sale del unitario publicado.
+    if (oi.final_unit_price != null) {
+      const unit = Number(oi.unit_price ?? 0);
+      const multiplier =
+        unit !== 0 ? Number(oi.total_price) / unit : Number(oi.quantity);
+      return this.roundMoney(Number(oi.final_unit_price) * multiplier);
+    }
     const lineTax = new Prisma.Decimal(oi.tax_amount_item ?? 0)
       .times(new Prisma.Decimal(oi.quantity))
       .toFixed(2, Prisma.Decimal.ROUND_DOWN);
     return this.roundMoney(Number(oi.total_price) + Number(lineTax));
+  }
+
+  /**
+   * F1 — reparto por línea del descuento del checkout (contrato nuevo). La
+   * promoción usa el desglose del motor (`line_id` = índice de
+   * `itemsWithTaxes`); el cupón se reparte sobre el bruto remanente.
+   * `null` sin descuento (la orden se persiste como siempre).
+   */
+  private resolveCheckoutLineDiscounts(
+    items: ReadonlyArray<{
+      quantity: number;
+      total_net: number;
+      total_tax: number;
+      item_taxes: ReadonlyArray<CheckoutLineTaxSnapshot>;
+    }>,
+    discountResult: {
+      quote: PromotionQuoteResult;
+      promotion_discount: number;
+      coupon_discount: number;
+    },
+  ) {
+    return applyCheckoutLineDiscounts(items, {
+      promotionTotal: discountResult.promotion_discount,
+      couponTotal: discountResult.coupon_discount,
+      promotionByLine: promotionDiscountByLine(
+        discountResult.quote,
+        items.length,
+        (lineId) =>
+          Number.isInteger(Number(lineId)) ? Number(lineId) : null,
+      ),
+    });
   }
 
   /**
@@ -1321,6 +1366,11 @@ export class CheckoutService {
     promotion_discount: number;
     coupon_discount: number;
     total_discount: number;
+    /**
+     * Lo que agrega el código de la casilla: el descuento del cupón, o lo que
+     * suma la promoción por código frente a la compra sin él.
+     */
+    code_discount: number;
   }> {
     const items = params.items;
     if (items.length === 0) {
@@ -1338,13 +1388,14 @@ export class CheckoutService {
         promotion_discount: 0,
         coupon_discount: 0,
         total_discount: 0,
+        code_discount: 0,
       };
     }
 
     const productIds = Array.from(new Set(items.map((i) => i.product_id)));
     const categoryMap = await this.resolveProductCategories(productIds);
 
-    const quote = await this.promotionEngine.quoteDiscounts({
+    const quoteInput = {
       items: items.map((item, index) => ({
         line_id: index,
         product_id: item.product_id,
@@ -1362,12 +1413,32 @@ export class CheckoutService {
         stock_units_consumed: item.stock_units_consumed ?? null,
       })),
       customer_id: params.customerId,
-    });
+    };
 
+    // Casilla única de código: cupón primero; si el código no es de ningún
+    // cupón pero sí de una promoción, la promoción entra al motor como manual
+    // (fechas, días, hora de la tienda, límites y alcance) y se persiste en
+    // `order_promotions` como cualquier otra.
     const couponCode = params.couponCode?.trim();
+    const codeTarget = couponCode
+      ? await this.promotionEngine.resolveDiscountCode(couponCode)
+      : ({ kind: 'none' } as const);
+    let quote: PromotionQuoteResult;
+    let codePromotionDiscount = 0;
+    if (codeTarget.kind === 'promotion') {
+      const withCode = await this.promotionEngine.quoteWithPromotionCode(
+        quoteInput,
+        codeTarget.promotion_id,
+      );
+      quote = withCode.quote;
+      codePromotionDiscount = withCode.code_discount;
+    } else {
+      quote = await this.promotionEngine.quoteDiscounts(quoteInput);
+    }
+
     let coupon: { coupon_id: number; discount_amount: number } | null = null;
 
-    if (couponCode) {
+    if (couponCode && codeTarget.kind !== 'promotion') {
       // Discount base for the coupon is the post-promotion subtotal so we
       // never refund money the customer didn't actually pay. We pass per-line
       // totals so SPECIFIC_PRODUCTS / SPECIFIC_CATEGORIES coupons can
@@ -1407,6 +1478,7 @@ export class CheckoutService {
       promotion_discount,
       coupon_discount,
       total_discount,
+      code_discount: coupon ? coupon_discount : codePromotionDiscount,
     };
   }
 
@@ -1500,7 +1572,7 @@ export class CheckoutService {
         valid: true,
         coupon_id: res.coupon?.coupon_id ?? null,
         code,
-        discount_amount: res.coupon_discount,
+        discount_amount: res.code_discount,
         subtotal: res.quote.promotional_subtotal,
       };
     } catch (err) {
@@ -2516,13 +2588,25 @@ export class CheckoutService {
       couponCode: dto.coupon_code,
     });
 
+    // F1 — contrato NUEVO (mismo kernel que el POS): el descuento se reparte
+    // por línea (la promoción sólo a sus líneas, el cupón al bruto remanente),
+    // se traslada a la BASE y el impuesto se recalcula sobre la base
+    // descontada. Sin descuento queda `null` y la orden es la de siempre.
+    const lineDiscounts = this.resolveCheckoutLineDiscounts(
+      itemsWithTaxes,
+      discountResult,
+    );
+    const order_tax_amount = lineDiscounts?.total_tax ?? total_tax;
+    const order_discount_amount =
+      lineDiscounts?.total_base_discount ?? discountResult.total_discount;
+
     // Discount base is the products subtotal BEFORE shipping. We add taxes
     // and shipping AFTER subtracting the discount, mirroring the POS flow.
     // Clamp grand_total at >= 0 in case a fixed coupon exceeds subtotal.
     const grand_total = this.roundMoney(
       Math.max(
         0,
-        subtotal + total_tax - discountResult.total_discount + shipping_cost,
+        subtotal + order_tax_amount - order_discount_amount + shipping_cost,
       ),
     );
 
@@ -2603,8 +2687,8 @@ export class CheckoutService {
             channel: dto.channel === 'whatsapp' ? 'whatsapp' : 'ecommerce',
             currency: cart_currency,
             subtotal_amount: subtotal,
-            tax_amount: total_tax,
-            discount_amount: discountResult.total_discount,
+            tax_amount: order_tax_amount,
+            discount_amount: order_discount_amount,
             shipping_cost: shipping_cost,
             shipping_method_id: shipping_method_id,
             shipping_rate_id: shipping_rate_id,
@@ -2641,7 +2725,7 @@ export class CheckoutService {
               : dto.notes?.trim() || undefined,
             placed_at: new Date(),
             order_items: {
-              create: itemsWithTaxes.map((item) => ({
+              create: itemsWithTaxes.map((item, itemIndex) => ({
                 // Snapshot congelado de adiciones (solo si la línea las tiene).
                 ...(item.option_snapshots.length
                   ? {
@@ -2671,7 +2755,23 @@ export class CheckoutService {
                 unit_price: item.base_unit_price,
                 total_price: item.total_net,
                 tax_rate: item.tax_rate,
-                tax_amount_item: item.tax_amount_item,
+                tax_amount_item:
+                  lineDiscounts?.lines[itemIndex].tax_amount_item ??
+                  item.tax_amount_item,
+                // F1: descuento de BASE de la línea (contrato nuevo). NULL =
+                // sin descuento, la orden queda como siempre.
+                ...(lineDiscounts
+                  ? {
+                      discount_amount: lineDiscounts.lines[itemIndex].discount_amount,
+                      // Bruto unitario PUBLICADO (pre-descuento), igual que el POS.
+                      // Con el contrato nuevo `tax_amount_item` es post-descuento y
+                      // ya no sirve para reconstruir el bruto en las vistas del
+                      // comprador (resumen, cuenta, comprobante).
+                      final_unit_price: this.roundMoney(
+                        item.base_unit_price + item.tax_amount_item,
+                      ),
+                    }
+                  : {}),
                 cost_price: item.cost_price,
                 notes: (item as any).notes?.trim() || null,
                 // Snapshot de la presentación aplicada. `stock_units_consumed` queda
@@ -2682,11 +2782,13 @@ export class CheckoutService {
                   item.applied_price_tier_name_snapshot,
                 stock_units_consumed: item.stock_units_consumed,
                 order_item_taxes: {
-                  create: item.item_taxes.map((t) => ({
+                  create: item.item_taxes.map((t, taxIndex) => ({
                     tax_rate_id: t.tax_rate_id,
                     tax_name: t.name,
                     tax_rate: t.rate,
-                    tax_amount: t.amount * item.quantity,
+                    tax_amount:
+                      lineDiscounts?.lines[itemIndex].tax_amounts[taxIndex] ??
+                      t.amount * item.quantity,
                     tax_type: t.tax_type,
                     // A.4 (F-002): el flag viaja por fila (N filas por tasa).
                     // QUI-INC — sin `?? false`. `CheckoutLineTaxSnapshot` ya lo
@@ -3607,10 +3709,19 @@ export class CheckoutService {
       CheckoutService.shippingTaxGuardLine(wa_shipping_tax),
     ]);
 
+    // F1 — mismo contrato de descuento por línea que el checkout web.
+    const lineDiscounts = this.resolveCheckoutLineDiscounts(
+      itemsWithTaxes,
+      discountResult,
+    );
+    const order_tax_amount = lineDiscounts?.total_tax ?? total_tax;
+    const order_discount_amount =
+      lineDiscounts?.total_base_discount ?? discountResult.total_discount;
+
     const grand_total = this.roundMoney(
       Math.max(
         0,
-        subtotal + total_tax - discountResult.total_discount + wa_shipping_cost,
+        subtotal + order_tax_amount - order_discount_amount + wa_shipping_cost,
       ),
     );
 
@@ -3636,8 +3747,8 @@ export class CheckoutService {
             channel: 'whatsapp',
             currency: cart_currency,
             subtotal_amount: subtotal,
-            tax_amount: total_tax,
-            discount_amount: discountResult.total_discount,
+            tax_amount: order_tax_amount,
+            discount_amount: order_discount_amount,
             shipping_cost: wa_shipping_cost,
             shipping_method_id: wa_shipping_method_id,
             shipping_rate_id: wa_shipping_rate_id,
@@ -3663,7 +3774,7 @@ export class CheckoutService {
             notes: dto.notes?.trim() || undefined,
             placed_at: new Date(),
             order_items: {
-              create: itemsWithTaxes.map((item) => ({
+              create: itemsWithTaxes.map((item, itemIndex) => ({
                 // Online/whatsapp para enviar: el plato KDS se empaca.
                 is_takeaway:
                   markTakeawayForDelivery &&
@@ -3682,7 +3793,23 @@ export class CheckoutService {
                 unit_price: item.base_unit_price,
                 total_price: item.total_net,
                 tax_rate: item.tax_rate,
-                tax_amount_item: item.tax_amount_item,
+                tax_amount_item:
+                  lineDiscounts?.lines[itemIndex].tax_amount_item ??
+                  item.tax_amount_item,
+                // F1: descuento de BASE de la línea (contrato nuevo). NULL =
+                // sin descuento, la orden queda como siempre.
+                ...(lineDiscounts
+                  ? {
+                      discount_amount: lineDiscounts.lines[itemIndex].discount_amount,
+                      // Bruto unitario PUBLICADO (pre-descuento), igual que el POS.
+                      // Con el contrato nuevo `tax_amount_item` es post-descuento y
+                      // ya no sirve para reconstruir el bruto en las vistas del
+                      // comprador (resumen, cuenta, comprobante).
+                      final_unit_price: this.roundMoney(
+                        item.base_unit_price + item.tax_amount_item,
+                      ),
+                    }
+                  : {}),
                 cost_price: item.cost_price,
                 notes: (item as any).notes?.trim() || null,
                 // Snapshot de la presentación aplicada. `stock_units_consumed` queda
@@ -3693,11 +3820,13 @@ export class CheckoutService {
                   item.applied_price_tier_name_snapshot,
                 stock_units_consumed: item.stock_units_consumed,
                 order_item_taxes: {
-                  create: item.item_taxes.map((t) => ({
+                  create: item.item_taxes.map((t, taxIndex) => ({
                     tax_rate_id: t.tax_rate_id,
                     tax_name: t.name,
                     tax_rate: t.rate,
-                    tax_amount: t.amount * item.quantity,
+                    tax_amount:
+                      lineDiscounts?.lines[itemIndex].tax_amounts[taxIndex] ??
+                      t.amount * item.quantity,
                     tax_type: t.tax_type,
                     // A.4 (F-002): el flag viaja por fila (N filas por tasa).
                     // QUI-INC — sin `?? false`. `CheckoutLineTaxSnapshot` ya lo
@@ -3854,7 +3983,9 @@ export class CheckoutService {
         // `tax_amount_item` persistido es POR UNIDAD; la línea = × cantidad
         // (mismo truncado ROUND_DOWN que `total_tax` del cálculo).
         unit_price_gross: this.roundMoney(
-          Number(oi.unit_price) + Number(oi.tax_amount_item ?? 0),
+          oi.final_unit_price != null
+            ? Number(oi.final_unit_price)
+            : Number(oi.unit_price) + Number(oi.tax_amount_item ?? 0),
         ),
         total_price_gross: this.grossLineTotal(oi),
         // [resid-fiscal] — Aditivo. El FE pinta la línea tachada con

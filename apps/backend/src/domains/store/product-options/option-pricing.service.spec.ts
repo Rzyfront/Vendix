@@ -95,13 +95,58 @@ describe('resolveOptionSelection', () => {
 });
 
 describe('OptionPricingService.resolve', () => {
-  function build(enabled: boolean, groups: Group[]) {
+  function build(enabled: boolean, groups: Group[], allowOnline = true) {
     const productOptions = {
       isEnabled: jest.fn().mockResolvedValue(enabled),
+      isAllowedOnline: jest.fn().mockResolvedValue(allowOnline),
       applicableForProduct: jest.fn().mockResolvedValue(groups),
     } as unknown as ProductOptionsService;
     return new OptionPricingService(productOptions);
   }
+
+  describe('QUI-1005: «Permitir adiciones en la tienda en línea»', () => {
+    it('con el flag activo la tienda en línea vende adiciones igual que hoy', async () => {
+      const result = await build(true, [frutas, cubierta], true).resolve(1, 5, [11, 22], 1, {
+        scheduled: true,
+        channel: 'ecommerce',
+      });
+      expect(result.unit_price_delta.toFixed(2)).toBe('11000.00');
+      expect(result.snapshots.map((x) => x.option_id)).toEqual([11, 22]);
+    });
+
+    it('con el flag apagado rechaza las adiciones que llegan por la tienda en línea (4xx claro)', async () => {
+      const service = build(true, [frutas], false);
+      const error = await service
+        .resolve(1, 5, [11], 1, { scheduled: true, channel: 'ecommerce' })
+        .catch((e: unknown) => e);
+      expect(error).toMatchObject({ errorCode: 'OPT_ONLINE_DISABLED' });
+      expect((error as { getStatus: () => number }).getStatus()).toBe(400);
+      await expect(
+        service.resolve(1, 5, [11], 1, { scheduled: false, restaurant: true, channel: 'ecommerce' }),
+      ).rejects.toMatchObject({ errorCode: 'OPT_ONLINE_DISABLED' });
+    });
+
+    it('con el flag apagado el producto se vende solo aunque tenga un grupo obligatorio', async () => {
+      const result = await build(true, [cubierta], false).resolve(1, 5, [], 1, {
+        scheduled: true,
+        channel: 'ecommerce',
+      });
+      expect(result.unit_price_delta.toNumber()).toBe(0);
+      expect(result.snapshots).toEqual([]);
+    });
+
+    it('el POS no lee el flag: con el flag apagado sigue vendiendo adiciones', async () => {
+      const productOptions = {
+        isEnabled: jest.fn().mockResolvedValue(true),
+        isAllowedOnline: jest.fn().mockResolvedValue(false),
+        applicableForProduct: jest.fn().mockResolvedValue([frutas]),
+      };
+      const service = new OptionPricingService(productOptions as unknown as ProductOptionsService);
+      const result = await service.resolve(1, 5, [11], 1, { scheduled: true });
+      expect(result.snapshots.map((x) => x.option_id)).toEqual([11]);
+      expect(productOptions.isAllowedOnline).not.toHaveBeenCalled();
+    });
+  });
 
   it('sin ids y sin grupos deja la línea como hoy', async () => {
     const result = await build(true, []).resolve(1, 5, undefined, 1, { scheduled: true });

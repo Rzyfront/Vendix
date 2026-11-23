@@ -12,6 +12,11 @@ import {
 } from '../../../store/analytics/analytics-metrics.contract';
 import { StoreActivityQueryDto } from './dto/store-activity-query.dto';
 import { StoreActivityDetailQueryDto } from './dto/store-activity-detail-query.dto';
+import {
+  vendixLoginAttemptSql,
+  vendixUserWhere,
+  withVendixActor,
+} from '@common/utils/vendix-user.util';
 
 /**
  * Read-only aggregates behind `Cuentas > Actividad`.
@@ -24,6 +29,11 @@ import { StoreActivityDetailQueryDto } from './dto/store-activity-detail-query.d
  *
  * Scoring (closed by plan):
  * - score = orders_count * 1 + audit_events * 0.2 + active_users * 2
+ * - active_users = staff of the store (Vendix users, see `vendixUserWhere`)
+ *   with a session in the window; ecommerce customers never count.
+ * - Only staff activity counts: audit events authored by end customers are
+ *   left out (`withVendixActor`; system events with no author stay) and so are
+ *   their sign-ins (`vendixLoginAttemptSql`), everywhere on this board.
  * - active store = is_active AND (orders_count >= 1 OR audit_events >= 5)
  * - activity meta = 80 (% of active stores)
  * - avg hours/day = distinct UTC (day, hour) pairs with >= 1 audit/order
@@ -53,6 +63,19 @@ export interface StoreActivityRow {
   audit_events: number;
   active_users: number;
   revenue_operating: number;
+  last_activity_at: string | null;
+}
+
+/**
+ * La fila de un comercio sin identidad ni timeline: lo que comparte la Cuenta
+ * Vendix del CRM de Vendix Platform (`getSummary`).
+ */
+export interface StoreActivitySummary {
+  score: number;
+  orders_count: number;
+  revenue_operating: number;
+  active_users: number;
+  audit_events: number;
   last_activity_at: string | null;
 }
 
@@ -134,6 +157,11 @@ const seriesOrderSelect = {
 type LoginTimelineRow = Prisma.login_attemptsGetPayload<{
   select: typeof loginTimelineSelect;
 }>;
+
+interface ActivityRange {
+  gte: Date;
+  lt: Date;
+}
 
 function formatUtcDay(value: Date): string {
   const month = String(value.getUTCMonth() + 1).padStart(2, '0');
@@ -312,6 +340,31 @@ export class StoreActivityService {
     };
   }
 
+  /**
+   * Solo la fila de agregados del comercio en la ventana (score, órdenes,
+   * ingresos, usuarios activos, eventos y última actividad), sin timeline: no
+   * expone números de orden ni correos. Comercio sin actividad → ceros.
+   */
+  async getSummary(
+    storeId: number,
+    window: StoreActivityWindow,
+  ): Promise<StoreActivitySummary> {
+    const rows = await this.buildRows(
+      { organization_id: undefined } as StoreActivityQueryDto,
+      window,
+      [storeId],
+    );
+    const row = rows[0];
+    return {
+      score: row?.score ?? 0,
+      orders_count: row?.orders_count ?? 0,
+      revenue_operating: row?.revenue_operating ?? 0,
+      active_users: row?.active_users ?? 0,
+      audit_events: row?.audit_events ?? 0,
+      last_activity_at: row?.last_activity_at ?? null,
+    };
+  }
+
   async getSeries(
     storeId: number,
     query: StoreActivityDetailQueryDto,
@@ -347,13 +400,10 @@ export class StoreActivityService {
         select: seriesOrderSelect,
       }),
       this.prisma.audit_logs.findMany({
-        where: { store_id: storeId, created_at: range },
+        where: withVendixActor({ store_id: storeId, created_at: range }),
         select: { created_at: true },
       }),
-      this.prisma.login_attempts.findMany({
-        where: { store_id: storeId, success: true, attempted_at: range },
-        select: { attempted_at: true },
-      }),
+      this.readStaffLogins(storeId, range),
     ]);
 
     const completedStates = new Set<string>([...COMPLETED_SALE_STATES]);
@@ -497,7 +547,7 @@ export class StoreActivityService {
       }),
       this.prisma.audit_logs.groupBy({
         by: ['store_id'],
-        where: { store_id: { in: ids }, created_at: range },
+        where: withVendixActor({ store_id: { in: ids }, created_at: range }),
         _count: { _all: true },
       }),
       this.prisma.orders.groupBy({
@@ -507,20 +557,15 @@ export class StoreActivityService {
       }),
       this.prisma.audit_logs.groupBy({
         by: ['store_id'],
-        where: { store_id: { in: ids }, created_at: range },
+        where: withVendixActor({ store_id: { in: ids }, created_at: range }),
         _max: { created_at: true },
       }),
-      this.prisma.login_attempts.groupBy({
-        by: ['store_id'],
-        where: {
-          store_id: { in: ids },
-          success: true,
-          attempted_at: range,
-        },
-        _max: { attempted_at: true },
-      }),
+      this.readLastStaffLoginByStore(ids, range),
+      // Solo el personal de la tienda (usuarios de Vendix): `store_users`
+      // también vincula a los clientes de ecommerce, y sus sesiones no son
+      // uso del producto por parte del comercio.
       this.prisma.store_users.findMany({
-        where: { store_id: { in: ids } },
+        where: { store_id: { in: ids }, user: vendixUserWhere() },
         select: { store_id: true, user_id: true },
       }),
     ]);
@@ -562,7 +607,7 @@ export class StoreActivityService {
     for (const row of orderMaxRows) trackMax(row.store_id, row._max.created_at);
     for (const row of auditMaxRows) trackMax(row.store_id, row._max.created_at);
     for (const row of loginRows) {
-      trackMax(row.store_id, row._max.attempted_at);
+      trackMax(row.store_id, row.last_attempted_at);
     }
 
     // Active users: distinct members with >= 1 session whose last_activity
@@ -675,7 +720,10 @@ export class StoreActivityService {
     const range = { gte: window.start, lt: window.end };
     const [auditTs, orderTs] = await Promise.all([
       this.prisma.audit_logs.findMany({
-        where: { store_id: { in: storeIds }, created_at: range },
+        where: withVendixActor({
+          store_id: { in: storeIds },
+          created_at: range,
+        }),
         select: { created_at: true },
       }),
       this.prisma.orders.findMany({
@@ -693,6 +741,52 @@ export class StoreActivityService {
     for (const row of auditTs) track(row.created_at);
     for (const row of orderTs) track(row.created_at);
     return round2(pairs.size / window.days);
+  }
+
+  /**
+   * Successful sign-ins of the store's staff in the window, newest first.
+   *
+   * Raw SQL because `login_attempts` has no `user_id` nor relation to `users`:
+   * the staff rule (`vendixLoginAttemptSql`) has to correlate on the email and
+   * the store's organization, which Prisma's `where` cannot express. Failed
+   * attempts never show on this board, whoever made them.
+   */
+  private readStaffLogins(
+    storeId: number,
+    range: ActivityRange,
+  ): Promise<LoginTimelineRow[]> {
+    return this.prisma.$queryRaw<LoginTimelineRow[]>(Prisma.sql`
+      SELECT la.id, la.email, la.attempted_at
+      FROM login_attempts la
+      WHERE ${this.staffLoginFilterSql([storeId], range)}
+      ORDER BY la.attempted_at DESC
+    `);
+  }
+
+  /** Latest staff sign-in per store, same rule as {@link readStaffLogins}. */
+  private readLastStaffLoginByStore(
+    storeIds: number[],
+    range: ActivityRange,
+  ): Promise<Array<{ store_id: number; last_attempted_at: Date | null }>> {
+    return this.prisma.$queryRaw<
+      Array<{ store_id: number; last_attempted_at: Date | null }>
+    >(Prisma.sql`
+      SELECT la.store_id, MAX(la.attempted_at) AS last_attempted_at
+      FROM login_attempts la
+      WHERE ${this.staffLoginFilterSql(storeIds, range)}
+      GROUP BY la.store_id
+    `);
+  }
+
+  private staffLoginFilterSql(
+    storeIds: number[],
+    range: ActivityRange,
+  ): Prisma.Sql {
+    return Prisma.sql`la.store_id IN (${Prisma.join(storeIds)})
+        AND la.success = true
+        AND la.attempted_at >= ${range.gte}
+        AND la.attempted_at < ${range.lt}
+        AND ${vendixLoginAttemptSql('la')}`;
   }
 
   private async buildTimeline(
@@ -724,17 +818,13 @@ export class StoreActivityService {
         : ([] as OrderTimelineRow[]),
       wantAudits
         ? this.prisma.audit_logs.findMany({
-            where: { store_id: storeId, created_at: range },
+            where: withVendixActor({ store_id: storeId, created_at: range }),
             select: auditTimelineSelect,
             orderBy: { created_at: 'desc' },
           })
         : ([] as AuditTimelineRow[]),
       wantLogins
-        ? this.prisma.login_attempts.findMany({
-            where: { store_id: storeId, success: true, attempted_at: range },
-            select: loginTimelineSelect,
-            orderBy: { attempted_at: 'desc' },
-          })
+        ? this.readStaffLogins(storeId, range)
         : ([] as LoginTimelineRow[]),
     ]);
 

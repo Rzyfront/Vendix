@@ -2,6 +2,7 @@ import { UnrecoverableError } from 'bullmq';
 import { InvoiceScanProcessor } from './invoice-scan.processor';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
+import { LEGACY_AI_SOURCES } from '@common/ai-scan-jobs/ai-scan-sources';
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const KEY = 'org/store/purchase-orders/scans/1-f.pdf';
@@ -15,8 +16,18 @@ const ATTACHMENT = {
 function build() {
   const scanner = { scanInvoiceFromBuffer: jest.fn() };
   const s3 = { downloadFile: jest.fn().mockResolvedValue(PNG) };
-  const processor = new InvoiceScanProcessor(scanner as any, s3 as any);
-  return { processor, scanner, s3 };
+  const monitor = {
+    runAiWork: jest.fn((_job: unknown, _source: unknown, work: () => unknown) =>
+      work(),
+    ),
+    onFailed: jest.fn().mockResolvedValue(undefined),
+  };
+  const processor = new InvoiceScanProcessor(
+    scanner as any,
+    s3 as any,
+    monitor as any,
+  );
+  return { processor, scanner, s3, monitor };
 }
 
 const job = (over: Record<string, unknown> = {}) =>
@@ -69,8 +80,41 @@ describe('InvoiceScanProcessor', () => {
       'image/png',
       'ingredient',
       ATTACHMENT,
+      expect.objectContaining({ reportProgress: expect.any(Function) }),
     );
     expect(res).toBe(result);
+  });
+
+  it('ia-cargas F3: el progreso real por páginas llega al job con `at`', async () => {
+    const { processor, scanner } = build();
+    const updateProgress = jest.fn().mockResolvedValue(undefined);
+    scanner.scanInvoiceFromBuffer.mockImplementation(
+      async (_b: unknown, _m: unknown, _o: unknown, _a: unknown, opts: any) => {
+        await opts.reportProgress({ done: 2, total: 6, unit: 'páginas', stage: 'Leyendo con IA' });
+        return { line_items: [] };
+      },
+    );
+
+    await processor.process({ ...job(), updateProgress } as any);
+
+    expect(updateProgress).toHaveBeenCalledWith(
+      expect.objectContaining({ done: 2, total: 6, unit: 'páginas', at: expect.any(Number) }),
+    );
+  });
+
+  it('ia-cargas F3: un fallo al guardar el progreso no rompe el escaneo', async () => {
+    const { processor, scanner } = build();
+    const updateProgress = jest.fn().mockRejectedValue(new Error('redis down'));
+    scanner.scanInvoiceFromBuffer.mockImplementation(
+      async (_b: unknown, _m: unknown, _o: unknown, _a: unknown, opts: any) => {
+        await opts.reportProgress({ done: 1, total: 1, unit: 'páginas', stage: 'x' });
+        return { ok: true };
+      },
+    );
+
+    await expect(
+      processor.process({ ...job(), updateProgress } as any),
+    ).resolves.toEqual({ ok: true });
   });
 
   it('INV_SCAN_PARSE_FAIL => UnrecoverableError', async () => {
@@ -116,5 +160,40 @@ describe('InvoiceScanProcessor', () => {
     await expect(p).rejects.toThrow(/No se pudo leer el documento/);
     await expect(p).rejects.not.toBeInstanceOf(UnrecoverableError);
     expect(scanner.scanInvoiceFromBuffer).not.toHaveBeenCalled();
+  });
+
+  it('envuelve el trabajo de IA en runAiWork con la fuente invoice-scan', async () => {
+    const { processor, scanner, monitor } = build();
+    scanner.scanInvoiceFromBuffer.mockResolvedValue({ line_items: [] });
+    const j = job();
+    await processor.process(j);
+    expect(monitor.runAiWork).toHaveBeenCalledWith(
+      j,
+      LEGACY_AI_SOURCES.invoiceScan,
+      expect.any(Function),
+    );
+  });
+
+  it('un error 4xx de negocio deja el CODIGO como failedReason (sin reintento)', async () => {
+    const { processor, scanner } = build();
+    scanner.scanInvoiceFromBuffer.mockRejectedValue(
+      new VendixHttpException(ErrorCodes.INV_SCAN_INVALID_FILE),
+    );
+    const p = processor.process(job());
+    await expect(p).rejects.toBeInstanceOf(UnrecoverableError);
+    await expect(p).rejects.toMatchObject({ message: 'INV_SCAN_INVALID_FILE' });
+  });
+
+  it('onFailed delega en el monitor con la fuente y el dueño del job', async () => {
+    const { processor, monitor } = build();
+    const j = job();
+    await processor.onFailed(j);
+    expect(monitor.onFailed).toHaveBeenCalledWith(
+      j,
+      LEGACY_AI_SOURCES.invoiceScan,
+      j.data,
+    );
+    await processor.onFailed(undefined);
+    expect(monitor.onFailed).toHaveBeenCalledTimes(1);
   });
 });

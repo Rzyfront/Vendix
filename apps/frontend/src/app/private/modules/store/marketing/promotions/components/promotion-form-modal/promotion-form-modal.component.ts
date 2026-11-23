@@ -10,6 +10,8 @@ import {
   Validators,
 } from '@angular/forms';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
+import { buildPromotionDate, splitPromotionDate } from '../../utils/promotion-date.util';
 import { startWith } from 'rxjs/operators';
 import { forkJoin, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
@@ -36,6 +38,13 @@ import {
   TextareaComponent,
   SettingToggleComponent,
 } from '../../../../../../../shared/components';
+import {
+  PROMOTION_WEEKDAYS,
+  WEEKDAY_PRESETS,
+  formatWeekdaysLong,
+  normalizeWeekdays,
+  sameDays,
+} from '../../utils/promotion-weekdays.util';
 import { ProductsService } from '../../../../products/services/products.service';
 import { CategoriesService } from '../../../../products/services/categories.service';
 
@@ -390,8 +399,8 @@ interface NormalizedTier {
           </p>
         }
 
-        <!-- Dates + Min purchase -->
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <!-- Vigencia: fecha obligatoria + hora opcional (vacía = todo el día) -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <app-input
             label="Fecha inicio"
             type="date"
@@ -400,10 +409,28 @@ interface NormalizedTier {
             [error]="form.get('start_date')?.touched && form.get('start_date')?.invalid ? 'La fecha de inicio es requerida' : ''"
           ></app-input>
           <app-input
+            label="Hora inicio"
+            type="time"
+            formControlName="start_time"
+            helperText="Opcional. Vacía = desde las 00:00."
+          ></app-input>
+          <app-input
             label="Fecha fin"
             type="date"
             formControlName="end_date"
           ></app-input>
+          <app-input
+            label="Hora fin"
+            type="time"
+            formControlName="end_time"
+            helperText="Opcional. Vacía = todo el día."
+          ></app-input>
+        </div>
+        <p class="text-xs text-text-secondary -mt-1">
+          Las fechas y horas son en la hora de la tienda ({{ storeTimezone() }}).
+        </p>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <app-input
             label="Compra minima"
             type="number"
@@ -411,6 +438,53 @@ interface NormalizedTier {
             placeholder="0"
             [min]="0"
           ></app-input>
+        </div>
+
+        <!-- Días de la semana (zona horaria de la tienda) -->
+        <div class="space-y-2">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <span id="promo-weekdays-label" class="text-sm font-medium text-text-primary">
+              Días en que aplica
+            </span>
+            <div class="flex flex-wrap gap-1.5">
+              @for (preset of weekdayPresets; track preset.key) {
+                <button
+                  type="button"
+                  class="h-8 px-3 rounded-full border text-xs font-medium transition-colors"
+                  [class.bg-primary/10]="isPresetActive(preset.days)"
+                  [class.border-primary/25]="isPresetActive(preset.days)"
+                  [class.text-primary]="isPresetActive(preset.days)"
+                  [class.border-border]="!isPresetActive(preset.days)"
+                  [class.text-text-secondary]="!isPresetActive(preset.days)"
+                  [attr.aria-pressed]="isPresetActive(preset.days)"
+                  (click)="setWeekdays(preset.days)"
+                >
+                  {{ preset.label }}
+                </button>
+              }
+            </div>
+          </div>
+          <div role="group" aria-labelledby="promo-weekdays-label" class="flex flex-wrap gap-2">
+            @for (day of weekdays; track day.value) {
+              <button
+                type="button"
+                class="w-8 h-8 rounded-full border text-sm font-semibold transition-colors"
+                [class.bg-primary]="isDaySelected(day.value)"
+                [class.text-on-primary]="isDaySelected(day.value)"
+                [class.border-primary]="isDaySelected(day.value)"
+                [class.bg-surface]="!isDaySelected(day.value)"
+                [class.text-text-secondary]="!isDaySelected(day.value)"
+                [class.border-border]="!isDaySelected(day.value)"
+                [attr.aria-pressed]="isDaySelected(day.value)"
+                [attr.aria-label]="day.name"
+                [title]="day.name"
+                (click)="toggleWeekday(day.value)"
+              >
+                {{ day.short }}
+              </button>
+            }
+          </div>
+          <p class="text-xs text-text-secondary">{{ weekdaysHint() }}</p>
         </div>
 
         <!-- Limits row -->
@@ -479,10 +553,60 @@ export class PromotionFormModalComponent {
   private categoriesService = inject(CategoriesService);
   private destroyRef = inject(DestroyRef);
   private fb = inject(FormBuilder);
+  private storeSettings = inject(StoreSettingsFacade);
+
+  /** Zona horaria de la tienda: las fechas y horas de la promo viven en ella. */
+  readonly storeTimezone = this.storeSettings.timezone;
 
   form!: FormGroup;
   readonly productOptions = signal<MultiSelectorOption[]>([]);
   readonly categoryOptions = signal<MultiSelectorOption[]>([]);
+
+  readonly weekdays = PROMOTION_WEEKDAYS;
+  readonly weekdayPresets = WEEKDAY_PRESETS;
+
+  /**
+   * Días elegidos (0 = domingo … 6 = sábado), puenteados a signal desde el
+   * control para que los chips se repinten sin zone.js. `[]` = todos los días.
+   */
+  private weekdaysValue!: Signal<number[]>;
+
+  /** Días marcados en los chips; sin restricción se ven los 7 encendidos. */
+  private readonly selectedWeekdays = computed<number[]>(() => {
+    const days = normalizeWeekdays(this.weekdaysValue?.() ?? []);
+    return days.length === 0 ? [0, 1, 2, 3, 4, 5, 6] : days;
+  });
+
+  readonly weekdaysHint = computed(() => {
+    const days = normalizeWeekdays(this.weekdaysValue?.() ?? []);
+    return days.length === 0
+      ? 'Aplica todos los días.'
+      : `Solo aplica los ${formatWeekdaysLong(days)} (hora de la tienda). Fuera de esos días no se aplica ni se muestra.`;
+  });
+
+  isDaySelected(day: number): boolean {
+    return this.selectedWeekdays().includes(day);
+  }
+
+  isPresetActive(days: readonly number[]): boolean {
+    return sameDays(this.weekdaysValue?.() ?? [], days);
+  }
+
+  setWeekdays(days: readonly number[]): void {
+    const control = this.form.get('active_weekdays');
+    control?.setValue(normalizeWeekdays([...days]));
+    control?.markAsDirty();
+  }
+
+  toggleWeekday(day: number): void {
+    const current = this.selectedWeekdays();
+    const next = current.includes(day)
+      ? current.filter((d) => d !== day)
+      : [...current, day];
+    // Quitar el último día no tiene sentido (la promo nunca aplicaría):
+    // se interpreta como volver a "todos los días".
+    this.setWeekdays(next);
+  }
 
   /** Reference to the tier row most recently inserted (drives the entry animation). */
   readonly recentlyAddedTier = signal<AbstractControl | null>(null);
@@ -597,13 +721,16 @@ export class PromotionFormModalComponent {
        */
       quantity_grouping: ['cart_total' as 'cart_total' | 'per_product'],
       start_date: ['', Validators.required],
+      start_time: [''],
       end_date: [''],
+      end_time: [''],
       min_purchase_amount: [null],
       max_discount_amount: [null],
       usage_limit: [null],
       per_customer_limit: [null],
       is_auto_apply: [false],
       priority: [0],
+      active_weekdays: [[] as number[]],
       product_ids: [[]],
       category_ids: [[]],
       quantity_tiers: this.fb.array([]),
@@ -616,6 +743,12 @@ export class PromotionFormModalComponent {
         startWith(this.quantityTiers.getRawValue() as TierFormRawValue[]),
       ),
       { initialValue: [] as TierFormRawValue[] },
+    );
+
+    const weekdaysControl = this.form.get('active_weekdays')!;
+    this.weekdaysValue = toSignal(
+      weekdaysControl.valueChanges.pipe(startWith(weekdaysControl.value)),
+      { initialValue: [] as number[] },
     );
 
     effect(() => {
@@ -830,6 +963,8 @@ export class PromotionFormModalComponent {
   }
 
   private populateForm(promotion: Promotion | null): void {
+    const start = splitPromotionDate(promotion?.start_date, 'start');
+    const end = splitPromotionDate(promotion?.end_date, 'end');
     this.form.reset({
       name: promotion?.name || '',
       description: promotion?.description || '',
@@ -843,17 +978,29 @@ export class PromotionFormModalComponent {
       quantity_grouping:
         (promotion?.quantity_grouping as 'cart_total' | 'per_product' | undefined) ??
         'cart_total',
-      start_date: this.toDateInputValue(promotion?.start_date),
-      end_date: this.toDateInputValue(promotion?.end_date),
+      start_date: start.date,
+      start_time: start.time,
+      end_date: end.date,
+      end_time: end.time,
       min_purchase_amount: promotion?.min_purchase_amount ?? null,
       max_discount_amount: promotion?.max_discount_amount ?? null,
       usage_limit: promotion?.usage_limit ?? null,
       per_customer_limit: promotion?.per_customer_limit ?? null,
       is_auto_apply: promotion?.is_auto_apply ?? false,
       priority: promotion?.priority ?? 0,
+      active_weekdays: normalizeWeekdays(promotion?.active_weekdays ?? []),
       product_ids: promotion?.promotion_products?.map((pp) => pp.product_id) || [],
       category_ids: promotion?.promotion_categories?.map((pc) => pc.category_id) || [],
     }, { emitEvent: false });
+
+    // `reset({ emitEvent: false })` no emite `valueChanges`, y los chips de días
+    // leen el control a través de ese stream: al abrir una promo guardada se
+    // quedaban con el `[]` anterior (los 7 días encendidos). Se re-emite solo
+    // este control (`onlySelf`) para que los chips reflejen los días guardados
+    // sin disparar los efectos del resto del formulario.
+    this.form
+      .get('active_weekdays')
+      ?.updateValueAndValidity({ onlySelf: true });
 
     // Reset the tiers array explicitly (reset() keeps existing FormArray children
     // unless we clear them). Seed rows from the persisted promotion.
@@ -1078,10 +1225,6 @@ export class PromotionFormModalComponent {
       : { required: true };
   }
 
-  private toDateInputValue(value?: string | null): string {
-    return value ? value.split('T')[0] : '';
-  }
-
   private toNumberArray(value: unknown): number[] {
     return Array.isArray(value)
       ? value.map((item) => Number(item)).filter((item) => Number.isFinite(item))
@@ -1101,16 +1244,33 @@ export class PromotionFormModalComponent {
 
     const raw = this.form.getRawValue();
 
-    // Clean up empty optional fields
+    // Campos opcionales vacíos: al CREAR se omiten; al EDITAR se envían como
+    // `null` para que el servidor los limpie. Antes se omitían también al
+    // editar y no había forma de quitar la fecha fin, el código o un límite.
+    const isEdit = !!this.promotion();
     const dto: any = { ...raw };
-    if (!dto.description) delete dto.description;
-    if (!dto.code) delete dto.code;
-    if (!dto.end_date) delete dto.end_date;
-    if (dto.min_purchase_amount === null || dto.min_purchase_amount === '') delete dto.min_purchase_amount;
-    if (dto.max_discount_amount === null || dto.max_discount_amount === '') delete dto.max_discount_amount;
-    if (dto.usage_limit === null || dto.usage_limit === '') delete dto.usage_limit;
-    if (dto.per_customer_limit === null || dto.per_customer_limit === '') delete dto.per_customer_limit;
-    if (dto.type !== 'percentage') delete dto.max_discount_amount;
+    const clearIfEmpty = (key: string, empty: boolean) => {
+      if (!empty) return;
+      if (isEdit) dto[key] = null;
+      else delete dto[key];
+    };
+    const isBlank = (v: unknown) => v === null || v === undefined || v === '';
+    clearIfEmpty('description', !dto.description);
+    clearIfEmpty('code', !dto.code);
+    // Fecha + hora opcional → un solo valor. Sin hora viaja `YYYY-MM-DD` (día
+    // completo de la tienda); con hora, ISO con el offset de la zona de la tienda.
+    const tz = this.storeTimezone();
+    dto.start_date = buildPromotionDate(raw.start_date, raw.start_time, tz);
+    dto.end_date = buildPromotionDate(raw.end_date, raw.end_time, tz);
+    delete dto.start_time;
+    delete dto.end_time;
+    clearIfEmpty('end_date', !dto.end_date);
+    clearIfEmpty('min_purchase_amount', isBlank(dto.min_purchase_amount));
+    clearIfEmpty('max_discount_amount', isBlank(dto.max_discount_amount) || dto.type !== 'percentage');
+    clearIfEmpty('usage_limit', isBlank(dto.usage_limit));
+    clearIfEmpty('per_customer_limit', isBlank(dto.per_customer_limit));
+    // Siempre explícito: `[]` = todos los días (permite quitar la restricción).
+    dto.active_weekdays = normalizeWeekdays(dto.active_weekdays);
 
     // Normalize scope-specific IDs:
     // - Product scope: send product_ids, strip category_ids.

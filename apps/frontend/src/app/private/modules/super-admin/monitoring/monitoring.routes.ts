@@ -43,6 +43,13 @@ export const MONITORING_ROUTES: Routes = [
             (c) => c.MonitoringHealthPage,
           ),
       },
+      {
+        path: 'alerts',
+        loadComponent: () =>
+          import('./pages/alerts/monitoring-alerts.page').then(
+            (c) => c.MonitoringAlertsPage,
+          ),
+      },
     ],
   },
 ];

@@ -1,14 +1,40 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { membership_status_enum } from '@prisma/client';
-import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import { AIMessage } from '../../../ai-engine/interfaces/ai-provider.interface';
-import { parseAiJson } from '../../../ai-engine/utils/ai-json.util';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { ResponseService } from '@common/responses/response.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { AiScanFile } from '@common/ai-scan-jobs/interfaces/ai-scan-job.interface';
 import { AiScanHandlerRegistry } from '@common/ai-scan-jobs/ai-scan-handler.registry';
+import type { AiJobProgress } from '@common/ai-scan-jobs/ai-job-monitor.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
+import {
+  DetectedIngestFile,
+  detectIngestFile,
+  IngestSheetFormat,
+} from '@common/ai-ingest/ingest-file.detector';
+import { SheetParserService } from '@common/ai-ingest/sheets/sheet-parser.service';
+import {
+  AiExtractionError,
+  AiExtractionService,
+  newIngestQuotaKey,
+} from '@common/ai-ingest/extraction/ai-extraction.service';
+import { DocumentPagesService } from '@common/ai-ingest/documents/document-pages.service';
+import { readDocumentWithAi } from '@common/ai-ingest/documents/document-reader';
+import {
+  canDecodeHeic,
+  HEIC_UNSUPPORTED_MESSAGE,
+} from '@common/ai-ingest/images/image-prep';
+import {
+  applyColumnMapping,
+  columnMappingSchema,
+  ColumnMapping,
+  mapColumnsBySynonyms,
+  mergeAiColumnMapping,
+  missingRequiredGroups,
+  unmappedHeadersWithData,
+} from '@common/ai-ingest/sheets/column-mapper';
+import type { SheetTable } from '@common/ai-ingest/ai-ingest.types';
 import { resolveStoreTimezone } from '@common/utils/store-timezone.util';
 import { MembershipPlansService } from '../membership-plans/membership-plans.service';
 import { CustomersService } from '../customers/customers.service';
@@ -21,18 +47,45 @@ import {
   AnalyzedMember,
   PlanMatch,
   RosterScanResult,
+  RosterRowIssue,
+  RosterSkippedRow,
   CommitMemberRosterDto,
   CommitMemberRosterResult,
   CommitMemberResult,
 } from './dto/scan-roster.dto';
 import { UpsertMemberProfileDto } from './dto/upsert-member-profile.dto';
-const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only (export default) but CJS runtime exports the function
+import {
+  detectSheetPlans,
+  MEMBER_ANALYZE_CHUNK,
+  MEMBER_FIELD_DESCRIPTIONS,
+  MEMBER_MAX_SHEET_ROWS,
+  MEMBER_ROSTER_SCHEMA,
+  MEMBER_SHEET_FIELDS,
+  memberDedupeKey,
+  MemberRowRecord,
+  MemberSheetField,
+  membersIngestProfile,
+  normalizeMemberRow,
+} from './member-ingest.profile';
+
+type ReportProgress = (progress: AiJobProgress) => Promise<void>;
+type RosterAnswer = {
+  document_type?: unknown;
+  detected_plans?: unknown[];
+  members?: unknown[];
+  warnings?: unknown[];
+  confidence?: unknown;
+};
+
+const APP_KEY = membersIngestProfile.appKey;
+const SAMPLE_ROWS_FOR_MAPPING = 5;
+const IMAGE_MIMETYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
 /**
  * MemberBulkScannerService — backend of the "Carga masiva de socios por IA"
  * feature. 1:1 calque of `InvoiceScannerService`/`RouteSheetScannerService`:
  *
- *   POST /store/memberships/bulk-scan        → `scanRoster`  (raw OCR)
+ *   POST /store/memberships/bulk-scan/async  → job `member_roster` (raw OCR)
  *   POST /store/memberships/bulk-scan/analyze → `analyzeRoster` (resolve plan/customer)
  *   POST /store/memberships/bulk-scan/commit  → `commitRoster` (persist)
  *
@@ -56,19 +109,13 @@ const sharp: typeof import('sharp').default = require('sharp'); // eslint-disabl
 export class MemberBulkScannerService implements OnModuleInit {
   private readonly logger = new Logger(MemberBulkScannerService.name);
 
-  /** Hard cap driven by the AI app's `max_tokens` (≈200 rows). */
-  private static readonly MAX_MEMBERS_PER_ROSTER = 200;
-
-  /** Mimetypes accepted by both the file interceptor and `scanRoster`. */
-  private static readonly ALLOWED_MIMETYPES = [
-    'image/jpeg',
-    'image/png',
-    'image/webp',
-    'application/pdf',
-  ];
+  /**
+   * Members per `analyze` request (each one costs a few queries). A sheet of
+   * up to 5.000 rows is analyzed by the web in chunks of this size.
+   */
+  private static readonly MAX_MEMBERS_PER_ROSTER = MEMBER_ANALYZE_CHUNK;
 
   constructor(
-    private readonly aiEngine: AIEngineService,
     private readonly prisma: StorePrismaService,
     private readonly membershipPlansService: MembershipPlansService,
     private readonly membershipsService: MembershipsService,
@@ -76,12 +123,17 @@ export class MemberBulkScannerService implements OnModuleInit {
     private readonly customersService: CustomersService,
     private readonly responseService: ResponseService,
     private readonly aiScanRegistry: AiScanHandlerRegistry,
+    private readonly sheetParser: SheetParserService,
+    private readonly aiExtraction: AiExtractionService,
+    private readonly documentPages: DocumentPagesService,
   ) {}
 
   /** Registra el handler async `member_roster` (cola generica `ai-scan`). */
   onModuleInit(): void {
-    this.aiScanRegistry.register<RosterScanResult>('member_roster', ({ files }) =>
-      this.scanRosterFromFiles(files),
+    this.aiScanRegistry.register<RosterScanResult>(
+      'member_roster',
+      ({ files, reportProgress }) =>
+        this.scanRosterFromFiles(files, reportProgress),
     );
   }
 
@@ -100,67 +152,284 @@ export class MemberBulkScannerService implements OnModuleInit {
     return this.scanRosterFromFiles([this.toScanFile(file)]);
   }
 
-  /** Nucleo (buffer + mime, sin multer): sincrono y handler async. */
-  async scanRosterFromFiles(files: AiScanFile[]): Promise<RosterScanResult> {
+  /**
+   * Nucleo (buffer + tipo REAL por firma, sin multer): sincrono y handler
+   * async. ia-cargas F2: hojas de cálculo con código (sinónimos + a lo sumo
+   * UNA llamada de mapeo) y PDF/fotos por páginas con texto nativo primero.
+   */
+  async scanRosterFromFiles(
+    files: AiScanFile[],
+    reportProgress?: ReportProgress,
+  ): Promise<RosterScanResult> {
     const file = files?.[0];
-    this.assertValidScanFile(file);
-
-    const { base64, mimeType } = await this.preprocessImage(file);
-    const dataUri = `data:${mimeType};base64,${base64}`;
-
-    this.logger.debug(
-      `[MemberRosterScan] Sending to AI engine (appKey=member_roster_ocr, size=${file.size}B)...`,
-    );
-
-    const imageMessage: AIMessage = {
-      role: 'user',
-      content: [
-        {
-          type: 'text',
-          text: 'Extract all members and plans from this document. Return ONLY the JSON object matching the schema defined in your system instructions.',
-        },
-        {
-          type: 'image_url',
-          image_url: { url: dataUri, detail: 'high' },
-        },
-      ],
-    };
-
-    const response = await this.aiEngine.run('member_roster_ocr', {}, [
-      imageMessage,
-    ]);
-
-    this.logger.debug(
-      `[MemberRosterScan] AI response: success=${response.success}, contentLength=${response.content?.length ?? 0}, model=${response.model}, error=${response.error}`,
-    );
-    this.logger.debug(
-      `[MemberRosterScan] AI content preview: ${response.content?.substring(0, 300)}`,
-    );
-
-    if (!response.success || !response.content) {
-      this.logger.error(
-        `[MemberRosterScan] AI failed: ${response.error ?? 'no content'}`,
-      );
-      throw new VendixHttpException(ErrorCodes.MEMBER_SCAN_AI_FAIL);
+    const detected = this.assertValidScanFile(file);
+    // One quota key per load: mapping, page batches and repairs charge one job.
+    const quotaKey = newIngestQuotaKey();
+    if (detected.kind === 'sheet') {
+      return this.scanSheet(file, detected.sheetFormat!, reportProgress, quotaKey);
     }
-
-    try {
-      const parsed = parseAiJson(response.content);
-      return this.normalizeScanResponse(parsed);
-    } catch (err: any) {
-      if (err instanceof VendixHttpException) throw err;
-      // Log the FULL raw content (mirrors InvoiceScannerService) so a
-      // truncated payload (roster > max_tokens) is diagnosable in the dev
-      // logs — a cut-off object has no closing brace and cannot be salvaged.
-      this.logger.error(
-        `[MemberRosterScan] Failed to parse AI response (${err?.message}). Raw content: ${response.content}`,
-      );
-      throw new VendixHttpException(ErrorCodes.MEMBER_SCAN_PARSE_FAIL);
-    }
+    return this.scanDocument(file, detected, reportProgress, quotaKey);
   }
 
-  // Defensive JSON parsing now lives in `ai-engine/utils/ai-json.util.ts`,
-  // shared by every OCR scanner instead of re-derived per service.
+  /**
+   * Imagen o PDF: páginas con texto nativo como texto, escaneadas y fotos como
+   * imagen (fotos muy altas en franjas), lotes de 2 páginas con esquema y
+   * progreso por páginas. Nunca el PDF crudo.
+   */
+  private async scanDocument(
+    file: AiScanFile,
+    detected: DetectedIngestFile,
+    reportProgress: ReportProgress | undefined,
+    quotaKey: string,
+  ): Promise<RosterScanResult> {
+    const read = await readDocumentWithAi<RosterAnswer>({
+      file,
+      mimeType: detected.mime,
+      pages: this.documentPages,
+      extraction: this.aiExtraction,
+      appKey: APP_KEY,
+      schema: MEMBER_ROSTER_SCHEMA,
+      instruction:
+        'Extract all members and plans from these pages. Return ONLY the JSON object matching the schema defined in your system instructions. Never invent data.',
+      limits: membersIngestProfile.limits,
+      quotaKey,
+      reportProgress,
+      logLabel: 'MemberRosterScan',
+    });
+
+    const scans = read.answers.map((a) => this.normalizeScanResponse(a));
+    const plans = new Map<string, ExtractedPlan>();
+    for (const plan of scans.flatMap((s) => s.detected_plans)) {
+      const key = this.normalizeForMatch(plan.name);
+      if (key && !plans.has(key)) plans.set(key, plan);
+    }
+    // Consecutive photo strips overlap: the same row may come twice.
+    const seen = new Set<string>();
+    let repeated = 0;
+    const members = scans
+      .flatMap((s) => s.members)
+      .filter((m) => {
+        const key = memberDedupeKey(m);
+        if (!key) return true;
+        if (seen.has(key)) {
+          repeated += 1;
+          return false;
+        }
+        seen.add(key);
+        return true;
+      });
+    const warnings = [...scans.flatMap((s) => s.warnings), ...read.warnings];
+    if (repeated) {
+      warnings.push(
+        `${repeated} socio(s) aparecían repetidos (mismo documento o nombre, plan y fechas) y se cargaron una sola vez.`,
+      );
+    }
+    if (members.length > MEMBER_MAX_SHEET_ROWS) {
+      warnings.push(
+        `El documento tiene ${members.length} socios; solo se cargaron los primeros ${MEMBER_MAX_SHEET_ROWS}. Divide el archivo para cargar el resto.`,
+      );
+    }
+    const kept = members.slice(0, MEMBER_MAX_SHEET_ROWS);
+    const confidences = scans.map((s) => s.confidence).filter((c) => c > 0);
+    return {
+      document_type: scans.find((s) => s.document_type !== 'other')?.document_type ?? 'other',
+      detected_plans: [...plans.values()],
+      members: kept,
+      warnings,
+      confidence: confidences.length ? Math.min(...confidences) : 0,
+      stats: {
+        source: 'document',
+        total_rows: kept.length,
+        imported_rows: kept.length,
+        skipped_rows: 0,
+        mapping: null,
+        pages: read.pages,
+        text_pages: read.textPages,
+      },
+    };
+  }
+
+  /**
+   * Hoja de cálculo (ia-cargas F2): parser determinista de F1 → columnas por
+   * sinónimos (UNA llamada de mapeo solo si faltan obligatorios) → código para
+   * todas las filas. Tope 5.000 filas; lo omitido va a `skipped` con fila.
+   */
+  private async scanSheet(
+    file: AiScanFile,
+    format: IngestSheetFormat,
+    reportProgress: ReportProgress | undefined,
+    quotaKey: string,
+  ): Promise<RosterScanResult> {
+    const progress = async (done: number, total: number, stage: string) => {
+      if (!reportProgress || total <= 0) return;
+      try {
+        await reportProgress({ done, total, stage, unit: 'filas' });
+      } catch {
+        // Progress is best effort.
+      }
+    };
+
+    const parsed = this.sheetParser.parse(file.buffer, format, {
+      maxRows: MEMBER_MAX_SHEET_ROWS,
+    });
+    if (!parsed.tables.length) {
+      throw new VendixHttpException(ErrorCodes.AI_INGEST_INVALID_FILE);
+    }
+    const warnings = [...parsed.warnings];
+    const skipped: RosterSkippedRow[] = [...parsed.skipped];
+    const rowIssues: RosterRowIssue[] = [];
+    const columns: NonNullable<RosterScanResult['columns']> = [];
+    const totalRows = parsed.tables.reduce((n, t) => n + t.rows.length, 0);
+    await progress(0, totalRows, 'Leyendo la hoja');
+
+    let mappingMode: 'synonyms' | 'ai' = 'synonyms';
+    const records: MemberRowRecord[] = [];
+    const multi = parsed.tables.length > 1;
+    let done = 0;
+    for (const table of parsed.tables) {
+      const sheet = multi ? table.sheet : undefined;
+      const { mapping, usedAi } = await this.mapColumns(table, warnings, quotaKey);
+      if (usedAi) mappingMode = 'ai';
+      for (const header of table.headers) {
+        columns.push({ ...(sheet ? { sheet } : {}), column: header, field: mapping.get(header) ?? null });
+      }
+      if (!mapping.size) {
+        warnings.push(
+          `No se reconoció ninguna columna de socios${sheet ? ` en la hoja "${sheet}"` : ''}; revisa los encabezados.`,
+        );
+        if (table.row_numbers.length) {
+          skipped.push({
+            row: table.row_numbers[0],
+            row_end: table.row_numbers[table.row_numbers.length - 1],
+            ...(sheet ? { sheet } : {}),
+            reason: 'unreadable',
+            message: 'La hoja no tiene columnas de socios reconocibles.',
+          });
+        }
+        done += table.rows.length;
+        continue;
+      }
+      const ignored = table.headers.filter((h) => !mapping.has(h));
+      if (ignored.length) {
+        warnings.push(`Columnas ignoradas${sheet ? ` en "${sheet}"` : ''}: ${ignored.join(', ')}.`);
+      }
+
+      const seen = new Set<string>();
+      table.rows.forEach((row, i) => {
+        const ctx = { row: table.row_numbers[i], ...(sheet ? { sheet } : {}) };
+        const { record, issues, skipMessage } = normalizeMemberRow(applyColumnMapping(row, mapping), ctx);
+        rowIssues.push(...issues);
+        if (!record) {
+          skipped.push({ ...ctx, reason: 'unreadable', message: skipMessage ?? 'Fila sin datos de socio.' });
+          return;
+        }
+        const key = memberDedupeKey(record.member);
+        if (key && seen.has(key)) {
+          skipped.push({
+            ...ctx,
+            reason: 'duplicate',
+            message: 'Repite a un socio de una fila anterior con el mismo plan y fechas.',
+          });
+          return;
+        }
+        if (key) seen.add(key);
+        records.push(record);
+      });
+      done += table.rows.length;
+      await progress(done, totalRows, 'Leyendo la hoja');
+    }
+
+    const byPosition = (a: { row: number; sheet?: string }, b: { row: number; sheet?: string }) =>
+      (a.sheet ?? '').localeCompare(b.sheet ?? '') || a.row - b.row;
+    skipped.sort(byPosition);
+    rowIssues.sort(byPosition);
+    const omitted = skipped.reduce((n, s) => n + (s.row_end ? s.row_end - s.row + 1 : 1), 0);
+    if (omitted) {
+      warnings.push(`${omitted} fila(s) no se cargaron; mira "Filas omitidas" para ver cuáles y por qué.`);
+    }
+    await progress(totalRows, totalRows, 'Preparando la vista previa');
+
+    return {
+      document_type: 'spreadsheet',
+      detected_plans: detectSheetPlans(records),
+      members: records.map((r) => r.member),
+      warnings,
+      // Read by code, not guessed: the low-confidence banner does not apply.
+      confidence: 100,
+      skipped,
+      row_issues: rowIssues,
+      columns,
+      stats: {
+        source: 'sheet',
+        total_rows: parsed.total_rows,
+        imported_rows: records.length,
+        skipped_rows: omitted,
+        mapping: mappingMode,
+      },
+    };
+  }
+
+  /**
+   * Encabezados → campos. Primero sinónimos; si no cubren los obligatorios (o
+   * falta el documento y queda una columna con datos sin mapear), UNA llamada
+   * con encabezados + 5 filas de muestra devuelve el mapeo, que luego se
+   * aplica con código a todas las filas.
+   */
+  private async mapColumns(
+    table: SheetTable,
+    warnings: string[],
+    quotaKey: string,
+  ): Promise<{ mapping: ColumnMapping<MemberSheetField>; usedAi: boolean }> {
+    const profile = membersIngestProfile;
+    const synonyms = mapColumnsBySynonyms<MemberSheetField>(table.headers, profile.columnSynonyms);
+    const missing = missingRequiredGroups(synonyms, profile.requiredFields);
+    const sample = table.rows.slice(0, SAMPLE_ROWS_FOR_MAPPING);
+    const wantedMissing =
+      !missing.length &&
+      missingRequiredGroups(synonyms, profile.wantedFields ?? []).length > 0 &&
+      unmappedHeadersWithData(table.headers, synonyms, sample).length > 0;
+    if (!missing.length && !wantedMissing) return { mapping: synonyms, usedAi: false };
+
+    const fieldList = MEMBER_SHEET_FIELDS.map((f) => `- ${f}: ${MEMBER_FIELD_DESCRIPTIONS[f]}`).join('\n');
+    const message: AIMessage = {
+      role: 'user',
+      content: [
+        'TASK FOR THIS REQUEST (it replaces the output format of your instructions): do NOT extract members.',
+        'Map each column of a gym/club member spreadsheet to ONE member field, or "ignore".',
+        'Return ONLY a JSON object: {"columns":[{"column":"<exact column name>","field":"<field or ignore>"}],"warnings":[]}.',
+        'Use each field at most once. Use the sample values, not only the column names.',
+        'Fields:',
+        fieldList,
+        `Columns: ${JSON.stringify(table.headers)}`,
+        `Sample rows: ${JSON.stringify(sample)}`,
+      ].join('\n'),
+    };
+    try {
+      const answer = await this.aiExtraction.extract<{
+        columns?: { column?: unknown; field?: unknown }[];
+      }>({
+        appKey: APP_KEY,
+        schema: columnMappingSchema(MEMBER_SHEET_FIELDS),
+        messages: [message],
+        quotaKey,
+      });
+      return {
+        mapping: mergeAiColumnMapping(synonyms, table.headers, MEMBER_SHEET_FIELDS, answer),
+        usedAi: true,
+      };
+    } catch (error) {
+      // Required mapping and the AI is down: the job fails (and is retried).
+      // An unreadable answer, or an optional call, falls back to the synonyms.
+      if (!wantedMissing && (!(error instanceof AiExtractionError) || error.failure === 'ai_failed')) {
+        throw error instanceof AiExtractionError ? error.toHttpException() : error;
+      }
+      this.logger.warn(
+        `[MemberRosterScan] column mapping by AI failed (${error instanceof AiExtractionError ? error.failure : 'error'}); using synonyms only`,
+      );
+      warnings.push('No se pudieron reconocer todas las columnas; revisa nombres y documentos en la vista previa.');
+      return { mapping: synonyms, usedAi: false };
+    }
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   // /analyze
@@ -172,7 +441,16 @@ export class MemberBulkScannerService implements OnModuleInit {
    * the frontend modal binds to. Never throws per row — collects per-row
    * warnings/errors into the `status` flag.
    */
-  async analyzeRoster(scan: RosterScanResult): Promise<MemberRosterAnalysis> {
+  async analyzeRoster(
+    scan: RosterScanResult,
+    /**
+     * ia-cargas F2 — members before this chunk in the whole load, so
+     * `row_number` stays unique when the web analyzes a big sheet in parts.
+     */
+    rowOffset = 0,
+  ): Promise<MemberRosterAnalysis> {
+    const offset =
+      Number.isInteger(rowOffset) && rowOffset > 0 ? rowOffset : 0;
     const storeId = RequestContextService.getContext()?.store_id;
     if (!storeId) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
@@ -249,7 +527,7 @@ export class MemberBulkScannerService implements OnModuleInit {
 
     for (let i = 0; i < members.length; i++) {
       const raw = members[i];
-      const row_number = i + 1;
+      const row_number = offset + i + 1;
 
       // 1) Customer resolution (document first, then email).
       let existingCustomerId: number | null = null;
@@ -485,6 +763,11 @@ export class MemberBulkScannerService implements OnModuleInit {
       };
     }
 
+    const plansResolved = [...refToPlanId].map(([ref_index, plan_id]) => ({
+      ref_index,
+      plan_id,
+    }));
+
     // ── Phase 2: members (best-effort) ────────────────────────────────────
     const results: CommitMemberResult[] = [];
     let succeeded = 0;
@@ -577,6 +860,7 @@ export class MemberBulkScannerService implements OnModuleInit {
       failed,
       results,
       plan_errors: [],
+      plans_resolved: plansResolved,
     };
   }
 
@@ -598,63 +882,46 @@ export class MemberBulkScannerService implements OnModuleInit {
     };
   }
 
-  private assertValidScanFile(file?: AiScanFile): asserts file is AiScanFile {
+  /**
+   * Tipo REAL por firma (no el `mimetype` del cliente ni el que la cola
+   * reconstruye desde la key de S3) y tamaño por tipo.
+   */
+  private assertValidScanFile(file?: AiScanFile): DetectedIngestFile {
     if (!file) {
       throw new VendixHttpException(ErrorCodes.MEMBER_SCAN_NO_FILE);
     }
-    if (!MemberBulkScannerService.ALLOWED_MIMETYPES.includes(file.mimeType)) {
-      throw new VendixHttpException(ErrorCodes.MEMBER_SCAN_INVALID_FILE);
-    }
-  }
-
-  /**
-   * Reused verbatim from `InvoiceScannerService.preprocessImage` and
-   * `RouteSheetScannerService.preprocessImage` (both 1:1 calques of each
-   * other). Copy-on-purpose: extracting to a shared helper would require
-   * moving the method on the source services and risks subtle behaviour
-   * drift in working callers. Kept identical (same constants, same
-   * fall-through to raw buffer for PDFs).
-   */
-  private async preprocessImage(
-    file: AiScanFile,
-  ): Promise<{ base64: string; mimeType: string }> {
-    const MAX_DIMENSION = 1536;
-    const JPEG_QUALITY = 85;
-
-    try {
-      const metadata = await sharp(file.buffer).metadata();
-      const needsResize =
-        (metadata.width && metadata.width > MAX_DIMENSION) ||
-        (metadata.height && metadata.height > MAX_DIMENSION);
-
-      let pipeline = sharp(file.buffer);
-
-      if (needsResize) {
-        pipeline = pipeline.resize(MAX_DIMENSION, MAX_DIMENSION, {
-          fit: 'inside',
-          withoutEnlargement: true,
-        });
+    const detected = detectIngestFile(file);
+    const { maxBytes } = membersIngestProfile.limits;
+    if (detected?.kind === 'sheet') {
+      if (file.size > maxBytes.sheet) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_VALIDATION_001,
+          'Las hojas de cálculo no pueden superar 5 MB.',
+        );
       }
-
-      const processedBuffer = await pipeline
-        .jpeg({ quality: JPEG_QUALITY })
-        .toBuffer();
-
-      return {
-        base64: processedBuffer.toString('base64'),
-        mimeType: 'image/jpeg',
-      };
-    } catch (err) {
-      // PDFs and unsupported mimetypes fall through to the raw buffer so
-      // the vision model processes them natively.
-      this.logger.warn(
-        `[MemberRosterScan] Image preprocessing failed, using raw: ${err.message}`,
-      );
-      return {
-        base64: file.buffer.toString('base64'),
-        mimeType: file.mimeType,
-      };
+      return detected;
     }
+    if (
+      detected &&
+      (detected.kind === 'pdf' ||
+        IMAGE_MIMETYPES.includes(detected.mime) ||
+        (detected.mime === 'image/heic' && canDecodeHeic()))
+    ) {
+      if (file.size > maxBytes.pdf) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_VALIDATION_001,
+          'Las imágenes y PDF no pueden superar 10 MB.',
+        );
+      }
+      return detected;
+    }
+    if (detected?.mime === 'image/heic') {
+      throw new VendixHttpException(
+        ErrorCodes.AI_INGEST_UNSUPPORTED_TYPE,
+        HEIC_UNSUPPORTED_MESSAGE,
+      );
+    }
+    throw new VendixHttpException(ErrorCodes.MEMBER_SCAN_INVALID_FILE);
   }
 
   /**

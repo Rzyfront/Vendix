@@ -80,6 +80,16 @@ Orden del deploy (no reordenar):
 
 Rollback: `docker start <slot_viejo>`, reapuntar el upstream a su puerto, `nginx -t && nginx -s reload`, health publico. Funciona mientras el slot viejo siga detenido y no se haya vuelto a desplegar sobre el.
 
+### Variables de entorno obligatorias por funcion
+
+Viven en `/opt/vendix/.env` (las lee `--env-file` de cada contenedor; el workflow no las crea).
+
+| Variable | Valor en prod | Si falta |
+| --- | --- | --- |
+| `VENDIX_PLATFORM_ORG_ID` | `1` (id de la org `is_platform`, "Vendix Platform") | El enlace CRM ↔ organizacion cliente (`/api/store/platform-crm/*`) responde 404 a todos, incluida la tienda de Vendix Platform: falla cerrado. Tambien es el respaldo de `PlatformOrgService` cuando no hay fila `is_platform`. |
+
+Alta antes del primer deploy que la necesite: `sudo grep -q '^VENDIX_PLATFORM_ORG_ID=' /opt/vendix/.env || echo 'VENDIX_PLATFORM_ORG_ID=1' | sudo tee -a /opt/vendix/.env`, y verificar que coincide con `SELECT id FROM organizations WHERE is_platform`.
+
 **Por que nunca rol `all`**: `all` arranca API + procesos de background (colas, cron, SSE) en el mismo proceso. Con dos slots, uno detenido y el otro activo, no pasa nada; pero durante la ventana de solape `all` duplicaria workers/cron y consumiria el doble de memoria. El API usa rol `api`; el trabajo de fondo vive solo en `vendix-backend-worker`.
 
 ## Disk / Docker Cleanup

@@ -1,8 +1,9 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { of } from 'rxjs';
+import { Observable, of } from 'rxjs';
 
 import { InvoiceScannerModalComponent } from './invoice-scanner-modal.component';
 import { InvoiceScannerService } from '../../services/invoice-scanner.service';
+import { AiScanJobService } from '../../../../../../../core/services/ai-scan-job.service';
 import { UomService } from '../../../services/uom.service';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import { SuppliersService } from '../../../services/suppliers.service';
@@ -94,9 +95,19 @@ const buildProductsStub = () =>
 
 const buildScannerStub = () =>
   ({
-    scanInvoiceAndWait: () => of(null),
+    scanEnqueueUrl: () => '/scan/async',
+    scanStatusUrl: (id: string) => `/scan/async/${id}`,
+    scanFormData: () => new FormData(),
+    revalidateEnqueueUrl: () => '/scan/revalidate',
+    revalidateStatusUrl: (id: string) => `/scan/revalidate/${id}`,
     matchProducts: () => of(null),
   }) as unknown as InvoiceScannerService;
+
+/** `AiScanJobService` doble: la espera real se prueba en su propio spec. */
+const aiScanJobsStub = {
+  enqueueAndWait: (): Observable<unknown> => of(null),
+  resume: () => null,
+};
 
 const buildUomStub = () =>
   ({
@@ -114,6 +125,7 @@ describe('InvoiceScannerModalComponent — QUI-855 multi-impuesto por línea', (
       imports: [InvoiceScannerModalComponent],
       providers: [
         { provide: InvoiceScannerService, useFactory: buildScannerStub },
+        { provide: AiScanJobService, useValue: aiScanJobsStub },
         { provide: UomService, useFactory: buildUomStub },
         { provide: ToastService, useFactory: buildToastStub },
         { provide: SuppliersService, useFactory: buildSuppliersStub },
@@ -221,7 +233,7 @@ describe('InvoiceScannerModalComponent — QUI-855 multi-impuesto por línea', (
 
   function scanWith(item: MatchedLineItem): void {
     const scanner = TestBed.inject(InvoiceScannerService) as any;
-    scanner.scanInvoiceAndWait = () => of(buildScan());
+    aiScanJobsStub.enqueueAndWait = () => of(buildScan());
     scanner.matchProducts = () =>
       of({ success: true, data: { ...buildMatch(false), items: [item] } });
     component.selectedFile.set(new File(['x'], 'factura.png'));

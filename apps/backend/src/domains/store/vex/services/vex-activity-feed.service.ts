@@ -7,6 +7,10 @@ import {
   isUiAuditEntry,
   summarizeAgentArgs,
 } from '../../vexi/vexi-activity.service';
+import {
+  ConversationAgentKey,
+  conversationAgentWhere,
+} from './agent-conversation-filter';
 
 export type FeedCategory = 'sale' | 'inventory' | 'cash' | 'alert' | 'agent';
 
@@ -203,12 +207,24 @@ export class VexActivityFeedService {
 
   // ── applied agent actions ─────────────────────────────────────────────
 
-  private async recentAgentActions(limit: number): Promise<ActivityFeedEntry[]> {
+  /**
+   * Applied actions, newest first, up to `limit`. With `agent`, the agent
+   * filter goes into the query, so the scan window and the cut only ever see
+   * that agent's messages (the store history pages one agent through it).
+   */
+  async recentAgentActions(
+    limit: number,
+    agent?: ConversationAgentKey,
+  ): Promise<ActivityFeedEntry[]> {
     // No tenant predicate written here on purpose: `ai_messages` is a
     // relationally-scoped model and the extension injects the conversation
-    // filter — see `VexiActivityService.list`.
+    // filter — see `VexiActivityService.list`. An agent filter on
+    // `conversation` does not replace it: the scoped client ANDs both.
     const messages = await this.prisma.ai_messages.findMany({
-      where: { tool_calls: { not: null } },
+      where: {
+        tool_calls: { not: null },
+        ...(agent && { conversation: conversationAgentWhere(agent) }),
+      },
       orderBy: { id: 'desc' },
       take: SCAN_WINDOW,
       select: {

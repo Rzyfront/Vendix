@@ -191,6 +191,9 @@ describe('PaymentsService', () => {
     };
 
     const mockPromotionEngine = {
+      // Casilla única de código: por defecto ningún código es de promoción.
+      resolveDiscountCode: jest.fn().mockResolvedValue({ kind: 'none' }),
+      quoteWithPromotionCode: jest.fn(),
       quoteDiscounts: jest.fn(),
       applyPromotion: jest.fn(),
       validatePromotion: jest.fn(),
@@ -1117,6 +1120,65 @@ describe('PaymentsService', () => {
    * `calculatePosCouponDiscount` delegates to `CouponsService.validate` and
    * intentionally ignores any `discount_amount` sent by the frontend.
    */
+  /**
+   * Casilla única de código: un código que no es cupón pero sí promoción se
+   * cotiza en el motor de promociones (manual) y no pasa por cupones.
+   */
+  describe('código de promoción en la casilla de cupón', () => {
+    const dto: any = {
+      coupon_code: 'MARTES20',
+      items: [
+        { product_id: 10, quantity: 1, unit_price: 100, final_unit_price: 100 },
+      ],
+    };
+
+    it('la promoción por código entra al quote y el cupón queda en 0', async () => {
+      (promotionEngine.resolveDiscountCode as jest.Mock).mockResolvedValue({
+        kind: 'promotion',
+        promotion_id: 800,
+      });
+      const quote = {
+        subtotal: 100,
+        total_discount: 20,
+        promotional_subtotal: 80,
+        applied_promotions: [],
+        items: [],
+        order_promotions_snapshot: [{ promotion_id: 800, discount_amount: 20 }],
+      };
+      (promotionEngine.quoteWithPromotionCode as jest.Mock).mockResolvedValue({
+        quote,
+        code_discount: 20,
+      });
+
+      const result = await (service as any).calculatePosPromotionQuote(dto);
+      expect(promotionEngine.quoteWithPromotionCode).toHaveBeenCalledWith(
+        expect.objectContaining({ manual_promotion_ids: [] }),
+        800,
+      );
+      expect(result.order_promotions_snapshot).toEqual([
+        { promotion_id: 800, discount_amount: 20 },
+      ]);
+
+      const coupon = await (service as any).calculatePosCouponDiscount(dto, 100, 20);
+      expect(coupon).toEqual({ coupon_id: null, coupon_code: null, discount_amount: 0 });
+      expect(couponsService.validate).not.toHaveBeenCalled();
+    });
+
+    it('si el código no aplica hoy, el error llega al cajero (no se cobra distinto)', async () => {
+      (promotionEngine.resolveDiscountCode as jest.Mock).mockResolvedValue({
+        kind: 'promotion',
+        promotion_id: 800,
+      });
+      const err = Object.assign(new Error('no aplica hoy'), {
+        response: { error_code: 'PROMOTION_NOT_TODAY_001' },
+      });
+      (promotionEngine.quoteWithPromotionCode as jest.Mock).mockRejectedValue(err);
+      await expect(
+        (service as any).calculatePosPromotionQuote(dto),
+      ).rejects.toBe(err);
+    });
+  });
+
   describe('calculatePosCouponDiscount (POS server-side recalculation)', () => {
     const baseDto: any = {
       items: [

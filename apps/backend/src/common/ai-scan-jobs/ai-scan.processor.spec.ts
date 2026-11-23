@@ -7,14 +7,18 @@ import { AiScanProcessor } from './ai-scan.processor';
 import { AiScanHandlerRegistry } from './ai-scan-handler.registry';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
+import { AiJobMonitorService } from './ai-job-monitor.service';
+import { noteProviderOutcome } from '../../ai-engine/provider-failure-recorder';
 
 describe('AiScanProcessor', () => {
   let registry: AiScanHandlerRegistry;
   let s3: { downloadFile: jest.Mock };
   let processor: AiScanProcessor;
+  let incidents: { report: jest.Mock };
   const job = (over: any = {}) =>
     ({
       id: '1',
+      updateProgress: jest.fn().mockResolvedValue(undefined),
       data: {
         kind: 'rut',
         context: { store_id: 5, organization_id: 2, user_id: 7, is_super_admin: false, request_id: 'r1' },
@@ -27,7 +31,11 @@ describe('AiScanProcessor', () => {
   beforeEach(() => {
     registry = new AiScanHandlerRegistry();
     s3 = { downloadFile: jest.fn().mockResolvedValue(Buffer.from('abc')) };
-    processor = new AiScanProcessor(registry, s3 as any);
+    incidents = { report: jest.fn().mockResolvedValue({}) };
+    const monitor = new AiJobMonitorService(incidents as any, {
+      getPlatformOrganizationId: jest.fn().mockResolvedValue(1),
+    } as any);
+    processor = new AiScanProcessor(registry, s3 as any, monitor);
   });
 
   it('kind desconocido -> UnrecoverableError', async () => {
@@ -77,5 +85,60 @@ describe('AiScanProcessor', () => {
       throw new Error('x');
     });
     await expect(processor.process(job())).rejects.toThrow('x');
+  });
+
+  describe('QUI-1020', () => {
+    it('proveedor sin créditos + *_AI_FAIL del handler -> UnrecoverableError(AI_PROVIDER_003)', async () => {
+      registry.register('rut', async () => {
+        noteProviderOutcome({ success: false, failure_reason: 'credits' });
+        throw new VendixHttpException(ErrorCodes.RUT_SCAN_AI_FAIL);
+      });
+      const p = processor.process(job());
+      await expect(p).rejects.toBeInstanceOf(UnrecoverableError);
+      await expect(p).rejects.toThrow('AI_PROVIDER_003');
+    });
+
+    it('429 persistente del proveedor -> Error reintentable AI_PROVIDER_004', async () => {
+      registry.register('rut', async () => {
+        noteProviderOutcome({ success: false, failure_reason: 'rate_limited' });
+        throw new VendixHttpException(ErrorCodes.RUT_SCAN_AI_FAIL);
+      });
+      const p = processor.process(job());
+      await expect(p).rejects.not.toBeInstanceOf(UnrecoverableError);
+      await expect(p).rejects.toThrow('AI_PROVIDER_004');
+    });
+
+    it('el handler puede reportar progreso real y queda en el job', async () => {
+      const j = job();
+      registry.register('rut', async ({ reportProgress }) => {
+        await reportProgress?.({ done: 1, total: 3, stage: 'Leyendo páginas' });
+        return { ok: 1 };
+      });
+      await processor.process(j);
+      // `at`: when it reported, so a long job that keeps advancing is not stalled.
+      expect(j.updateProgress).toHaveBeenCalledWith({
+        done: 1,
+        total: 3,
+        stage: 'Leyendo páginas',
+        at: expect.any(Number),
+      });
+    });
+
+    it('fallo final -> aviso al equipo; fallo con reintento pendiente -> nada', async () => {
+      await processor.onFailed(
+        job({ kind: 'rut' }) as any,
+      );
+      expect(incidents.report).not.toHaveBeenCalled();
+      const final = Object.assign(job(), {
+        failedReason: 'RUT_SCAN_AI_FAIL',
+        finishedOn: Date.now(),
+      });
+      await processor.onFailed(final);
+      expect(incidents.report).toHaveBeenCalledTimes(1);
+      expect(incidents.report.mock.calls[0][0]).toMatchObject({
+        dedupeKey: 'ai-job:technical:ai-scan:rut:RUT_SCAN_AI_FAIL',
+        title: 'Proceso de IA falló: escaneo del RUT',
+      });
+    });
   });
 });

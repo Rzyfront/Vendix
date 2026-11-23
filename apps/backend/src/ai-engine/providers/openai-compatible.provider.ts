@@ -1,5 +1,7 @@
 import OpenAI from 'openai';
 import { providerFailureMetadata } from './provider-failure';
+import { GeminiSpeechProvider } from './gemini-speech.provider';
+import { sampleRateFromMime, wrapPcmAsWav } from './pcm-wav.util';
 import {
   canonicalAgentTools,
   reportedAgentUsage,
@@ -142,6 +144,7 @@ export class OpenAICompatibleProvider implements AIProvider {
               tool_choice: options.tool_choice as any,
             }),
             ...this.reasoningControl(options),
+            ...this.responseFormat(options),
           },
           ...(deadline
             ? ([{ signal: deadline.signal }] as const)
@@ -242,6 +245,23 @@ export class OpenAICompatibleProvider implements AIProvider {
     }
   }
 
+  /**
+   * ai-ingest structured output. Opt-in: only a config that declares
+   * `settings.supports_json_schema: true` gets `response_format` on the wire;
+   * any other config receives exactly the request it received before.
+   */
+  private responseFormat(options?: AIRequestOptions): Record<string, unknown> {
+    const rs = options?.responseSchema;
+    if (!rs || options?.agenticStream || options?.tools?.length) return {};
+    if (this.config.settings?.supports_json_schema !== true) return {};
+    return {
+      response_format: {
+        type: 'json_schema',
+        json_schema: { name: rs.name, strict: true, schema: rs.schema },
+      },
+    };
+  }
+
   async complete(
     prompt: string,
     options?: AIRequestOptions,
@@ -312,6 +332,7 @@ export class OpenAICompatibleProvider implements AIProvider {
       return {
         success: false,
         error: error.message || 'OpenAI-compatible image generation failed',
+        ...providerFailureMetadata(error),
       };
     }
   }
@@ -424,6 +445,13 @@ export class OpenAICompatibleProvider implements AIProvider {
       this.config.settings?.speech_model ||
       this.config.modelId;
 
+    // Gemini TTS served through this endpoint (OpenRouter) only produces raw
+    // PCM and has no speed parameter: any other `response_format` is refused
+    // ("Gemini TTS only supports response_format=\"pcm\""), so the requested
+    // format and speed are not sent, and the PCM is wrapped as WAV below —
+    // the same contract as the direct GeminiSpeechProvider.
+    const geminiTts = this.isGeminiSpeechModel(model);
+
     try {
       const body: Record<string, any> = {
         model,
@@ -433,17 +461,19 @@ export class OpenAICompatibleProvider implements AIProvider {
           this.config.settings?.speech_voice ||
           this.config.settings?.voice ||
           this.getDefaultSpeechVoice(model),
-        ...(options?.responseFormat ||
-        this.config.settings?.response_format ||
-        this.config.settings?.speech_response_format
-          ? {
-              response_format:
-                options?.responseFormat ||
-                this.config.settings?.response_format ||
-                this.config.settings?.speech_response_format,
-            }
-          : {}),
-        ...(options?.speed || this.config.settings?.speed
+        ...(geminiTts
+          ? { response_format: 'pcm' }
+          : options?.responseFormat ||
+              this.config.settings?.response_format ||
+              this.config.settings?.speech_response_format
+            ? {
+                response_format:
+                  options?.responseFormat ||
+                  this.config.settings?.response_format ||
+                  this.config.settings?.speech_response_format,
+              }
+            : {}),
+        ...(!geminiTts && (options?.speed || this.config.settings?.speed)
           ? { speed: options?.speed || this.config.settings?.speed }
           : {}),
         ...(options?.provider || this.config.settings?.provider_preferences
@@ -465,12 +495,29 @@ export class OpenAICompatibleProvider implements AIProvider {
       }
 
       const buffer = Buffer.from(await response.arrayBuffer());
+      const providerContentType = response.headers.get('content-type');
+
+      if (
+        geminiTts &&
+        buffer.length > 0 &&
+        !this.isAudioContainer(buffer, providerContentType)
+      ) {
+        return {
+          success: true,
+          audioBase64: wrapPcmAsWav(
+            buffer,
+            sampleRateFromMime(providerContentType),
+          ).toString('base64'),
+          contentType: 'audio/wav',
+          generationId: response.headers.get('x-generation-id') || undefined,
+          model,
+        };
+      }
 
       return {
         success: buffer.length > 0,
         audioBase64: buffer.toString('base64'),
-        contentType:
-          response.headers.get('content-type') || 'application/octet-stream',
+        contentType: providerContentType || 'application/octet-stream',
         generationId: response.headers.get('x-generation-id') || undefined,
         model,
         error: buffer.length ? undefined : 'Speech model returned no audio',
@@ -2054,7 +2101,29 @@ export class OpenAICompatibleProvider implements AIProvider {
       return 'Eve';
     }
 
+    // `alloy` is an OpenAI voice; Gemini refuses it with a 400.
+    if (this.isGeminiSpeechModel(model)) {
+      return GeminiSpeechProvider.DEFAULT_VOICE;
+    }
+
     return 'alloy';
+  }
+
+  /** `google/gemini-3.8-flash-lite-tts`, `gemini-2.5-flash-preview-tts`, … */
+  private isGeminiSpeechModel(model: string): boolean {
+    const name = model.toLowerCase().split('/').pop() || '';
+    return name.includes('gemini') && /(^|[-_.])tts([-_.]|$)/.test(name);
+  }
+
+  /** Already playable as returned: a WAV/MP3/OGG… body, not headerless PCM. */
+  private isAudioContainer(
+    buffer: Buffer,
+    contentType: string | null,
+  ): boolean {
+    if (buffer.length >= 4 && buffer.toString('ascii', 0, 4) === 'RIFF') {
+      return true;
+    }
+    return /wav|wave|mpeg|mp3|ogg|opus|aac|flac|webm/i.test(contentType || '');
   }
 
   private mapImageUsage(usage: any): AIImageResponse['usage'] {

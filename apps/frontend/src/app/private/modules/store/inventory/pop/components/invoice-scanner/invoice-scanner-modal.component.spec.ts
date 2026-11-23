@@ -1,8 +1,10 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { of } from 'rxjs';
+import { Observable, of, throwError } from 'rxjs';
 
 import { InvoiceScannerModalComponent } from './invoice-scanner-modal.component';
 import { InvoiceScannerService } from '../../services/invoice-scanner.service';
+import { AiScanJobError } from '../../../../../../../core/utils/ai-job-error';
+import { AiScanJobService } from '../../../../../../../core/services/ai-scan-job.service';
 import { UomService } from '../../../services/uom.service';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import { SuppliersService } from '../../../services/suppliers.service';
@@ -94,9 +96,19 @@ const buildProductsStub = () =>
 
 const buildScannerStub = () =>
   ({
-    scanInvoiceAndWait: () => of(null),
+    scanEnqueueUrl: () => '/scan/async',
+    scanStatusUrl: (id: string) => `/scan/async/${id}`,
+    scanFormData: () => new FormData(),
+    revalidateEnqueueUrl: () => '/scan/revalidate',
+    revalidateStatusUrl: (id: string) => `/scan/revalidate/${id}`,
     matchProducts: () => of(null),
   }) as unknown as InvoiceScannerService;
+
+/** `AiScanJobService` doble: la espera real se prueba en su propio spec. */
+const buildAiScanJobsStub = () => ({
+  enqueueAndWait: () => of(null),
+  resume: () => null,
+});
 
 const buildUomStub = () =>
   ({
@@ -122,6 +134,7 @@ describe('InvoiceScannerModalComponent — QUI-845 proveedor nuevo en el confirm
       imports: [InvoiceScannerModalComponent],
       providers: [
         { provide: InvoiceScannerService, useFactory: buildScannerStub },
+        { provide: AiScanJobService, useValue: buildAiScanJobsStub() },
         { provide: UomService, useFactory: buildUomStub },
         { provide: ToastService, useFactory: buildToastStub },
         { provide: SuppliersService, useFactory: buildSuppliersStub },
@@ -234,5 +247,165 @@ describe('InvoiceScannerModalComponent — QUI-845 proveedor nuevo en el confirm
 
     expect((component as any).supplierConfirmDeclined).toBe(false);
     expect((component as any).pendingSupplierConfirm).toBe(false);
+  });
+
+  /**
+   * ia-cargas F3 — el tope de una OC es PURCHASE_ORDER_CREATE_ITEMS_MAX
+   * (10.000), no 100: el 100 es por solicitud de líneas sin resolver y el POP
+   * las resuelve por lotes antes de crear la orden.
+   */
+  describe('tope de líneas de la OC', () => {
+    const items = (n: number): MatchedLineItem[] =>
+      Array.from({ length: n }, (_, i) => ({ ...buildItem(), description: `L${i + 1}` }));
+    const overLimitAlert = () =>
+      fixture.nativeElement.querySelector('[data-testid="pop-scan-over-limit"]');
+
+    it('el tope es 10.000 (el del backend), no 100', () => {
+      expect(component.PURCHASE_ORDER_CREATE_ITEMS_MAX).toBe(10000);
+      expect(component.orderLimitLabel).toBe('10.000');
+    });
+
+    it('factura de 130 líneas: sin aviso rojo', () => {
+      component.scanResult.set(buildScan());
+      component.matchResult.set(buildMatch(false));
+      component.editableItems.set(items(130));
+      fixture.detectChanges();
+      expect(component.overOrderLimit()).toBe(false);
+      expect(overLimitAlert()).toBeNull();
+    });
+
+    it('factura de 2.000 líneas: sin aviso', () => {
+      component.editableItems.set(items(2000));
+      expect(component.overOrderLimit()).toBe(false);
+    });
+
+    it('más de 10.000 líneas activas: sí avisa; descartar hasta el tope lo quita', () => {
+      component.editableItems.set(items(10001));
+      expect(component.overOrderLimit()).toBe(true);
+      component.discardedIndexes.set(new Set([0]));
+      expect(component.overOrderLimit()).toBe(false);
+    });
+  });
+});
+/**
+ * QUI-1020 — la espera del escaneo es de `AiScanJobService`: el modal solo
+ * pinta la barra, conserva el archivo al fallar y retoma el trabajo en curso.
+ */
+describe('InvoiceScannerModalComponent — QUI-1020 barra, reintento y reenganche', () => {
+  let fixture: ComponentFixture<InvoiceScannerModalComponent>;
+  let component: InvoiceScannerModalComponent;
+  let jobs: {
+    enqueueAndWait: jasmine.Spy;
+    resume: jasmine.Spy;
+    pendingResume: jasmine.Spy;
+  };
+
+  const FILE = () => new File(['x'], 'factura.pdf', { type: 'application/pdf' });
+
+  function setup(): void {
+    const scanner = {
+      ...buildScannerStub(),
+      matchProducts: () => of({ success: true, data: buildMatch(false) }),
+    };
+    TestBed.configureTestingModule({
+      imports: [InvoiceScannerModalComponent],
+      providers: [
+        { provide: InvoiceScannerService, useValue: scanner },
+        { provide: AiScanJobService, useValue: jobs },
+        { provide: UomService, useFactory: buildUomStub },
+        { provide: ToastService, useFactory: buildToastStub },
+        { provide: SuppliersService, useFactory: buildSuppliersStub },
+        { provide: ProductsService, useFactory: buildProductsStub },
+        { provide: CurrencyFormatService, useFactory: buildCurrencyStub },
+      ],
+    });
+    fixture = TestBed.createComponent(InvoiceScannerModalComponent);
+    component = fixture.componentInstance;
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.detectChanges();
+  }
+
+  beforeEach(() => {
+    jobs = {
+      enqueueAndWait: jasmine.createSpy('enqueueAndWait'),
+      resume: jasmine.createSpy('resume').and.returnValue(null),
+      pendingResume: jasmine
+        .createSpy('pendingResume')
+        .and.returnValue({ data: {}, meta: { profile: 'ingredient' } }),
+    };
+  });
+
+  it('un escaneo fallido deja el archivo, muestra el panel con reintento y no vuelve al paso 1', () => {
+    jobs.enqueueAndWait.and.callFake(
+      (_u: string, _b: unknown, opts: { progress: { onUploadStart(): void; onFailed(e: unknown): void } }) => {
+        opts.progress.onUploadStart();
+        const err = new AiScanJobError('Algo falló en Vendix', 'technical', 'X_001');
+        opts.progress.onFailed(err);
+        return throwError(() => err);
+      },
+    );
+    setup();
+    const file = FILE();
+    component.selectedFile.set(file);
+    component.startScan();
+    fixture.detectChanges();
+
+    expect(component.selectedFile()).toBe(file);
+    expect(component.currentStep()).toBe(2);
+    expect(component.isScanning()).toBe(false);
+    expect(component.scanProgress.phase()).toBe('failed');
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('[data-testid="ai-job-error"]')).not.toBeNull();
+
+    component.backToFileSelection();
+    expect(component.currentStep()).toBe(1);
+    expect(component.selectedFile()).toBe(file);
+  });
+
+  it('encola con la clave de reenganche y el estado propio de la cola', () => {
+    jobs.enqueueAndWait.and.returnValue(of(buildScan()));
+    setup();
+    component.selectedFile.set(FILE());
+    component.startScan();
+
+    const [url, , opts] = jobs.enqueueAndWait.calls.mostRecent().args;
+    expect(url).toBe('/scan/async');
+    expect(opts.resumeKey).toBe('po_invoice_scan:new');
+    expect(opts.statusUrl('3')).toBe('/scan/async/3');
+    expect(opts.progress).toBe(component.scanProgress);
+    expect(component.currentStep()).toBe(3);
+  });
+
+  it('al abrir retoma el escaneo en curso y llega a la revisión sin archivo', () => {
+    jobs.resume.and.callFake(
+      (): Observable<InvoiceScanResult> => of(buildScan()),
+    );
+    setup();
+
+    expect(jobs.resume).toHaveBeenCalledWith(
+      'po_invoice_scan:new',
+      jasmine.objectContaining({ progress: component.scanProgress }),
+    );
+    expect(component.selectedFile()).toBeNull();
+    expect(component.currentStep()).toBe(3);
+    expect(component.scanResult()).toEqual(buildScan());
+  });
+
+  it('al retomar usa el perfil con el que se lanzó el escaneo, no el del input actual', () => {
+    jobs.resume.and.callFake(
+      (): Observable<InvoiceScanResult> => of(buildScan()),
+    );
+    // The modal opens as `retail`, the remembered scan was `ingredient`.
+    setup();
+    expect(component.scanProfile()).toBe('ingredient');
+  });
+
+  it('un escaneo nuevo guarda su perfil en resumeMeta', () => {
+    jobs.enqueueAndWait.and.returnValue(of(buildScan()));
+    setup();
+    component.selectedFile.set(FILE());
+    component.startScan();
+    const opts = jobs.enqueueAndWait.calls.mostRecent().args[2];
+    expect(opts.resumeMeta).toEqual({ profile: component.scanProfile() });
   });
 });

@@ -127,6 +127,11 @@ describe('ProductsService', () => {
     stores: {
       findUnique: jest.fn(),
     },
+    manufacturing_plants: { findFirst: jest.fn() },
+    // QUI-1006 — sesión abierta del cajero bajo "Bodega de la caja".
+    cash_register_sessions: {
+      findFirst: jest.fn(),
+    },
     // S13: por defecto la tienda tiene recetas activas (comportamiento previo).
     recipes: {
       findFirst: jest.fn().mockResolvedValue({ id: 1 }),
@@ -678,6 +683,63 @@ describe('ProductsService', () => {
           { tax_category_id: 4, product_id: 1 },
         ],
       });
+    });
+  });
+
+  describe('dónde se produce (production_site)', () => {
+    const apply = (dto: any, existing?: any) =>
+      (service as any).applyProductionSite(dto, 1, existing);
+    const industries = (list: string[]) =>
+      (mockPrismaService.stores.findUnique as jest.Mock).mockResolvedValue({ industries: list });
+
+    afterEach(() => {
+      (mockPrismaService.stores.findUnique as jest.Mock).mockReset();
+      (mockPrismaService.manufacturing_plants.findFirst as jest.Mock).mockReset();
+    });
+
+    it('restaurante + manufactura: un producto por lote sin dónde se produce se rechaza', async () => {
+      industries(['restaurant', 'manufacturing']);
+      await expect(apply({ is_batch_produced: true })).rejects.toMatchObject({
+        errorCode: 'PRODUCTION_SITE_REQUIRED',
+      });
+      await expect(
+        apply({ is_batch_produced: true, production_site: 'kitchen' }),
+      ).resolves.toMatchObject({ production_site: 'kitchen', production_plant_id: null });
+    });
+
+    it('solo manufactura o solo restaurante: no es obligatorio (la industria decide)', async () => {
+      industries(['manufacturing']);
+      await expect(apply({ is_batch_produced: true })).resolves.toEqual({ is_batch_produced: true });
+      industries(['restaurant']);
+      await expect(apply({ is_batch_produced: true })).resolves.toEqual({ is_batch_produced: true });
+    });
+
+    it('editar precio o nombre de un producto existente sin el campo nunca se bloquea', async () => {
+      industries(['restaurant', 'manufacturing']);
+      const dto = { base_price: 10 };
+      await expect(
+        apply(dto, { is_batch_produced: true, production_site: null }),
+      ).resolves.toBe(dto);
+      expect(mockPrismaService.stores.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('la planta concreta debe ser de la tienda; fuera de Planta se limpia', async () => {
+      (mockPrismaService.manufacturing_plants.findFirst as jest.Mock).mockResolvedValue(null);
+      await expect(
+        apply({ production_site: 'plant', production_plant_id: 99 }),
+      ).rejects.toMatchObject({ errorCode: 'PRODUCTION_SITE_PLANT_INVALID' });
+      expect(mockPrismaService.manufacturing_plants.findFirst).toHaveBeenCalledWith({
+        where: { id: 99, store_id: 1 },
+        select: { id: true },
+      });
+
+      (mockPrismaService.manufacturing_plants.findFirst as jest.Mock).mockResolvedValue({ id: 4 });
+      await expect(
+        apply({ production_site: 'plant', production_plant_id: 4 }),
+      ).resolves.toMatchObject({ production_plant_id: 4 });
+      await expect(
+        apply({ production_site: 'kitchen', production_plant_id: 4 }),
+      ).resolves.toMatchObject({ production_plant_id: null });
     });
   });
 
@@ -2796,6 +2858,233 @@ describe('ProductsService', () => {
       const where = await run({ is_ingredient: false });
       expect(where).not.toHaveProperty('lodging_unit_type');
       expect(where.is_ingredient).toBe(false);
+    });
+  });
+
+  /**
+   * QUI-1006 — POS con alcance "Bodega de la caja": sin caja abierta no hay
+   * catálogo (ni grilla, ni búsqueda, ni escaneo); con caja, solo lo que su
+   * bodega tiene. "Todas las bodegas" / "Bodega principal" no cambian.
+   */
+  describe('QUI-1006 — POS con alcance "Bodega de la caja" (findAll)', () => {
+    const CASHIER_ID = 5;
+    let userIdSpy: jest.SpyInstance;
+
+    const registerClause = (locationId: number) => ({
+      OR: [
+        { track_inventory: false },
+        { product_variants: { some: { track_inventory_override: false } } },
+        {
+          stock_levels: {
+            some: expect.objectContaining({
+              location_id: locationId,
+              quantity_on_hand: { gt: 0 },
+              // La bodega se cruza con las ubicaciones vendibles DE ESTA
+              // tienda: una caja con bodega ajena no lista nada.
+              inventory_locations: expect.objectContaining({
+                store_id: 1,
+                is_active: true,
+              }),
+            }),
+          },
+        },
+      ],
+    });
+
+    /** `registerLocationId`: bodega de la caja abierta; `'none'` = sin sesión. */
+    const primeScope = (
+      scope: 'main_location' | 'all_locations' | 'register_location',
+      registerLocationId: number | null | 'none',
+    ) => {
+      mockPrismaService.store_settings.findFirst.mockResolvedValue({
+        settings: { inventory: { pos_stock_scope: scope } },
+      });
+      mockPrismaService.stores.findUnique.mockResolvedValue({
+        default_location_id: 1,
+      });
+      mockPrismaService.cash_register_sessions.findFirst.mockResolvedValue(
+        registerLocationId === 'none'
+          ? null
+          : { register: { location_id: registerLocationId } },
+      );
+      mockPrismaService.products.findMany.mockResolvedValue([]);
+      mockPrismaService.products.count.mockResolvedValue(0);
+      mockPrismaService.products.findMany.mockClear();
+      mockPrismaService.products.count.mockClear();
+    };
+
+    const run = (extra: Partial<ProductQueryDto> = {}) =>
+      service.findAll({
+        page: 1,
+        limit: 20,
+        pos_optimized: true,
+        ...extra,
+      } as ProductQueryDto);
+
+    beforeEach(() => {
+      userIdSpy = jest
+        .spyOn(RequestContextService, 'getUserId')
+        .mockReturnValue(CASHIER_ID);
+    });
+
+    afterEach(() => {
+      userIdSpy.mockRestore();
+      // clearAllMocks conserva implementaciones: los demás tests no deben
+      // heredar el alcance ni la sesión de estos.
+      mockPrismaService.store_settings.findFirst.mockReset();
+      mockPrismaService.stores.findUnique.mockReset();
+      mockPrismaService.cash_register_sessions.findFirst.mockReset();
+    });
+
+    it.each([
+      ['la grilla', {}],
+      ['la búsqueda', { search: 'cafe' }],
+      ['el escaneo de código de barras', { barcode: '7701234567890' }],
+    ])(
+      'sin caja abierta, %s devuelve vacío y no consulta productos (no cae a la bodega principal)',
+      async (_label, extra) => {
+        primeScope('register_location', 'none');
+
+        const result = await run(extra);
+
+        expect(result).toEqual({
+          data: [],
+          meta: { total: 0, page: 1, limit: 20, totalPages: 0, search: undefined },
+        });
+        expect(mockPrismaService.products.findMany).not.toHaveBeenCalled();
+        expect(mockPrismaService.products.count).not.toHaveBeenCalled();
+        // La caja sale de la sesión abierta del cajero en la tienda del
+        // contexto; el cliente nunca elige una caja ajena.
+        expect(
+          mockPrismaService.cash_register_sessions.findFirst,
+        ).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { store_id: 1, opened_by: CASHIER_ID, status: 'open' },
+          }),
+        );
+      },
+    );
+
+    it('caja abierta sin bodega asignada: también vacío', async () => {
+      primeScope('register_location', null);
+
+      const result = await run();
+
+      expect(result.data).toEqual([]);
+      expect(result.meta.total).toBe(0);
+      expect(mockPrismaService.products.findMany).not.toHaveBeenCalled();
+    });
+
+    it('con caja abierta, lista solo lo que tiene su bodega y el stock mostrado es el de esa bodega', async () => {
+      primeScope('register_location', 2);
+
+      await run();
+
+      const args = mockPrismaService.products.findMany.mock.calls[0][0];
+      expect(args.where.AND).toEqual([registerClause(2)]);
+      expect(args.include.stock_levels.where).toEqual(
+        expect.objectContaining({ location_id: 2 }),
+      );
+      // El total de la paginación cuenta el mismo conjunto filtrado.
+      expect(mockPrismaService.products.count.mock.calls[0][0].where).toEqual(
+        args.where,
+      );
+    });
+
+    it.each([
+      ['la búsqueda', { search: 'cafe' }],
+      ['el escaneo de código de barras', { barcode: '7701234567890' }],
+    ])('con caja abierta, %s respeta el mismo filtro', async (_label, extra) => {
+      primeScope('register_location', 2);
+
+      await run(extra);
+
+      const where = mockPrismaService.products.findMany.mock.calls[0][0].where;
+      expect(where.AND).toContainEqual(registerClause(2));
+      if ('barcode' in extra) {
+        // El OR del código de barras sigue intacto al lado del filtro.
+        expect(where.OR).toEqual(
+          expect.arrayContaining([
+            { barcode: { equals: '7701234567890' } },
+          ]),
+        );
+      }
+    });
+
+    it.each(['all_locations', 'main_location'] as const)(
+      'con alcance %s nada cambia: sin consulta de caja ni filtro de catálogo',
+      async (scope) => {
+        primeScope(scope, 'none');
+
+        await run();
+
+        expect(
+          mockPrismaService.cash_register_sessions.findFirst,
+        ).not.toHaveBeenCalled();
+        const where = mockPrismaService.products.findMany.mock.calls[0][0].where;
+        expect(where).not.toHaveProperty('AND');
+      },
+    );
+
+    it('fuera del POS (listado admin) la bodega de la caja no aplica', async () => {
+      primeScope('register_location', 'none');
+
+      await service.findAll({ page: 1, limit: 20 } as ProductQueryDto);
+
+      expect(
+        mockPrismaService.cash_register_sessions.findFirst,
+      ).not.toHaveBeenCalled();
+      expect(mockPrismaService.products.findMany).toHaveBeenCalled();
+      expect(
+        mockPrismaService.products.findMany.mock.calls[0][0].where,
+      ).not.toHaveProperty('AND');
+    });
+
+    it('con búsqueda trigram, rankea en memoria sobre el where filtrado (el SQL crudo no conoce la bodega)', async () => {
+      primeScope('register_location', 2);
+      mockSearchPath.resolveSearchPathFor.mockResolvedValue({
+        path: 'trigram',
+        trigramCapable: true,
+        killSwitch: false,
+      });
+      mockCacheManager.get.mockResolvedValue(null);
+      const withoutScope = jest.fn();
+      (mockPrismaService as any).withoutScope = withoutScope;
+
+      try {
+        await run({ search: 'cafe' });
+      } finally {
+        delete (mockPrismaService as any).withoutScope;
+        mockSearchPath.resolveSearchPathFor.mockReset();
+      }
+
+      expect(withoutScope).not.toHaveBeenCalled();
+      const scan = mockPrismaService.products.findMany.mock.calls[0][0];
+      expect(scan.select).toBeDefined();
+      expect(scan.where.AND).toContainEqual(registerClause(2));
+    });
+
+    it('la lista rankeada en caché se separa por bodega de la caja', async () => {
+      mockSearchPath.resolveSearchPathFor.mockResolvedValue({
+        path: 'l2',
+        trigramCapable: false,
+        killSwitch: false,
+      });
+      mockCacheManager.get.mockResolvedValue(null);
+      const keys: string[] = [];
+      try {
+        for (const locationId of [2, 3]) {
+          primeScope('register_location', locationId);
+          mockCacheManager.get.mockClear();
+          await run({ search: 'cafe' });
+          keys.push(mockCacheManager.get.mock.calls[0][0]);
+        }
+      } finally {
+        mockSearchPath.resolveSearchPathFor.mockReset();
+      }
+
+      expect(keys[0]).toMatch(/^products:smartsearch:1:/);
+      expect(keys[0]).not.toBe(keys[1]);
     });
   });
 

@@ -633,3 +633,122 @@ describe('PurchaseOrdersController — receive/async y receive-jobs', () => {
     expect((await validate(mk(0))).length).toBeGreaterThan(0);
   });
 });
+
+describe('PurchaseOrdersController — estado de colas de IA con AiJobMonitorService', () => {
+  const META = { progress: { done: 1, total: 2 }, stalled: false };
+
+  function build() {
+    const paymentQueue = { add: jest.fn(), getJob: jest.fn() };
+    const revalidateQueue = { add: jest.fn(), getJob: jest.fn() };
+    const scanQueue = { add: jest.fn(), getJob: jest.fn() };
+    const monitor = { describe: jest.fn().mockResolvedValue(META) };
+    const controller = new PurchaseOrdersController(
+      {} as any,
+      {} as any,
+      new ResponseService(),
+      paymentQueue as any,
+      revalidateQueue as any,
+      scanQueue as any,
+      undefined,
+      monitor as any,
+    );
+    return { controller, paymentQueue, revalidateQueue, scanQueue, monitor };
+  }
+
+  const inCtx = <T>(store_id: number, fn: () => Promise<T>) =>
+    RequestContextService.run(
+      {
+        store_id,
+        organization_id: 5,
+        user_id: 9,
+        is_super_admin: false,
+        is_owner: false,
+        request_id: 'r1',
+      } as any,
+      fn,
+    );
+
+  const jobOf = (data: Record<string, unknown>) => ({
+    data,
+    getState: jest.fn().mockResolvedValue('active'),
+    returnvalue: undefined,
+    failedReason: undefined,
+  });
+
+  it('scan: agrega los campos del monitor sin quitar status/result/error', async () => {
+    const { controller, scanQueue, monitor } = build();
+    const job = jobOf({ store_id: 1 });
+    scanQueue.getJob.mockResolvedValue(job);
+
+    const res = await inCtx(1, () => controller.getInvoiceScanStatus('1'));
+
+    expect(res).toEqual({
+      status: 'active',
+      result: undefined,
+      error: undefined,
+      ...META,
+    });
+    expect(monitor.describe).toHaveBeenCalledWith(
+      job,
+      'active',
+      expect.objectContaining({ queue: 'invoice-scan' }),
+      job.data,
+      scanQueue,
+    );
+  });
+
+  it('revalidate: agrega los campos del monitor', async () => {
+    const { controller, revalidateQueue, monitor } = build();
+    const job = jobOf({ store_id: 1 });
+    revalidateQueue.getJob.mockResolvedValue(job);
+
+    const res = await inCtx(1, () => controller.getInvoiceRevalidateStatus('1'));
+
+    expect(res).toMatchObject({ status: 'active', ...META });
+    expect(monitor.describe).toHaveBeenCalledWith(
+      job,
+      'active',
+      expect.objectContaining({ queue: 'invoice-revalidate' }),
+      job.data,
+      revalidateQueue,
+    );
+  });
+
+  it('comprobante de pago: describe con el context del job', async () => {
+    const { controller, paymentQueue, monitor } = build();
+    const job = jobOf({ context: { store_id: 1 } });
+    paymentQueue.getJob.mockResolvedValue(job);
+
+    const res = await inCtx(1, () =>
+      controller.getPaymentReceiptScanStatus('7', '1'),
+    );
+
+    expect(res).toMatchObject({ status: 'active', ...META });
+    expect(monitor.describe).toHaveBeenCalledWith(
+      job,
+      'active',
+      expect.objectContaining({ queue: 'payment-receipt-scan' }),
+      job.data.context,
+      paymentQueue,
+    );
+  });
+
+  it('IDOR intacto: job de otra tienda => AI_QUEUE_002 y el monitor no se toca', async () => {
+    const { controller, scanQueue, revalidateQueue, paymentQueue, monitor } =
+      build();
+    scanQueue.getJob.mockResolvedValue(jobOf({ store_id: 2 }));
+    revalidateQueue.getJob.mockResolvedValue(jobOf({ store_id: 2 }));
+    paymentQueue.getJob.mockResolvedValue(jobOf({ context: { store_id: 2 } }));
+
+    await expect(
+      inCtx(1, () => controller.getInvoiceScanStatus('1')),
+    ).rejects.toMatchObject({ errorCode: 'AI_QUEUE_002' });
+    await expect(
+      inCtx(1, () => controller.getInvoiceRevalidateStatus('1')),
+    ).rejects.toMatchObject({ errorCode: 'AI_QUEUE_002' });
+    await expect(
+      inCtx(1, () => controller.getPaymentReceiptScanStatus('7', '1')),
+    ).rejects.toMatchObject({ errorCode: 'AI_QUEUE_002' });
+    expect(monitor.describe).not.toHaveBeenCalled();
+  });
+});

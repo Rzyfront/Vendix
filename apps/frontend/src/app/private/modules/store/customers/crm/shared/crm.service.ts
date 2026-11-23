@@ -3,11 +3,15 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, map } from 'rxjs';
 import { environment } from '../../../../../../../environments/environment';
 import {
+  CompleteCrmTaskMove,
   CrmBoard,
   CrmBoardQuery,
   CrmNote,
+  CrmOpenOpportunity,
   CrmOpportunity,
+  CrmPerson,
   CrmPipeline,
+  CrmStageTemplate,
   CrmTag,
   CrmTask,
   CrmTaskStats,
@@ -19,6 +23,8 @@ import {
   CustomerCrmMemberships,
   CustomerCrmProfile,
   SaveCrmOpportunity,
+  SaveCrmStageTemplate,
+  SaveCrmTag,
   SaveCrmTask,
   UpdateCustomerCrmProfile,
 } from './crm.interface';
@@ -161,9 +167,23 @@ export class CrmService {
       .pipe(map((r) => r.data));
   }
 
-  createTag(body: { name: string; color?: string | null }): Observable<CrmTag> {
+  createTag(body: SaveCrmTag & { name: string }): Observable<CrmTag> {
     return this.http
       .post<ApiResponse<CrmTag>>(`${this.base}/crm/tags`, body)
+      .pipe(map((r) => r.data));
+  }
+
+  /** Renames, recolors, moves to a group and/or rewrites «cuándo se pone»; its customers keep it. */
+  updateTag(id: number, body: SaveCrmTag): Observable<CrmTag> {
+    return this.http
+      .patch<ApiResponse<CrmTag>>(`${this.base}/crm/tags/${id}`, body)
+      .pipe(map((r) => r.data));
+  }
+
+  /** Deletes a tag and its assignments; customers are never deleted. */
+  deleteTag(id: number): Observable<{ id: number }> {
+    return this.http
+      .delete<ApiResponse<{ id: number }>>(`${this.base}/crm/tags/${id}`)
       .pipe(map((r) => r.data));
   }
 
@@ -201,6 +221,18 @@ export class CrmService {
       .pipe(map((r) => r.data));
   }
 
+  /**
+   * Active staff of the store for the task support picker, by name. Gated by
+   * the tasks permission, so a seller without POS access finds them too.
+   */
+  taskStaff(q: string): Observable<CrmPerson[]> {
+    return this.http
+      .get<ApiResponse<CrmPerson[]>>(`${this.base}/crm/tasks/staff`, {
+        params: toParams({ q: q.trim() }),
+      })
+      .pipe(map((r) => r.data ?? []));
+  }
+
   createTask(body: SaveCrmTask): Observable<CrmTask> {
     return this.http
       .post<ApiResponse<CrmTask>>(`${this.base}/crm/tasks`, body)
@@ -213,9 +245,13 @@ export class CrmService {
       .pipe(map((r) => r.data));
   }
 
-  completeTask(id: number): Observable<CrmTask> {
+  /**
+   * Marks the task done. `move` (only for a task that moves nothing by
+   * itself) also moves that open opportunity of its customer to that stage.
+   */
+  completeTask(id: number, move?: CompleteCrmTaskMove): Observable<CrmTask> {
     return this.http
-      .post<ApiResponse<CrmTask>>(`${this.base}/crm/tasks/${id}/complete`, {})
+      .post<ApiResponse<CrmTask>>(`${this.base}/crm/tasks/${id}/complete`, move ?? {})
       .pipe(map((r) => r.data));
   }
 
@@ -255,6 +291,19 @@ export class CrmService {
       .pipe(map((r) => r.data));
   }
 
+  /**
+   * Open opportunities of one customer the viewer sees (task form).
+   * `includeId`, the opportunity of the task being edited, always comes back
+   * while it is open, even past the first page.
+   */
+  openOpportunities(customerId: number, includeId?: number): Observable<CrmOpenOpportunity[]> {
+    return this.http
+      .get<ApiResponse<CrmOpenOpportunity[]>>(`${this.base}/crm/opportunities/open`, {
+        params: toParams({ customer_id: customerId, include_id: includeId }),
+      })
+      .pipe(map((r) => r.data ?? []));
+  }
+
   createOpportunity(body: SaveCrmOpportunity): Observable<CrmOpportunity> {
     return this.http
       .post<ApiResponse<CrmOpportunity>>(`${this.base}/crm/opportunities`, body)
@@ -289,6 +338,53 @@ export class CrmService {
     return this.http
       .post<ApiResponse<CrmOpportunity>>(`${this.base}/crm/opportunities/${id}/lose`, {
         lost_reason: lostReason,
+      })
+      .pipe(map((r) => r.data));
+  }
+
+  deleteOpportunity(id: number): Observable<{ id: number }> {
+    return this.http
+      .delete<ApiResponse<{ id: number }>>(`${this.base}/crm/opportunities/${id}`)
+      .pipe(map((r) => r.data));
+  }
+
+  // ── Stage templates ───────────────────────────────────────
+  listStageTemplates(): Observable<CrmStageTemplate[]> {
+    return this.http
+      .get<ApiResponse<CrmStageTemplate[]>>(`${this.base}/crm/stage-templates`)
+      .pipe(map((r) => r.data));
+  }
+
+  createStageTemplate(
+    body: Required<SaveCrmStageTemplate>,
+  ): Observable<CrmStageTemplate> {
+    return this.http
+      .post<ApiResponse<CrmStageTemplate>>(`${this.base}/crm/stage-templates`, body)
+      .pipe(map((r) => r.data));
+  }
+
+  updateStageTemplate(id: number, body: SaveCrmStageTemplate): Observable<CrmStageTemplate> {
+    return this.http
+      .patch<ApiResponse<CrmStageTemplate>>(`${this.base}/crm/stage-templates/${id}`, body)
+      .pipe(map((r) => r.data));
+  }
+
+  deleteStageTemplate(id: number): Observable<{ id: number }> {
+    return this.http
+      .delete<ApiResponse<{ id: number }>>(`${this.base}/crm/stage-templates/${id}`)
+      .pipe(map((r) => r.data));
+  }
+
+  createPipeline(body: { name: string; template_id: number }): Observable<CrmPipeline> {
+    return this.http
+      .post<ApiResponse<CrmPipeline>>(`${this.base}/crm/pipelines`, body)
+      .pipe(map((r) => r.data));
+  }
+
+  applyStageTemplate(pipelineId: number, templateId: number): Observable<CrmPipeline> {
+    return this.http
+      .post<ApiResponse<CrmPipeline>>(`${this.base}/crm/pipelines/${pipelineId}/apply-template`, {
+        template_id: templateId,
       })
       .pipe(map((r) => r.data));
   }

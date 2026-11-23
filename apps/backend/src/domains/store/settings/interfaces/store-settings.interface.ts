@@ -1,3 +1,4 @@
+import type { HomePanelSettings } from '../../../../common/access/home-panels';
 import type { FiscalStatusBlock } from '@common/interfaces/fiscal-status.interface';
 import type { StoreIndustry } from '../../stores/dto/index';
 
@@ -609,6 +610,9 @@ export interface StoreSettings {
   // Recordatorios de cuotas de venta a crédito (CreditInstallmentRemindersJob)
   credit_reminders?: CreditRemindersSettings;
 
+  // Panel Principal de la tienda (QUI-967): sin clave = Resumen (tiendas existentes)
+  home_panel?: HomePanelSettings;
+
   // Secciones existentes
   general: GeneralSettings;
   inventory: InventorySettings;
@@ -765,6 +769,13 @@ export interface NotificationsSettings {
    * la fecha; `0` desactiva el aviso anticipado (la vencida se re-emite siempre).
    */
   ap_due_soon_days: number;
+  /**
+   * Minutos antes del vencimiento de una tarea CRM en que llega "Tarea por
+   * vencer" (5-1440, default 60). `ReminderScheduler` lo lee por tienda.
+   */
+  task_due_soon_minutes: number;
+  /** Hora local (0-23, default 7) del resumen diario de tareas por correo. */
+  daily_digest_hour: number;
 }
 
 export interface CustomerQueueSettings {
@@ -1397,6 +1408,13 @@ export interface CreditRemindersSettings {
 /** Adiciones de producto. Apagadas por defecto. */
 export interface ProductOptionsSettings {
   enabled: boolean;
+  /**
+   * QUI-1005 — «Permitir adiciones en la tienda en línea». Solo gobierna el
+   * canal en línea (vitrina y checkout público); el POS y los canales internos
+   * no lo leen. Default `true` (comportamiento previo), por eso se lee con
+   * `!== false`: una tienda que guardó la sección antes del flag no lo tiene.
+   */
+  allow_online?: boolean;
 }
 
 export interface MembershipSettings {

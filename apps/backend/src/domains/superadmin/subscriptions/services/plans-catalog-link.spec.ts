@@ -11,9 +11,7 @@ import { VendixHttpException } from '../../../../common/errors';
 describe('PlansService F6 catalog link (ai_feature_flags)', () => {
   let service: PlansService;
   let prisma: any;
-  let registry: any;
 
-  const KNOWN_TOOLS = new Set(['list_products', 'find_customer']);
 
   beforeEach(() => {
     const tx = {
@@ -44,13 +42,7 @@ describe('PlansService F6 catalog link (ai_feature_flags)', () => {
       },
       $transaction: jest.fn((fn: any) => fn(tx)),
     };
-    registry = {
-      canonicalName: jest.fn((name: string) => name),
-      get: jest.fn((name: string) =>
-        KNOWN_TOOLS.has(name) ? { name } : undefined,
-      ),
-    };
-    service = new PlansService(prisma, registry);
+    service = new PlansService(prisma);
   });
 
   function createDto(flags: unknown) {
@@ -99,30 +91,19 @@ describe('PlansService F6 catalog link (ai_feature_flags)', () => {
     );
   });
 
-  it('rechaza tool desconocida en tools_allowed con 400', async () => {
-    await expect400(
-      service.create(
-        createDto({
-          tool_agents: { enabled: true, tools_allowed: ['products.search'] },
-        }),
-      ),
-      'tools_allowed',
+  it('acepta tools_allowed desconocida: es inerte (N4)', async () => {
+    await service.create(
+      createDto({
+        tool_agents: { enabled: true, tools_allowed: ['products.search'] },
+      }),
     );
+    expect(prisma.subscription_plans.create).toHaveBeenCalled();
   });
 
   it('rechaza categoria desconocida con 400', async () => {
     await expect400(
       service.create(createDto({ text_generaton: { enabled: true } })),
       'ai_feature_flags',
-    );
-  });
-
-  it('rechaza allowlist malformada (no arreglo) con 400', async () => {
-    await expect400(
-      service.create(
-        createDto({ tool_agents: { enabled: true, tools_allowed: 'todo' } }),
-      ),
-      'tools_allowed',
     );
   });
 
@@ -145,7 +126,7 @@ describe('PlansService F6 catalog link (ai_feature_flags)', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it('acepta refs vivas (agente vexi + tool del registry)', async () => {
+  it('acepta refs vivas (agente vexi)', async () => {
     const result = await service.create(
       createDto({
         text_generation: { enabled: true, monthly_tokens_cap: 1000 },
@@ -163,7 +144,6 @@ describe('PlansService F6 catalog link (ai_feature_flags)', () => {
   it('no valida cuando el payload no trae flags', async () => {
     await service.create({ code: 'f6', name: 'F6', base_price: 0 } as any);
     expect(prisma.ai_agents.findMany).not.toHaveBeenCalled();
-    expect(registry.get).not.toHaveBeenCalled();
   });
 
   it('update valida solo cuando dto trae flags', async () => {
@@ -181,15 +161,5 @@ describe('PlansService F6 catalog link (ai_feature_flags)', () => {
     prisma.ai_agents.findMany.mockClear();
     await service.update(7, { name: 'otro nombre' } as any);
     expect(prisma.ai_agents.findMany).not.toHaveBeenCalled();
-  });
-
-  it('fail-closed: sin registry, tools declaradas se rechazan', async () => {
-    const withoutRegistry = new PlansService(prisma);
-    await expect400(
-      withoutRegistry.create(
-        createDto({ tool_agents: { enabled: true, tools_allowed: ['list_products'] } }),
-      ),
-      'tools_allowed',
-    );
   });
 });

@@ -16,7 +16,10 @@ export class CrmTagsService {
 
   async list() {
     const rows = await this.prisma.crm_tags.findMany({
-      orderBy: { name: 'asc' },
+      // Grupo y luego nombre: el catálogo se lee agrupado en el gestor y en el
+      // selector del cliente. En Postgres un ASC deja los NULL al final, así
+      // que las etiquetas sin grupo cierran la lista.
+      orderBy: [{ group_name: 'asc' }, { name: 'asc' }],
       include: { _count: { select: { customer_tags: true } } },
     });
     return rows.map(({ _count, ...tag }) => ({
@@ -33,6 +36,8 @@ export class CrmTagsService {
           store_id: viewer.store_id,
           name: dto.name.trim(),
           color: dto.color ?? null,
+          group_name: dto.group_name ?? null,
+          description: dto.description?.trim() || null,
         },
       });
     } catch (error) {
@@ -48,6 +53,10 @@ export class CrmTagsService {
         data: {
           ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
           ...(dto.color !== undefined ? { color: dto.color } : {}),
+          ...(dto.group_name !== undefined ? { group_name: dto.group_name } : {}),
+          ...(dto.description !== undefined
+            ? { description: dto.description?.trim() || null }
+            : {}),
         },
       });
     } catch (error) {

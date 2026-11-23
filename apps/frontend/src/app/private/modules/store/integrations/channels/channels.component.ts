@@ -17,16 +17,29 @@ import { ChannelsService } from './channels.service';
 import { MessagingChannelCardsComponent } from './messaging-channels/messaging-channel-cards.component';
 import { MetaReadiness, WhatsappChannel } from './channels.interface';
 import {
+  allowsRegistrationRetry,
+  channelAlertMessage,
+  CONNECT_HELP_MESSAGE,
+  connectedOutcome,
+  COEXISTENCE_DISCONNECT_NOTE,
+  COEXISTENCE_PHONE_LINE,
+  isCoexistenceChannel,
+  needsRegistrationNotice,
+} from './channels-coexistence';
+import {
   EmbeddedSignupFlowError,
+  EmbeddedSignupFlowResult,
   startEmbeddedSignupFlow,
 } from './embedded-signup-flow';
-
-declare global {
-  interface Window {
-    FB?: any;
-    fbAsyncInit?: () => void;
-  }
-}
+import { FacebookSdkService } from './facebook-sdk.service';
+import {
+  createSignupBridgeNonce,
+  openSignupBridge,
+  shouldUseSignupBridge,
+  waitForSignupBridgeResult,
+  whatsappSignupBridgeOrigin,
+} from './whatsapp-signup-bridge';
+import { environment } from '../../../../../../environments/environment';
 
 @Component({
   selector: 'app-integrations-channels',
@@ -57,17 +70,13 @@ declare global {
           </app-alert-banner>
         }
 
-        @if (channel()?.status === 'error' && channel()?.last_error) {
+        @if (channelAlert(); as alert) {
           <app-alert-banner variant="warning" icon="triangle-alert">
-            {{ channel()?.last_error }}
+            {{ alert }}
           </app-alert-banner>
         }
 
-        @if (
-          channel()?.status === 'connected' &&
-          channel()?.phone_number_id &&
-          channel()?.registration_status !== 'registered'
-        ) {
+        @if (showRegistrationNotice()) {
           <app-alert-banner variant="warning" icon="triangle-alert">
             {{
               channel()?.last_error ||
@@ -102,47 +111,60 @@ declare global {
               </div>
             </div>
 
-            <div class="flex flex-wrap gap-3 pt-1 lg:pt-0">
-              @if (channel()?.connected) {
-                <app-button
-                  variant="outline-danger"
-                  size="md"
-                  [loading]="disconnecting()"
-                  (clicked)="disconnectWhatsapp()"
-                >
-                  <app-icon slot="icon" name="plug" [size]="16"></app-icon>
-                  Desconectar
-                </app-button>
-              } @else {
-                @if (canRetryRegistration()) {
+            <div class="flex flex-col gap-3 pt-1 lg:max-w-sm lg:pt-0">
+              <div class="flex flex-wrap gap-3">
+                @if (channel()?.connected) {
                   <app-button
-                    variant="outline"
+                    variant="outline-danger"
                     size="md"
-                    [loading]="registering()"
-                    (clicked)="retryRegistration()"
+                    [loading]="disconnecting()"
+                    (clicked)="disconnectWhatsapp()"
+                  >
+                    <app-icon slot="icon" name="plug" [size]="16"></app-icon>
+                    Desconectar
+                  </app-button>
+                } @else {
+                  @if (canRetryRegistration()) {
+                    <app-button
+                      variant="outline"
+                      size="md"
+                      [loading]="registering()"
+                      (clicked)="retryRegistration()"
+                    >
+                      <app-icon
+                        slot="icon"
+                        name="refresh-cw"
+                        [size]="16"
+                      ></app-icon>
+                      Reintentar registro
+                    </app-button>
+                  }
+                  <app-button
+                    variant="primary"
+                    size="md"
+                    [disabled]="!canConnectWhatsapp()"
+                    [loading]="connecting()"
+                    (clicked)="connectWhatsapp()"
                   >
                     <app-icon
                       slot="icon"
-                      name="refresh-cw"
+                      name="message-circle"
                       [size]="16"
                     ></app-icon>
-                    Reintentar registro
+                    Conectar WhatsApp
                   </app-button>
                 }
-                <app-button
-                  variant="primary"
-                  size="md"
-                  [disabled]="!canConnectWhatsapp()"
-                  [loading]="connecting()"
-                  (clicked)="connectWhatsapp()"
-                >
-                  <app-icon
-                    slot="icon"
-                    name="message-circle"
-                    [size]="16"
-                  ></app-icon>
-                  Conectar WhatsApp
-                </app-button>
+              </div>
+              @if (channel()?.connected) {
+                @if (isCoexistence()) {
+                  <p class="text-xs text-[var(--color-text-secondary)]">
+                    {{ coexistenceDisconnectNote }}
+                  </p>
+                }
+              } @else {
+                <p class="text-xs text-[var(--color-text-secondary)]">
+                  {{ connectHelp }}
+                </p>
               }
             </div>
           </div>
@@ -232,6 +254,11 @@ declare global {
                   >
                     {{ channel()?.display_phone_number || 'No disponible' }}
                   </p>
+                  @if (isCoexistence()) {
+                    <p class="mt-1 text-xs text-[var(--color-text-secondary)]">
+                      {{ coexistencePhoneLine }}
+                    </p>
+                  }
                 </div>
                 <div class="rounded-lg border border-[var(--color-border)] p-4">
                   <p class="text-xs text-[var(--color-text-secondary)]">
@@ -277,7 +304,7 @@ declare global {
 export class ChannelsComponent {
   private readonly service = inject(ChannelsService);
   private readonly toast = inject(ToastService);
-  private sdkLoadingPromise: Promise<void> | null = null;
+  private readonly facebookSdk = inject(FacebookSdkService);
 
   protected readonly loading = signal(false);
   protected readonly connecting = signal(false);
@@ -307,18 +334,27 @@ export class ChannelsComponent {
     );
   });
 
-  protected readonly canRetryRegistration = computed(() => {
-    const channel = this.channel();
+  protected readonly canRetryRegistration = computed(
     // Also covers channels connected before registration existed: status
-    // 'connected' with no registration state yet.
-    return Boolean(
-      channel &&
-      channel.status !== 'disconnected' &&
-      channel.phone_number_id &&
-      channel.registration_status !== 'registered' &&
-      !this.registering(),
-    );
-  });
+    // 'connected' with no registration state yet. Never for coexistence.
+    () => allowsRegistrationRetry(this.channel()) && !this.registering(),
+  );
+
+  protected readonly showRegistrationNotice = computed(() =>
+    needsRegistrationNotice(this.channel()),
+  );
+
+  protected readonly isCoexistence = computed(() =>
+    isCoexistenceChannel(this.channel()),
+  );
+
+  protected readonly channelAlert = computed(() =>
+    channelAlertMessage(this.channel()),
+  );
+
+  protected readonly connectHelp = CONNECT_HELP_MESSAGE;
+  protected readonly coexistencePhoneLine = COEXISTENCE_PHONE_LINE;
+  protected readonly coexistenceDisconnectNote = COEXISTENCE_DISCONNECT_NOTE;
 
   protected readonly channelStatusLabel = computed(() => {
     const channel = this.channel();
@@ -380,28 +416,50 @@ export class ChannelsComponent {
       return;
     }
 
-    this.connecting.set(true);
     this.error.set(null);
 
-    try {
-      await this.loadFacebookSdk(readiness);
-      if (!window.FB) {
-        throw new EmbeddedSignupFlowError(
-          'WhatsApp no está listo para conectar',
+    // Meta only answers on the fixed host. Elsewhere the signup runs in the
+    // bridge window, which must open synchronously inside this click.
+    const bridgeOrigin = whatsappSignupBridgeOrigin(environment.vendixDomain);
+    let bridge: { popup: Window; nonce: string } | null = null;
+    if (shouldUseSignupBridge(window.location.origin, bridgeOrigin)) {
+      const nonce = createSignupBridgeNonce();
+      try {
+        const popup = openSignupBridge(
+          (url, target, features) => window.open(url, target, features),
+          bridgeOrigin,
+          window.location.origin,
+          nonce,
         );
+        bridge = { popup, nonce };
+      } catch (error) {
+        this.error.set(this.extractErrorMessage(error));
+        return;
       }
-      const signup = await startEmbeddedSignupFlow(window.FB, readiness);
+    }
+
+    this.connecting.set(true);
+
+    try {
+      const signup: EmbeddedSignupFlowResult = bridge
+        ? await waitForSignupBridgeResult(
+            bridge.popup,
+            bridgeOrigin,
+            bridge.nonce,
+          )
+        : await startEmbeddedSignupFlow(
+            await this.facebookSdk.load(readiness),
+            readiness,
+          );
       const channel = await firstValueFrom(
         this.service.completeWhatsappEmbeddedSignup(signup),
       );
       this.channel.set(channel);
-      if (channel.status === 'error') {
-        this.error.set(
-          channel.last_error ||
-            'WhatsApp quedó conectado, pero falta registrar el número.',
-        );
+      const outcome = connectedOutcome(channel);
+      if (outcome.kind === 'error') {
+        this.error.set(outcome.message);
       } else {
-        this.toast.success('WhatsApp quedó conectado.');
+        this.toast.success(outcome.message);
       }
     } catch (error) {
       this.error.set(this.extractErrorMessage(error));
@@ -452,57 +510,6 @@ export class ChannelsComponent {
       dateStyle: 'medium',
       timeStyle: 'short',
     }).format(new Date(value));
-  }
-
-  private loadFacebookSdk(readiness: MetaReadiness): Promise<void> {
-    if (typeof window === 'undefined') {
-      return Promise.reject(
-        new Error('WhatsApp no está disponible en este momento'),
-      );
-    }
-
-    if (window.FB) {
-      window.FB.init({
-        appId: readiness.app_id,
-        cookie: true,
-        xfbml: true,
-        version: readiness.graph_version,
-      });
-      return Promise.resolve();
-    }
-
-    if (this.sdkLoadingPromise) return this.sdkLoadingPromise;
-
-    this.sdkLoadingPromise = new Promise((resolve, reject) => {
-      const timeout = window.setTimeout(() => {
-        reject(new Error('WhatsApp no respondió a tiempo'));
-      }, 15000);
-
-      window.fbAsyncInit = () => {
-        window.FB?.init({
-          appId: readiness.app_id,
-          cookie: true,
-          xfbml: true,
-          version: readiness.graph_version,
-        });
-        window.clearTimeout(timeout);
-        resolve();
-      };
-
-      const existingScript = document.getElementById('facebook-jssdk');
-      if (existingScript) return;
-
-      const script = document.createElement('script');
-      script.id = 'facebook-jssdk';
-      script.async = true;
-      script.defer = true;
-      script.src = 'https://connect.facebook.net/es_LA/sdk.js';
-      script.onerror = () =>
-        reject(new Error('No fue posible preparar la conexión de WhatsApp'));
-      document.body.appendChild(script);
-    });
-
-    return this.sdkLoadingPromise;
   }
 
   private extractErrorMessage(error: unknown): string {

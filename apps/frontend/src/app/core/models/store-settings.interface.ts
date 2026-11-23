@@ -1,3 +1,4 @@
+import type { HomePanelSettings } from '../../shared/constants/home-panels';
 import type { FiscalStatusBlock } from './fiscal-status.model';
 import type { StoreIndustry } from '../../shared/constants/industry-modules.constant';
 
@@ -64,6 +65,8 @@ export interface StoreSettings {
   product_options?: ProductOptionsSettings;
   /** Recordatorios de cuotas de venta a crédito. Ausente = apagado. */
   credit_reminders?: CreditRemindersSettings;
+  /** QUI-967 — Panel Principal de la tienda. Sin clave = Resumen (tiendas existentes). */
+  home_panel?: HomePanelSettings;
   /**
    * Master switch for the Vexi assistant. Mirrors backend `VexiSettings`.
    *
@@ -135,6 +138,10 @@ export interface VexiSettings {
   enabled?: boolean;
 
   /**
+   * @deprecated T16/N5 — la tienda ya no configura el motor de voz (lo define
+   * superadmin; la voz es solo por API). El backend lo acepta y lo ignora.
+   * Se conserva el tipo mientras otros archivos aún lo leen.
+   *
    * Which engine answers a voice turn: `realtime` (WebRTC speech-to-speech) or
    * `pipeline` (transcribe → the chat's text agent → dictate).
    *
@@ -317,6 +324,11 @@ export interface CreditRemindersSettings {
 /** Mirrors backend `store_settings.settings.product_options`. */
 export interface ProductOptionsSettings {
   enabled: boolean;
+  /**
+   * QUI-1005 — «Permitir adiciones en la tienda en línea». Default `true`
+   * (ausente ⇒ permitidas): se lee con `!== false`. Solo la tienda en línea.
+   */
+  allow_online?: boolean;
 }
 
 export interface ReservationsSettings {
@@ -729,6 +741,10 @@ export interface NotificationsSettings {
   sound_id: string | null;
   sound_volume: number;
   sound_muted: boolean;
+  /** Minutos antes del vencimiento en que se avisa de una tarea del CRM (5-1440). */
+  task_due_soon_minutes?: number;
+  /** Hora de la tienda (0-23) en que sale el resumen diario de tareas. */
+  daily_digest_hour?: number;
 }
 
 export interface CashRegisterSettings {

@@ -34,6 +34,9 @@ export class ManufacturingOrdersService {
     if (query.product_id != null) {
       params = params.set('product_id', String(query.product_id));
     }
+    if (query.plant_id != null) {
+      params = params.set('plant_id', String(query.plant_id));
+    }
     if (query.date_from) params = params.set('date_from', query.date_from);
     if (query.date_to) params = params.set('date_to', query.date_to);
     if (query.search) params = params.set('search', query.search);

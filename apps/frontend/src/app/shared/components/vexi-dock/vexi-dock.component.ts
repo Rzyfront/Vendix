@@ -1,5 +1,3 @@
-import { firstValueFrom } from 'rxjs';
-import { VexiApiService } from '../../../core/services/vexi-api.service';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -19,7 +17,6 @@ import { VexiPanelComponent } from './vexi-panel.component';
 import { VexiDockPositionService } from './vexi-dock-position.service';
 import { VexiPresenceService } from './vexi-presence.service';
 import { VexiRealtimeService } from '../../../core/services/vexi-realtime.service';
-import { StoreSettingsFacade } from '../../../core/store/store-settings/store-settings.facade';
 
 /**
  * Gesture the pointer has committed to.
@@ -442,24 +439,15 @@ export class VexiDockComponent {
   private readonly voice = inject(VexiRealtimeService);
   private readonly presence = inject(VexiPresenceService);
   private readonly chat = inject(VexiFacade);
-  private readonly chatApi = inject(VexiApiService);
 
   protected readonly mode = signal<DockMode>('idle');
   protected readonly panelOpen = signal(false);
 
   /**
-   * Which engine the hold gesture routes to, per store setting.
+   * True when the panel was opened by the hold gesture.
    *
-   * Absent reads as `realtime`, so nothing changes for a store that predates the
-   * key. See `StoreSettingsFacade.vexiVoiceEngine`.
-   */
-  private readonly voiceEngine = inject(StoreSettingsFacade).vexiVoiceEngine;
-
-  /**
-   * True when the panel was opened by the hold gesture under the pipeline engine.
-   *
-   * Not derived from `voiceEngine` alone: a pipeline store still opens the panel
-   * in chat mode on a plain tap. What decides the mode is *how* it was opened.
+   * A plain tap still opens the panel in chat mode: what decides the mode is
+   * *how* it was opened.
    */
   protected readonly openPanelInVoice = signal(false);
 
@@ -1072,45 +1060,13 @@ export class VexiDockComponent {
     this.clearFlash();
     this.presence.noteInteraction();
 
-    // The pipeline engine has no session to negotiate from here: its turn is a
-    // chat turn, and the surface that can render a confirmation card is the
-    // panel. So the hold opens the panel already in voice mode, and the mic
+    // N5: realtime voice is retired, so every hold uses the pipeline. Its turn
+    // is a chat turn, and the surface that can render a confirmation card is
+    // the panel: the hold opens the panel already in voice mode, and the mic
     // there takes over the gesture. The dock stays out of the audio path.
-    if (this.voiceEngine() === 'pipeline') {
-      this.mode.set('idle');
-      this.openPanelInVoice.set(true);
-      this.panelOpen.set(true);
-      return;
-    }
-
-    this.mode.set('voice');
-    void this.openRealtimeVoice().then((opened) => {
-      // The attempt was spent on the permission dialog, which also killed the
-      // hold. Drop back to idle so the next press starts a real turn.
-      if (!opened) this.mode.set('idle');
-    });
-  }
-
-  private async openRealtimeVoice(): Promise<boolean> {
-    let conversation_id = this.chat.activeConversationId() ?? undefined;
-    if (await this.voice.voiceConsentEnabled()) {
-      if (!conversation_id) {
-        try {
-          const conversation = await firstValueFrom(
-            this.chatApi.createConversation({}),
-          );
-          conversation_id = conversation.id;
-          this.chat.selectConversation(conversation_id);
-        } catch {
-          return false;
-        }
-      }
-      // The hold may have been released while the handshake was in flight.
-      if (this.mode() !== 'voice') return false;
-    }
-    return this.voice.start(
-      conversation_id ? { conversation_id, agent_key: 'vexi' } : undefined,
-    );
+    this.mode.set('idle');
+    this.openPanelInVoice.set(true);
+    this.panelOpen.set(true);
   }
 
   private exitVoiceMode(): void {

@@ -19,6 +19,7 @@ import {
 } from '../../../common/errors';
 import { SubscriptionTrialService } from '../../store/subscriptions/services/subscription-trial.service';
 import { StoreBootstrapHelper } from '@common/helpers/store-bootstrap.helper';
+import { vendixUserWhere } from '@common/utils/vendix-user.util';
 import { S3Service } from '../../../common/services/s3.service';
 import type {
   StoreDetailContract,
@@ -192,7 +193,7 @@ export class StoresService {
           },
           _count: {
             select: {
-              store_users: true,
+              store_users: { where: { user: vendixUserWhere() } },
               products: true,
               orders: true,
             },
@@ -251,7 +252,7 @@ export class StoresService {
         store_settings: true,
         _count: {
           select: {
-            store_users: true,
+            store_users: { where: { user: vendixUserWhere() } },
             products: true,
             orders: true,
           },
@@ -527,7 +528,7 @@ export class StoresService {
           store_settings: true,
           _count: {
             select: {
-              store_users: true,
+              store_users: { where: { user: vendixUserWhere() } },
               products: true,
               orders: true,
             },
@@ -561,6 +562,8 @@ export class StoresService {
       throw new VendixHttpException(ErrorCodes.ORG_STORE_001);
     }
 
+    // Guarda de integridad, no métrica: cualquier vínculo (también el de un
+    // cliente de ecommerce) bloquea el borrado, por eso aquí no se filtra.
     if (
       existingStore._count.store_users > 0 ||
       existingStore._count.products > 0 ||
@@ -605,7 +608,7 @@ export class StoresService {
           },
           _count: {
             select: {
-              store_users: true,
+              store_users: { where: { user: vendixUserWhere() } },
               products: true,
               orders: true,
             },

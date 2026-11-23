@@ -1,6 +1,7 @@
 import { Controller, Param, Query, Sse, MessageEvent } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { AIEngineService } from './ai-engine.service';
+import { withoutClientCost } from './agent-execution.contract';
 
 @Controller('store/ai')
 export class AIStreamController {
@@ -41,8 +42,9 @@ export class AIStreamController {
           }
 
           for await (const chunk of stream) {
+            // T24 / P2-6: the cost is logged internally, never sent to the store.
             subscriber.next({
-              data: JSON.stringify(chunk),
+              data: JSON.stringify(withoutClientCost(chunk)),
               type: 'ai-chunk',
             } as MessageEvent);
 

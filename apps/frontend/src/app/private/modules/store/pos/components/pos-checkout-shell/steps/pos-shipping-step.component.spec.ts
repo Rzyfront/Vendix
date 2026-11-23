@@ -1477,6 +1477,71 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     expect(customers.updateCustomerAddress).not.toHaveBeenCalled();
   });
 
+  // Buscador de venta dividido por establecimiento: la sede elegida en la
+  // línea del cliente (`preferred_address_id`) llega preseleccionada.
+  describe('establecimiento elegido en el buscador', () => {
+    const fresh = (preferred?: number | null): CartState => {
+      const state = cart();
+      state.shippingContext = undefined;
+      state.linkedOrderId = null;
+      state.customer = { ...state.customer!, preferred_address_id: preferred };
+      return state;
+    };
+
+    it('preselecciona la sede elegida en vez de la principal', () => {
+      mount(fresh(33));
+      expect(component.addressId()).toBe(33);
+      expect(component.address()?.address_line1).toBe('Calle bodega 42');
+    });
+
+    it('sin sede elegida (o si ya no existe) sigue usando la principal', () => {
+      mount(fresh(null));
+      expect(component.addressId()).toBe(1);
+
+      fixture.componentRef.setInput('cartState', fresh(999));
+      fixture.detectChanges();
+      expect(component.addressId()).toBe(1);
+    });
+
+    it('elegir otra sede del mismo cliente la cambia y el cajero aún puede elegir otra', () => {
+      mount(fresh(33));
+      fixture.componentRef.setInput('cartState', fresh(1));
+      fixture.detectChanges();
+      expect(component.addressId()).toBe(1);
+
+      component.selectSavedAddress(33);
+      expect(component.addressId()).toBe(33);
+    });
+
+    it('editando una orden, cambiar a otro cliente por su línea de sede la deja elegida', () => {
+      const state = cart();
+      mount(state);
+      // Como `setCustomer`: mismo snapshot de envío, solo cambia el cliente.
+      fixture.componentRef.setInput('cartState', {
+        ...state,
+        customer: {
+          id: 120, first_name: 'Otro', phone: '3001234567', preferred_address_id: 61,
+          addresses: [
+            { id: 60, address_line1: 'Principal 60', city: 'Bogotá', state_province: 'Bogotá', country_code: 'CO', phone_number: '3001234567', is_primary: true, type: 'shipping', latitude: 4.6, longitude: -74 },
+            { id: 61, label: 'Sede Sur', address_line1: 'Sur 61', city: 'Bogotá', state_province: 'Bogotá', country_code: 'CO', phone_number: '3001234567', is_primary: false, type: 'shipping', latitude: 4.5, longitude: -74.1 },
+          ],
+        },
+      } as unknown as CartState);
+      fixture.detectChanges();
+
+      expect(component.customerChanged()).toBeTrue();
+      expect(component.addressId()).toBe(61);
+      expect(component.editorValidationError() ?? '').not.toContain('Cambiaste el cliente');
+    });
+
+    it('persona jurídica: el destinatario usa la razón social', () => {
+      const state = cart();
+      state.customer = { ...state.customer!, first_name: '', last_name: '', legal_name: 'ACME SAS' } as any;
+      mount(state);
+      expect(component.customerDisplayName).toBe('ACME SAS');
+    });
+  });
+
   it('B6 — cambiar de tarifa en el selector actualiza el costo de envío', () => {
     mount();
     component.selectShippingMethod(firstMethod);

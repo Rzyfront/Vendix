@@ -1154,6 +1154,21 @@
 	                      }
 	                    </div>
 
+                    <!-- Promo de la línea (aditivo): nombre de la promoción
+                         que produjo el descuento. Solo llega en líneas con
+                         descuento, así que su presencia ya es la señal. -->
+                    @if (item.promotion_label) {
+                      <div class="mt-2 flex flex-wrap gap-1.5">
+                        <span
+                          class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200 text-[11px] font-semibold"
+                          [attr.title]="'Promoción aplicada: ' + item.promotion_label"
+                        >
+                          <app-icon name="tag" [size]="10" />
+                          {{ item.promotion_label }}
+                        </span>
+                      </div>
+                    }
+
                     <!-- Price -->
                     <!-- F-136 (C.9, major — revisión 2026-09-14): antes eran
                          dos cifras sin una sola palabra que las distinguiera
@@ -1164,19 +1179,60 @@
                       <p class="text-[10px] font-medium uppercase tracking-wide text-gray-400 leading-none">
                         Total línea
                       </p>
-                      <p class="font-bold text-gray-900 text-sm">
-                        {{
-                          (item.final_total_price ?? item.total_price) || 0
-                            | currency
-                        }}
-                      </p>
-                      <p class="text-[11px] text-gray-500">
-                        <span class="sr-only">Precio unitario: </span>{{ lineQuantityLabel(item) }} x
-                        {{
-                          (item.final_unit_price ?? item.unit_price) || 0
-                            | currency
-                        }}
-                      </p>
+                      @if (item.line_breakdown; as line) {
+                        <!-- Desglose persistido: la base sola no es el precio
+                             de la línea; el total ya trae descuento e impuesto. -->
+                        @if (
+                          line.discount > 0 &&
+                          (line.total_before_discount ?? 0) > line.total
+                        ) {
+                          <!-- Precio de la línea (con impuesto) antes de la
+                               promo, tachado. -->
+                          <p
+                            class="text-[11px] text-gray-400 line-through tabular-nums leading-none mb-0.5"
+                            [attr.title]="'Precio antes de la promoción'"
+                          >
+                            {{ line.total_before_discount | currency }}
+                          </p>
+                        }
+                        <p class="font-bold text-gray-900 text-sm">
+                          {{ line.total | currency }}
+                        </p>
+                        <dl
+                          class="mt-1 grid grid-cols-[auto_auto] justify-end gap-x-2 gap-y-0.5 text-[11px] leading-tight text-gray-500"
+                        >
+                          <dt>Sin impuesto</dt>
+                          <dd class="tabular-nums">{{ line.base | currency }}</dd>
+                          @if (line.discount > 0) {
+                            <dt class="text-green-600">Descuento</dt>
+                            <dd class="tabular-nums text-green-600">
+                              -{{ line.discount | currency }}
+                            </dd>
+                          }
+                          @for (tax of line.taxes; track $index) {
+                            <dt>{{ tax.name }}</dt>
+                            <dd class="tabular-nums">{{ tax.amount | currency }}</dd>
+                          }
+                          <dt class="font-semibold text-gray-700">Con impuesto</dt>
+                          <dd class="tabular-nums font-semibold text-gray-700">
+                            {{ line.total | currency }}
+                          </dd>
+                        </dl>
+                      } @else {
+                        <p class="font-bold text-gray-900 text-sm">
+                          {{
+                            (item.final_total_price ?? item.total_price) || 0
+                              | currency
+                          }}
+                        </p>
+                        <p class="text-[11px] text-gray-500">
+                          <span class="sr-only">Precio unitario: </span>{{ lineQuantityLabel(item) }} x
+                          {{
+                            (item.final_unit_price ?? item.unit_price) || 0
+                              | currency
+                          }}
+                        </p>
+                      }
                     </div>
                   </div>
                 </div>
@@ -2602,12 +2658,21 @@
             <div class="space-y-2.5">
               <!-- Desglose completo: valores persistidos tal cual (base gross).
                    Subtotal = suma de líneas en bruto (grossSubtotal); IVA va incluido, no suma. -->
-              <div class="flex justify-between items-center text-sm">
-                <span class="text-text-secondary">Subtotal</span>
-                <span class="font-semibold text-gray-900">{{
-                  grossSubtotal() | currency
-                }}</span>
-              </div>
+              @if (totalsBreakdown(); as totals) {
+                <div class="flex justify-between items-center text-sm">
+                  <span class="text-text-secondary">Subtotal (sin impuesto)</span>
+                  <span class="font-semibold text-gray-900">{{
+                    totals.subtotal_base | currency
+                  }}</span>
+                </div>
+              } @else {
+                <div class="flex justify-between items-center text-sm">
+                  <span class="text-text-secondary">Subtotal</span>
+                  <span class="font-semibold text-gray-900">{{
+                    grossSubtotal() | currency
+                  }}</span>
+                </div>
+              }
 
               <!-- Applied promotions (persisted snapshot) -->
               @if (appliedPromotions().length > 0) {
@@ -2680,11 +2745,23 @@
               <!-- Total discount (always shown when > 0; aggregates snapshot or legacy discount_amount) -->
               @if (orderData.discount_amount && orderData.discount_amount > 0) {
                 <div class="flex justify-between items-center text-sm">
-                  <span class="text-text-secondary">Descuento total</span>
+                  <span class="text-text-secondary">Descuento</span>
                   <span class="font-semibold text-green-600"
                     >-{{ orderData.discount_amount || 0 | currency }}</span
                   >
                 </div>
+              }
+              <!-- Impuesto por tipo (IVA 19 % / INC 8 %), leído de las filas
+                   persistidas: subtotal − descuento + impuesto = líneas. -->
+              @if (totalsBreakdown(); as totals) {
+                @for (tax of totals.taxes; track $index) {
+                  <div class="flex justify-between items-center text-sm">
+                    <span class="text-text-secondary">{{ tax.name }}</span>
+                    <span class="font-semibold text-gray-900">{{
+                      tax.amount | currency
+                    }}</span>
+                  </div>
+                }
               }
               <div class="flex justify-between items-center text-sm">
                 <span class="text-text-secondary">Envio</span>
@@ -2711,7 +2788,7 @@
                 </div>
               }
               <!-- IVA incluido: informativo, fuera de la aritmética (base gross). -->
-              @if (showDetailVatNote()) {
+              @if (!totalsBreakdown() && showDetailVatNote()) {
                 <div class="flex justify-between items-center text-sm">
                   <span class="text-text-secondary">IVA incluido</span>
                   <span class="font-semibold text-gray-900">{{
@@ -2974,6 +3051,14 @@
           </app-card>
         </div>
       </div>
+    </div>
+
+    <!-- Documentos guardados en la orden (por Vex o por flujos). -->
+    <div class="max-w-[1600px] mx-auto mt-4">
+      <app-card shadow="sm" [responsivePadding]="true">
+        <h3 class="text-sm font-semibold text-text-primary mb-3">Documentos</h3>
+        <app-record-documents subjectType="order" [subjectId]="orderData.id"></app-record-documents>
+      </app-card>
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════

@@ -1,0 +1,23 @@
+-- Vendix Platform · un cliente del CRM puede enlazarse con VARIAS cuentas
+-- Vendix (organizaciones enteras y/o tiendas sueltas): hay dueños de varios
+-- comercios (odd/tasks/cuenta-vendix-multi-movimientos.md, D2).
+--
+-- DATA IMPACT:
+--   Tables affected: platform_crm_links (se elimina 1 índice único parcial).
+--   Ninguna otra tabla.
+--   Expected row changes: 0 INSERT, 0 UPDATE, 0 DELETE.
+--   Destructive operations: ninguna sobre datos. Solo DROP INDEX del único
+--   parcial "platform_crm_links_one_active_per_customer": relaja una regla, así
+--   que ninguna fila existente puede violar el estado nuevo. Se conservan
+--   "platform_crm_links_one_active_per_organization" (la org entera tiene un
+--   solo dueño) y "platform_crm_links_one_active_per_linked_store" (una tienda
+--   tiene un solo dueño), y los triggers de 20261204090000 y 20261207090000.
+--   FK/cascade risk: ninguno (no toca llaves foráneas).
+--   Idempotency: DROP INDEX IF EXISTS. Aplicarla dos veces no falla.
+--   Reversible: recrear el índice es posible mientras cada cliente tenga a lo
+--   sumo un enlace activo:
+--     CREATE UNIQUE INDEX "platform_crm_links_one_active_per_customer"
+--       ON "platform_crm_links"("customer_id") WHERE "status" = 'linked';
+--   Approval: decisión D2 de Rafael del 2026-11-19 (Cuenta Vendix multi).
+
+DROP INDEX IF EXISTS "platform_crm_links_one_active_per_customer";

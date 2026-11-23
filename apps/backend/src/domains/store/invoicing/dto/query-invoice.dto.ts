@@ -169,6 +169,17 @@ export class QueryInvoiceDto {
   @IsInt()
   @Min(1)
   contract_id?: number;
+
+  /**
+   * QUI-684 — filtra por OC de origen (`invoices.purchase_order_id`): la OC
+   * lista sus documentos soporte sin un endpoint dedicado. `@Min(1)` por el
+   * mismo motivo que `contract_id`.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  purchase_order_id?: number;
 }
 
 /**

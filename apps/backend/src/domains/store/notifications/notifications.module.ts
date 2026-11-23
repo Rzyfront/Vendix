@@ -8,6 +8,15 @@ import { NotificationSoundsCatalogService } from './notification-sounds-catalog.
 import { NotificationsSseService } from './notifications-sse.service';
 import { NotificationsPushService } from './notifications-push.service';
 import { NotificationsEventsListener } from './notifications-events.listener';
+import { NotificationDispatcher } from './notification-dispatcher.service';
+import { NotificationPreferencesService } from './notification-preferences.service';
+import { NotificationRecipientsService } from './notification-recipients.service';
+import { NotificationEmailService } from './notification-email.service';
+import { NotificationDeliveriesJob } from './notification-deliveries.job';
+import { MyNotificationsService } from './my-notifications.service';
+import { ReminderScheduler } from './reminders/reminder-scheduler.service';
+import { ReminderSourceRegistry } from './reminders/reminder-source.registry';
+import { ScheduledRemindersJob } from './reminders/scheduled-reminders.job';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { EmailModule } from '../../../email/email.module';
@@ -41,11 +50,28 @@ import { InvoiceDeliveryModule } from '../invoicing/delivery/invoice-delivery.mo
     NotificationsPushService,
     NotificationsEventsListener,
     NotificationSoundsCatalogService,
+    // Avisos personales con preferencias por canal (plan recordatorios §3.1).
+    NotificationDispatcher,
+    NotificationPreferencesService,
+    NotificationRecipientsService,
+    NotificationEmailService,
+    MyNotificationsService,
+    // Cron: solo corre en el worker (la API desmonta los @Cron en main.ts).
+    NotificationDeliveriesJob,
+    // Recordatorios con fecha (plan §3.1b): cada módulo registra su fuente en
+    // `ReminderSourceRegistry` y programa con `ReminderScheduler`.
+    ReminderScheduler,
+    ReminderSourceRegistry,
+    ScheduledRemindersJob,
   ],
   exports: [
     NotificationsService,
     NotificationsSseService,
     NotificationsPushService,
+    NotificationDispatcher,
+    NotificationPreferencesService,
+    ReminderScheduler,
+    ReminderSourceRegistry,
   ],
 })
 export class NotificationsModule implements OnModuleInit {

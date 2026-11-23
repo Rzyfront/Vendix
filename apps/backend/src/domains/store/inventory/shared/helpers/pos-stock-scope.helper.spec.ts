@@ -1,6 +1,8 @@
 import {
   NON_SELLABLE_LOCATION_TYPES,
   displayableStockLevelsWhere,
+  isPosCatalogBlockedWithoutRegister,
+  registerCatalogProductsWhere,
   resolvePosStockScope,
   sellableLocationsWhere,
   sellableStockLevelsWhere,
@@ -249,5 +251,77 @@ describe('register_location — bodega de la caja', () => {
     expect(
       resolvePosStockScope({ default_location_id: 1 }, settingsWith('all_locations'), 2),
     ).toEqual({ scope: 'all_locations', mainLocationId: null });
+  });
+});
+
+/**
+ * QUI-1006 — el catálogo del POS bajo "Bodega de la caja": sin caja no lista
+ * nada; con caja, solo lo que su bodega tiene. Main/all no cambian.
+ */
+describe('QUI-1006 — catálogo del POS bajo la bodega de la caja', () => {
+  it('sin caja abierta o caja sin bodega, el catálogo queda bloqueado', () => {
+    for (const registerLocationId of [undefined, null]) {
+      expect(
+        isPosCatalogBlockedWithoutRegister(
+          settingsWith('register_location'),
+          registerLocationId,
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it('con caja abierta con bodega, el catálogo no se bloquea', () => {
+    expect(
+      isPosCatalogBlockedWithoutRegister(settingsWith('register_location'), 2),
+    ).toBe(false);
+  });
+
+  it('main/all nunca bloquean, haya o no caja (sin regresión)', () => {
+    for (const scope of ['main_location', 'all_locations'] as const) {
+      for (const registerLocationId of [undefined, null, 2]) {
+        expect(
+          isPosCatalogBlockedWithoutRegister(
+            settingsWith(scope),
+            registerLocationId,
+          ),
+        ).toBe(false);
+      }
+    }
+  });
+
+  it('con caja: solo productos con existencias en su bodega vendible, más los que no controlan inventario', () => {
+    const scope = resolvePosStockScope(
+      { default_location_id: 1 },
+      settingsWith('register_location'),
+      2,
+    );
+
+    expect(registerCatalogProductsWhere(STORE_ID, scope)).toEqual({
+      OR: [
+        { track_inventory: false },
+        { product_variants: { some: { track_inventory_override: false } } },
+        {
+          stock_levels: {
+            some: {
+              inventory_locations: sellableLocationsWhere(STORE_ID),
+              location_id: 2,
+              quantity_on_hand: { gt: 0 },
+            },
+          },
+        },
+      ],
+    });
+  });
+
+  it('main/all no filtran el catálogo (null)', () => {
+    for (const scope of [
+      resolvePosStockScope({ default_location_id: 1 }, settingsWith('main_location')),
+      resolvePosStockScope({ default_location_id: 1 }, settingsWith('all_locations')),
+      // register_location sin caja degrada a main: tampoco filtra (el bloqueo
+      // lo decide isPosCatalogBlockedWithoutRegister).
+      resolvePosStockScope({ default_location_id: 1 }, settingsWith('register_location'), null),
+    ]) {
+      expect(registerCatalogProductsWhere(STORE_ID, scope)).toBeNull();
+    }
   });
 });

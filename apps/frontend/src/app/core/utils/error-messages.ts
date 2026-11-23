@@ -20,6 +20,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   SYS_FORBIDDEN_001: 'No tiene permisos para realizar esta accion.',
   SYS_UNAUTHORIZED_001: 'Debe iniciar sesion para continuar.',
   SYS_CONFLICT_001: 'El recurso ya existe o esta en conflicto.',
+  // 503: transacción vencida (P2028) o pool agotado (P2024). Reintentable.
+  SYS_BUSY_001: 'El sistema está ocupado, intenta de nuevo en unos segundos',
 
   // Tarifas: la regla de ajuste (precio fijo, monto o porcentaje) sin valor.
   PRICE_TIER_ADJUSTMENT_001:
@@ -124,6 +126,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   PAYMENT_NOT_OWNED: 'No puedes operar este pago: pertenece a otra persona.',
   PRODUCT_VARIANT_MISMATCH: 'La variante seleccionada no corresponde al producto.',
   AUTH_TOKEN_001: 'Token invalido o expirado.',
+  AUTH_STORE_INACTIVE_001:
+    'La tienda esta inactiva. Elige otra tienda o pide que la reactiven.',
   AUTH_CREDENTIALS_001: 'Email o contrasena incorrectos.',
   AUTH_PASSWORD_001: 'La contrasena es incorrecta.',
   AUTH_ROLE_001: 'Rol no encontrado.',
@@ -281,6 +285,19 @@ export const ERROR_MESSAGES: Record<string, string> = {
   BULK_PROD_VALIDATE_001:
     'Uno de los valores tiene un formato invalido. Verifique campos como marca o categoria.',
 
+  // Bulk upload jobs (QUI-1009)
+  BULK_JOB_ALREADY_ACTIVE:
+    'Ya hay una carga de este tipo en curso en la tienda. Espera a que termine.',
+  BULK_JOB_NOT_FOUND: 'No encontramos esa carga.',
+  BULK_JOB_NOT_RETRYABLE:
+    'Esta carga ya no se puede reanudar. Sube el archivo de nuevo.',
+  BULK_JOB_ENQUEUE_FAILED:
+    'No pudimos iniciar la carga por un problema técnico. Intenta de nuevo en unos minutos.',
+  BULK_JOB_TIMEOUT:
+    'La carga superó el tiempo máximo. Estamos revisando el problema técnico.',
+  BULK_JOB_INTERRUPTED:
+    'La carga se interrumpió en el servidor. Estamos revisando el problema técnico.',
+
   // Orders
   ORD_FIND_001: 'Orden no encontrada.',
   ORD_CREATE_001: 'Error al crear la orden.',
@@ -427,6 +444,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   SUP_ADMIN_USER_001: 'Usuario de superadministrador no encontrado.',
   SUP_ADMIN_ORG_001: 'Organizacion no encontrada.',
   SUP_ADMIN_ROLE_001: 'Rol de superadministrador no encontrado.',
+  SUP_ADMIN_ROLE_002:
+    'El rol cliente no se asigna desde el Super Admin: identifica a los clientes finales de las tiendas.',
   SUP_ADMIN_PERM_001: 'Permiso de superadministrador denegado.',
 
   // Payroll
@@ -469,6 +488,12 @@ export const ERROR_MESSAGES: Record<string, string> = {
   AI_CONFIG_001: 'Configuracion de IA no encontrada.',
   AI_PROVIDER_001: 'No se pudo conectar con el proveedor de IA.',
   AI_PROVIDER_002: 'No hay un proveedor de IA configurado por defecto.',
+  // QUI-1020: el proveedor rechazó por saldo/cuota o siguió limitando tras
+  // los reintentos. No es culpa del documento y Vendix ya fue avisado.
+  AI_PROVIDER_003:
+    'El servicio de IA no está disponible en este momento (sin créditos). Ya avisamos al equipo de Vendix; intenta más tarde.',
+  AI_PROVIDER_004:
+    'El servicio de IA está saturado en este momento. Ya avisamos al equipo de Vendix; intenta de nuevo en unos minutos.',
   AI_REQUEST_001: 'La solicitud al proveedor de IA fallo.',
   AI_CONFIG_002: 'Ya existe una configuracion con ese proveedor y modelo.',
   AI_APP_001: 'Aplicacion de IA no encontrada.',
@@ -566,6 +591,20 @@ export const ERROR_MESSAGES: Record<string, string> = {
   DCOL_DELETE_001:
     'No se puede eliminar una plantilla que tiene formularios enviados.',
   DCOL_PRODUCT_001: 'El formulario de recepción solo se puede vincular a servicios de esta tienda.',
+  DCOL_CRM_001: 'Solo una plantilla activa de tipo Cliente puede usarse en el CRM.',
+  DCOL_CRM_002: 'Otra plantilla se marcó como predeterminada del CRM al mismo tiempo. Intenta de nuevo.',
+  // CRM pipeline: stage templates and customer data sheet (QUI-1043).
+  CRM_PIPELINE_006: 'Una etapa que sobra tiene oportunidades abiertas. Muévelas antes de desactivarla o de aplicar la plantilla.',
+  CRM_PIPELINE_007: 'Solo el dueño o un administrador puede configurar pipelines y etapas.',
+  CRM_PIPELINE_008: 'Una etapa con oportunidades no puede cambiar de tipo. Muévelas antes de aplicar la plantilla.',
+  CRM_PIPELINE_009: 'Ya existe un pipeline con ese nombre.',
+  CRM_STAGE_TEMPLATE_001: 'La plantilla de etapas no existe.',
+  CRM_STAGE_TEMPLATE_002: 'Ya existe una plantilla de etapas con ese nombre.',
+  CRM_STAGE_TEMPLATE_003: 'La plantilla necesita al menos una etapa abierta, una ganada y una perdida, con nombres de etapa sin repetir.',
+  CRM_OPPORTUNITY_001: 'La oportunidad no existe o no tienes acceso a ella.',
+  CRM_DATA_SHEET_001: 'Ese campo no pertenece a la plantilla de datos del cliente.',
+  CRM_DATA_SHEET_002: 'El archivo no pertenece a la ficha de este cliente. Súbelo de nuevo.',
+  CRM_DATA_SHEET_003: 'Ese tipo de archivo no se permite. Sube una imagen, un PDF o un documento de Office, texto o CSV.',
   // Rejections a customer meets when booking a station online.
   STATION_001: 'El servicio, el profesional y la estación elegidos no son compatibles.',
   STATION_002: 'Ese horario de la estación ya fue tomado. Elige otro horario.',
@@ -875,6 +914,34 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'La IA no pudo leer la resolución. Intenta con una foto más nítida o escribe los datos a mano.',
   RESOLUTION_SCAN_PARSE_FAIL:
     'La IA respondió algo que no se pudo interpretar. Intenta de nuevo o escribe los datos a mano.',
+  // Escáner IA de planillas de ruta y de socios (QUI-1020: no tenían texto).
+  RTSCAN_NO_FILE: 'Sube una foto o un PDF de la planilla.',
+  RTSCAN_INVALID_FILE: 'Formato no soportado. Usa JPG, PNG, WebP o PDF.',
+  RTSCAN_AI_FAIL:
+    'No se pudo analizar la planilla por un problema del servicio. Intenta de nuevo.',
+  RTSCAN_PARSE_FAIL:
+    'No pudimos leer la planilla. Intenta con una foto más nítida y completa.',
+  RTSCAN_MATCH_001:
+    'Una fila de la planilla no coincide con ninguna parada de la ruta. Revisa que sea la planilla correcta.',
+  MEMBER_SCAN_NO_FILE: 'Sube una foto o un PDF con la lista de socios.',
+  MEMBER_SCAN_INVALID_FILE:
+    'Formato no soportado. Usa una imagen (JPG, PNG, WebP), un PDF, Excel (xlsx, xls) o CSV.',
+  MEMBER_SCAN_AI_FAIL:
+    'No se pudo analizar la lista por un problema del servicio. Intenta de nuevo.',
+  MEMBER_SCAN_PARSE_FAIL:
+    'No pudimos leer la lista de socios. Intenta con un archivo más nítido.',
+  AI_INGEST_PARSE_FAIL:
+    'La IA no pudo interpretar el documento. Intenta con un archivo más nítido o con menos datos.',
+  AI_INGEST_INCOMPLETE:
+    'El documento tiene demasiados datos para leerlo de una vez. Divídelo en partes más pequeñas o usa una hoja de cálculo.',
+  AI_INGEST_INVALID_FILE:
+    'No pudimos leer el archivo. Verifica que no esté dañado, protegido con contraseña o vacío.',
+  AI_INGEST_TOO_MANY_PAGES:
+    'El PDF tiene más páginas de las que se pueden leer en una sola carga. Divídelo en partes o usa una hoja de cálculo.',
+  AI_INGEST_UNSUPPORTED_TYPE:
+    'Las fotos HEIC (iPhone) aún no se pueden leer. Expórtala como JPG o PNG, o cambia la cámara a "Más compatible", e intenta de nuevo.',
+  AI_INGEST_NO_PAGES:
+    'El PDF no tiene texto ni páginas que se puedan leer. Si es un escaneo, vuelve a escanearlo o sube fotos de las páginas.',
   RUT_SCAN_NO_FILE: 'Sube una foto o un PDF del RUT.',
   RUT_SCAN_INVALID_FILE: 'Formato no soportado. Usa JPG, PNG, WebP o PDF.',
   RUT_SCAN_AI_FAIL:
@@ -1314,6 +1381,23 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Los cambios no son válidos. Revisa los productos e intenta de nuevo.',
   ORD_EDIT_PROMOTION_INVALID_001:
     'La promoción o cupón ya no está disponible.',
+  // Promociones de la tienda. El backend suele enviar un mensaje más
+  // específico (p. ej. los días en que aplica); estos son el respaldo.
+  PROMOTION_INVALID_001:
+    'La promoción no es válida, no está activa o está fuera de sus fechas.',
+  PROMOTION_NOT_TODAY_001:
+    'Esta promoción no aplica hoy. Revisa los días en que está disponible.',
+  PROMOTION_USAGE_LIMIT_001: 'La promoción ya alcanzó su límite de usos.',
+  PROMOTION_CUSTOMER_LIMIT_001:
+    'El cliente ya alcanzó el límite de usos de esta promoción.',
+  PROMOTION_MIN_PURCHASE_001:
+    'El carrito no alcanza la compra mínima de la promoción.',
+  PROMOTION_NOT_APPLICABLE_001:
+    'La promoción no aplica a los productos del carrito.',
+  PROMOTION_CODE_DUP_001:
+    'Ese código ya lo usa un cupón u otra promoción de la tienda.',
+  PROMOTION_STATE_001:
+    'Una promoción cancelada no se puede reactivar. Crea una nueva.',
   ORD_EDIT_COUPON_COMMIT_001:
     'No fue posible registrar el cupón. Revisa la orden.',
   ORD_EDIT_RESPONSE_MISMATCH_001:
@@ -1359,6 +1443,16 @@ export const ERROR_MESSAGES: Record<string, string> = {
   // reintente, y a quién avisar.
   PRINT_TOKEN_SYNTAX_001:
     'La venta quedó registrada, pero el formato de impresión tiene un error en su plantilla y el documento no se puede generar. Reintentar no lo resuelve: avisa al administrador para que corrija la plantilla.',
+
+  // Vendix Platform · enlace CRM ↔ organización cliente (solo tienda plataforma).
+  PLATFORM_CRM_001: 'Este cliente ya no está en el CRM de Vendix Platform.',
+  PLATFORM_CRM_002: 'La organización no existe o no se puede enlazar.',
+  PLATFORM_CRM_003: 'Este cliente ya tiene una cuenta Vendix enlazada. Recarga la ficha.',
+  PLATFORM_CRM_004: 'Esa organización ya está enlazada a otro cliente del CRM.',
+  PLATFORM_CRM_005: 'Este cliente ya no tiene una cuenta Vendix enlazada. Recarga la ficha.',
+  PLATFORM_CRM_006: 'La tienda no existe o no se puede enlazar.',
+  PLATFORM_CRM_007: 'Esa tienda ya está enlazada a otro cliente del CRM.',
+  PLATFORM_CRM_008: 'Una tienda de esa organización ya está enlazada a otro cliente del CRM.',
 };
 
 export const EMPTY_CART_MESSAGE = 'El carrito está vacío.';

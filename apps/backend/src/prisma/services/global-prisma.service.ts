@@ -356,6 +356,17 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.push_subscriptions;
   }
 
+  // Outbox de entregas de avisos personales y disparos programados: los usan
+  // el despachador y los crons sin contexto de tienda. Cada fila nombra su
+  // tienda y toda consulta debe filtrar por ella explícitamente.
+  get notification_deliveries() {
+    return this.baseClient.notification_deliveries;
+  }
+
+  get scheduled_reminders() {
+    return this.baseClient.scheduled_reminders;
+  }
+
   get notification_sounds() {
     return this.baseClient.notification_sounds;
   }
@@ -384,6 +395,11 @@ export class GlobalPrismaService extends BasePrismaService {
   // Support models
   get support_tickets() {
     return this.baseClient.support_tickets;
+  }
+
+  // QUI-1010 — bot de monitoreo (registro de plataforma, sin tenant).
+  get platform_alerts() {
+    return this.baseClient.platform_alerts;
   }
 
   get support_attachments() {
@@ -457,6 +473,46 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.ai_agent_recipe_events;
   }
 
+  // Sin scoping: lo usa el job de reintento de S3, que corre sin contexto de
+  // tienda. Filtra por la propia fila de la constancia.
+  get ai_conversation_purges() {
+    return this.baseClient.ai_conversation_purges;
+  }
+
+  // F4 T31: sin scoping. Solo para el borrado de una conversación (filtra por
+  // source_conversation_id de la propia constancia) y tareas de sistema; el
+  // tráfico de la tienda va por StorePrismaService.ai_agent_memories.
+  get ai_agent_memories() {
+    return this.baseClient.ai_agent_memories;
+  }
+
+  // F4 T32–T33: skills de Vex (contenido global administrado en superadmin).
+  get ai_voice_profiles() {
+    return this.baseClient.ai_voice_profiles;
+  }
+
+  get ai_agent_skills() {
+    return this.baseClient.ai_agent_skills;
+  }
+
+  get ai_agent_skill_versions() {
+    return this.baseClient.ai_agent_skill_versions;
+  }
+
+  // F4 T27: series de videos y progreso de aprendizaje (contenido global; el
+  // progreso se filtra por user_id en el servicio).
+  get video_series() {
+    return this.baseClient.video_series;
+  }
+
+  get video_series_items() {
+    return this.baseClient.video_series_items;
+  }
+
+  get user_learning_progress() {
+    return this.baseClient.user_learning_progress;
+  }
+
   get ai_agent_script_runs() {
     return this.baseClient.ai_agent_script_runs;
   }
@@ -512,6 +568,11 @@ export class GlobalPrismaService extends BasePrismaService {
   // Invoicing models
   get invoices() {
     return this.baseClient.invoices;
+  }
+
+  /** QUI-580 — the reminder due job resolves quotation links (explicit store predicate). */
+  get quotations() {
+    return this.baseClient.quotations;
   }
 
   get accounting_entries() {
@@ -787,6 +848,10 @@ export class GlobalPrismaService extends BasePrismaService {
 
   get plan_module_rules() {
     return this.baseClient.plan_module_rules;
+  }
+
+  get plan_ai_entitlements() {
+    return this.baseClient.plan_ai_entitlements;
   }
 
   get platform_settings() {

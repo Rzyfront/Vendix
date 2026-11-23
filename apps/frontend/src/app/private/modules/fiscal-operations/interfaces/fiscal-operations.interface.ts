@@ -278,6 +278,30 @@ export interface FiscalDataSettings {
 
 export interface FiscalDataResponse {
   fiscal_data: FiscalDataSettings | null;
+  /** Resumen del calendario tributario generado al guardar (F1). */
+  fiscal_calendar?: FiscalCalendarSummary | null;
+}
+
+/** Resultado de generar obligaciones + recordatorios del calendario tributario. */
+export interface FiscalCalendarSummary {
+  status: string;
+  periodicity: string | null;
+  obligations: number;
+  reminders_created: number;
+  reminders_scheduled: number;
+  pending_confirmation: number;
+  replaced: { obligations_cancelled: number; reminders_removed: number } | null;
+  /** Texto en español para mostrarle a la persona (vacío si no aplica). */
+  message: string;
+}
+
+/** Cuánto se reemplazaría al cambiar la periodicidad de IVA (F3). */
+export interface FiscalCalendarChangePreview {
+  current_periodicity: string | null;
+  next_periodicity: string | null;
+  changed: boolean;
+  pending_reminders: number;
+  pending_obligations: number;
 }
 
 /**

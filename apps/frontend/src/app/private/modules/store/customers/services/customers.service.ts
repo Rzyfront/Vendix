@@ -3,6 +3,7 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, catchError, throwError, map, of } from 'rxjs';
 import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import { registerStoreSwitchReset } from '../../../../../core/utils/store-scoped-cache';
 import {
     Customer,
     CustomerAddress,
@@ -133,6 +134,8 @@ interface CacheEntry<T> {
 }
 
 const storeCustomersStatsCache = new Map<number, CacheEntry<Observable<CustomerStats>>>();
+// QUI-1021: a store switch empties it, so a return to a store fetches again.
+registerStoreSwitchReset(() => storeCustomersStatsCache.clear());
 
 @Injectable({
     providedIn: 'root',
@@ -186,11 +189,12 @@ export class CustomersService {
         if (filters?.search) {
             params = params.set('search', filters.search);
         }
-
-        // Example fitlers
-        // if (filters?.state) {
-        //   params = params.set('state', filters.state);
-        // }
+        if (filters?.state_province) {
+            params = params.set('state_province', filters.state_province);
+        }
+        if (filters?.city) {
+            params = params.set('city', filters.city);
+        }
 
         return this.http.get<PaginatedResponse<Customer>>(this.apiUrl, { params });
     }
@@ -308,13 +312,6 @@ export class CustomersService {
         return this.http.get(`${this.apiUrl}/bulk/template/download`, {
             responseType: 'blob',
         });
-    }
-
-    /**
-     * Sube clientes en formato JSON para carga masiva
-     */
-    uploadBulkCustomersJson(customers: any[]): Observable<any> {
-        return this.http.post(`${this.apiUrl}/bulk/upload`, { customers });
     }
 
     // ── Direcciones de envío del cliente ──────────────────────

@@ -7,6 +7,16 @@ import { CreatePromotionDto } from './dto/create-promotion.dto';
 import { UpdatePromotionDto } from './dto/update-promotion.dto';
 import { QueryPromotionsDto } from './dto/query-promotions.dto';
 import { QuantityTierDto } from './dto/quantity-tier.dto';
+import { resolveTimezoneCascade } from '../../../common/utils/store-timezone.util';
+import {
+  PromotionClock,
+  buildPromotionClock,
+  isPromotionEnded,
+  isPromotionActiveOnWeekday,
+  normalizeActiveWeekdays,
+  promotionDateWindowWhere,
+} from './promotion-schedule.util';
+import { normalizePromotionDate } from './utils/promotion-date.util';
 
 /**
  * Tipo de regla de promoción. Alias local (igual que en
@@ -18,6 +28,44 @@ type PromotionRuleType = 'flat' | 'quantity_tiered';
 @Injectable()
 export class PromotionsService {
   constructor(private readonly prisma: StorePrismaService) {}
+
+  /**
+   * Reloj de la tienda (fecha, hora y día local). Mismo criterio que el motor
+   * de promociones: `stores.timezone` primero, luego el JSON legado.
+   */
+  private async getStoreClock(now: Date = new Date()): Promise<PromotionClock> {
+    try {
+      const row = (await this.prisma.store_settings.findFirst({
+        select: { settings: true, stores: { select: { timezone: true } } },
+      } as any)) as any;
+      return buildPromotionClock(
+        now,
+        resolveTimezoneCascade(
+          row?.stores?.timezone,
+          row?.settings?.general?.timezone,
+        ),
+      );
+    } catch {
+      return buildPromotionClock(now, null);
+    }
+  }
+
+  /**
+   * Estado efectivo para mostrar: no existe un job que pase las promociones a
+   * `scheduled`/`expired`, así que el listado lo deriva de las fechas (en la
+   * zona de la tienda). No toca la columna `state`.
+   */
+  private effectiveState(
+    promo: { state: string; start_date: Date; end_date: Date | null },
+    clock: PromotionClock,
+  ): string {
+    if (promo.state !== 'active' && promo.state !== 'scheduled') {
+      return promo.state;
+    }
+    if (isPromotionEnded(promo.end_date, clock)) return 'expired';
+    if (new Date(promo.start_date) > clock.wall_now) return 'scheduled';
+    return 'active';
+  }
 
   private getContext() {
     const context = RequestContextService.getContext();
@@ -74,8 +122,12 @@ export class PromotionsService {
       this.prisma.promotions.count({ where }),
     ]);
 
+    const clock = await this.getStoreClock();
     return {
-      data,
+      data: data.map((promo) => ({
+        ...promo,
+        effective_state: this.effectiveState(promo, clock),
+      })),
       meta: {
         total,
         page,
@@ -123,21 +175,22 @@ export class PromotionsService {
   }
 
   async getSummary() {
-    const now = new Date();
+    const clock = await this.getStoreClock();
 
     const [total_active, total_scheduled, usage_agg, discount_agg] =
       await Promise.all([
+        // "Activas" = vigentes hoy en la zona de la tienda, incluidas las
+        // programadas cuya fecha ya llegó (el motor ya las aplica).
         this.prisma.promotions.count({
           where: {
-            state: 'active',
-            start_date: { lte: now },
-            OR: [{ end_date: null }, { end_date: { gte: now } }],
+            state: { in: ['active', 'scheduled'] },
+            ...promotionDateWindowWhere(clock),
           },
         }),
         this.prisma.promotions.count({
           where: {
             state: { in: ['active', 'scheduled'] },
-            start_date: { gt: now },
+            start_date: { gt: clock.wall_now },
           },
         }),
         this.prisma.promotions.aggregate({
@@ -157,14 +210,18 @@ export class PromotionsService {
     };
   }
 
+  /**
+   * Promociones que el POS puede aplicar HOY: vigentes en la zona de la
+   * tienda, en su día de la semana y con cupo de usos. Orden del motor
+   * (menor `priority` gana, luego la más antigua).
+   */
   async getActive() {
-    const now = new Date();
+    const clock = await this.getStoreClock();
 
-    return this.prisma.promotions.findMany({
+    const rows = await this.prisma.promotions.findMany({
       where: {
         state: { in: ['active', 'scheduled'] },
-        start_date: { lte: now },
-        OR: [{ end_date: null }, { end_date: { gte: now } }],
+        ...promotionDateWindowWhere(clock),
       },
       include: {
         promotion_quantity_tiers: {
@@ -173,8 +230,14 @@ export class PromotionsService {
         promotion_products: true,
         promotion_categories: true,
       },
-      orderBy: { priority: 'desc' },
+      orderBy: [{ priority: 'asc' }, { id: 'asc' }],
     });
+
+    return rows.filter(
+      (promo) =>
+        isPromotionActiveOnWeekday(promo, clock.weekday) &&
+        !(promo.usage_limit && promo.usage_count >= promo.usage_limit),
+    );
   }
 
   async create(dto: CreatePromotionDto) {
@@ -190,6 +253,8 @@ export class PromotionsService {
 
     this.validateScopeSelection(scope, normalizedProductIds, normalizedCategoryIds);
     this.validateRuleTypeShape(rule_type, quantity_tiers);
+    await this.assertCodeAvailable(dto.code);
+    const { timezone } = await this.getStoreClock();
 
     const data: any = {
       ...promotionData,
@@ -200,8 +265,11 @@ export class PromotionsService {
       // would clobber existing rows on a partial PATCH.
       is_auto_apply: dto.is_auto_apply ?? false,
       priority: dto.priority ?? 0,
-      start_date: new Date(dto.start_date),
-      end_date: dto.end_date ? new Date(dto.end_date) : null,
+      active_weekdays: normalizeActiveWeekdays(dto.active_weekdays),
+      start_date: normalizePromotionDate(dto.start_date, 'start', timezone),
+      end_date: dto.end_date
+        ? normalizePromotionDate(dto.end_date, 'end', timezone)
+        : null,
       state: 'draft',
       usage_count: 0,
     };
@@ -302,14 +370,30 @@ export class PromotionsService {
       normalizedCategoryIds,
     );
     this.validateRuleTypeShape(effectiveRuleType, effectiveTiers);
+    if (dto.code) {
+      await this.assertCodeAvailable(dto.code, id);
+    }
 
     // Prepare date conversions
     const data: any = { ...updateData };
     if (dto.scope) data.scope = effectiveScope;
     if (dto.rule_type) data.rule_type = effectiveRuleType;
-    if (dto.start_date) data.start_date = new Date(dto.start_date);
-    if (dto.end_date !== undefined) {
-      data.end_date = dto.end_date ? new Date(dto.end_date) : null;
+    if (dto.start_date || dto.end_date) {
+      const { timezone } = await this.getStoreClock();
+      if (dto.start_date) {
+        data.start_date = normalizePromotionDate(
+          dto.start_date,
+          'start',
+          timezone,
+        );
+      }
+      if (dto.end_date) {
+        data.end_date = normalizePromotionDate(dto.end_date, 'end', timezone);
+      }
+    }
+    if (dto.end_date !== undefined && !dto.end_date) data.end_date = null;
+    if (dto.active_weekdays !== undefined) {
+      data.active_weekdays = normalizeActiveWeekdays(dto.active_weekdays);
     }
 
     // Decide whether to rewrite each association table.
@@ -399,9 +483,18 @@ export class PromotionsService {
       throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);
     }
 
-    const now = new Date();
+    // Una promoción cancelada es definitiva (su historial queda en órdenes):
+    // reactivarla debía hacerse creando otra. Antes `activate` la revivía.
+    if (promotion.state === 'cancelled') {
+      throw new VendixHttpException(
+        ErrorCodes.PROMOTION_STATE_001,
+        'Una promoción cancelada no se puede reactivar; crea una nueva',
+      );
+    }
+
+    const clock = await this.getStoreClock();
     const new_state =
-      new Date(promotion.start_date) > now ? 'scheduled' : 'active';
+      new Date(promotion.start_date) > clock.wall_now ? 'scheduled' : 'active';
 
     return this.prisma.promotions.update({
       where: { id },
@@ -481,6 +574,37 @@ export class PromotionsService {
       });
       await tx.promotions.delete({ where: { id } });
     });
+  }
+
+  /**
+   * El código de una promoción se escribe en la MISMA casilla que los cupones
+   * (POS y checkout) y el cupón tiene prioridad: no puede repetirse con un
+   * cupón ni con otra promoción de la tienda (sin distinguir mayúsculas).
+   */
+  private async assertCodeAvailable(code?: string | null, selfId?: number) {
+    const normalized = String(code ?? '').trim();
+    if (!normalized) return;
+    const [coupon, promotion] = await Promise.all([
+      this.prisma.coupons.findFirst({
+        where: { code: { equals: normalized, mode: 'insensitive' } },
+        select: { id: true },
+      }),
+      this.prisma.promotions.findFirst({
+        where: {
+          code: { equals: normalized, mode: 'insensitive' },
+          ...(selfId != null ? { id: { not: selfId } } : {}),
+        },
+        select: { id: true },
+      }),
+    ]);
+    if (coupon || promotion) {
+      throw new VendixHttpException(
+        ErrorCodes.PROMOTION_CODE_DUP_001,
+        coupon
+          ? 'Ya existe un cupón con ese código'
+          : 'Ya existe otra promoción con ese código',
+      );
+    }
   }
 
   private validateScopeSelection(

@@ -4,15 +4,17 @@ import {
   computed,
   inject,
   input,
+  effect,
   output,
   signal,
+  untracked,
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { HttpErrorResponse } from '@angular/common/http';
-import { Subscription, catchError, of } from 'rxjs';
+import { Observable, Subscription } from 'rxjs';
 
-import { parseApiError } from '../../../core/utils/parse-api-error';
+import { injectAiJobProgress } from '../../utils/ai-job-progress';
+import { AiJobProgressComponent } from '../ai-job-progress/ai-job-progress.component';
 
 import { AiReviewAckComponent } from '../ai-review-ack/ai-review-ack.component';
 import { BadgeComponent, BadgeVariant } from '../badge/badge.component';
@@ -20,7 +22,6 @@ import { ButtonComponent } from '../button/button.component';
 import { IconComponent } from '../icon/icon.component';
 import { ModalComponent } from '../modal/modal.component';
 import { StepsLineComponent } from '../steps-line/steps-line.component';
-import { ToastService } from '../toast/toast.service';
 
 import {
   DianHabilitationScanResult,
@@ -28,6 +29,7 @@ import {
   HABILITATION_SCAN_SECTIONS,
   HabilitationScanField,
   HabilitationScanFieldKey,
+  HabilitationScanApiResponse,
   HabilitationScannerScope,
   SCANNED_ENVIRONMENT_LABELS,
 } from './interfaces/habilitation-scan-result.interface';
@@ -87,6 +89,7 @@ interface ReviewSection {
     IconComponent,
     StepsLineComponent,
     AiReviewAckComponent,
+    AiJobProgressComponent,
   ],
   template: `
     <app-modal
@@ -237,31 +240,19 @@ interface ReviewSection {
         </div>
       }
 
-      <!-- Paso 2: analizando -->
+      <!-- Paso 2: barra de progreso de IA (QUI-1020) -->
       @if (currentStep() === 2) {
-        <div
-          class="scan-stage relative overflow-hidden rounded-2xl border border-border min-h-[280px] flex flex-col items-center justify-center gap-4 p-6"
-        >
-          <div class="scan-stage__line"></div>
-          <div class="scan-stage__icon">
-            <app-icon name="sparkles" [size]="32"></app-icon>
-          </div>
-          <p class="relative z-10 text-base font-semibold text-text-primary">
-            Leyendo la habilitación...
-          </p>
-          <p
-            class="relative z-10 max-w-[320px] text-center text-sm text-text-secondary"
-          >
-            Extrayendo Software ID, PIN, Test Set ID, NIT y la resolución de
-            pruebas.
-          </p>
-          <p class="relative z-10 max-w-[320px] text-center text-xs text-text-secondary">
-            @if (scanStalled()) {
-              Está tardando más de lo normal; seguimos procesando el documento.
-            } @else {
-              Esto puede tardar unos minutos. No cierres la ventana.
-            }
-          </p>
+        <div class="min-h-[200px] flex flex-col justify-center gap-3 p-2">
+          <app-ai-job-progress
+            [progress]="aiProgress"
+            [showRetry]="hasInput()"
+            (retry)="startScan()"
+          />
+          @if (aiProgress.running()) {
+            <p class="text-center text-xs text-text-secondary">
+              Extrayendo Software ID, PIN, Test Set ID, NIT y la resolución de pruebas. No cierres la ventana.
+            </p>
+          }
         </div>
       }
 
@@ -348,6 +339,24 @@ interface ReviewSection {
             </div>
           }
 
+          <!-- ia-cargas F5b: avisos de lectura (páginas sin leer, valores en conflicto) -->
+          @if (result()!.warnings?.length) {
+            <div
+              class="flex items-start gap-2 bg-warning-light border border-warning rounded-lg p-3"
+            >
+              <app-icon
+                name="alert-triangle"
+                [size]="16"
+                class="text-warning mt-0.5"
+              ></app-icon>
+              <ul class="list-disc space-y-0.5 pl-4 text-xs text-warning">
+                @for (warning of result()!.warnings; track $index) {
+                  <li>{{ warning }}</li>
+                }
+              </ul>
+            </div>
+          }
+
           <app-ai-review-ack
             #ackBlock
             [(acknowledged)]="aiAck"
@@ -368,6 +377,11 @@ interface ReviewSection {
           <app-button variant="outline" (clicked)="onCancel()">
             Cancelar
           </app-button>
+          @if (currentStep() === 2 && !aiProgress.running()) {
+            <app-button variant="outline" (clicked)="backToUpload()">
+              Cambiar archivo
+            </app-button>
+          }
           @if (currentStep() === 1) {
             <app-button
               variant="primary"
@@ -389,88 +403,11 @@ interface ReviewSection {
       </div>
     </app-modal>
   `,
-  styles: [
-    `
-      .scan-stage {
-        background:
-          radial-gradient(
-            circle at 50% 50%,
-            color-mix(in oklab, var(--color-primary) 10%, transparent),
-            transparent 70%
-          ),
-          var(--color-surface-secondary);
-      }
-
-      .scan-stage__icon {
-        position: relative;
-        z-index: 6;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 72px;
-        height: 72px;
-        border-radius: 9999px;
-        color: var(--color-primary);
-        background: color-mix(in oklab, var(--color-primary) 12%, transparent);
-        box-shadow:
-          0 0 0 1px color-mix(in oklab, var(--color-primary) 25%, transparent),
-          0 0 30px color-mix(in oklab, var(--color-primary) 35%, transparent);
-        animation: scan-icon-breathe 3s ease-in-out infinite;
-      }
-
-      .scan-stage__line {
-        position: absolute;
-        left: 0;
-        right: 0;
-        top: 0;
-        height: 2px;
-        z-index: 4;
-        pointer-events: none;
-        background: linear-gradient(
-          90deg,
-          transparent,
-          color-mix(in oklab, var(--color-primary) 75%, transparent),
-          transparent
-        );
-        box-shadow: 0 0 14px
-          color-mix(in oklab, var(--color-primary) 55%, transparent);
-        animation: scan-line-sweep 2.6s ease-in-out infinite;
-      }
-
-      @keyframes scan-icon-breathe {
-        0%,
-        100% {
-          transform: scale(1);
-        }
-        50% {
-          transform: scale(1.08);
-        }
-      }
-
-      @keyframes scan-line-sweep {
-        0% {
-          transform: translateY(0);
-        }
-        50% {
-          transform: translateY(260px);
-        }
-        100% {
-          transform: translateY(0);
-        }
-      }
-
-      @media (prefers-reduced-motion: reduce) {
-        .scan-stage__icon,
-        .scan-stage__line {
-          animation: none !important;
-        }
-      }
-    `,
-  ],
 })
 export class DianHabilitationScannerModalComponent {
   private readonly scanner = inject(HabilitationScannerService);
-  private readonly toast = inject(ToastService);
+  /** Shared progress bar state of the scan (QUI-1020). */
+  readonly aiProgress = injectAiJobProgress({ kind: 'dian_habilitation' });
   private readonly destroyRef = inject(DestroyRef);
 
   readonly isOpen = input(false);
@@ -488,9 +425,7 @@ export class DianHabilitationScannerModalComponent {
   readonly files = signal<PickedFile[]>([]);
   readonly fileError = signal<string | null>(null);
   readonly isDragging = signal(false);
-  readonly isScanning = signal(false);
   /** true cuando el job lleva más de ~60 s sin terminar. */
-  readonly scanStalled = signal(false);
   private scanSub: Subscription | null = null;
   readonly result = signal<DianHabilitationScanResult | null>(null);
 
@@ -504,6 +439,12 @@ export class DianHabilitationScannerModalComponent {
     { label: 'Analizar' },
     { label: 'Revisar' },
   ];
+
+  constructor() {
+    effect(() => {
+      if (this.isOpen()) untracked(() => this.tryResume());
+    });
+  }
 
   readonly isFull = computed(() => this.files().length >= this.maxFiles);
 
@@ -704,40 +645,57 @@ export class DianHabilitationScannerModalComponent {
     if (picked.length === 0) return;
 
     this.currentStep.set(2);
-    this.isScanning.set(true);
-
-    this.scanSub?.unsubscribe();
-    this.scanStalled.set(false);
-    this.scanSub = this.scanner
-      .scanHabilitation(
+    this.aiProgress.reset();
+    this.aiProgress.setSize(picked.length);
+    this.listen(
+      this.scanner.scanHabilitation(
         picked.map((item) => item.file),
         this.scope(),
-        { onStall: () => this.scanStalled.set(true) },
-      )
-      .pipe(
-        catchError((err: unknown) => {
-          this.toast.error(this.extractErrorMessage(err));
-          this.currentStep.set(1);
-          this.isScanning.set(false);
-          return of(null);
-        }),
-        takeUntilDestroyed(this.destroyRef),
-      )
-      .subscribe((response) => {
-        this.isScanning.set(false);
-        if (!response) return;
+        { progress: this.aiProgress, resumeKey: this.resumeKey() },
+      ),
+    );
+  }
 
+  hasInput(): boolean {
+    return this.files().length > 0;
+  }
+
+  /** Back to the upload step keeping the chosen files (retry without re-upload). */
+  backToUpload(): void {
+    this.scanSub?.unsubscribe();
+    this.scanSub = null;
+    this.aiProgress.reset();
+    this.currentStep.set(1);
+  }
+
+  private resumeKey(): string {
+    return `dian_habilitation:${this.scope()}`;
+  }
+
+  /** Re-attach to a scan that was running when the screen was closed or reloaded. */
+  private tryResume(): void {
+    if (this.scanSub || this.currentStep() !== 1 || this.result()) return;
+    const resumed = this.scanner.resume(this.scope(), {
+      progress: this.aiProgress,
+    });
+    if (!resumed) return;
+    this.currentStep.set(2);
+    this.listen(resumed);
+  }
+
+  private listen(source: Observable<HabilitationScanApiResponse>): void {
+    this.scanSub?.unsubscribe();
+    this.scanSub = source.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (response) => {
         if (response.success && response.data) {
           this.result.set(response.data);
           this.currentStep.set(3);
-        } else {
-          this.toast.error(
-            response.message ||
-              'No se pudieron extraer los datos de la habilitación.',
-          );
-          this.currentStep.set(1);
         }
-      });
+      },
+      // The classified error is shown by the progress bar and the selected
+      // files are kept so the user can retry.
+      error: () => undefined,
+    });
   }
 
   // ============================================================
@@ -779,8 +737,7 @@ export class DianHabilitationScannerModalComponent {
     this.fileError.set(null);
     this.scanSub?.unsubscribe();
     this.scanSub = null;
-    this.scanStalled.set(false);
-    this.isScanning.set(false);
+    this.aiProgress.reset();
     this.result.set(null);
     // Obligatorio: el contenido proyectado en app-modal no se destruye al
     // cerrar, así que sin este reset la segunda apertura traería el check ya
@@ -801,10 +758,5 @@ export class DianHabilitationScannerModalComponent {
       return Number(value).toLocaleString('es-CO');
     }
     return String(value);
-  }
-
-  private extractErrorMessage(err: unknown): string {
-    if (err instanceof HttpErrorResponse) return parseApiError(err).userMessage;
-    return (err as Error | null)?.message || 'No se pudo escanear el documento';
   }
 }

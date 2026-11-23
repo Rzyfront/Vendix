@@ -294,6 +294,7 @@ export class LayawayService {
           (await this.stockLevelManager.getDefaultLocationForProduct(
             item.product_id,
             item.product_variant_id,
+            tx,
           ));
 
         await this.stockLevelManager.reserveStock(
@@ -931,7 +932,7 @@ export class LayawayService {
           customer: { select: { id: true, first_name: true, last_name: true } },
         },
       });
-    });
+    }, { timeout: 20_000, maxWait: 5_000 });
   }
 
   /**

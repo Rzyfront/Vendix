@@ -42,6 +42,12 @@ actions: DropdownAction[] = [
 
 Con **una sola** acción el componente no abre un menú: muestra un botón con el icono y el texto de esa acción y la ejecuta al hacer clic (`actionClick` emite su `action`). Con dos o más acciones vuelve al menú "Acciones". El botón respeta `disabled` y el `variant` de la acción (`primary` con tinte de marca, `destructive` en rojo). Si las acciones bajan a una con el menú abierto, el menú se cierra. Es dinámico: si `actions` es un `computed` (por ejemplo, filtrado por permisos), el componente cambia solo de modo. No hace falta nada en el padre.
 
+Para conservar el menú aunque haya una sola acción, pasa `[singleActionAsMenu]="true"`: el trigger sigue siendo "Acciones" con chevron y la acción aparece dentro del menú desplegable. Es opt-in (default `false`); úsalo cuando el encabezado deba quedar limpio y la acción no merezca un botón propio (por ejemplo, "Plantillas de etapas" en el Pipeline CRM).
+
+```html
+<app-options-dropdown [actions]="actions()" [singleActionAsMenu]="true" (actionClick)="onAction($event)"></app-options-dropdown>
+```
+
 ## Filtros prearmados
 
 `order-filter.preset.ts` — orden alfabético reutilizable para cualquier vista
@@ -68,6 +74,7 @@ decide qué ordenar con ese valor.
 | triggerIcon  | IconName         | 'sliders-horizontal' | Icono del boton trigger               |
 | debounceMs   | number           | 350                  | Milisegundos de debounce para cambios |
 | isLoading    | boolean          | false                | Estado de carga                       |
+| singleActionAsMenu | boolean    | false                | Con una sola acción, la muestra dentro del menú "Acciones" (ver "Una sola acción") |
 
 ## Outputs
 

@@ -18,6 +18,7 @@ describe('RutScannerModalComponent (Step C.2)', () => {
 
   const rutScannerServiceStub = {
     scanRutFile: jasmine.createSpy('scanRutFile'),
+    resume: () => null,
   };
 
   beforeEach(async () => {

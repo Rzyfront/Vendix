@@ -441,6 +441,11 @@ describe('ProductionOrdersService.findDaySupplies (S4)', () => {
     }
   });
 
+  it('QUI-1013: a plant session sums only the supplies of that plant', async () => {
+    await service.findDaySupplies({ date: '2026-11-10', plant_id: 3 });
+    expect(prisma.production_orders.findMany.mock.calls[0][0].where.plant_id).toBe(3);
+  });
+
   it('reads ALL the orders of the day with the same membership as findDay (carried-over in, cancelled out), no pagination, no cost columns', async () => {
     await service.findDaySupplies({ date: '2026-11-10' });
 

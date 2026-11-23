@@ -11,7 +11,6 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { environment } from '../../../../../../environments/environment';
 import { CustomersService } from '../services/customers.service';
-import { MetadataFieldsService } from '../../data-collection/services/metadata-fields.service';
 import { CustomerHistoryService, ConsultationHistoryEntry } from '../services/customer-history.service';
 import { CurrencyPipe } from '../../../../../../app/shared/pipes/currency';
 import { translateCustomerError } from '../utils/customer-error.translator';
@@ -28,12 +27,15 @@ import {
   SelectorComponent,
   PaginationComponent,
   BadgeComponent,
+  UserAvatarComponent,
 } from '../../../../../../app/shared/components';
 import type { BadgeVariant } from '../../../../../../app/shared/components';
 import {
   CustomerSectionComponent,
   CustomerSectionEmptyComponent,
 } from '../components/customer-section/customer-section.component';
+import { CustomerDataSheetComponent } from '../components/customer-data-sheet/customer-data-sheet.component';
+import { RecordDocumentsComponent } from '../../../../../shared/components/record-documents/record-documents.component';
 import { CustomerCrmPanelComponent } from '../crm/profile/customer-crm-panel.component';
 import { CustomerLocationsComponent } from '../components/customer-locations/customer-locations.component';
 import {
@@ -58,7 +60,10 @@ import {
     SelectorComponent,
     PaginationComponent,
     StickyHeaderComponent,
+    UserAvatarComponent,
     CustomerCrmPanelComponent,
+    RecordDocumentsComponent,
+    CustomerDataSheetComponent,
     CustomerLocationsComponent,
     CustomerSectionComponent,
     CustomerSectionEmptyComponent,
@@ -88,6 +93,10 @@ import {
           [customerId]="customerId()!"
           (changed)="loadCustomer()"
         ></app-customer-locations>
+      }
+
+      @if (activeTab() === 'documentos' && customerId()) {
+        <app-record-documents subjectType="customer" [subjectId]="customerId()!"></app-record-documents>
       }
 
       @if (activeTab() === 'crm' && customerId()) {
@@ -120,7 +129,11 @@ import {
                 <div
                   class="w-14 h-14 rounded-full flex items-center justify-center font-bold text-xl flex-shrink-0 bg-primary/10 text-primary-on-tint"
                   >
-                  {{ getInitials() }}
+                  <app-user-avatar
+                    [src]="customer().avatar_url"
+                    [initials]="getInitials()"
+                    [alt]="getDisplayName()"
+                  ></app-user-avatar>
                 </div>
                 <div>
                   <h2 class="text-xl font-bold text-text-primary">
@@ -273,40 +286,21 @@ import {
           }
         }
     
-        <!-- Customer Metadata Card -->
-        @if (customerMetadata().length > 0) {
-          <app-customer-section title="Ficha del cliente" icon="clipboard-list">
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-              @for (field of summaryFields(); track field.id) {
-                <div class="flex flex-col">
-                  <span class="text-xs text-text-secondary">{{ field.field?.label }}</span>
-                  <span class="text-sm font-semibold text-text-primary">
-                    {{ field.value_text || field.value_number || field.value_bool || field.value_date || '-' }}
-                  </span>
-                </div>
-              }
-            </div>
-    
-            @if (detailFields().length > 0) {
-              <button type="button" class="text-xs font-semibold text-primary hover:underline" (click)="showAllMetadata.set(!showAllMetadata())">
-                {{ showAllMetadata() ? 'Ver menos' : 'Ver todos los datos (' + detailFields().length + ')' }}
-              </button>
-              @if (showAllMetadata()) {
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
-                  @for (field of detailFields(); track field.id) {
-                    <div class="flex flex-col">
-                      <span class="text-xs text-text-secondary">{{ field.field?.label }}</span>
-                      <span class="text-sm text-text-primary">
-                        {{ field.value_text || field.value_number || field.value_bool || field.value_date || '-' }}
-                      </span>
-                    </div>
-                  }
-                </div>
-              }
-            }
+        <!-- Customer data sheet (Data Collection template) -->
+        @if (customerId()) {
+          <app-customer-section
+            title="Ficha del cliente"
+            icon="clipboard-list"
+            hint="Planilla de recolección de datos del cliente."
+          >
+            <app-customer-data-sheet
+              [customerId]="customerId()!"
+              [editable]="canEditDataSheet()"
+              [compact]="true"
+            />
           </app-customer-section>
         }
-    
+
         <!-- Hospitality (Hotelería) — placeholder until stays land -->
         @if (customer() && !loadingCustomer() && showHospitalitySection()) {
           <app-customer-section title="Hotelería" icon="bed-double">
@@ -737,7 +731,6 @@ import {
 })
 export class CustomerDetailsComponent {
   private destroyRef = inject(DestroyRef);
-  private metadataService = inject(MetadataFieldsService);
   private historyService = inject(CustomerHistoryService);
   private route = inject(ActivatedRoute);
   private router = inject(Router);
@@ -753,15 +746,16 @@ export class CustomerDetailsComponent {
     this.authFacade.storeIndustries().includes('service'),
   );
 
-  // Metadata & History signals
-  customerMetadata = signal<any[]>([]);
-  showAllMetadata = signal(false);
+  // History signals
   bookingHistory = signal<ConsultationHistoryEntry[]>([]);
   historyLoading = signal(false);
   showConsolidatedSummary = signal(false);
 
-  summaryFields = computed(() => this.customerMetadata().filter((f: any) => f.field?.display_mode === 'summary'));
-  detailFields = computed(() => this.customerMetadata().filter((f: any) => f.field?.display_mode === 'detail'));
+  readonly canEditDataSheet = computed(
+    () =>
+      this.authFacade.isOwner() ||
+      this.authFacade.hasPermission('store:customers:update'),
+  );
 
   customerId = signal<number | null>(null);
 
@@ -770,8 +764,9 @@ export class CustomerDetailsComponent {
     { id: 'info', label: 'Información', icon: 'user' },
     { id: 'ubicaciones', label: 'Ubicaciones', icon: 'map-pin' },
     { id: 'crm', label: 'CRM', icon: 'trending-up' },
+    { id: 'documentos', label: 'Documentos', icon: 'folder-open' },
   ];
-  readonly activeTab = signal<'info' | 'ubicaciones' | 'crm'>('info');
+  readonly activeTab = signal<'info' | 'ubicaciones' | 'crm' | 'documentos'>('info');
   readonly showCrmTab = computed(
     () =>
       this.authFacade.isOwner() ||
@@ -783,8 +778,8 @@ export class CustomerDetailsComponent {
     this.profileTabs.filter((t) => t.id !== 'crm' || this.showCrmTab()),
   );
 
-  private resolveTab(tab: string | null): 'info' | 'ubicaciones' | 'crm' {
-    return tab === 'crm' || tab === 'ubicaciones' ? tab : 'info';
+  private resolveTab(tab: string | null): 'info' | 'ubicaciones' | 'crm' | 'documentos' {
+    return tab === 'crm' || tab === 'ubicaciones' || tab === 'documentos' ? tab : 'info';
   }
 
   selectTab(tab: string): void {
@@ -900,7 +895,6 @@ export class CustomerDetailsComponent {
           this.loadCustomer();
           this.loadWallet();
           this.loadWalletHistory();
-          this.loadCustomerMetadata(this.customerId()!);
           this.loadBookingHistory(this.customerId()!);
         }
       });
@@ -1214,15 +1208,6 @@ export class CustomerDetailsComponent {
 
   get hasActiveFilters(): boolean {
     return !!this.historyFilterType() || !!this.historyDateFrom() || !!this.historyDateTo();
-  }
-
-  private loadCustomerMetadata(customerId: number) {
-    this.metadataService.getValues('customer', customerId)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (values) => this.customerMetadata.set(values),
-        error: () => this.customerMetadata.set([]),
-      });
   }
 
   private loadBookingHistory(customerId: number) {

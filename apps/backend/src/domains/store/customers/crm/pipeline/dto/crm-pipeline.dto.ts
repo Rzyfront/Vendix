@@ -1,4 +1,7 @@
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsBoolean,
   IsIn,
   IsInt,
@@ -11,8 +14,9 @@ import {
   MaxLength,
   Min,
   ValidateIf,
+  ValidateNested,
 } from 'class-validator';
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 
 export const CRM_STAGE_KINDS = ['open', 'won', 'lost'] as const;
 export type CrmStageKind = (typeof CRM_STAGE_KINDS)[number];
@@ -114,6 +118,24 @@ export class CrmOpportunitiesQueryDto {
   @IsString()
   @MaxLength(100)
   q?: string;
+}
+
+/** Open opportunities of one customer, for the task form. */
+export class OpenCrmOpportunitiesQueryDto {
+  @Transform(toInt)
+  @IsInt()
+  @Min(1)
+  customer_id!: number;
+
+  /**
+   * Opportunity linked to the task being edited: it is always returned while
+   * it is open and visible, even past the first page.
+   */
+  @IsOptional()
+  @Transform(toInt)
+  @IsInt()
+  @Min(1)
+  include_id?: number;
 }
 
 export class CreateCrmOpportunityDto {
@@ -236,4 +258,76 @@ export class LoseCrmOpportunityDto {
   @IsNotEmpty()
   @MaxLength(160)
   lost_reason!: string;
+}
+
+/** One stage of a stage template (QUI-1043): the order is the array's. */
+export class CrmStageTemplateStageDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(80)
+  name!: string;
+
+  @IsIn(CRM_STAGE_KINDS)
+  kind!: CrmStageKind;
+
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsString()
+  @MaxLength(20)
+  color?: string | null;
+
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsInt()
+  @Min(0)
+  @Max(100)
+  probability?: number | null;
+}
+
+export class CreateCrmStageTemplateDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(80)
+  name!: string;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => CrmStageTemplateStageDto)
+  stages!: CrmStageTemplateStageDto[];
+}
+
+export class UpdateCrmStageTemplateDto {
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(80)
+  name?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => CrmStageTemplateStageDto)
+  stages?: CrmStageTemplateStageDto[];
+}
+
+/** A new pipeline always starts from a stage template. */
+export class CreateCrmPipelineDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(80)
+  name!: string;
+
+  @IsInt()
+  @Min(1)
+  template_id!: number;
+}
+
+export class ApplyCrmStageTemplateDto {
+  @IsInt()
+  @Min(1)
+  template_id!: number;
 }

@@ -2,6 +2,7 @@ import { Module, OnModuleInit } from '@nestjs/common';
 import { PromotionsController } from './promotions.controller';
 import { PromotionsService } from './promotions.service';
 import { PromotionEngineService } from './promotion-engine/promotion-engine.service';
+import { OpenOrderPromotionService } from './open-order-promotion.service';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 // The marketing tool family covers promotions + coupons; this module owns the
@@ -14,8 +15,8 @@ import { createMarketingTools } from '../../../ai-engine/tools/domains/marketing
 @Module({
   imports: [ResponseModule, PrismaModule, CouponsModule],
   controllers: [PromotionsController],
-  providers: [PromotionsService, PromotionEngineService],
-  exports: [PromotionsService, PromotionEngineService],
+  providers: [PromotionsService, PromotionEngineService, OpenOrderPromotionService],
+  exports: [PromotionsService, PromotionEngineService, OpenOrderPromotionService],
 })
 export class PromotionsModule implements OnModuleInit {
   constructor(

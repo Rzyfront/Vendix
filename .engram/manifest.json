@@ -3728,6 +3728,22 @@
       "sessions": 197,
       "memories": 102,
       "prompts": 0
+    },
+    {
+      "id": "a9235dd5",
+      "created_by": "rzy",
+      "created_at": "2026-11-16T02:40:01Z",
+      "sessions": 38,
+      "memories": 156,
+      "prompts": 0
+    },
+    {
+      "id": "bdd19add",
+      "created_by": "rzy",
+      "created_at": "2026-11-22T19:11:18Z",
+      "sessions": 122,
+      "memories": 179,
+      "prompts": 0
     }
   ]
 }

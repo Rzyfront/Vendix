@@ -31,6 +31,7 @@ import { toTitleCase } from '@common/utils/format.util';
 import { emailEquals, normalizeEmail } from '@common/utils/email.util';
 import { mergeUserConfigPanelUi } from '../../common/utils/panel-ui-merge.util';
 import { buildActiveUserRolesWhere } from '@common/utils/role-scope.util';
+import { omitSensitiveUserFields } from '@common/utils/safe-user-select.util';
 import {
   isStrongPassword,
   passwordPolicyMessage,
@@ -48,6 +49,7 @@ import { Prisma, organizations } from '@prisma/client';
 import { recordTriggerEvent } from '../store/workflows/engine/workflow-trigger.outbox';
 import { mergeStoreSettingsWithDefaults } from '../store/settings/defaults/default-store-settings';
 import { signUserAvatar } from './helpers/sign-user-avatar.helper';
+import { parseUserDocumentType } from '../../common/constants/document-types';
 
 /**
  * Result of organization lookup with smart fallback logic
@@ -400,6 +402,15 @@ export class AuthService {
     };
   }
 
+  /** Normaliza/valida `document_type` para `users` (ver parseUserDocumentType). */
+  private toUserDocumentType(value: unknown) {
+    try {
+      return parseUserDocumentType(value);
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
   async updateProfile(
     userId: number,
     updateProfileDto: any,
@@ -420,9 +431,16 @@ export class AuthService {
     if (first_name) updateData.first_name = first_name;
     if (last_name) updateData.last_name = last_name;
     if (phone !== undefined) updateData.phone = phone;
-    if (document_type !== undefined) updateData.document_type = document_type;
+    // `identification_type_enum` es MAYÚSCULAS: normalizar ("cc" → "CC"),
+    // null/"" limpia el campo y un código desconocido es un 400 en español
+    // en vez del error crudo de Prisma.
+    if (document_type !== undefined)
+      updateData.document_type = this.toUserDocumentType(document_type);
     if (document_number !== undefined)
-      updateData.document_number = document_number;
+      updateData.document_number =
+        typeof document_number === 'string'
+          ? document_number.trim() || null
+          : document_number;
 
     // Manejar avatar_url - sanitizar para almacenar solo el key de S3, no la URL firmada
     if (avatar_url !== undefined) {
@@ -721,7 +739,7 @@ export class AuthService {
       throw new ConflictException({
         message: 'Ya tienes un onboarding pendiente',
         pendingOnboarding: existingOrganization,
-        user: existingUser,
+        user: omitSensitiveUserFields(existingUser),
       });
     }
 
@@ -1015,8 +1033,8 @@ export class AuthService {
       roles, // Array simple: ["owner", "admin"]
     };
 
-    // Remover password del response
-    const { password: _, ...userWithRolesAndPassword } = userWithRolesArray;
+    // Sin credenciales ni contadores de bloqueo en la respuesta
+    const userWithRolesAndPassword = omitSensitiveUserFields(userWithRolesArray);
 
     // Obtener user_settings del usuario creado
     const userSettings = await this.prismaService.user_settings.findUnique({
@@ -1148,7 +1166,7 @@ export class AuthService {
         first_name: formatted_first_name,
         last_name: formatted_last_name,
         phone,
-        document_type: document_type as any,
+        document_type: this.toUserDocumentType(document_type) ?? null,
         document_number,
         username: await this.generateUniqueUsername(email),
         email_verified: false,
@@ -1347,8 +1365,8 @@ export class AuthService {
       roles, // Array simple: ["owner", "admin"]
     };
 
-    // Remover password del response
-    const { password: _, ...userWithRolesAndPassword } = userWithRolesArray;
+    // Sin credenciales ni contadores de bloqueo en la respuesta
+    const userWithRolesAndPassword = omitSensitiveUserFields(userWithRolesArray);
 
     const defaultsForCustomerRegister =
       await this.defaultPanelUIService.generatePanelUI('');
@@ -1650,8 +1668,11 @@ export class AuthService {
       // No fallar el registro si el email no se puede enviar
     }
 
-    // Remover password del response (no es necesario ya que no se incluye en la query)
-    const userWithoutPassword = userWithRoles;
+    // La consulta trae la fila completa: la respuesta va sin credenciales ni
+    // contadores de bloqueo.
+    const userWithoutPassword = userWithRoles
+      ? omitSensitiveUserFields(userWithRoles)
+      : null;
 
     return {
       message: `Usuario ${role} creado exitosamente`,
@@ -1805,6 +1826,24 @@ export class AuthService {
           throw new VendixHttpException(ErrorCodes.AUTH_CREDENTIALS_001);
         }
       }
+
+      // El login por dominio/slug de una tienda inactiva se bloquea (regla de
+      // producto, incidente vendix-centro). Para no revelar que la tienda
+      // existe e está inactiva a quien no tiene acceso ni la contraseña, el
+      // aviso específico solo sale DESPUÉS de validar membresía y contraseña.
+      // Un owner/admin que quiera revisarla o reactivarla entra a la
+      // organización y la abre desde el panel (cambio de tienda explícito).
+      if (!targetStore.is_active) {
+        const locked = !!user.locked_until && new Date() < user.locked_until;
+        const passwordOk =
+          !locked && (await bcrypt.compare(password, user.password));
+        await this.logLoginAttempt(user.id, false);
+        if (!passwordOk) {
+          if (!locked) await this.handleFailedLogin(user.id, client_info);
+          throw new VendixHttpException(ErrorCodes.AUTH_CREDENTIALS_001);
+        }
+        throw new VendixHttpException(ErrorCodes.AUTH_STORE_INACTIVE_001);
+      }
     }
 
     // 1. Resolución de tienda de arranque (CD3).
@@ -1835,7 +1874,9 @@ export class AuthService {
             where: { id: user.main_store_id },
           });
 
-          if (main_store) {
+          // Una main_store inactiva se ignora: se cae a las Estrategias 2/3,
+          // que también descartan tiendas inactivas.
+          if (main_store && main_store.is_active) {
             // Verificar si pertenece a la misma organización
             if (main_store.organization_id === user.organization_id) {
               // Verificar acceso o si es High Privilege
@@ -1876,9 +1917,11 @@ export class AuthService {
                 user_id: user.id,
                 store: {
                   organization_id: user.organization_id, // Asegurar que sea de la misma org
+                  is_active: true,
                 },
               },
               include: { store: true },
+              orderBy: { store_id: 'asc' },
             });
 
           if (first_store_user && first_store_user.store) {
@@ -1890,7 +1933,8 @@ export class AuthService {
         // Estrategia 3: High Privilege Fallback - Buscar CUALQUIER tienda de la org
         if (!effective_store_slug && hasHighPrivilege) {
           const first_org_store = await this.prismaService.stores.findFirst({
-            where: { organization_id: user.organization_id },
+            where: { organization_id: user.organization_id, is_active: true },
+            orderBy: { id: 'asc' },
           });
 
           if (first_org_store) {
@@ -1978,6 +2022,7 @@ export class AuthService {
           store: {
             slug: effective_store_slug,
             organization_id: user.organization_id, // Asegurar consistencia organizacional
+            is_active: true,
           },
         },
         include: {
@@ -2027,7 +2072,7 @@ export class AuthService {
           },
         });
 
-        if (targetStore) {
+        if (targetStore && targetStore.is_active) {
           // Crear la relación automáticamente para futuros accesos
           await this.prismaService.store_users.create({
             data: {
@@ -2200,11 +2245,11 @@ export class AuthService {
       .map((ur: any) => ur.roles?.name)
       .filter(Boolean);
 
-    const { password: _, ...userWithRolesAndPassword } = {
+    const userWithRolesAndPassword = omitSensitiveUserFields({
       ...userWithRolesArray,
       roles: effective_roles,
       store: cleanStore,
-    };
+    });
 
     const userSettingsForResponse = {
       id: userSettings.id,
@@ -2321,6 +2366,23 @@ export class AuthService {
         throw new VendixHttpException(ErrorCodes.AUTH_TOKEN_001);
       }
 
+      // Una sesión abierta en una tienda que se desactivó no se renueva
+      // (obliga a iniciar sesión de nuevo y caer en una tienda activa), salvo
+      // para owner/admin: ellos pueden abrirla a propósito desde el panel de
+      // la organización para revisarla o reactivarla.
+      if (payload.store_id) {
+        const scopedStore = await this.prismaService.stores.findUnique({
+          where: { id: Number(payload.store_id) },
+          select: { is_active: true },
+        });
+        const isHighPrivilege = (user.user_roles ?? []).some((ur: any) =>
+          ['owner', 'admin', 'super_admin'].includes(ur.roles?.name),
+        );
+        if (!scopedStore?.is_active && !isHighPrivilege) {
+          throw new VendixHttpException(ErrorCodes.AUTH_STORE_INACTIVE_001);
+        }
+      }
+
       // Generar nuevos tokens — preservar app_type del refresh token original
       // para no perder el dominio durante el refresh.
       const tokens = await this.generateTokens(user, {
@@ -2329,8 +2391,9 @@ export class AuthService {
         app_type: payload.app_type,
       });
 
-      // El password no está incluido en esta consulta por seguridad
-      const userWithoutPassword = user;
+      // La relación `users` trae la fila completa: la respuesta va sin
+      // credenciales ni contadores de bloqueo.
+      const userWithoutPassword = omitSensitiveUserFields(user);
 
       // Actualizar el refresh token en la base de datos
       const refreshTokenExpiry =
@@ -2374,6 +2437,14 @@ export class AuthService {
         ...tokens,
       };
     } catch (error) {
+      // El cierre por tienda inactiva conserva su código para que el front
+      // muestre el motivo; cualquier otro fallo sigue siendo token inválido.
+      if (
+        error instanceof VendixHttpException &&
+        error.errorCode === ErrorCodes.AUTH_STORE_INACTIVE_001.code
+      ) {
+        throw error;
+      }
       throw new VendixHttpException(ErrorCodes.AUTH_TOKEN_001);
     }
   }
@@ -2409,8 +2480,8 @@ export class AuthService {
       throw new VendixHttpException(ErrorCodes.AUTH_FIND_001);
     }
 
-    // Remover password del response
-    const { password, ...userWithoutPassword } = user;
+    // Sin credenciales ni contadores de bloqueo en la respuesta
+    const userWithoutPassword = omitSensitiveUserFields(user);
 
     // Firmar el avatar_url si existe (convertir key de S3 a URL firmada)
     const signedAvatarUrl = await this.s3Service.signUrl(user.avatar_url);
@@ -3386,8 +3457,8 @@ export class AuthService {
       },
     );
 
-    // Remover password del response
-    const { password, ...userWithoutPassword } = updatedUser;
+    // Sin credenciales ni contadores de bloqueo en la respuesta
+    const userWithoutPassword = omitSensitiveUserFields(updatedUser);
 
     return {
       message: 'Email verificado exitosamente por super administrador',
@@ -3692,7 +3763,7 @@ export class AuthService {
       return null;
     }
 
-    const { password, ...userWithoutPassword } = user as any;
+    const userWithoutPassword = omitSensitiveUserFields(user);
     const roles = userRoles.map((ur) => ur.roles?.name).filter(Boolean);
 
     return signUserAvatar(this.s3Service, {
@@ -4253,7 +4324,7 @@ export class AuthService {
 
     // Construir el usuario completo con la misma estructura que el login
     const userWithEnvironment = {
-      ...user,
+      ...omitSensitiveUserFields(user),
       user_roles: effective_user_roles, // QUI-72: scopeado a la tienda destino
       store: activeStore, // Store con domain_settings incluido
       organizations: organizations, // Organization con domain_settings incluido
@@ -4375,7 +4446,7 @@ export class AuthService {
     const permissions = this.getPermissionsFromRoles(userRolesWithPermissions);
 
     return {
-      user: user,
+      user: omitSensitiveUserFields(user),
       user_settings: user.user_settings,
       permissions,
       access_token: tokens.access_token,

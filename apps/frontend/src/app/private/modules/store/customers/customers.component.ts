@@ -2,7 +2,7 @@ import { Component, inject, signal, computed, DestroyRef, viewChild } from '@ang
 import { Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { finalize } from 'rxjs';
-import { CustomerListComponent, CustomerModalComponent, CustomerBulkUploadModalComponent, CustomerAiImportModalComponent } from './components';
+import { CustomerListComponent, CustomerLocationFilter, CustomerModalComponent, CustomerBulkUploadModalComponent, CustomerAiImportModalComponent } from './components';
 import { CUSTOMER_MODAL_FILLABLE_FIELDS } from './components/customer-modal/customer-modal.component';
 import { DuplicateCustomerDialogComponent } from './components/customer-modal/duplicate-customer-dialog.component';
 import { translateCustomerError, extractDocumentConflict } from './utils/customer-error.translator';
@@ -85,6 +85,7 @@ import { customerDisplayName } from '../../../../shared/utils/customer-display-n
         [page]="page()"
         [limit]="limit()"
         (search)="onSearch($event)"
+        (locationFilter)="onLocationFilter($event)"
         (pageChange)="onPageChange($event)"
         (create)="openCreateModal()"
         (edit)="openEditModal($event)"
@@ -154,6 +155,7 @@ export class CustomersComponent {
   limit = signal(10);
   totalItems = signal(0);
   private searchQuery = signal('');
+  private readonly locationFilter = signal<CustomerLocationFilter>({});
 
   // Modal
   isModalOpen = signal(false);
@@ -417,7 +419,10 @@ export class CustomersComponent {
   loadCustomers() {
     this.loading.set(true);
     this.customersService
-      .getCustomers(this.page(), this.limit(), { search: this.searchQuery() })
+      .getCustomers(this.page(), this.limit(), {
+        search: this.searchQuery(),
+        ...this.locationFilter(),
+      })
       .pipe(
         takeUntilDestroyed(this.destroyRef),
         finalize(() => this.loading.set(false)),
@@ -438,6 +443,12 @@ export class CustomersComponent {
 
   onSearch(query: string) {
     this.searchQuery.set(query);
+    this.page.set(1);
+    this.loadCustomers();
+  }
+
+  onLocationFilter(filter: CustomerLocationFilter) {
+    this.locationFilter.set(filter);
     this.page.set(1);
     this.loadCustomers();
   }

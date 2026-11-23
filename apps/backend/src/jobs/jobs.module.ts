@@ -58,6 +58,8 @@ import { FiscalStatusService } from '../common/services/fiscal-status.service';
 import { EmailNotificationsProcessor } from './email-notifications.processor';
 import { BillingWarningProcessor } from './billing-warning.processor';
 import { PrismaModule } from '../prisma/prisma.module';
+import { ConversationPurgeS3RetryJob } from './conversation-purge-s3-retry.job';
+import { ConversationPurgeS3Cleaner } from '../domains/store/ai-chat/conversation-purge-s3.cleaner';
 import { SubscriptionsModule } from '../domains/store/subscriptions/subscriptions.module';
 import { EmailModule } from '../email/email.module';
 import { WompiModule } from '../domains/store/payments/processors/wompi/wompi.module';
@@ -110,6 +112,8 @@ import { OrderHistoryModule } from '../domains/store/orders/order-history/order-
     BookingConfirmationJob,
     BookingProximityJob,
     EmbeddingSyncJob,
+    ConversationPurgeS3Cleaner,
+    ConversationPurgeS3RetryJob,
     ArAgingUpdateJob,
     ApAgingUpdateJob,
     PaymentTimeoutCleanupJob,

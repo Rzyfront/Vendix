@@ -293,6 +293,73 @@ describe('CrmPipelineService', () => {
     expect(await codeOf(service.win(600))).toBe('CRM_OPPORTUNITY_001');
   });
 
+  describe('remove (QUI-1043 H2)', () => {
+    it('deletes the opportunity, audits its snapshot and the customer follows its latest remaining one', async () => {
+      as('owner');
+      const { service, prisma, audit } = setup();
+      prisma.crm_opportunities.deleteMany = jest.fn(async (..._args: any[]) => ({ count: 1 }));
+      prisma.crm_opportunities.findFirst
+        .mockResolvedValueOnce(opportunity())
+        .mockResolvedValueOnce({ stage_id: 102 });
+
+      await expect(service.remove(500)).resolves.toEqual({ id: 500 });
+
+      expect(prisma.crm_opportunities.deleteMany).toHaveBeenCalledWith({ where: { id: 500 } });
+      expect(audit.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: OWNER,
+          storeId: STORE,
+          action: 'DELETE',
+          resource: 'crm_opportunities',
+          resourceId: 500,
+          oldValues: expect.objectContaining({
+            id: 500,
+            title: 'Dotación oficina',
+            amount: '1500000',
+            stage_id: 101,
+            customer: expect.objectContaining({ id: CUSTOMER }),
+          }),
+        }),
+      );
+      expect(prisma.crm_opportunities.findFirst).toHaveBeenLastCalledWith(
+        expect.objectContaining({ where: { customer_id: CUSTOMER } }),
+      );
+      expect(prisma.store_users.updateMany).toHaveBeenCalledWith({
+        where: { user_id: CUSTOMER },
+        data: { crm_stage_id: 102 },
+      });
+    });
+
+    it('with no opportunity left the customer keeps the stage it reached', async () => {
+      as('owner');
+      const { service, prisma } = setup();
+      prisma.crm_opportunities.deleteMany = jest.fn(async (..._args: any[]) => ({ count: 1 }));
+      prisma.crm_opportunities.findFirst
+        .mockResolvedValueOnce(opportunity())
+        .mockResolvedValueOnce(null);
+
+      await service.remove(500);
+
+      expect(prisma.store_users.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('an opportunity the seller cannot see answers 404 and nothing is deleted or audited', async () => {
+      as('seller');
+      const { service, prisma, audit } = setup();
+      prisma.crm_opportunities.deleteMany = jest.fn(async (..._args: any[]) => ({ count: 1 }));
+      prisma.crm_opportunities.findFirst.mockResolvedValueOnce(null);
+
+      expect(await codeOf(service.remove(600))).toBe('CRM_OPPORTUNITY_001');
+      expect(prisma.crm_opportunities.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { AND: [{ id: 600 }, { owner_user_id: SELLER }] },
+        }),
+      );
+      expect(prisma.crm_opportunities.deleteMany).not.toHaveBeenCalled();
+      expect(audit.log).not.toHaveBeenCalled();
+    });
+  });
+
   it('only see-all edits stages, and an active stage with open cards cannot be deactivated', async () => {
     as('seller');
     const seller = setup();
@@ -308,6 +375,158 @@ describe('CrmPipelineService', () => {
       'CRM_PIPELINE_006',
     );
     expect(owner.prisma.crm_pipeline_stages.updateMany).not.toHaveBeenCalled();
+  });
+
+  describe('tasks that move the opportunity', () => {
+    it('lists the open opportunities of a customer with board, stage and active stages, seller only theirs', async () => {
+      as('seller');
+      const { service, prisma } = setup();
+      prisma.crm_opportunities.findMany.mockResolvedValueOnce([
+        {
+          id: 500,
+          title: 'Dotación oficina',
+          stage: STAGES[0],
+          pipeline: { id: 1, name: 'Ventas', stages: STAGES.slice(0, 4) },
+        },
+      ]);
+
+      const rows = await service.openForCustomer({ customer_id: CUSTOMER });
+
+      const args = prisma.crm_opportunities.findMany.mock.calls[0][0];
+      expect(args.where).toEqual({
+        AND: [{ customer_id: CUSTOMER, status: 'open' }, { owner_user_id: SELLER }],
+      });
+      expect(args.select.pipeline.select.stages.where).toEqual({ is_active: true });
+      expect(rows).toEqual([
+        {
+          id: 500,
+          title: 'Dotación oficina',
+          pipeline: { id: 1, name: 'Ventas' },
+          stage: STAGES[0],
+          stages: STAGES.slice(0, 4),
+        },
+      ]);
+    });
+
+    it('adds the opportunity of the task being edited when it is not in the first page', async () => {
+      as('seller');
+      const { service, prisma } = setup();
+      const row = (id: number) => ({
+        id,
+        title: `Oportunidad ${id}`,
+        stage: STAGES[0],
+        pipeline: { id: 1, name: 'Ventas', stages: STAGES.slice(0, 4) },
+      });
+      const open = [{ customer_id: CUSTOMER, status: 'open' }, { owner_user_id: SELLER }];
+
+      prisma.crm_opportunities.findMany.mockResolvedValueOnce([row(500), row(501)]);
+      prisma.crm_opportunities.findFirst.mockResolvedValueOnce(row(900));
+      const rows = await service.openForCustomer({ customer_id: CUSTOMER, include_id: 900 });
+      expect(rows.map((item) => item.id)).toEqual([500, 501, 900]);
+      expect(prisma.crm_opportunities.findFirst.mock.calls[0][0].where).toEqual({
+        AND: [{ id: 900 }, ...open],
+      });
+
+      // Already in the page: no second read. Closed or not visible: not added.
+      prisma.crm_opportunities.findFirst.mockClear();
+      prisma.crm_opportunities.findMany.mockResolvedValueOnce([row(500)]);
+      await service.openForCustomer({ customer_id: CUSTOMER, include_id: 500 });
+      expect(prisma.crm_opportunities.findFirst).not.toHaveBeenCalled();
+
+      prisma.crm_opportunities.findMany.mockResolvedValueOnce([row(500)]);
+      prisma.crm_opportunities.findFirst.mockResolvedValueOnce(null);
+      const without = await service.openForCustomer({ customer_id: CUSTOMER, include_id: 901 });
+      expect(without.map((item) => item.id)).toEqual([500]);
+    });
+
+    it('a target stage must be an active, non-lost stage of the opportunity board', async () => {
+      as('seller');
+      const { service, prisma } = setup();
+      await expect(service.assertTaskTargetStage(500, 102)).resolves.toBeUndefined();
+      await expect(service.assertTaskTargetStage(500, 103)).resolves.toBeUndefined();
+      expect(await codeOf(service.assertTaskTargetStage(500, 104))).toBe('CRM_TASK_002');
+      expect(await codeOf(service.assertTaskTargetStage(500, 201))).toBe('CRM_TASK_002');
+      expect(await codeOf(service.assertTaskTargetStage(500, 999))).toBe('CRM_TASK_002');
+      prisma.crm_pipeline_stages.findFirst.mockResolvedValueOnce({ ...STAGES[1], is_active: false });
+      expect(await codeOf(service.assertTaskTargetStage(500, 102))).toBe('CRM_TASK_002');
+    });
+
+    it('completing the task moves the opportunity like the board, even for someone who does not own it', async () => {
+      as('owner');
+      const { service, prisma, audit } = setup();
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: STORE,
+        user_id: STAFF,
+        is_super_admin: false,
+        is_owner: false,
+        permissions: ['store:crm_tasks:manage'],
+      });
+
+      const move = await service.moveForTask(500, 102);
+
+      expect(move).toEqual({
+        moved: true,
+        reason: null,
+        stage: { id: 102, name: 'Cotizado', kind: 'open' },
+      });
+      expect(prisma.crm_opportunities.findFirst.mock.calls[0][0].where).toEqual({ id: 500 });
+      expect(prisma.crm_opportunities.updateMany.mock.calls[0][0]).toMatchObject({
+        where: { id: 500 },
+        data: { stage_id: 102, status: 'open', sort_order: 5 },
+      });
+      expect(prisma.store_users.updateMany).toHaveBeenCalledWith({
+        where: { user_id: CUSTOMER },
+        data: { crm_stage_id: 102 },
+      });
+      expect(audit.log).not.toHaveBeenCalled();
+    });
+
+    it('a won target stage wins the opportunity', async () => {
+      as('seller');
+      const { service, prisma, audit } = setup();
+      const move = await service.moveForTask(500, 103);
+      expect(move.moved).toBe(true);
+      expect(prisma.crm_opportunities.updateMany.mock.calls[0][0].data).toMatchObject({
+        stage_id: 103,
+        status: 'won',
+        won_at: expect.any(Date),
+      });
+      expect(audit.log).toHaveBeenCalledWith(
+        expect.objectContaining({ metadata: { reason: 'crm_opportunity_status' } }),
+      );
+    });
+
+    it('nothing moves when the opportunity is closed, gone, already there or the stage is no longer valid', async () => {
+      as('owner');
+      const { service, prisma } = setup();
+
+      prisma.crm_opportunities.findFirst.mockResolvedValueOnce(opportunity({ status: 'won', stage_id: 103 }));
+      expect(await service.moveForTask(500, 102)).toEqual({
+        moved: false,
+        reason: 'opportunity_closed',
+        stage: { id: 102, name: 'Cotizado', kind: 'open' },
+      });
+
+      prisma.crm_opportunities.findFirst.mockResolvedValueOnce(null);
+      expect((await service.moveForTask(500, 102)).reason).toBe('opportunity_missing');
+
+      expect((await service.moveForTask(500, 101)).reason).toBe('already_in_stage');
+      expect((await service.moveForTask(500, 104)).reason).toBe('stage_unavailable');
+      expect((await service.moveForTask(500, 201)).reason).toBe('stage_unavailable');
+
+      expect(prisma.crm_opportunities.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('the board still only lets a seller move what they own', async () => {
+      as('seller');
+      const { service, prisma } = setup();
+      prisma.crm_opportunities.findFirst.mockResolvedValueOnce(null);
+      expect(await codeOf(service.move(500, { stage_id: 102 }))).toBe('CRM_OPPORTUNITY_001');
+      expect(prisma.crm_opportunities.findFirst.mock.calls[0][0].where).toEqual({
+        AND: [{ id: 500 }, { owner_user_id: SELLER }],
+      });
+      expect(prisma.crm_opportunities.updateMany).not.toHaveBeenCalled();
+    });
   });
 
   it('winByQuotation wins only open opportunities of the store and links the order', async () => {

@@ -558,6 +558,7 @@ export class OperatingScopeMigrationService {
     }
 
     // Blocker 2: Open cross-store transfers (active states, source≠dest store).
+    // `partially_received` (D4) sigue abierta: tiene saldo en camino.
     // Use raw SQL to express the join+filter cleanly without relying on
     // Prisma's relation-filter limitations.
     const transferRows = await client.$queryRaw<
@@ -574,7 +575,7 @@ export class OperatingScopeMigrationService {
       INNER JOIN inventory_locations fl ON fl.id = st.from_location_id
       INNER JOIN inventory_locations tl ON tl.id = st.to_location_id
       WHERE st.organization_id = ${organization_id}
-        AND st.status IN ('draft', 'in_transit')
+        AND st.status IN ('draft', 'in_transit', 'partially_received')
         AND fl.store_id IS NOT NULL
         AND tl.store_id IS NOT NULL
         AND fl.store_id <> tl.store_id;

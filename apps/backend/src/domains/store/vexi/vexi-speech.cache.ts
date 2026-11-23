@@ -27,6 +27,12 @@ export interface SpeechCacheParams {
   format: string;
   speed: number;
   vol: number;
+  /**
+   * F8 T49 — provider config of the catalog voice that reads this turn. Absent
+   * on the fallback path (the TTS app's own config), and then it adds nothing
+   * to the key, so entries created before the catalog existed stay valid.
+   */
+  configId?: number;
 }
 
 interface CacheEntry {
@@ -81,6 +87,7 @@ export class VexiSpeechCache {
           params.format,
           String(params.speed),
           String(params.vol),
+          ...(params.configId ? [`config:${params.configId}`] : []),
         ].join('\0'),
       )
       .digest('hex');

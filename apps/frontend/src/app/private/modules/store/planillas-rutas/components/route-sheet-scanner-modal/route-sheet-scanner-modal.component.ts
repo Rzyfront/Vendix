@@ -6,19 +6,23 @@ import {
   inject,
   input,
   output,
+  effect,
   signal,
+  untracked,
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
-import { of, switchMap, catchError, Subscription } from 'rxjs';
+import { Observable, of, switchMap, catchError, Subscription } from 'rxjs';
 
 import { AiReviewAckComponent } from '../../../../../../shared/components/ai-review-ack/ai-review-ack.component';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { BadgeComponent } from '../../../../../../shared/components/badge/badge.component';
 import { SpinnerComponent } from '../../../../../../shared/components/spinner/spinner.component';
+import { AiJobProgressComponent } from '../../../../../../shared/components/ai-job-progress/ai-job-progress.component';
+import { injectAiJobProgress } from '../../../../../../shared/utils/ai-job-progress';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
 import { StepsLineComponent } from '../../../../../../shared/components/steps-line/steps-line.component';
@@ -33,6 +37,7 @@ import {
 } from '../../../../../../shared/pipes/currency/currency.pipe';
 
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
+import { AiScanJobError } from '../../../../../../core/utils/ai-job-error';
 import { PlanillasRutasService } from '../../services/planillas-rutas.service';
 import {
   ConfirmRouteSheetDto,
@@ -96,6 +101,7 @@ interface EditableStopDecision {
     ButtonComponent,
     BadgeComponent,
     SpinnerComponent,
+    AiJobProgressComponent,
     IconComponent,
     InputComponent,
     StepsLineComponent,
@@ -120,6 +126,23 @@ interface EditableStopDecision {
           size="sm"
         ></app-steps-line>
       </div>
+
+      <!-- Hidden file inputs -->
+      <input
+        #fileInput
+        type="file"
+        class="hidden"
+        accept="image/jpeg,image/png,image/webp,application/pdf"
+        (change)="onFileSelected($event)"
+      />
+      <input
+        #cameraInput
+        type="file"
+        class="hidden"
+        accept="image/jpeg,image/png,image/webp"
+        capture="environment"
+        (change)="onFileSelected($event)"
+      />
 
       <!-- Step 1: Upload -->
       @if (currentStep() === 1) {
@@ -200,23 +223,6 @@ interface EditableStopDecision {
             }
           </div>
 
-          <!-- Hidden file inputs -->
-          <input
-            #fileInput
-            type="file"
-            class="hidden"
-            accept="image/jpeg,image/png,image/webp,application/pdf"
-            (change)="onFileSelected($event)"
-          />
-          <input
-            #cameraInput
-            type="file"
-            class="hidden"
-            accept="image/jpeg,image/png,image/webp"
-            capture="environment"
-            (change)="onFileSelected($event)"
-          />
-
           @if (fileError()) {
             <p class="text-sm text-red-600">{{ fileError() }}</p>
           }
@@ -246,17 +252,17 @@ interface EditableStopDecision {
           }
 
           <div class="flex-1 flex flex-col items-center justify-center gap-4">
-            <app-spinner size="lg" text="Analizando hoja de ruta..."></app-spinner>
-            <p class="text-sm text-text-secondary text-center">
-              Extrayendo recaudos y buscando coincidencias con las paradas de la ruta...
-            </p>
-            <p class="text-xs text-text-secondary text-center">
-              @if (scanStalled()) {
-                Está tardando más de lo normal; seguimos procesando.
-              } @else {
-                Esto puede tardar unos minutos. No cierres la ventana.
-              }
-            </p>
+            <app-ai-job-progress
+              class="w-full"
+              [progress]="aiProgress"
+              [showRetry]="!!selectedFile()"
+              (retry)="startScan()"
+            />
+            @if (aiProgress.error()) {
+              <app-button variant="outline" (clicked)="backToUpload()">
+                Elegir otro archivo
+              </app-button>
+            }
           </div>
         </div>
       }
@@ -264,6 +270,17 @@ interface EditableStopDecision {
       <!-- Step 3: Review & Confirm -->
       @if (currentStep() === 3 && matchResult()) {
         <div class="space-y-5 max-h-[60vh] overflow-y-auto pr-1">
+          @if (!selectedFile()) {
+            <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center justify-between gap-3">
+              <p class="text-xs text-amber-800">
+                Retomamos el análisis de tu hoja. Para liquidar, adjunta de nuevo el archivo.
+              </p>
+              <app-button variant="outline" size="sm" (clicked)="triggerFileInput()">
+                Adjuntar hoja
+              </app-button>
+            </div>
+          }
+
           <!-- Confidence summary -->
           <div class="bg-muted/30 rounded-lg p-4 border border-border flex items-center justify-between gap-2">
             <div class="flex items-center gap-2">
@@ -276,6 +293,16 @@ interface EditableStopDecision {
               {{ matchResult()!.confidence }}%
             </app-badge>
           </div>
+
+          <!-- ia-cargas F5a: avisos de la lectura (páginas que no se leyeron) -->
+          @if (scanResult()?.warnings?.length) {
+            <div class="bg-amber-50 border border-amber-200 rounded-lg p-3">
+              <p class="text-xs font-semibold text-amber-800 mb-1">Lectura del documento</p>
+              @for (warn of scanResult()!.warnings!; track warn) {
+                <p class="text-xs text-amber-700">{{ warn }}</p>
+              }
+            </div>
+          }
 
           <!-- Warnings -->
           @if (matchResult()!.warnings.length > 0) {
@@ -542,6 +569,13 @@ export class RouteSheetScannerModalComponent {
   readonly route = input<DispatchRoute | null>(null);
 
   readonly closed = output<void>();
+
+  constructor() {
+    // Re-attach to a scan still running for this route when the modal opens.
+    effect(() => {
+      if (this.isOpen()) untracked(() => this.tryResume());
+    });
+  }
   /**
    * Emits the fully-updated route returned by `/scan/confirm` so the parent
    * can refresh the detail without a second round-trip to `GET :id`.
@@ -607,8 +641,8 @@ export class RouteSheetScannerModalComponent {
   readonly fileError = signal<string | null>(null);
   readonly isDragging = signal(false);
   readonly isScanning = signal(false);
-  /** true cuando el job lleva más de ~60 s sin terminar. */
-  readonly scanStalled = signal(false);
+  /** Shared AI progress bar (QUI-1020). */
+  readonly aiProgress = injectAiJobProgress({ kind: 'route_sheet' });
   private scanSub: Subscription | null = null;
   readonly isProcessingFile = signal(false);
   readonly isConfirming = signal(false);
@@ -796,32 +830,60 @@ export class RouteSheetScannerModalComponent {
   // Scanning (scan → match)
   // ============================================================
 
+  private resumeKey(): string {
+    return `route_sheet:${this.routeId()}`;
+  }
+
   startScan(): void {
     const file = this.selectedFile();
     if (!file) return;
 
     this.currentStep.set(2);
     this.isScanning.set(true);
+    this.aiProgress.setSize(1);
+    this.followScan(
+      this.service.scanSheet(this.routeId(), file, {
+        progress: this.aiProgress,
+        resumeKey: this.resumeKey(),
+      }),
+    );
+  }
 
+  /** Re-attaches to a scan that was running before a reload (QUI-1020). */
+  private tryResume(): void {
+    if (this.isScanning() || this.currentStep() !== 1 || this.selectedFile()) {
+      return;
+    }
+    const resumed = this.service.resumeScan(this.routeId(), {
+      progress: this.aiProgress,
+    });
+    if (!resumed) return;
+    this.currentStep.set(2);
+    this.isScanning.set(true);
+    this.followScan(resumed);
+  }
+
+  /** scan -> match with the same handlers for a fresh or a resumed job. */
+  private followScan(scan$: Observable<RouteSheetScanResult>): void {
     this.scanSub?.unsubscribe();
-    this.scanStalled.set(false);
-    this.scanSub = this.service
-      .scanSheet(this.routeId(), file, {
-        onStall: () => this.scanStalled.set(true),
-      })
+    this.scanSub = scan$
       .pipe(
         switchMap((scan) => {
           this.scanResult.set(scan);
           return this.service.matchStops(this.routeId(), scan);
         }),
         catchError((err: unknown) => {
-          const msg =
-            err instanceof HttpErrorResponse
-              ? parseApiError(err).userMessage
-              : (err as Error | null)?.message ||
-                'Error al procesar la hoja de ruta';
-          this.toast.error(msg);
-          this.currentStep.set(1);
+          // The progress panel already explains the failure by category;
+          // the selected file is kept so the user can retry.
+          if (!(err instanceof AiScanJobError)) {
+            const msg =
+              err instanceof HttpErrorResponse
+                ? parseApiError(err).userMessage
+                : (err as Error | null)?.message ||
+                  'Error al procesar la hoja de ruta';
+            this.toast.error(msg);
+          }
+          if (!this.aiProgress.error()) this.aiProgress.onFailed(err);
           this.isScanning.set(false);
           return of(null);
         }),
@@ -834,6 +896,12 @@ export class RouteSheetScannerModalComponent {
         this.editableStops.set(match.stops.map((s) => this.toEditable(s)));
         this.currentStep.set(3);
       });
+  }
+
+  /** Back to the upload step after a failure, keeping the selected file. */
+  backToUpload(): void {
+    this.aiProgress.reset();
+    this.currentStep.set(1);
   }
 
   /** Build an editable review row from a backend matched stop. */
@@ -940,7 +1008,10 @@ export class RouteSheetScannerModalComponent {
 
     const file = this.selectedFile();
     const scan = this.scanResult();
-    if (!file) return;
+    if (!file) {
+      this.toast.error('Adjunta de nuevo la hoja de ruta para poder liquidar.');
+      return;
+    }
 
     // El botón sigue habilitado a propósito: en vez de quedar inerte, el clic
     // lleva al usuario a la casilla de verificación y la resalta.
@@ -1130,7 +1201,7 @@ export class RouteSheetScannerModalComponent {
   resetWizard(): void {
     this.scanSub?.unsubscribe();
     this.scanSub = null;
-    this.scanStalled.set(false);
+    this.aiProgress.reset();
     // QUI-644: el descarte no debe sobrevivir al siguiente escaneo.
     this.discardedIndexes.set(new Set());
     this.currentStep.set(1);

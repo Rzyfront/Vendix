@@ -135,6 +135,11 @@ export function getDefaultStoreSettings(): StoreSettings {
       // cron `ApDueNotificationsJob` la lee por tienda; 0 desactiva el aviso
       // anticipado (la vencida se sigue emitiendo).
       ap_due_soon_days: 1,
+      // Tareas CRM: minutos antes del vencimiento en que llega "Tarea por
+      // vencer" (D2: 60) y hora local de la tienda del resumen diario por
+      // correo. Los lee `ReminderScheduler`; fuera de rango cae al default.
+      task_due_soon_minutes: 60,
+      daily_digest_hour: 7,
     },
     pos: {
       allow_anonymous_sales: true,
@@ -559,9 +564,11 @@ export function getDefaultStoreSettings(): StoreSettings {
       ],
     },
 
-    // Adiciones de producto - apagadas por defecto.
+    // Adiciones de producto - apagadas por defecto. `allow_online` (QUI-1005)
+    // nace encendido: activar adiciones las ofrece también en la tienda en línea.
     product_options: {
       enabled: false,
+      allow_online: true,
     },
 
     // Recordatorios de cuotas a crédito - apagados por defecto. Al activarlos
@@ -612,23 +619,8 @@ export function getDefaultStoreSettings(): StoreSettings {
     // section (receipts, POS) would stamp it into the row permanently.
     vexi: {
       enabled: false,
-      // `pipeline`, y el motivo no es preferencia sino capacidad.
-      //
-      // El default anterior era `realtime`, elegido para "no mover el motor de
-      // ninguna tienda". Pero el realtime necesita un proveedor que exponga el
-      // Realtime API (`/realtime/client_secrets`), y en producción no hay
-      // ninguna config así: `vexi_realtime_voice` quedó apuntando a MiniMax T2A,
-      // que sólo dicta. El resultado era que las 82 tiendas sin valor propio
-      // caían al único motor sin proveedor capaz y el gesto de voz devolvía
-      // `AI_PROVIDER_001` 502. Un default que apunta a lo único que no funciona
-      // no preserva comportamiento: preserva una falla.
-      //
-      // El pipeline sí tiene sus dos extremos configurados y activos
-      // (`vexi_voice_stt` y `vexi_voice_tts`), así que es el default honesto.
-      // Una tienda que quiera el realtime lo pide explícito desde
-      // Ajustes → Vexi → Motor de voz, y si su config no es capaz de realtime
-      // `VexiRealtimeService` lo dice en el error en vez de intentarlo.
-      voice_engine: 'pipeline',
+      // Sin `voice_engine` (T16/N5): el motor de voz ya no es ajuste de la
+      // tienda; lo define superadmin y la voz es solo por API.
     },
 
     // Vex — off by default, same three-legged contract as `vexi` above: the

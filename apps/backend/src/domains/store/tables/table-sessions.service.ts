@@ -1,6 +1,6 @@
 import { requestProductionSaleSync } from '../production/production-sale-sync';
 import { assertSaleNatureProducts } from '../products/services/product-usage-nature.util';
-import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional, forwardRef } from '@nestjs/common';
 import { Prisma, table_status_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
@@ -28,6 +28,9 @@ import {
   TypedTaxRate,
 } from '../taxes/utils/final-price.util';
 import { resolvePaymentReceivedSaleFields } from '../payments/utils/payment-sale-share.util';
+import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
+import { loadLinePromotionLabels } from '../promotions/utils/line-promotion-label.util';
+import { buildOrderLineBreakdown } from '../orders/utils/order-breakdown.util';
 import { assertNoActiveFinancialSplit } from '../orders/shared/financial-split-policy';
 import { canReassignOrderToTable } from '../orders/shared/order-table-reassignment-policy.util';
 import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
@@ -44,6 +47,7 @@ import { ReassignTableSessionDto } from './dto/table-session.dto';
 import { OrderHistoryService } from '../orders/order-history/order-history.service';
 import { resolveLineDestinations } from '../orders/utils/line-destination.loader';
 import { nextPosOrderNumber } from '../orders/utils/pos-order-number.util';
+import { OpenOrderPromotionService } from '../promotions/open-order-promotion.service';
 
 // `FullTaxRow` y su resolver viven en orders/utils/catalog-line-pricing.util
 // (compartidos con las cuentas de estaciones de servicio y con
@@ -121,6 +125,16 @@ export interface TableSessionView {
       // payload byte-por-byte como antes (campos ausentes, no null).
       final_unit_price?: number;
       final_total_price?: number;
+      // Promo en la cuenta abierta (solo si la línea tiene descuento y el
+      // caller no es cocina): descuento de BASE y total con impuesto ya
+      // descontado. `final_total_price` sigue siendo el bruto sin descuento.
+      discount_amount?: number;
+      discounted_total_price?: number;
+      // Total con impuesto ANTES del descuento (precio tachado). Mismo cálculo
+      // que el detalle de la orden (`buildOrderLineBreakdown`).
+      total_before_discount?: number;
+      // Nombre de la promoción que produjo el descuento (solo no-cocina).
+      promotion_label?: string;
       inventory_consumed_at_fire: boolean;
       // Snapshot of `products.product_type` taken at order creation
       // (Restaurant Suite — see addItems at L311 and OrdersService
@@ -299,6 +313,15 @@ export class TableSessionsService {
     private readonly orderHistory: OrderHistoryService,
     private readonly stockValidator: StockValidatorService,
     private readonly sellableStockAllocator: SellableStockAllocator,
+    // Cuenta abierta con promo: recotiza el motor sobre las líneas vivas al
+    // agregar/cancelar. Opcional: sin él la cuenta queda sin descuento (como
+    // antes) y el cobro sigue recotizando.
+    @Optional() private readonly openOrderPromotion?: OpenOrderPromotionService,
+    // Etiqueta de la promo por línea: cuenta abierta aún no registra
+    // `order_promotions`, así que se consulta el MISMO motor que cotiza la
+    // promo (`findActiveAutoPromotionsForProducts`). Opcional: sin él la
+    // línea cae al fallback "Promoción".
+    @Optional() private readonly promotionEngine?: PromotionEngineService,
   ) {}
 
   // ------------------------------------------------------------------ helpers
@@ -1161,11 +1184,16 @@ export class TableSessionsService {
         }
       }
 
-      // 3. Recompute order totals. The retail OrdersService stores
-      //    grand_total = subtotal + tax - discount + shipping; for an
-      //    open check we keep tax=0 (handled at fire or at pay) and
-      //    discount=0 (applied at payment time). Shipping is N/A for
-      //    dine-in.
+      // 3. Recompute order totals: grand_total = subtotal + tax - discount
+      //    (shipping is N/A for dine-in). La promo se cotiza sobre las líneas
+      //    vivas y queda en las líneas (descuento de BASE + impuesto sobre la
+      //    base descontada) con la misma regla del cobro, que recotiza; acá
+      //    NO se registra `order_promotions` ni se consume cupo. Antes el
+      //    descuento quedaba en 0 hasta el cobro y la cuenta no lo mostraba.
+      const repriced = this.openOrderPromotion
+        ? await this.openOrderPromotion.repriceInTx(tx, session.order_id)
+        : null;
+      const discount = repriced?.discount_amount ?? 0;
       // Filtra cancelados: el seam compartido (`OrderFlowService.cancelOrderItem`)
       // marca `cancelled_at` y NO pone `total_price`/`tax_amount_item` a cero
       // (su propio recálculo de cabecera filtra `cancelled_at IS NULL`,
@@ -1211,7 +1239,7 @@ export class TableSessionsService {
         return acc + Number(it.tax_amount_item ?? 0) * multiplier;
       }, 0);
 
-      const nextGrandTotal = subtotal + tax;
+      const nextGrandTotal = Math.max(0, subtotal + tax - discount);
       const serviceSessionId = lockedOrders[0].service_session_id;
       if (serviceSessionId != null) {
         const budget = await tx.service_budgets.findFirst({
@@ -1238,6 +1266,9 @@ export class TableSessionsService {
         data: {
           subtotal_amount: new Prisma.Decimal(subtotal),
           tax_amount: new Prisma.Decimal(tax),
+          ...(repriced
+            ? { discount_amount: new Prisma.Decimal(discount) }
+            : {}),
           grand_total: new Prisma.Decimal(nextGrandTotal),
           ...(serviceSessionId != null
             ? { service_version: { increment: 1 } }
@@ -1335,8 +1366,75 @@ export class TableSessionsService {
       reason,
       cancellationType,
     );
+    await this.repriceOpenAccountAfterItemChange(session.order_id);
 
     return this.findOne(sessionId);
+  }
+
+  /**
+   * Tras quitar una línea de la cuenta, la promo se recotiza sobre las líneas
+   * que quedan (el seam conserva el descuento viejo de la cabecera). Fuera de
+   * la tx del seam y tolerante a fallo: el cobro recotiza de todos modos.
+   */
+  private async repriceOpenAccountAfterItemChange(
+    orderId: number,
+  ): Promise<void> {
+    const promotion = this.openOrderPromotion;
+    if (!promotion) return;
+    try {
+      await this.prisma.$transaction(
+        async (tx: any) => {
+          const before = await tx.orders.findFirst({
+            where: { id: orderId },
+            select: {
+              grand_total: true,
+              shipping_cost: true,
+              tip_amount: true,
+              remaining_balance: true,
+              payment_form: true,
+            },
+          });
+          if (!before) return;
+          const repriced = await promotion.repriceInTx(tx, orderId);
+          const grandTotal =
+            Math.round(
+              (repriced.items_total +
+                Number(before.shipping_cost ?? 0) +
+                Number(before.tip_amount ?? 0)) *
+                100,
+            ) / 100;
+          const delta = grandTotal - Number(before.grand_total ?? 0);
+          await tx.orders.update({
+            where: { id: orderId },
+            data: {
+              tax_amount: new Prisma.Decimal(repriced.tax_amount),
+              discount_amount: new Prisma.Decimal(repriced.discount_amount),
+              grand_total: new Prisma.Decimal(grandTotal),
+              // El saldo sigue al total vivo (el de crédito es del plan).
+              ...(before.payment_form !== '2' &&
+              before.remaining_balance != null
+                ? {
+                    remaining_balance: new Prisma.Decimal(
+                      Math.max(
+                        0,
+                        Math.round(
+                          (Number(before.remaining_balance) + delta) * 100,
+                        ) / 100,
+                      ),
+                    ),
+                  }
+                : {}),
+              updated_at: new Date(),
+            },
+          });
+        },
+        { timeout: 20_000, maxWait: 5_000 },
+      );
+    } catch (error) {
+      this.logger.warn(
+        `No se pudo recotizar la promo de la cuenta order=${orderId}: ${(error as Error).message}`,
+      );
+    }
   }
 
   /**
@@ -2356,6 +2454,10 @@ export class TableSessionsService {
                 // `resolveOrderLineFinals` no puede distinguir la línea vieja
                 // de la nueva y re-aplica tasas sobre un bruto ya resuelto.
                 tax_amount_item: true,
+                // Promo en la cuenta abierta: descuento de BASE de la línea y
+                // su impuesto post-descuento, para el total ya descontado.
+                discount_amount: true,
+                order_item_taxes: { select: { tax_amount: true } },
                 inventory_consumed_at_fire: true,
                 // CP-POLLO-ARABE-727 F.1 Round 4 (C.4) — insumos para derivar
                 // `variant_label` con el mismo criterio de
@@ -2438,7 +2540,14 @@ export class TableSessionsService {
     // y su payload sale byte-por-byte como hoy.
     const finalsByItemId = new Map<
       number,
-      { final_unit_price: number; final_total_price: number }
+      {
+        final_unit_price: number;
+        final_total_price: number;
+        discount_amount?: number;
+        discounted_total_price?: number;
+        total_before_discount?: number;
+        promotion_label?: string;
+      }
     >();
     if (order && !this.isKitchenRole()) {
       const ratesByProductId = await this.resolveLineRatesByProductId(
@@ -2449,9 +2558,32 @@ export class TableSessionsService {
           it.product_id != null
             ? (ratesByProductId.get(it.product_id) ?? [])
             : [];
-        finalsByItemId.set(
-          it.id,
-          resolveOrderLineFinals(
+        // Línea con promo: descuento de BASE y total con impuesto ya
+        // descontado (base − descuento + impuesto persistido post-descuento).
+        const lineDiscount = Number(it.discount_amount ?? 0);
+        const discounted =
+          lineDiscount > 0
+            ? {
+                discount_amount: lineDiscount,
+                discounted_total_price:
+                  Math.round(
+                    (Number(it.total_price) -
+                      lineDiscount +
+                      (it.order_item_taxes ?? []).reduce(
+                        (sum, t) => sum + Number(t.tax_amount || 0),
+                        0,
+                      )) *
+                      100,
+                  ) / 100,
+                // Precio de lista CON impuesto: `final_total_price` devuelve
+                // la base cuando la tasa va incluida, así que el tachado y el
+                // ahorro salen del mismo desglose que el detalle de la orden.
+                total_before_discount:
+                  buildOrderLineBreakdown(it).total_before_discount,
+              }
+            : {};
+        finalsByItemId.set(it.id, {
+          ...resolveOrderLineFinals(
             {
               unit_price: it.unit_price,
               quantity: it.quantity,
@@ -2463,7 +2595,35 @@ export class TableSessionsService {
             },
             rates,
           ),
+          ...discounted,
+        });
+      }
+      // Etiqueta de la promo por línea (display-only, ADITIVO): `order_items`
+      // guarda el descuento, no qué promoción lo produjo. Solo se etiquetan
+      // líneas con descuento; un fallo del motor no rompe la cuenta.
+      try {
+        const labels = await loadLinePromotionLabels(
+          this.prisma as any,
+          order.id,
+          order.order_items.map((it) => ({
+            id: it.id,
+            product_id: it.product_id ?? null,
+            discount_amount: it.discount_amount,
+            unit_price: it.unit_price,
+          })),
+          this.promotionEngine
+            ? (products) =>
+                this.promotionEngine!.findActiveAutoPromotionsForProducts(
+                  products,
+                )
+            : null,
         );
+        for (const [itemId, label] of labels) {
+          const entry = finalsByItemId.get(itemId);
+          if (entry) entry.promotion_label = label;
+        }
+      } catch {
+        // Cosmético: la cuenta sigue mostrando precio y descuento.
       }
     }
     return {

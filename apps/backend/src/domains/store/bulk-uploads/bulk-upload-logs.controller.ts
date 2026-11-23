@@ -2,6 +2,8 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   Logger,
   Param,
   ParseIntPipe,
@@ -17,6 +19,7 @@ import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { UserRole } from '../../auth/enums/user-role.enum';
 import { BulkUploadLogsService } from './bulk-upload-logs.service';
+import { BulkUploadJobsService } from './bulk-upload-jobs.service';
 import {
   BULK_UPLOAD_ANY_PERMISSION,
   BULK_UPLOAD_TYPE_PERMISSIONS,
@@ -27,6 +30,7 @@ import {
   QueryBulkUploadLogsDto,
   RegisterBulkUploadDto,
 } from './dto/bulk-upload-log.dto';
+import { QueryActiveBulkJobDto } from './dto/bulk-upload-job.dto';
 
 /**
  * QUI-1004 — historial de cargas masivas de la tienda del contexto.
@@ -44,6 +48,7 @@ export class BulkUploadLogsController {
   constructor(
     private readonly bulkUploadLogsService: BulkUploadLogsService,
     private readonly responseService: ResponseService,
+    private readonly bulkUploadJobsService: BulkUploadJobsService,
   ) {}
 
   @ApiOperation({
@@ -97,6 +102,60 @@ export class BulkUploadLogsController {
       { id: row.id, status: row.status },
       'Carga masiva registrada',
     );
+  }
+
+  // QUI-1009 — trabajos durables. Van ANTES de `:id`. Cada ruta exige el
+  // permiso del tipo de la carga (`assertUploadPermission`); la fila se lee con
+  // la tienda del contexto, así que una carga ajena responde 404.
+
+  @ApiOperation({
+    summary: 'Carga masiva activa (en cola o en curso) de la tienda para un tipo',
+  })
+  @Get('jobs/active')
+  @Permissions(...BULK_UPLOAD_ANY_PERMISSION)
+  async activeJob(@Query() query: QueryActiveBulkJobDto, @Req() request: any) {
+    this.assertUploadPermission(request, query.upload_type);
+    const job = await this.bulkUploadJobsService.getActive(query.upload_type);
+    return this.responseService.success(job, 'Carga masiva activa');
+  }
+
+  @ApiOperation({ summary: 'Estado y avance de un trabajo de carga masiva' })
+  @Get('jobs/:id')
+  @Permissions(...BULK_UPLOAD_ANY_PERMISSION)
+  async jobStatus(@Param('id', ParseIntPipe) id: number, @Req() request: any) {
+    this.assertUploadPermission(
+      request,
+      await this.bulkUploadJobsService.getType(id),
+    );
+    const job = await this.bulkUploadJobsService.getView(id);
+    return this.responseService.success(job, 'Trabajo de carga masiva');
+  }
+
+  @ApiOperation({ summary: 'Resultados por fila de un trabajo de carga masiva' })
+  @Get('jobs/:id/results')
+  @Permissions(...BULK_UPLOAD_ANY_PERMISSION)
+  async jobResults(@Param('id', ParseIntPipe) id: number, @Req() request: any) {
+    this.assertUploadPermission(
+      request,
+      await this.bulkUploadJobsService.getType(id),
+    );
+    const results = await this.bulkUploadJobsService.getResults(id);
+    return this.responseService.success(results, 'Resultados de la carga masiva');
+  }
+
+  @ApiOperation({
+    summary: 'Reintentar un trabajo de carga masiva que falló por un problema técnico',
+  })
+  @Post('jobs/:id/retry')
+  @HttpCode(HttpStatus.OK)
+  @Permissions(...BULK_UPLOAD_ANY_PERMISSION)
+  async retryJob(@Param('id', ParseIntPipe) id: number, @Req() request: any) {
+    this.assertUploadPermission(
+      request,
+      await this.bulkUploadJobsService.getType(id),
+    );
+    const job = await this.bulkUploadJobsService.retry(id);
+    return this.responseService.success(job, 'Carga masiva reintentada');
   }
 
   @ApiOperation({ summary: 'Ver una carga masiva del historial de la tienda' })

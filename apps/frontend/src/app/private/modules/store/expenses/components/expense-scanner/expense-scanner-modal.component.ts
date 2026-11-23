@@ -1,13 +1,13 @@
-import {Component, inject, signal, computed, input, output, viewChild, DestroyRef} from '@angular/core';
+import {Component, inject, signal, computed, input, output, viewChild, DestroyRef, effect, untracked} from '@angular/core';
 import {takeUntilDestroyed, toSignal} from '@angular/core/rxjs-interop';
 import {FormsModule} from '@angular/forms';
 import {Store} from '@ngrx/store';
-import {map} from 'rxjs';
+import {Observable, Subscription, map} from 'rxjs';
 
 import {loadExpenses, loadExpensesSummary, loadExpenseCategories} from '../../state/actions/expenses.actions';
 import {selectActiveExpenseCategories} from '../../state/selectors/expenses.selectors';
 import {Expense, ExpenseCategory, CreateExpenseDto} from '../../interfaces/expense.interface';
-import {ExpenseLineItem, ExpenseScanResult} from '../../interfaces/expense-scanner.interface';
+import {ExpenseLineItem, ExpenseScanResponse, ExpenseScanResult} from '../../interfaces/expense-scanner.interface';
 import {ExpensesService} from '../../services/expenses.service';
 import {ExpenseScannerService} from '../../services/expense-scanner.service';
 import {
@@ -30,6 +30,8 @@ import {
 import {ExpenseCategoryQuickCreateComponent} from '../expense-category-quick-create.component';
 import {CurrencyPipe} from '../../../../../../shared/pipes/currency/currency.pipe';
 import {toLocalDateString} from '../../../../../../shared/utils/date.util';
+import {injectAiJobProgress} from '../../../../../../shared/utils/ai-job-progress';
+import {AiJobProgressComponent} from '../../../../../../shared/components/ai-job-progress/ai-job-progress.component';
 
 @Component({
   selector: 'app-expense-scanner-modal',
@@ -49,6 +51,7 @@ import {toLocalDateString} from '../../../../../../shared/utils/date.util';
     CurrencyPipe,
     AiReviewAckComponent,
     AiDiscardToggleComponent,
+    AiJobProgressComponent,
   ],
   template: `
     <app-modal
@@ -193,11 +196,25 @@ import {toLocalDateString} from '../../../../../../shared/utils/date.util';
             </div>
           }
 
-          <div class="flex-1 flex flex-col items-center justify-center gap-4">
-            <app-spinner size="lg" text="Procesando factura con IA..."></app-spinner>
-            <p class="text-sm text-text-secondary text-center">
-              Extrayendo proveedor, items y totales de la factura...
-            </p>
+          <div class="flex-1 flex flex-col justify-center gap-4">
+            <app-ai-job-progress
+              [progress]="aiProgress"
+              [showRetry]="!!selectedFile()"
+              (retry)="startScan()"
+            />
+            @if (aiProgress.running()) {
+              <p class="text-sm text-text-secondary text-center">
+                Extrayendo proveedor, items y totales de la factura...
+              </p>
+            } @else if (!isScanning()) {
+              <button
+                type="button"
+                class="self-center text-xs text-primary hover:underline font-medium"
+                (click)="backToUpload()"
+              >
+                Cambiar archivo
+              </button>
+            }
           </div>
         </div>
       }
@@ -217,6 +234,19 @@ import {toLocalDateString} from '../../../../../../shared/utils/date.util';
               </div>
             }
           </div>
+
+          <!-- ia-cargas F5a: avisos de la lectura (páginas no leídas, dos totales) -->
+          @if (scanWarnings().length > 0) {
+            <div class="bg-amber-50 border border-amber-200 rounded-lg p-3">
+              <p class="text-xs font-semibold text-amber-800 mb-1">Revisa antes de guardar</p>
+              @for (warn of scanWarnings(); track warn) {
+                <p class="text-xs text-amber-700">{{ warn }}</p>
+              }
+            </div>
+          }
+          @if ((scanPages() ?? 0) > 1) {
+            <p class="text-xs text-text-secondary">Factura leída en {{ scanPages() }} páginas.</p>
+          }
 
           <!-- Invoice header fields -->
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -579,6 +609,10 @@ export class ExpenseScannerModalComponent {
   readonly created = output<Expense>();
 
   private expenseScannerService = inject(ExpenseScannerService);
+
+  /** Shared AI progress bar (QUI-1020). */
+  readonly aiProgress = injectAiJobProgress({kind: 'expense'});
+  private scanSub: Subscription | null = null;
   private expensesService = inject(ExpensesService);
   private store = inject(Store);
   private toastService = inject(ToastService);
@@ -605,6 +639,9 @@ export class ExpenseScannerModalComponent {
 
   // Scan results
   readonly scanResult = signal<ExpenseScanResult | null>(null);
+  /** ia-cargas F5a: notices about how the invoice was read (optional in the API). */
+  readonly scanWarnings = signal<string[]>([]);
+  readonly scanPages = signal<number | null>(null);
   readonly matchedCategory = signal<{
     id: number;
     name: string;
@@ -786,6 +823,37 @@ export class ExpenseScannerModalComponent {
   // Scanning
   // ============================================================
 
+  constructor() {
+    // QUI-1020: reopening the modal re-attaches to a scan that was running.
+    effect(() => {
+      if (!this.isOpen()) return;
+      untracked(() => this.resumeScan());
+    });
+  }
+
+  private resumeScan(): void {
+    if (this.isScanning() || this.currentStep() !== 0 || this.selectedFile()) {
+      return;
+    }
+    const resumed = this.expenseScannerService.resumeScan({
+      progress: this.aiProgress,
+    });
+    if (!resumed) return;
+    this.currentStep.set(1);
+    this.trackScan(resumed);
+  }
+
+  /** Back to the upload step keeping nothing from the failed attempt. */
+  backToUpload(): void {
+    this.scanSub?.unsubscribe();
+    // The user discarded this scan: reopening must not re-attach to it (a
+    // stalled job keeps its resume key until now).
+    this.expenseScannerService.forgetScan();
+    this.aiProgress.reset();
+    this.isScanning.set(false);
+    this.currentStep.set(0);
+  }
+
   startScan(): void {
     const file = this.selectedFile();
     if (!file) return;
@@ -793,12 +861,21 @@ export class ExpenseScannerModalComponent {
     this.currentStep.set(1);
     this.isScanning.set(true);
 
-    // El servicio encola el job y hace polling internamente; emite UNA sola vez
+    // AiScanJobService encola el job y espera con backoff; emite UNA sola vez
     // el resultado final, por lo que `isScanning` permanece true durante todo el
-    // poll (solo se apaga en next/error) y este `next` prellena las señales igual
-    // que antes.
-    this.expenseScannerService
-      .scanInvoiceAsync(file)
+    // poll (solo se apaga en next/error). Al fallar el archivo NO se borra:
+    // el panel ofrece reintentar sin volver a subirlo.
+    this.trackScan(
+      this.expenseScannerService.scanInvoiceAsync(file, {
+        progress: this.aiProgress,
+      }),
+    );
+  }
+
+  private trackScan(scan$: Observable<ExpenseScanResponse>): void {
+    this.isScanning.set(true);
+    this.scanSub?.unsubscribe();
+    this.scanSub = scan$
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: result => {
@@ -809,6 +886,8 @@ export class ExpenseScannerModalComponent {
 
           this.scanResult.set(scan);
           this.matchedCategory.set(matched);
+          this.scanWarnings.set(result.warnings ?? []);
+          this.scanPages.set(result.scan_source?.pages ?? null);
 
           // Pre-fill editable fields from scan
           this.editSupplierName.set(scan.supplier_name || '');
@@ -856,14 +935,10 @@ export class ExpenseScannerModalComponent {
           }));
           this.currentStep.set(2);
         },
-        error: (err: unknown) => {
-          // El servicio normaliza failed/timeout/404-evicción a Error con mensaje
-          // legible; se muestra en toast y se resetea al paso inicial.
+        error: () => {
+          // La barra ya muestra el error por categoría (documento / Vendix /
+          // IA) con «Intentar de nuevo»; el archivo seleccionado se conserva.
           this.isScanning.set(false);
-          this.toastService.error(
-            err instanceof Error ? err.message : 'Error al procesar la factura',
-          );
-          this.currentStep.set(0);
         },
       });
   }
@@ -1056,7 +1131,12 @@ export class ExpenseScannerModalComponent {
     this.fileError.set(null);
     this.isProcessingFile.set(false);
     this.isScanning.set(false);
+    // Closing mid-scan keeps the job remembered: reopening re-attaches to it.
+    this.scanSub?.unsubscribe();
+    this.aiProgress.reset();
     this.scanResult.set(null);
+    this.scanWarnings.set([]);
+    this.scanPages.set(null);
     this.matchedCategory.set(null);
     this.editableItems.set([]);
     this.editSupplierName.set('');

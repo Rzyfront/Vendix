@@ -114,10 +114,11 @@ export class SettingsController {
     @Query('store_id') storeIdRaw?: string,
   ) {
     const storeId = dto.store_id ?? (storeIdRaw ? Number(storeIdRaw) : undefined);
-    const fiscalData = await this.settingsService.updateFiscalData(
-      dto as unknown as Record<string, unknown>,
-      storeId,
-    );
-    return { fiscal_data: fiscalData };
+    const { fiscal_data, fiscal_calendar } =
+      await this.settingsService.updateFiscalDataWithCalendar(
+        dto as unknown as Record<string, unknown>,
+        storeId,
+      );
+    return { fiscal_data, fiscal_calendar };
   }
 }

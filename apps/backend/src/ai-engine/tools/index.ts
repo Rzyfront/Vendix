@@ -5,6 +5,7 @@ export { AIToolRegistry } from './ai-tool-registry';
 export { createSalesTools } from './domains/sales.tools';
 export { createOrdersTools } from './domains/orders.tools';
 export { createInventoryTools } from './domains/inventory.tools';
+export { createInventoryTransferTools } from './domains/inventory-transfers.tools';
 export { createAccountingTools } from './domains/accounting.tools';
 export { createFiscalTools } from './domains/fiscal.tools';
 export { createInvoicingTools } from './domains/invoicing.tools';
@@ -14,6 +15,12 @@ export { createSubscriptionTools } from './domains/subscriptions.tools';
 export { createSettingsAdminTools } from './domains/settings-admin.tools';
 export { createFinanceOpsTools } from './domains/finance-ops.tools';
 export { createCustomerTools } from './domains/customers.tools';
+// QUI-1042: CRM family (registered by CustomerCrmModule, owner of the services).
+export { createCrmCustomerTools } from './domains/crm-customers.tools';
+export { createCrmTagTools } from './domains/crm-tags.tools';
+export { createCrmSegmentTools } from './domains/crm-segments.tools';
+export { createCrmPipelineTools } from './domains/crm-pipeline.tools';
+export { createCrmTaskCampaignTools } from './domains/crm-tasks-campaigns.tools';
 export { createProductTools } from './domains/products.tools';
 export {
   createCategoryTools,
@@ -41,6 +48,8 @@ export { createDispatchTools } from './domains/dispatch.tools';
 export { createShippingTools } from './domains/shipping.tools';
 export { createNotificationTools } from './domains/notifications.tools';
 export { createReminderTools } from './domains/reminders.tools';
+export { createFollowupTools } from './domains/followup.tools';
+export { createComputeTools } from './domains/compute.tools';
 export { createSearchTools } from './domains/search.tools';
 export { createBusinessTools } from './domains/business.tools';
 export { createApiBridgeTools } from './bridge/api-bridge.tools';
@@ -71,6 +80,9 @@ export { createDiscoveryTools } from './domains/discovery.tools';
 export { ToolRouterService } from './tool-router.service';
 
 export { createPlaybookTools } from './domains/playbook.tools';
-export { createCodeExecutionTools } from './domains/code-execution.tools';
+export {
+  createCodeExecutionTools,
+  createAnalysisTools,
+} from './domains/code-execution.tools';
 
 export { createProceduralRecipeTools } from './domains/recipe.tools';

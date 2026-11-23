@@ -134,11 +134,22 @@ describe('ReturnOrdersService — customer returns go through the order refund',
   });
 
   it('a supplier return still moves its logical quantity and books no customer refund', async () => {
-    const { service, tx, prisma, moved } = build({
+    const { service, tx, prisma, moved, stockLevelManager } = build({
       returnItems: [{ id: 10, product_id: 7, quantity: 2 }],
     });
     await service.process(99, [{ id: 10, action: 'restock' }]);
     expect(moved()).toEqual([2]);
+    // Explicit budget for the processing transaction (the 5 s default expired).
+    expect(prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function), { timeout: 20_000, maxWait: 5_000 },
+    );
+    // Without an explicit warehouse the default one is resolved on the
+    // return's tx connection, never on a second pool connection.
+    expect(stockLevelManager.getDefaultLocationForProduct).toHaveBeenCalledWith(7, undefined, tx);
+    expect(stockLevelManager.updateStock).toHaveBeenCalledWith(
+      expect.objectContaining({ location_id: 1 }),
+      tx,
+    );
     expect(tx.order_items.findMany).not.toHaveBeenCalled();
     expect(tx.return_orders.update).toHaveBeenCalledWith(
       expect.objectContaining({

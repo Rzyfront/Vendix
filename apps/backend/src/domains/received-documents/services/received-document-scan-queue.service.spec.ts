@@ -57,6 +57,8 @@ describe('ReceivedDocumentScanQueueService', () => {
     expect(scanner.assertConfigured).toHaveBeenCalledTimes(1);
     expect(documents.createPendingFileWithOutcome).toHaveBeenCalledWith(context, expect.any(Object), 'manual');
     expect(queue.add).toHaveBeenCalledWith('scan', {
+      triggered_by_user_id: null,
+      source: 'http:documentos-recibidos/escanear',
       document_id: 101,
       file_id: 303,
       context: { ...context, request_id: 'received-ocr-7-12-101-v1' },

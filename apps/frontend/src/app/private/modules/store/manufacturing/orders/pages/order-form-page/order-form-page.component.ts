@@ -33,13 +33,18 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
 import {
   CreateManufacturingOrderDto,
   Formula,
+  ManufacturingPlant,
   ManufacturingPriority,
   ORDER_PRIORITY_LABELS,
   UpdateManufacturingOrderDto,
 } from '../../../interfaces';
 import {
+  isOrderPlantRequired,
   ManufacturingFormulasService,
   ManufacturingOrdersService,
+  ManufacturingPlantsService,
+  orderPlantIdToSend,
+  orderPlantOptions,
 } from '../../../services';
 import { InventoryService } from '../../../../inventory/services/inventory.service';
 
@@ -48,6 +53,7 @@ interface OrderFormShape {
   planned_qty: FormControl<number | null>;
   due_date: FormControl<string>;
   location_id: FormControl<number | null>;
+  plant_id: FormControl<number | null>;
   priority: FormControl<ManufacturingPriority>;
   notes: FormControl<string>;
 }
@@ -74,6 +80,7 @@ export class OrderFormPageComponent implements OnInit {
   private readonly ordersService = inject(ManufacturingOrdersService);
   private readonly formulasService = inject(ManufacturingFormulasService);
   private readonly inventoryService = inject(InventoryService);
+  private readonly plantsService = inject(ManufacturingPlantsService);
   private readonly toastService = inject(ToastService);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
@@ -88,6 +95,17 @@ export class OrderFormPageComponent implements OnInit {
   readonly formulas = signal<Formula[]>([]);
   readonly locationOptions = signal<SelectorOption[]>([]);
 
+  // QUI-1013: plant of the order. With one active plant it is assigned by the
+  // API and the selector stays hidden; with several it is required.
+  readonly plants = signal<ManufacturingPlant[]>([]);
+  /** Plant the order had when the form loaded (edit mode). */
+  readonly originalPlantId = signal<number | null>(null);
+  readonly plantOptions = computed<SelectorOption[]>(() =>
+    orderPlantOptions(this.plants(), this.originalPlantId()),
+  );
+  readonly plantRequired = computed(() => isOrderPlantRequired(this.plants()));
+  readonly showPlantSelector = computed(() => this.plantOptions().length > 1);
+
   readonly priorityOptions: SelectorOption[] = (
     Object.keys(ORDER_PRIORITY_LABELS) as ManufacturingPriority[]
   ).map((value) => ({ value, label: ORDER_PRIORITY_LABELS[value] }));
@@ -101,6 +119,7 @@ export class OrderFormPageComponent implements OnInit {
     }),
     due_date: this.fb.nonNullable.control(''),
     location_id: this.fb.nonNullable.control<number | null>(null),
+    plant_id: this.fb.nonNullable.control<number | null>(null),
     priority: this.fb.nonNullable.control<ManufacturingPriority>('normal'),
     notes: this.fb.nonNullable.control(''),
   });
@@ -132,6 +151,7 @@ export class OrderFormPageComponent implements OnInit {
   ngOnInit(): void {
     this.loadFormulas();
     this.loadLocations();
+    this.loadPlants();
     const id = this.route.snapshot.paramMap.get('id');
     if (id) {
       this.isEditMode.set(true);
@@ -167,6 +187,17 @@ export class OrderFormPageComponent implements OnInit {
       });
   }
 
+  private loadPlants(): void {
+    // Inactive plants too: an order may still belong to one deactivated later.
+    this.plantsService
+      .list(true)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (rows) => this.plants.set(rows),
+        error: () => this.toastService.error('No se pudieron cargar las plantas'),
+      });
+  }
+
   private loadOrder(id: number): void {
     this.isLoading.set(true);
     this.ordersService
@@ -186,9 +217,11 @@ export class OrderFormPageComponent implements OnInit {
             planned_qty: Number(order.planned_qty),
             due_date: order.due_date ? toUTCDateString(new Date(order.due_date)) : '',
             location_id: order.location_id ?? null,
+            plant_id: order.plant_id ?? null,
             priority: order.priority ?? 'normal',
             notes: order.notes ?? '',
           });
+          this.originalPlantId.set(order.plant_id ?? null);
           this.isLoading.set(false);
         },
         error: (error) => {
@@ -209,12 +242,21 @@ export class OrderFormPageComponent implements OnInit {
       return;
     }
     const raw = this.form.getRawValue();
+    // The selector may hand back the id as a string; empty means "not chosen".
+    const selectedPlant = Number(raw.plant_id) > 0 ? Number(raw.plant_id) : null;
+    if (this.plantRequired() && selectedPlant == null) {
+      this.form.controls.plant_id.markAsTouched();
+      this.toastService.error('Elige la planta donde se fabrica la orden');
+      return;
+    }
+    const plantId = orderPlantIdToSend(selectedPlant, this.originalPlantId(), this.isEditMode());
     const common = {
       planned_qty: Number(raw.planned_qty),
       priority: raw.priority,
       ...(raw.due_date ? { due_date: raw.due_date } : {}),
       ...(raw.location_id != null ? { location_id: Number(raw.location_id) } : {}),
       ...(raw.notes.trim() ? { notes: raw.notes.trim() } : {}),
+      ...(plantId !== undefined ? { plant_id: plantId } : {}),
     };
 
     this.isSubmitting.set(true);

@@ -9,6 +9,7 @@ import {
   signal,
   untracked,
 } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import {
   FormBuilder,
@@ -32,6 +33,16 @@ import {
 import { computeDocumentFormatHint } from '../../utils/document-format-hint.util';
 import { computePhoneFormatHint } from '../../utils/phone-format-hint.util';
 import { customerDisplayName } from '../../../../../../shared/utils/customer-display-name.util';
+import {
+  buildCustomerEstablishmentRows,
+  customerFromEstablishmentRow,
+  CustomerEstablishmentRow,
+  establishmentSummary,
+  EstablishmentLike,
+  hasEstablishmentRows,
+  MAX_ESTABLISHMENT_ROWS,
+  preferredEstablishment,
+} from '../../../../../../shared/utils/customer-establishment-rows.util';
 import {
   extractFormIdentifiers,
   RawCustomerResolveForm,
@@ -64,6 +75,7 @@ export type CustomerSelectorView = 'overview' | 'search';
   selector: 'app-pos-customer-selector',
   standalone: true,
   imports: [
+    NgTemplateOutlet,
     ReactiveFormsModule,
     ButtonComponent,
     DocumentIdentityFieldsComponent,
@@ -119,6 +131,13 @@ export class PosCustomerSelectorComponent {
    * inactivo y el comportamiento no cambia.
    */
   readonly requiresElectronicInvoicing = input<boolean>(false);
+  /**
+   * Venta: un cliente con 2+ establecimientos (direcciones de envío con
+   * sede) se lista como una línea por establecimiento y, al elegir una, el
+   * cliente se emite con `preferred_address_id` para que el paso de envío la
+   * preseleccione. Opt-in: hospitalidad/mesas siguen con una línea por cliente.
+   */
+  readonly splitByEstablishment = input<boolean>(false);
 
   // ── Outputs ─────────────────────────────────────────────────────────
   readonly customerSelected = output<PosCustomer>();
@@ -173,8 +192,35 @@ export class PosCustomerSelectorComponent {
   /** Compressed slices — enforce 3-item MAX without scroll. */
   readonly topCustomersSlice = computed(() => this.topCustomers().slice(0, 3));
   readonly resultsSlice = computed(() => this.results().slice(0, 3));
-  readonly resultsOverflow = computed(() =>
-    Math.max(0, this.results().length - this.resultsSlice().length),
+
+  /**
+   * Líneas visibles del listado. Sin establecimientos divididos: exactamente
+   * los mismos 3 clientes de siempre. Con alguna sede dividida el tope sube a
+   * {@link MAX_ESTABLISHMENT_ROWS} líneas (el resto se alcanza escribiendo el
+   * nombre de la sede: el backend también busca por ella).
+   */
+  readonly resultRows = computed(() =>
+    this.visibleRows(this.results(), this.lastQuery()),
+  );
+  readonly topCustomerRows = computed(() =>
+    this.visibleRows(this.topCustomersSlice(), ''),
+  );
+  readonly resultsOverflow = computed(() => {
+    if (!this.splitByEstablishment()) {
+      return Math.max(0, this.results().length - this.resultsSlice().length);
+    }
+    const total = buildCustomerEstablishmentRows(
+      this.results(),
+      this.lastQuery(),
+    ).length;
+    return Math.max(0, total - this.resultRows().length);
+  });
+
+  /** Sede elegida en el buscador para el cliente seleccionado (tarjeta resumen). */
+  readonly selectedEstablishment = computed(() =>
+    this.splitByEstablishment()
+      ? preferredEstablishment(this.selectedCustomer())
+      : null,
   );
 
   /**
@@ -409,6 +455,32 @@ export class PosCustomerSelectorComponent {
    */
   displayName(customer: PosCustomer): string {
     return customerDisplayName(customer, '');
+  }
+
+  establishmentText(establishment: EstablishmentLike | null): string {
+    return establishmentSummary(establishment);
+  }
+
+  /** Expande a líneas por establecimiento (si aplica) y recorta al tope visible. */
+  private visibleRows(
+    customers: PosCustomer[],
+    query: string,
+  ): CustomerEstablishmentRow<PosCustomer>[] {
+    if (!this.splitByEstablishment()) {
+      return customers.slice(0, 3).map((customer) => ({
+        key: String(customer.id),
+        customer,
+        establishment: null,
+      }));
+    }
+    const rows = buildCustomerEstablishmentRows(customers, query);
+    const max = hasEstablishmentRows(rows) ? MAX_ESTABLISHMENT_ROWS : 3;
+    return rows.slice(0, max);
+  }
+
+  /** Elige la línea: el cliente viaja con su establecimiento (si la línea lo tiene). */
+  selectRow(row: CustomerEstablishmentRow<PosCustomer>): void {
+    this.selectCustomer(customerFromEstablishmentRow(row));
   }
 
   selectCustomer(customer: PosCustomer): void {

@@ -1068,10 +1068,13 @@ export interface InvoiceCardView {
   data: InvoiceCardData;
 }
 
+import { RecordDocumentsComponent } from '../../../../../../shared/components/record-documents/record-documents.component';
+
 @Component({
   selector: 'app-order-details-page',
   standalone: true,
   imports: [ProviderNamePipe, 
+    RecordDocumentsComponent,
     SplitAccountsPanelComponent,
     RouterModule,
     ReactiveFormsModule,
@@ -1232,6 +1235,15 @@ export class OrderDetailsPageComponent {
           sum + Number(item.final_total_price ?? item.total_price ?? 0),
         0,
       ),
+  );
+
+  /**
+   * Totales leídos de lo persistido: subtotal SIN impuesto, descuento,
+   * impuesto por tipo. `null` = el API no lo envió (rol cocina o backend
+   * anterior) y el resumen cae al desglose en bruto de siempre.
+   */
+  readonly totalsBreakdown = computed(
+    () => this.order()?.totals_breakdown ?? null,
   );
 
   // ── Discount snapshots (read-only from order; never recalculated) ──
@@ -4173,7 +4185,7 @@ export class OrderDetailsPageComponent {
     const { routeId } = this.dispatchGeneratedContext();
     this.showDispatchGeneratedModal.set(false);
     if (routeId != null) {
-      this.router.navigate(['/admin/orders/planillas', routeId]);
+      this.router.navigate(['/admin/orders/rutas', routeId]);
     }
   }
 
@@ -5266,7 +5278,7 @@ export class OrderDetailsPageComponent {
 
   /** Navigate to the dispatch route (planilla) detail page. */
   viewDispatchRoute(routeId: number): void {
-    this.router.navigate(['/admin/orders/planillas', routeId]);
+    this.router.navigate(['/admin/orders/rutas', routeId]);
   }
 
   goBack(): void {
@@ -6727,6 +6739,10 @@ export class OrderDetailsPageComponent {
    */
   cancelItem(item: OrderItem): void {
     if (this.splitLocked()) return;
+    // Un plato a la vez: con una cancelación o reversa en vuelo no se abre
+    // otro flujo (dos tx sobre la misma orden compiten por el pool).
+    if (this.cancellingItemId() !== null || this.reversingItemId() !== null)
+      return;
     if (this.cancellationBlockedByPayment()) return;
     if (!this.canCancelItem(item)) return;
     const orderId = this.order()?.id;
@@ -6770,6 +6786,13 @@ export class OrderDetailsPageComponent {
               );
               return;
             }
+            // Doble clic: dos diálogos encolados llegan aquí; solo el
+            // primero envía.
+            if (
+              this.cancellingItemId() !== null ||
+              this.reversingItemId() !== null
+            )
+              return;
             this.cancellingItemId.set(item.id);
             this.ordersFlowService
               .cancelOrderItem(orderId, item.id, { reason })
@@ -6786,10 +6809,16 @@ export class OrderDetailsPageComponent {
                 },
                 error: (err: unknown) => {
                   this.cancellingItemId.set(null);
+                  // 503 SYS_BUSY_001 (tx vencida o pool agotado): el mesero
+                  // necesita saber que puede reintentar. El resto conserva
+                  // el copy previo.
+                  const parsed = parseApiError(err);
                   this.toastService.error(
                     typeof err === 'string'
                       ? err
-                      : 'Error al cancelar el plato',
+                      : parsed.errorCode === 'SYS_BUSY_001'
+                        ? parsed.userMessage
+                        : 'Error al cancelar el plato',
                   );
                   console.error('Cancel item failed', err);
                 },

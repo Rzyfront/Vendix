@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { S3Service } from '../../../common/services/s3.service';
 import { ImageContext } from '@common/config/image-presets';
@@ -12,14 +13,53 @@ import {
   VideoSourceTypeEnum,
 } from './dto';
 import { Prisma } from '@prisma/client';
-import { normalizeKeywords } from '../../../common/helpers/keywords.helper';
+import {
+  HELP_VIDEO_CHANGED,
+  isVideoSearchTextInsufficient,
+  videoSearchTextLength,
+} from '../../../ai-engine/embeddings/help-knowledge-indexer.service';
+import {
+  normalizeKeywords,
+  calculateRelevance,
+} from '../../../common/helpers/keywords.helper';
+import {
+  buildVideoSearchWhere,
+  findVideoIdsIgnoringAccents,
+  videoRankingTokens,
+} from '../../video-library/video-search.helper';
+
+/** Thumbnail generated from a YouTube video ID (not uploaded by hand). */
+const AUTO_YOUTUBE_THUMBNAIL = /^https?:\/\/img\.youtube\.com\/vi\//;
 
 @Injectable()
 export class VideoLibraryAdminService {
   constructor(
     private readonly globalPrisma: GlobalPrismaService,
     private readonly s3Service: S3Service,
+    @Optional() private readonly events?: EventEmitter2,
   ) {}
+
+  /** T26 (D4): flag videos whose publication text is too short to be found by Vex. */
+  private withSearchFlags<
+    T extends {
+      title: string;
+      summary?: string | null;
+      description?: string | null;
+      tags?: string[] | null;
+      keywords?: string[] | null;
+    },
+  >(video: T) {
+    return {
+      ...video,
+      search_text_insufficient: isVideoSearchTextInsufficient(video),
+      search_text_length: videoSearchTextLength(video),
+    };
+  }
+
+  /** The help knowledge indexer re-reads the row: published indexes, anything else retires. */
+  private notifyChanged(id: number): void {
+    this.events?.emit(HELP_VIDEO_CHANGED, { id });
+  }
 
   // ==========================================
   // VIDEOS CRUD
@@ -28,6 +68,9 @@ export class VideoLibraryAdminService {
   async findAllVideos(query: AdminVideoQueryDto) {
     const { page = 1, limit = 20, status, video_source, category, search } = query;
     const skip = (page - 1) * limit;
+    const accentInsensitiveIds = search
+      ? await findVideoIdsIgnoringAccents(this.globalPrisma, search)
+      : [];
 
     const where: Prisma.videosWhereInput = {
       ...(status && { status: status as any }),
@@ -37,14 +80,7 @@ export class VideoLibraryAdminService {
           ? { slug: category }
           : { OR: [{ slug: category }, { id: Number(category) }] },
       }),
-      ...(search && {
-        OR: [
-          { title: { contains: search, mode: 'insensitive' as const } },
-          { summary: { contains: search, mode: 'insensitive' as const } },
-          { tags: { has: search.toLowerCase().trim() } },
-          { keywords: { has: search.toLowerCase().trim() } },
-        ],
-      }),
+      ...(search && buildVideoSearchWhere(search, accentInsensitiveIds)),
     };
 
     const [data, total] = await Promise.all([
@@ -64,11 +100,18 @@ export class VideoLibraryAdminService {
 
     const signedData = await Promise.all(
       data.map(async (video) => ({
-        ...video,
+        ...this.withSearchFlags(video),
         thumbnail_url: await this.resolveMediaUrl(video.thumbnail_url),
         video_url: await this.resolveMediaUrl(video.video_url),
       })),
     );
+
+    if (search) {
+      const tokens = videoRankingTokens(search);
+      signedData.sort(
+        (a, b) => calculateRelevance(b, tokens) - calculateRelevance(a, tokens),
+      );
+    }
 
     return {
       data: signedData,
@@ -96,7 +139,7 @@ export class VideoLibraryAdminService {
     }
 
     return {
-      ...video,
+      ...this.withSearchFlags(video),
       thumbnail_url: await this.resolveMediaUrl(video.thumbnail_url),
       video_url: await this.resolveMediaUrl(video.video_url),
     };
@@ -151,8 +194,10 @@ export class VideoLibraryAdminService {
       },
     });
 
+    this.notifyChanged(video.id);
+
     return {
-      ...video,
+      ...this.withSearchFlags(video),
       thumbnail_url: await this.resolveMediaUrl(video.thumbnail_url),
       video_url: await this.resolveMediaUrl(video.video_url),
     };
@@ -176,19 +221,36 @@ export class VideoLibraryAdminService {
       slug = existing ? `${newSlug}-${Date.now()}` : newSlug;
     }
 
-    let external_id = dto.external_id;
-    let video_source = dto.video_source;
-    if (dto.video_url && dto.video_url !== video.video_url) {
-      const parsed = this.parseVideoUrl(dto.video_url, dto.video_source);
-      external_id = external_id || parsed.external_id;
-      video_source = video_source || parsed.video_source;
-    }
-
     const sanitizedVideoUrl = dto.video_url !== undefined
       ? (this.s3Service.sanitizeForStorage(dto.video_url) || dto.video_url)
       : undefined;
-    const sanitizedThumbnailUrl = dto.thumbnail_url !== undefined
-      ? (this.s3Service.sanitizeForStorage(dto.thumbnail_url) || dto.thumbnail_url)
+
+    let external_id: string | null | undefined = dto.external_id;
+    let video_source = dto.video_source;
+    let thumbnail_url = dto.thumbnail_url;
+    if (sanitizedVideoUrl && sanitizedVideoUrl !== video.video_url) {
+      const parsed = this.parseVideoUrl(dto.video_url!, dto.video_source);
+      // The edit form re-sends the stored ID/platform; a new URL must win over
+      // them. Only a value the user changed by hand is kept.
+      if (!external_id || external_id === video.external_id) {
+        external_id = parsed.external_id ?? null;
+      }
+      if (!video_source || video_source === video.video_source) {
+        video_source = parsed.video_source;
+      }
+      // Regenerate the auto YouTube thumbnail; never replace an uploaded one.
+      const currentThumbnail = thumbnail_url !== undefined ? thumbnail_url : video.thumbnail_url;
+      if (
+        video_source === VideoSourceTypeEnum.YOUTUBE &&
+        external_id &&
+        (!currentThumbnail || AUTO_YOUTUBE_THUMBNAIL.test(currentThumbnail))
+      ) {
+        thumbnail_url = `https://img.youtube.com/vi/${external_id}/maxresdefault.jpg`;
+      }
+    }
+
+    const sanitizedThumbnailUrl = thumbnail_url !== undefined
+      ? (this.s3Service.sanitizeForStorage(thumbnail_url) || thumbnail_url)
       : undefined;
 
     const updated = await this.globalPrisma.videos.update({
@@ -219,8 +281,10 @@ export class VideoLibraryAdminService {
       },
     });
 
+    this.notifyChanged(updated.id ?? id);
+
     return {
-      ...updated,
+      ...this.withSearchFlags(updated),
       thumbnail_url: await this.resolveMediaUrl(updated.thumbnail_url),
       video_url: await this.resolveMediaUrl(updated.video_url),
     };
@@ -236,6 +300,7 @@ export class VideoLibraryAdminService {
     }
 
     await this.globalPrisma.videos.delete({ where: { id } });
+    this.notifyChanged(id);
     return { id, deleted: true };
   }
 

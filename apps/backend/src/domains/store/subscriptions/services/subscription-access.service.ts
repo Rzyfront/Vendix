@@ -3,6 +3,7 @@ import {
   Injectable,
   InternalServerErrorException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import Redis from 'ioredis';
 import { Prisma, store_subscription_state_enum } from '@prisma/client';
@@ -21,6 +22,13 @@ import {
   ResolvedSubscription,
 } from '../types/access.types';
 import { SubscriptionResolverService } from './subscription-resolver.service';
+import { AIEntitlementsShadowService } from './ai-entitlements-shadow.service';
+import { AIEntitlementsResolverService } from './ai-entitlements-resolver.service';
+import { aiEntitlementsMode } from './ai-entitlements-mode';
+import {
+  EnforcedFeatureDecision,
+  enforcedFeatureDecision,
+} from './ai-entitlements-enforce';
 import {
   AI_USAGE_GROUPS,
   AiUsageGroup,
@@ -106,8 +114,8 @@ export interface DunningStateResponse {
   payment_method_invalid: boolean;
 }
 
-type Mode = 'allow' | 'warn' | 'block';
-type Severity = 'info' | 'warning' | 'critical' | 'blocker';
+export type Mode = 'allow' | 'warn' | 'block';
+export type Severity = 'info' | 'warning' | 'critical' | 'blocker';
 
 /**
  * `store_subscriptions.lock_reason` stamped by the renewal job
@@ -132,6 +140,117 @@ const LOCK_REASON_PLAN_RETIRED = 'current_plan_unavailable_at_renewal';
 const LOCK_REASON_STATES: ReadonlySet<store_subscription_state_enum> = new Set<
   store_subscription_state_enum
 >(['grace_soft', 'grace_hard', 'suspended', 'blocked', 'pending_payment']);
+
+/**
+ * Map subscription state to base gate mode. Feature-level degradation is
+ * considered for grace_hard.
+ *
+ * `lockReason` is the raw `store_subscriptions.lock_reason`. The real cause of
+ * the lock was already recorded there, but this mapping used to discard it and
+ * derive the reason from the state alone — so a store whose plan was retired
+ * at renewal (owing nothing) was told "suspendida por falta de pago".
+ * Charging someone with a debt they don't have is false information: it
+ * generates support tickets and destroys trust. The truthful code wins.
+ *
+ * Only the `reason` changes: `mode` and `severity` per state stay exactly as
+ * before, so the retired-plan case is not more (nor less) restrictive.
+ *
+ * Exported so the agent status (`AgentRuntimeConfigService.getAgentStatuses`)
+ * says «off» exactly when this gate blocks, instead of re-deriving the states.
+ */
+export function subscriptionStateToGateMode(
+  state: store_subscription_state_enum,
+  feature: FeatureConfig | undefined,
+  lockReason?: string | null,
+): { mode: Mode; severity: Severity; reason?: string } {
+  const planRetired = lockReason === LOCK_REASON_PLAN_RETIRED;
+
+  switch (state) {
+    case 'active':
+    case 'trial':
+      return { mode: 'allow', severity: 'info' };
+    // QUI-676 — `pending_payment` means "a charge is IN FLIGHT", not "the
+    // customer did not pay". It had no case here, so it fell into
+    // `default: block/blocker` and an unconfirmed Wompi webhook locked the
+    // entire store out of every write under /api/store/**.
+    //
+    // A store that just handed us its card cannot be treated worse than one
+    // that is five days past due (`grace_soft` → warn). Blocking is still
+    // reachable and still correct — via `suspended`, `blocked`, `cancelled`
+    // and `expired` — but it must be the OUTCOME of the charge, not its
+    // waiting room.
+    //
+    // The window is bounded outside this mapping: after 60 minutes
+    // `ReconcileStuckPendingJob` voids the stale invoice and reverts the
+    // subscription to `pending_revert_state`, so `pending_payment` is a
+    // transient state by construction, not an indefinite free pass.
+    case 'pending_payment':
+      return {
+        mode: 'warn',
+        severity: 'warning',
+        reason: planRetired ? 'SUBSCRIPTION_011' : 'SUBSCRIPTION_007',
+      };
+    case 'grace_soft':
+      return {
+        mode: 'warn',
+        severity: 'warning',
+        reason: planRetired ? 'SUBSCRIPTION_011' : 'SUBSCRIPTION_007',
+      };
+    case 'grace_hard': {
+      // Degradation per feature. Default = warn.
+      const deg = feature?.degradation ?? 'warn';
+      if (deg === 'block') {
+        return {
+          mode: 'block',
+          severity: 'critical',
+          reason: planRetired ? 'SUBSCRIPTION_011' : 'SUBSCRIPTION_009',
+        };
+      }
+      return {
+        mode: 'warn',
+        severity: 'critical',
+        reason: planRetired ? 'SUBSCRIPTION_011' : 'SUBSCRIPTION_007',
+      };
+    }
+    case 'suspended':
+      return {
+        mode: 'block',
+        severity: 'critical',
+        reason: planRetired ? 'SUBSCRIPTION_011' : 'SUBSCRIPTION_008',
+      };
+    case 'blocked':
+      return {
+        mode: 'block',
+        severity: 'blocker',
+        reason: planRetired ? 'SUBSCRIPTION_011' : 'SUBSCRIPTION_009',
+      };
+    case 'cancelled':
+      return {
+        mode: 'block',
+        severity: 'blocker',
+        reason: 'SUBSCRIPTION_003',
+      };
+    case 'expired':
+      return {
+        mode: 'block',
+        severity: 'blocker',
+        reason: 'SUBSCRIPTION_003',
+      };
+    case 'no_plan':
+      return {
+        mode: 'block',
+        severity: 'blocker',
+        reason: 'SUBSCRIPTION_004',
+      };
+    case 'draft':
+    default:
+      return {
+        mode: 'block',
+        severity: 'blocker',
+        reason: 'SUBSCRIPTION_002',
+      };
+  }
+}
 
 /**
  * Central AI gate for the SaaS subscription system.
@@ -170,6 +289,12 @@ export class SubscriptionAccessService {
     private readonly resolver: SubscriptionResolverService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     private readonly prisma: GlobalPrismaService,
+    // T10 — shadow mode of plan_ai_entitlements. Optional so a missing
+    // provider (or a unit test) keeps the legacy gate untouched.
+    @Optional()
+    private readonly entitlementsShadow?: AIEntitlementsShadowService,
+    @Optional()
+    private readonly entitlementsResolver?: AIEntitlementsResolverService,
   ) {}
 
   // ------------------------------------------------------------------
@@ -220,10 +345,29 @@ export class SubscriptionAccessService {
       };
     }
 
+    // T10 — compare the new entitlements model with the legacy features this
+    // gate decides with. Fire-and-forget: it never changes the result below.
+    this.observeEntitlementsShadow(storeId, feature, resolved);
+
+    // T20 — `enforce` decides with plan_ai_entitlements only (never the
+    // legacy JSON); `shadow`, the default, keeps the legacy JSON deciding.
+    let featureConfig: FeatureConfig | undefined = resolved.features[feature];
+    let quotaExhausted = false;
+    if (aiEntitlementsMode() === 'enforce') {
+      const decision = await this.enforcedFeature(storeId, feature);
+      quotaExhausted = decision.kind === 'exhausted';
+      featureConfig =
+        decision.kind === 'on'
+          ? decision.config
+          : quotaExhausted
+            ? { enabled: true }
+            : undefined;
+    }
+
     const lockReason = await this.readLockReason(storeId, resolved.state);
     const stateMode = this.stateToMode(
       resolved.state,
-      resolved.features[feature],
+      featureConfig,
       lockReason,
     );
     if (stateMode.mode === 'block') {
@@ -238,13 +382,26 @@ export class SubscriptionAccessService {
       };
     }
 
-    const featureConfig = resolved.features[feature];
     if (!featureConfig || featureConfig.enabled === false) {
       return {
         allowed: false,
         mode: 'block',
         severity: 'blocker',
         reason: 'SUBSCRIPTION_005',
+        subscription_state: resolved.state,
+        plan_id: resolved.planId,
+        has_record: resolved.found,
+      };
+    }
+
+    // A cap of 0 is "nothing" in the new model; the legacy quota path below
+    // would read it as unlimited, so it is decided here.
+    if (quotaExhausted) {
+      return {
+        allowed: false,
+        mode: 'block',
+        severity: 'critical',
+        reason: 'SUBSCRIPTION_006',
         subscription_state: resolved.state,
         plan_id: resolved.planId,
         has_record: resolved.found,
@@ -289,9 +446,9 @@ export class SubscriptionAccessService {
 
   /**
    * F3 — expone la `FeatureConfig` resuelta de una feature IA para el loop
-   * del agente (`tools_allowed` de `tool_agents`). El resolver ya aplica
-   * base + restricción de partner + unión promo, así que lo devuelto es la
-   * lista efectiva del plan.
+   * del agente (cupos y flags). El resolver ya aplica base + restricción de
+   * partner + unión promo. El plan no restringe herramientas (N4): un
+   * `tools_allowed` guardado es inerte.
    *
    * Nunca lanza: ante fila ausente o fallo interno devuelve null y el
    * llamador conserva el comportamiento sin plan (solo filtro por permisos
@@ -552,6 +709,47 @@ export class SubscriptionAccessService {
 
   async invalidateCache(storeId: number): Promise<void> {
     await this.resolver.invalidate(storeId);
+    await this.entitlementsResolver?.invalidate(storeId);
+  }
+
+  /**
+   * T20 — enforce-mode decision for one legacy feature key from the rows.
+   * Fails closed: no resolver, an unreadable table or a store without plan
+   * rows means the feature is off, never the legacy JSON.
+   */
+  private async enforcedFeature(
+    storeId: number,
+    feature: AIFeatureKey,
+  ): Promise<EnforcedFeatureDecision> {
+    if (!this.entitlementsResolver) return { kind: 'off' };
+    try {
+      const resolvedRows = await this.entitlementsResolver.resolveForStore(storeId);
+      if (!resolvedRows.found || resolvedRows.planId === null) {
+        return { kind: 'off' };
+      }
+      return enforcedFeatureDecision(feature, resolvedRows.rows);
+    } catch (err) {
+      this.logger.warn(
+        `AI_ENTITLEMENTS_ENFORCE_UNAVAILABLE store=${storeId} feature=${feature}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return { kind: 'off' };
+    }
+  }
+
+  private observeEntitlementsShadow(
+    storeId: number,
+    feature: AIFeatureKey,
+    resolved: ResolvedSubscription,
+  ): void {
+    try {
+      this.entitlementsShadow?.observe(storeId, feature, resolved.features);
+    } catch (err) {
+      this.logger.warn(
+        `AI entitlements shadow hook failed for store ${storeId}: ${(err as Error).message}`,
+      );
+    }
   }
 
   /**
@@ -1332,112 +1530,13 @@ export class SubscriptionAccessService {
   // Internals
   // ------------------------------------------------------------------
 
-  /**
-   * Map subscription state to base gate mode. Feature-level degradation is
-   * considered for grace_hard.
-   *
-   * `lockReason` is the raw `store_subscriptions.lock_reason`. The real cause of
-   * the lock was already recorded there, but this mapping used to discard it and
-   * derive the reason from the state alone — so a store whose plan was retired
-   * at renewal (owing nothing) was told "suspendida por falta de pago".
-   * Charging someone with a debt they don't have is false information: it
-   * generates support tickets and destroys trust. The truthful code wins.
-   *
-   * Only the `reason` changes: `mode` and `severity` per state stay exactly as
-   * before, so the retired-plan case is not more (nor less) restrictive.
-   */
+  /** See `subscriptionStateToGateMode`: the gate's own state mapping. */
   private stateToMode(
     state: store_subscription_state_enum,
     feature: FeatureConfig | undefined,
     lockReason?: string | null,
   ): { mode: Mode; severity: Severity; reason?: string } {
-    const planRetired = lockReason === LOCK_REASON_PLAN_RETIRED;
-
-    switch (state) {
-      case 'active':
-      case 'trial':
-        return { mode: 'allow', severity: 'info' };
-      // QUI-676 — `pending_payment` means "a charge is IN FLIGHT", not "the
-      // customer did not pay". It had no case here, so it fell into
-      // `default: block/blocker` and an unconfirmed Wompi webhook locked the
-      // entire store out of every write under /api/store/**.
-      //
-      // A store that just handed us its card cannot be treated worse than one
-      // that is five days past due (`grace_soft` → warn). Blocking is still
-      // reachable and still correct — via `suspended`, `blocked`, `cancelled`
-      // and `expired` — but it must be the OUTCOME of the charge, not its
-      // waiting room.
-      //
-      // The window is bounded outside this mapping: after 60 minutes
-      // `ReconcileStuckPendingJob` voids the stale invoice and reverts the
-      // subscription to `pending_revert_state`, so `pending_payment` is a
-      // transient state by construction, not an indefinite free pass.
-      case 'pending_payment':
-        return {
-          mode: 'warn',
-          severity: 'warning',
-          reason: planRetired ? 'SUBSCRIPTION_011' : 'SUBSCRIPTION_007',
-        };
-      case 'grace_soft':
-        return {
-          mode: 'warn',
-          severity: 'warning',
-          reason: planRetired ? 'SUBSCRIPTION_011' : 'SUBSCRIPTION_007',
-        };
-      case 'grace_hard': {
-        // Degradation per feature. Default = warn.
-        const deg = feature?.degradation ?? 'warn';
-        if (deg === 'block') {
-          return {
-            mode: 'block',
-            severity: 'critical',
-            reason: planRetired ? 'SUBSCRIPTION_011' : 'SUBSCRIPTION_009',
-          };
-        }
-        return {
-          mode: 'warn',
-          severity: 'critical',
-          reason: planRetired ? 'SUBSCRIPTION_011' : 'SUBSCRIPTION_007',
-        };
-      }
-      case 'suspended':
-        return {
-          mode: 'block',
-          severity: 'critical',
-          reason: planRetired ? 'SUBSCRIPTION_011' : 'SUBSCRIPTION_008',
-        };
-      case 'blocked':
-        return {
-          mode: 'block',
-          severity: 'blocker',
-          reason: planRetired ? 'SUBSCRIPTION_011' : 'SUBSCRIPTION_009',
-        };
-      case 'cancelled':
-        return {
-          mode: 'block',
-          severity: 'blocker',
-          reason: 'SUBSCRIPTION_003',
-        };
-      case 'expired':
-        return {
-          mode: 'block',
-          severity: 'blocker',
-          reason: 'SUBSCRIPTION_003',
-        };
-      case 'no_plan':
-        return {
-          mode: 'block',
-          severity: 'blocker',
-          reason: 'SUBSCRIPTION_004',
-        };
-      case 'draft':
-      default:
-        return {
-          mode: 'block',
-          severity: 'blocker',
-          reason: 'SUBSCRIPTION_002',
-        };
-    }
+    return subscriptionStateToGateMode(state, feature, lockReason);
   }
 
   /**

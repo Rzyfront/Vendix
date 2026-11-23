@@ -93,7 +93,7 @@ type StopCollectionState = 'prepaid' | 'collected' | 'pending_cod' | 'none';
         [subtitle]="headerSubtitle()"
         icon="truck"
         [showBackButton]="true"
-        backRoute="/admin/orders/planillas"
+        backRoute="/admin/orders/rutas"
         [badgeText]="route() ? statusLabel(route()!.status) : ''"
         [badgeColor]="headerBadgeColor()"
         [actions]="headerActions()"
@@ -584,7 +584,7 @@ export class PlanillaDetailPageComponent {
   }
 
   openRouteView(): void {
-    this.router.navigate(['/admin/orders/planillas', this.routeId(), 'recorrido']);
+    this.router.navigate(['/admin/orders/rutas', this.routeId(), 'recorrido']);
   }
 
   readonly routeId = signal<number>(0);
@@ -1313,7 +1313,7 @@ export class PlanillaDetailPageComponent {
   }
 
   back() {
-    this.router.navigate(['/admin/orders/planillas']);
+    this.router.navigate(['/admin/orders/rutas']);
   }
 
   onSettle(event: SettleStopDto) {

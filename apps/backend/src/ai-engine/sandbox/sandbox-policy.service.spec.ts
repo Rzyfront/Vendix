@@ -134,7 +134,7 @@ describe('SandboxPolicyService: release audit and fresh tenant authority', () =>
         .mockResolvedValue({ allowed: true, mode: 'allow' }),
       getAIFeatureConfig: jest
         .fn()
-        .mockResolvedValue({ enabled: true, tools_allowed: ['products'] }),
+        .mockResolvedValue({ enabled: true }),
     };
     service = new SandboxPolicyService(
       prisma as never,
@@ -509,7 +509,6 @@ describe('SandboxPolicyService: release audit and fresh tenant authority', () =>
     'settings',
     'gate',
     'config',
-    'plan-list',
     'deny',
     'allow',
     'locked',
@@ -542,12 +541,6 @@ describe('SandboxPolicyService: release audit and fresh tenant authority', () =>
         break;
       case 'config':
         access.getAIFeatureConfig.mockResolvedValue(null);
-        break;
-      case 'plan-list':
-        access.getAIFeatureConfig.mockResolvedValue({
-          enabled: true,
-          tools_allowed: [],
-        });
         break;
       case 'deny':
         currentAgent.denied_tools = ['products'];
@@ -583,12 +576,14 @@ describe('SandboxPolicyService: release audit and fresh tenant authority', () =>
     await denyAuthorization();
   });
 
-  it('honors exact plan name, domain and wildcard but never widens initial manifest', async () => {
-    for (const tools_allowed of [['list_products'], ['products'], ['*']]) {
-      access.getAIFeatureConfig.mockResolvedValue({
-        enabled: true,
-        tools_allowed,
-      });
+  it('ignores the plan tool list entirely (N4) and never widens the initial manifest', async () => {
+    for (const config of [
+      { enabled: true },
+      { enabled: true, tools_allowed: [] },
+      { enabled: true, tools_allowed: ['orders'] },
+      { enabled: true, tools_allowed: 'garbage' },
+    ]) {
+      access.getAIFeatureConfig.mockResolvedValue(config);
       await authorize(async (_, names) =>
         expect(names).toEqual(['list_products']),
       );
@@ -600,7 +595,7 @@ describe('SandboxPolicyService: release audit and fresh tenant authority', () =>
     expect(callback).not.toHaveBeenCalled();
   });
 
-  it('uses vex_agent gate for Vex and denies missing effective plan list', async () => {
+  it('uses vex_agent gate for Vex; a config without tools_allowed is not denied', async () => {
     await service.authorize(
       snapshot,
       'vex',
@@ -610,6 +605,14 @@ describe('SandboxPolicyService: release audit and fresh tenant authority', () =>
     );
     expect(access.canUseAIFeature).toHaveBeenCalledWith(5, 'vex_agent');
     access.getAIFeatureConfig.mockResolvedValue({ enabled: true });
+    await service.authorize(
+      snapshot,
+      'vex',
+      ['list_products'],
+      ['store:products:read'],
+      async () => undefined,
+    );
+    access.getAIFeatureConfig.mockResolvedValue({ enabled: false });
     await denyAuthorization();
   });
 

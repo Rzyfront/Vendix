@@ -17,6 +17,8 @@ import {
 import { PromotionsService } from './promotions.service';
 import { PromotionEngineService } from './promotion-engine/promotion-engine.service';
 import { ResponseService } from '../../../common/responses/response.service';
+import { CouponsService } from '../coupons/coupons.service';
+import { ValidateCouponDto } from '../coupons/dto';
 import {
   CreatePromotionDto,
   UpdatePromotionDto,
@@ -30,6 +32,7 @@ export class PromotionsController {
     private readonly promotions_service: PromotionsService,
     private readonly promotion_engine_service: PromotionEngineService,
     private readonly response_service: ResponseService,
+    private readonly coupons_service: CouponsService,
   ) {}
 
   // --- Static Routes (MUST be before :id) ---
@@ -69,6 +72,59 @@ export class PromotionsController {
       body.customer_id,
     );
     return this.response_service.success(result);
+  }
+
+  /**
+   * Valida una promoción por su código contra el carrito y devuelve el
+   * descuento que el cobro aplicaría. Errores con código propio
+   * (PROMOTION_NOT_TODAY_001, PROMOTION_USAGE_LIMIT_001, …).
+   */
+  @Post('validate-code')
+  @Permissions('store:promotions:read')
+  @HttpCode(HttpStatus.OK)
+  async validateCode(
+    @Body() body: { code: string; items: any[]; customer_id?: number },
+  ) {
+    const { promotion, discount } =
+      await this.promotion_engine_service.validatePromotionByCode(
+        body?.code,
+        body?.items ?? [],
+        body?.customer_id,
+      );
+    return this.response_service.success({
+      promotion_id: promotion.id,
+      name: promotion.name,
+      code: promotion.code,
+      discount,
+    });
+  }
+
+  /**
+   * Casilla única de código del POS: el mismo cuerpo de la validación de
+   * cupones. Primero busca un cupón (comportamiento idéntico al de
+   * `/store/coupons/validate`, incluido `CPN_FIND_001` si no existe ningún
+   * código); si no hay cupón con ese código, valida la promoción que lo tenga
+   * (fechas, días, hora de la tienda, límites y alcance).
+   */
+  @Post('discount-code/validate')
+  @Permissions('store:coupons:validate')
+  @HttpCode(HttpStatus.OK)
+  async validateDiscountCode(@Body() dto: ValidateCouponDto) {
+    const target = await this.promotion_engine_service.resolveDiscountCode(
+      dto.code,
+    );
+    if (target.kind === 'promotion') {
+      const result = await this.promotion_engine_service.previewPromotionCode(
+        target.promotion_id,
+        dto,
+      );
+      return this.response_service.success(result, 'Promoción aplicada');
+    }
+    const coupon = await this.coupons_service.validate(dto);
+    return this.response_service.success(
+      { ...coupon, kind: 'coupon', coupon_code: coupon.code },
+      'Cupón validado exitosamente',
+    );
   }
 
   // --- Parameter Routes (MUST be last) ---

@@ -31,6 +31,14 @@ export interface FinancialSplitSource {
   items: Array<{
     id: number;
     subtotal_amount: SplitDecimalInput;
+    /**
+     * Descuento de BASE ya asignado a la línea (contrato nuevo de
+     * `order_items.discount_amount`). Cuando la orden lo trae, la división
+     * respeta ese reparto (p. ej. una promo de producto solo en sus líneas) en
+     * vez de prorratear el descuento de cabecera entre todas. Ausente/null en
+     * todas las líneas = contrato legado (prorrateo por base).
+     */
+    discount_amount?: SplitDecimalInput | null;
     taxes: SplitAllocationTaxInput[];
   }>;
 }
@@ -265,6 +273,8 @@ export function allocateMatrix(
 interface NormalizedItem {
   id: number;
   base: bigint;
+  /** Descuento de base persistido en la línea; null = contrato legado. */
+  lineDiscount: bigint | null;
   taxes: Array<{ snapshot: SplitAllocationTaxOutput; amount: bigint }>;
 }
 interface ComponentRow {
@@ -301,6 +311,31 @@ function normalizeTax(
  * inventory flags or payments. The paid account is an economic snapshot only.
  * Source rows must be active lines and authoritative tax snapshots from the caller.
  */
+/**
+ * Descuento de base por línea para la división. Si la orden persiste el
+ * reparto por línea (contrato nuevo) y ese reparto cuadra con la cabecera y
+ * no excede ninguna base, se usa tal cual: así una promo de producto queda solo
+ * en sus líneas y cada cuenta parcial lleva el descuento de lo que consumió.
+ * Si no hay reparto por línea, o no cuadra, se conserva el prorrateo por base
+ * de siempre (contrato legado / promos de orden).
+ */
+function resolveItemDiscounts(
+  discount: bigint,
+  items: readonly NormalizedItem[],
+): bigint[] {
+  if (items.some((item) => item.lineDiscount !== null)) {
+    const perLine = items.map((item) => item.lineDiscount ?? 0n);
+    const valid =
+      sum(perLine) === discount &&
+      perLine.every((value, index) => value >= 0n && value <= items[index].base);
+    if (valid) return perLine;
+  }
+  return proportional(
+    discount,
+    items.map((item) => item.base),
+  );
+}
+
 export function allocateFinancialSplit(
   source: FinancialSplitSource,
   request: FinancialSplitRequest,
@@ -356,6 +391,10 @@ export function allocateFinancialSplit(
       return {
         id: item.id,
         base: sourceMoney(item.subtotal_amount, 'item.subtotal_amount'),
+        lineDiscount:
+          item.discount_amount === null || item.discount_amount === undefined
+            ? null
+            : sourceMoney(item.discount_amount, 'item.discount_amount'),
         taxes,
       };
     })
@@ -370,10 +409,7 @@ export function allocateFinancialSplit(
     );
   }
 
-  const itemDiscounts = proportional(
-    discount,
-    items.map((item) => item.base),
-  );
+  const itemDiscounts = resolveItemDiscounts(discount, items);
   const rows: ComponentRow[] = [];
   const netRows: number[] = [];
   items.forEach((item, itemIndex) => {

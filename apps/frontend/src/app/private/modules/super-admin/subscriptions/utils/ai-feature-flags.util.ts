@@ -2,6 +2,12 @@ import {
   AI_FEATURE_KEYS,
   AIFeatureFlags,
 } from '../interfaces/subscription-admin.interface';
+import {
+  AI_CAPABILITIES,
+  AIEntitlement,
+  aiCapabilityId,
+  defaultAIEntitlement,
+} from '../../../../../shared/constants/ai-capabilities';
 
 /**
  * Single source of truth for reading and seeding `subscription_plans.ai_feature_flags`
@@ -203,3 +209,29 @@ type AIFeatureConfigLike =
     }
   | null
   | undefined;
+
+// ─── T12: capability entitlements (catalog-driven) ───
+
+/**
+ * Always the COMPLETE list: one row per catalog entry, catalog order. A row the
+ * plan does not have falls back to `defaultAIEntitlement`; rows that are not in
+ * the catalog are dropped. Saving this list can never drop a capability.
+ */
+export function completeAIEntitlements(rows: AIEntitlement[] | null | undefined): AIEntitlement[] {
+  const byId = new Map(
+    (rows ?? []).map((row) => [aiCapabilityId(row.agent_key, row.capability_key), row]),
+  );
+  return AI_CAPABILITIES.map((def) => {
+    const stored = byId.get(aiCapabilityId(def.agent_key, def.capability_key));
+    return stored ? { ...stored } : defaultAIEntitlement(def);
+  });
+}
+
+/** Starting rows of a NEW plan: costly switches (Vex and Vexi) start off. */
+export function defaultNewPlanAIEntitlements(): AIEntitlement[] {
+  return AI_CAPABILITIES.map((def) => {
+    const row = defaultAIEntitlement(def);
+    if (def.agent_key !== 'platform' && def.kind !== 'cap') row.enabled = false;
+    return row;
+  });
+}

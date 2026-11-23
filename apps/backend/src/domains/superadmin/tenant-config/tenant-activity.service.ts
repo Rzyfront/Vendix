@@ -14,6 +14,12 @@ import {
   resolveOrganizationTimezone,
   resolveStoreTimezone,
 } from '@common/utils/store-timezone.util';
+import {
+  vendixActorAuditSql,
+  vendixUserWhere,
+  withVendixActor,
+  withVendixUser,
+} from '@common/utils/vendix-user.util';
 
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import type { StorePrismaService } from '../../../prisma/services/store-prisma.service';
@@ -225,18 +231,26 @@ export class TenantActivityService {
    * de la misma organización. Repartirlas entre todas las tiendas inflaría
    * cada ficha con el trabajo de las demás. Lo que se pierde por ese lado se
    * reporta aparte en `unattributed_events`.
+   *
+   * Solo actividad del personal: los eventos cuyo autor es un cliente final no
+   * cuentan en ninguna cifra de la ficha (`withVendixActor`); los de sistema
+   * (sin autor) sí.
    */
   private auditWhere(scope: ActivityScope): Prisma.audit_logsWhereInput {
-    return scope.store_id == null
-      ? { organization_id: scope.organization_id }
-      : { organization_id: scope.organization_id, store_id: scope.store_id };
+    return withVendixActor(
+      scope.store_id == null
+        ? { organization_id: scope.organization_id }
+        : { organization_id: scope.organization_id, store_id: scope.store_id },
+    );
   }
 
   /** Fragmento SQL equivalente a {@link auditWhere}, para la serie diaria. */
   private auditWhereSql(scope: ActivityScope): Prisma.Sql {
-    return scope.store_id == null
-      ? Prisma.sql`al.organization_id = ${scope.organization_id}`
-      : Prisma.sql`al.organization_id = ${scope.organization_id} AND al.store_id = ${scope.store_id}`;
+    const tenant =
+      scope.store_id == null
+        ? Prisma.sql`al.organization_id = ${scope.organization_id}`
+        : Prisma.sql`al.organization_id = ${scope.organization_id} AND al.store_id = ${scope.store_id}`;
+    return Prisma.sql`${tenant} AND ${vendixActorAuditSql('al.user_id')}`;
   }
 
   /**
@@ -249,6 +263,10 @@ export class TenantActivityService {
    * sin él, un `store_users` huérfano bastaría para colar a un usuario ajeno.
    *
    * Organización: todos sus usuarios.
+   *
+   * En ambos casos solo usuarios de Vendix (`withVendixUser`): un cliente de
+   * ecommerce también tiene `store_users` en la tienda, pero no ocupa asiento
+   * ni su login es uso del producto por parte del comercio.
    */
   private async readRoster(scope: ActivityScope) {
     const where: Prisma.usersWhereInput =
@@ -263,7 +281,7 @@ export class TenantActivityService {
           };
 
     return this.db.users.findMany({
-      where,
+      where: withVendixUser(where),
       select: {
         id: true,
         username: true,
@@ -442,6 +460,10 @@ export class TenantActivityService {
    * quien movió la tienda fue alguien que ya no tiene asiento, ocultarlo
    * borraría justo la explicación que soporte está buscando. Cada fila declara
    * con `is_current_seat` si la persona sigue vinculada.
+   *
+   * El ranking es de usuarios de Vendix: los eventos de clientes finales no
+   * entran (el filtro va en el `groupBy`, antes del `take`, para que el top
+   * no se quede corto).
    */
   private async readTopUsers(
     scope: ActivityScope,
@@ -453,6 +475,7 @@ export class TenantActivityService {
       where: {
         ...this.auditWhere(scope),
         user_id: { not: null },
+        users: vendixUserWhere(),
         created_at: { gte: window.startDate, lte: window.endDate },
       },
       _count: { _all: true },
@@ -560,11 +583,11 @@ export class TenantActivityService {
     }
 
     return this.db.audit_logs.count({
-      where: {
+      where: withVendixActor({
         organization_id: scope.organization_id,
         store_id: null,
         created_at: { gte: window.startDate, lte: window.endDate },
-      },
+      }),
     });
   }
 

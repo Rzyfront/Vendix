@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { getPrismaClient } from './shared/client';
+import { syncSeedPlanAIEntitlements } from './shared/plan-ai-entitlements';
 import {
   PLAN_MATRIX,
   PlanLineId,
@@ -233,11 +234,13 @@ export async function seedPlanCommercialLines(
       redemption_code: null,
       plan_group_code: plan.line,
     };
-    await client.subscription_plans.upsert({
+    const saved = await client.subscription_plans.upsert({
       where: { code: plan.code },
       update: { ...data, updated_at: new Date() },
       create: { code: plan.code, ...data },
     });
+    // T11 — the entitlement rows follow the JSON this seed rewrites.
+    await syncSeedPlanAIEntitlements(client, saved.id, data.ai_feature_flags);
   }
 
   // Rules for every non-promotional, non-archived plan of a commercial line

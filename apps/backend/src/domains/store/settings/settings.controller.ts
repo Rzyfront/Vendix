@@ -105,11 +105,12 @@ export class SettingsController {
     description: 'Fiscal data section updated successfully',
   })
   async updateFiscalData(@Body() dto: UpdateStoreFiscalDataDto) {
-    const fiscalData = await this.settingsService.updateFiscalData(
-      dto as unknown as Record<string, unknown>,
-    );
+    const { fiscal_data, fiscal_calendar } =
+      await this.settingsService.updateFiscalDataWithCalendar(
+        dto as unknown as Record<string, unknown>,
+      );
     return this.responseService.success(
-      { fiscal_data: fiscalData },
+      { fiscal_data, fiscal_calendar },
       'Fiscal data updated successfully',
     );
   }

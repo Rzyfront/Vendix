@@ -33,6 +33,8 @@ describe('Fix router: catálogo autorizado completo, sin rondas de staging (loop
     for (let i = 0; i < 60; i++)
       registry.register({
         name: `operation_${String(i).padStart(2, '0')}`,
+        access: 'public',
+        accessReason: 'test fixture',
         domain: 'inventory',
         description: `Operation ${i}`,
         parameters: { type: 'object', properties: {} },
@@ -250,6 +252,8 @@ describe('Fix router: catálogo autorizado completo, sin rondas de staging (loop
     const f = fixture();
     f.registry.register({
       name: 'vex_render_table',
+      access: 'public',
+      accessReason: 'test fixture',
       domain: 'vex',
       description: 'Tabla de Vex',
       parameters: { type: 'object', properties: {} },
@@ -285,6 +289,8 @@ describe('Fix router: catálogo autorizado completo, sin rondas de staging (loop
     const supplierTool = (f: ReturnType<typeof fixture>) =>
       f.registry.register({
         name: 'find_supplier',
+        access: 'public',
+        accessReason: 'test fixture',
         domain: 'suppliers',
         description: 'Buscar proveedores por nombre o NIT',
         parameters: { type: 'object', properties: {} },
@@ -562,6 +568,8 @@ describe('Fix router: catálogo autorizado completo, sin rondas de staging (loop
       const f = fixture(0, true);
       f.registry.register({
         name: 'find_invoice',
+        access: 'public',
+        accessReason: 'test fixture',
         domain: 'billing',
         description: 'Busca una factura por número',
         parameters: {

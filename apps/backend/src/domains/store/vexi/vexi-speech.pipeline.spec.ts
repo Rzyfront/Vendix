@@ -468,3 +468,63 @@ describe('VexiSpeechTurn', () => {
     });
   });
 });
+
+describe('VexiSpeechTurn — medición de voz (T14)', () => {
+  /** Source whose segments report whether the provider generated them. */
+  class MeteredSource extends StubSource {
+    cached = new Set<string>();
+    async synthesize(text: string): Promise<any> {
+      const audio = await super.synthesize(text);
+      if (!audio) return null;
+      return this.cached.has(text)
+        ? { ...audio, generated: false, seconds: 0 }
+        : { ...audio, generated: true, seconds: text.length / 10 };
+    }
+  }
+
+  it('mide solo los segmentos generados, con su índice, y nunca la muletilla', async () => {
+    const source = new MeteredSource();
+    source.cached.add('Dos.');
+    const meter = jest.fn();
+    const turn = new VexiSpeechTurn(source, PARAMS, Date.now(), 'COP', meter);
+
+    await turn.filler(null);
+    turn.push('Uno. Dos. Tres. ');
+    turn.flush();
+    await turn.settle();
+
+    // La muletilla ocupa el índice 0 y no se mide; los segmentos siguen en 1.
+    expect(meter.mock.calls).toEqual([
+      [0.4, 1],
+      [0.5, 3],
+    ]);
+  });
+
+  it('el audio ya generado se mide aunque la persona corte la lectura', async () => {
+    const source = new MeteredSource('manual');
+    const meter = jest.fn();
+    const turn = new VexiSpeechTurn(source, PARAMS, Date.now(), 'COP', meter);
+
+    turn.push('Uno. ');
+    turn.flush();
+    turn.abort();
+    await source.runToCompletion();
+    await turn.settle();
+
+    expect(meter).toHaveBeenCalledWith(0.4, 0);
+    expect(turn.drain()).toEqual([]);
+  });
+
+  it('un medidor que lanza no rompe la lectura', async () => {
+    const source = new MeteredSource();
+    const turn = new VexiSpeechTurn(source, PARAMS, Date.now(), 'COP', () => {
+      throw new Error('meter down');
+    });
+
+    turn.push('Uno. ');
+    turn.flush();
+    await turn.settle();
+
+    expect(turn.drain()).toHaveLength(1);
+  });
+});

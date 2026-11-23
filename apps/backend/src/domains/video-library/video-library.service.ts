@@ -7,6 +7,11 @@ import {
   tokenizeQuery,
   calculateRelevance,
 } from '../../common/helpers/keywords.helper';
+import {
+  buildVideoSearchWhere,
+  findVideoIdsIgnoringAccents,
+  videoRankingTokens,
+} from './video-search.helper';
 
 @Injectable()
 export class VideoLibraryService {
@@ -18,6 +23,9 @@ export class VideoLibraryService {
   async findAll(query: VideoQueryDto) {
     const { page = 1, limit = 20, category, module, search } = query;
     const skip = (page - 1) * limit;
+    const accentInsensitiveIds = search
+      ? await findVideoIdsIgnoringAccents(this.globalPrisma, search)
+      : [];
 
     const where: Prisma.videosWhereInput = {
       status: 'PUBLISHED',
@@ -27,24 +35,7 @@ export class VideoLibraryService {
           : { OR: [{ slug: category }, { id: Number(category) }] },
       }),
       ...(module && { module }),
-      ...(search && (() => {
-        const cleanSearch = search.trim();
-        const tokens = tokenizeQuery(cleanSearch);
-        return {
-          OR: [
-            { title: { contains: cleanSearch, mode: 'insensitive' as const } },
-            { summary: { contains: cleanSearch, mode: 'insensitive' as const } },
-            { tags: { has: cleanSearch.toLowerCase() } },
-            { keywords: { has: cleanSearch.toLowerCase() } },
-            ...tokens.flatMap((t) => [
-              { title: { contains: t, mode: 'insensitive' as const } },
-              { summary: { contains: t, mode: 'insensitive' as const } },
-              { tags: { has: t } },
-              { keywords: { has: t } },
-            ]),
-          ],
-        };
-      })()),
+      ...(search && buildVideoSearchWhere(search, accentInsensitiveIds)),
     };
 
     const [data, total] = await Promise.all([
@@ -75,7 +66,7 @@ export class VideoLibraryService {
     );
 
     if (search) {
-      const tokens = tokenizeQuery(search);
+      const tokens = videoRankingTokens(search);
       signedData.sort(
         (a, b) => calculateRelevance(b, tokens) - calculateRelevance(a, tokens),
       );

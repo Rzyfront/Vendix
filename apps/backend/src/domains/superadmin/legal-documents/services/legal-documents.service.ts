@@ -7,6 +7,10 @@ import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.s
 import { AuditService } from '../../../../common/audit/audit.service';
 import { S3Service } from '../../../../common/services/s3.service';
 import {
+  vendixUserWhere,
+  withVendixUser,
+} from '@common/utils/vendix-user.util';
+import {
   CreateSystemDocumentDto,
   LegalDocumentTypeEnum,
 } from '../dto/create-system-document.dto';
@@ -323,7 +327,8 @@ export class LegalDocumentsService {
     documentId: number,
     filters?: AcceptanceFilters,
   ) {
-    const where: any = { document_id: documentId };
+    // Solo aceptaciones de usuarios de Vendix; nunca clientes finales.
+    const where: any = { document_id: documentId, user: vendixUserWhere() };
 
     if (filters?.startDate || filters?.endDate) {
       where.accepted_at = {};
@@ -382,12 +387,13 @@ export class LegalDocumentsService {
       return [];
     }
 
-    // Obtener usuarios que no han aceptado esta versión
+    // Obtener usuarios de Vendix (sin clientes finales) que no han aceptado
+    // esta versión
     const allUsers = await this.globalPrisma.users.findMany({
-      where: {
+      where: withVendixUser({
         state: 'active',
         email_verified: true,
-      },
+      }),
       select: {
         id: true,
         email: true,
@@ -425,17 +431,19 @@ export class LegalDocumentsService {
   }
 
   async getAcceptanceStats(documentId: number) {
+    // Numerador y denominador sobre la misma población: usuarios de Vendix.
     const totalUsers = await this.globalPrisma.users.count({
-      where: {
+      where: withVendixUser({
         state: 'active',
         email_verified: true,
-      },
+      }),
     });
 
     const acceptances = await this.globalPrisma.document_acceptances.groupBy({
       by: ['acceptance_version'],
       where: {
         document_id: documentId,
+        user: vendixUserWhere(),
       },
       _count: {
         acceptance_version: true,

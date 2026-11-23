@@ -55,6 +55,7 @@ export class CustomerCrmService {
           OR: [
             { assigned_user_id: viewer.user_id },
             { created_by_user_id: viewer.user_id },
+            { supporters: { some: { user_id: viewer.user_id } } },
           ],
         };
     const ownOpportunities = viewer.can_see_all
@@ -179,6 +180,27 @@ export class CustomerCrmService {
       });
     }
     return this.getProfile(customerId);
+  }
+
+  /**
+   * Whether the request user may change owners (same rule `updateProfile`
+   * enforces) and the current owner of each customer of THIS store, in one
+   * store-scoped read. Bulk owner assignment from the agent (QUI-1042)
+   * previews with it instead of loading the full profile (RFM included) once
+   * per customer. Ids that are not customers of the store are absent.
+   */
+  async ownersOf(customerIds: number[]) {
+    const viewer = this.viewer();
+    const rows = customerIds.length
+      ? await this.prisma.store_users.findMany({
+          where: { user_id: { in: customerIds } },
+          select: { user_id: true, crm_owner: { select: PERSON_SELECT } },
+        })
+      : [];
+    return {
+      can_assign: viewer.can_see_all,
+      owners: new Map(rows.map((row) => [row.user_id, row.crm_owner])),
+    };
   }
 
   async timeline(customerId: number, query: CustomerCrmTimelineQueryDto) {
@@ -320,8 +342,19 @@ export class CustomerCrmService {
   private async tagsOf(customerId: number) {
     const rows = await this.prisma.crm_customer_tags.findMany({
       where: { customer_id: customerId },
-      select: { tag: { select: { id: true, name: true, color: true } } },
-      orderBy: { tag: { name: 'asc' } },
+      select: {
+        tag: {
+          select: {
+            id: true,
+            name: true,
+            color: true,
+            group_name: true,
+            description: true,
+          },
+        },
+      },
+      // Mismo orden que el catálogo: por grupo y luego por nombre.
+      orderBy: [{ tag: { group_name: 'asc' } }, { tag: { name: 'asc' } }],
     });
     return rows.map((row) => row.tag);
   }

@@ -21,6 +21,10 @@ function normalize(raw: unknown, currency: StoreCurrencyInfo = COP) {
     // probado (normalizeOcrResponse) no toca responsabilidades fiscales, así
     // que null es seguro y mantiene el arnés en seco.
     null as any,
+    // ia-cargas F3 — lector común de documentos y extracción con esquema; el
+    // path probado no los toca.
+    null as any,
+    null as any,
   );
   return (service as any).normalizeOcrResponse(raw, currency);
 }
@@ -369,6 +373,9 @@ function buildScanner(options: ScannerMockOptions = {}) {
     settingsService as any,
     null as any,
     new VatResponsibilityService(),
+    // ia-cargas F3 — lector de páginas y extracción; no los toca este arnés.
+    null as any,
+    null as any,
   );
 
   return { service, prisma, productFindMany };

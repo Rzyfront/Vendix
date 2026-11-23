@@ -5,7 +5,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "1.1"
+  version: "1.2"
   scope: [root]
   auto_invoke:
     - "Adding new settings sections to stores or organizations"
@@ -75,6 +75,12 @@ Key files:
 
 - `apps/frontend/src/app/private/modules/store/settings/general/services/store-settings.service.ts`
 - `apps/frontend/src/app/private/modules/store/settings/general/general-settings.component.ts`
+
+## AI Agent Settings
+
+- The store holds only the two switches (`vexi.enabled`, `vex.enabled`; owner/admin only), usage bars and history under `/admin/settings/ai-agents`. Agentic config (model, provider, voice, prompt, iterations) lives only in superadmin's agent sheet (`superadmin/ai-engine/agent-runtime/:agentKey`, `AgentRuntimeConfigService`) and is identical for every store; the plan decides what a store gets (`plan_ai_entitlements`).
+- `vexi.voice_engine` is deprecated: `settings.service.ts` accepts it (an old tab may still send it) and discards it before the merge, so it is never persisted and a PATCH carrying only it writes nothing. Voice is per-reply TTS through the API; realtime voice is retired.
+- "Why is it off" comes from `GET /store/ai-agents/status` (same text for store and superadmin); do not rebuild that decision in the browser.
 
 ## Ownership Boundaries
 

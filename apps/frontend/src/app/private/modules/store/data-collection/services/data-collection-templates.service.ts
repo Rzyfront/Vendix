@@ -4,6 +4,21 @@ import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import { DataCollectionTemplate } from '../interfaces/data-collection-template.interface';
+import { TemplateJson } from '../utils/template-json.contract';
+import { AiDraftStatusResponse } from '../utils/template-ai-draft.util';
+
+/** Field resolution reported by `import?dry_run=true`. */
+export interface TemplateImportDryRunField {
+  key: string;
+  entity_type: string;
+  type: string;
+  status: 'new' | 'reuse';
+}
+
+export interface TemplateImportDryRun {
+  valid: boolean;
+  fields: TemplateImportDryRunField[];
+}
 
 @Injectable({ providedIn: 'root' })
 export class DataCollectionTemplatesService {
@@ -22,6 +37,30 @@ export class DataCollectionTemplatesService {
 
   create(data: any): Observable<DataCollectionTemplate> {
     return this.http.post<any>(this.apiUrl, data).pipe(map(r => r.data));
+  }
+
+  /** Validates a template JSON on the server without writing anything. */
+  importDryRun(json: TemplateJson): Observable<TemplateImportDryRun> {
+    const params = new HttpParams().set('dry_run', 'true');
+    return this.http.post<any>(`${this.apiUrl}/import`, json, { params }).pipe(map(r => r.data));
+  }
+
+  /** Creates the template (inactive) and its missing fields from a template JSON. */
+  importTemplate(json: TemplateJson): Observable<DataCollectionTemplate> {
+    return this.http.post<any>(`${this.apiUrl}/import`, json).pipe(map(r => r.data));
+  }
+
+  /** Uploads a PDF/photo and enqueues the AI draft; resolves the job id. */
+  startAiDraft(file: File): Observable<{ job_id: string }> {
+    const body = new FormData();
+    body.append('file', file, file.name);
+    return this.http.post<{ data: { job_id: string } }>(`${this.apiUrl}/ai-draft`, body).pipe(map(r => r.data));
+  }
+
+  getAiDraftStatus(jobId: string): Observable<AiDraftStatusResponse> {
+    return this.http
+      .get<{ data: AiDraftStatusResponse }>(`${this.apiUrl}/ai-draft/${encodeURIComponent(jobId)}`)
+      .pipe(map(r => r.data));
   }
 
   update(id: number, data: any): Observable<DataCollectionTemplate> {

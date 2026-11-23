@@ -20,6 +20,7 @@ import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { CashRegistersModule } from '../cash-registers/cash-registers.module';
 import { S3Module } from '@common/services/s3.module';
+import { AiIngestModule } from '@common/ai-ingest/ai-ingest.module';
 import { GeocodingModule } from '../../ecommerce/geocoding/geocoding.module';
 import { OrderFlowModule } from '../orders/order-flow/order-flow.module';
 
@@ -29,6 +30,8 @@ import { OrderFlowModule } from '../orders/order-flow/order-flow.module';
     PrismaModule,
     CashRegistersModule,
     S3Module,
+    // ia-cargas F5a: the route-sheet scan reads PDFs and photos by pages.
+    AiIngestModule,
     // Provides GeocodingService.forward() for resolving stop coordinates on
     // the route map (fallback when no lat/lng is stored on the address).
     GeocodingModule,

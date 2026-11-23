@@ -6,6 +6,7 @@ import {
   ApiResponse,
   CreateFiscalRuleSetPayload,
   FiscalApiScope,
+  FiscalCalendarChangePreview,
   FiscalCloseSession,
   FiscalConfigChecklist,
   FiscalDataEnvelope,
@@ -391,6 +392,31 @@ export class FiscalOperationsService {
       this.getSettingsUrl(scope, 'fiscal-data'),
       payload,
     );
+  }
+
+  /**
+   * Cuántos recordatorios y obligaciones sin empezar se reemplazarían si se
+   * cambia la periodicidad de IVA (diálogo «reemplazar o conservar»).
+   */
+  getFiscalCalendarChangePreview(
+    scope: FiscalApiScope,
+    vatPeriodicity: string,
+  ): Observable<ApiResponse<FiscalCalendarChangePreview>> {
+    return this.http.get<ApiResponse<FiscalCalendarChangePreview>>(
+      this.getFiscalCalendarUrl(scope, 'preview'),
+      { params: { vat_periodicity: vatPeriodicity } },
+    );
+  }
+
+  /**
+   * `{store|organization}/fiscal/calendar-reminders/*`. La plataforma edita
+   * identidad agregada: no tiene calendario propio, así que no hay endpoint.
+   */
+  private getFiscalCalendarUrl(
+    scope: FiscalApiScope,
+    endpoint: string,
+  ): string {
+    return `${environment.apiUrl}/${this.scopeToBasePath(scope)}/calendar-reminders/${endpoint}`;
   }
 
   /**

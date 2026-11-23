@@ -30,6 +30,11 @@ export class EcommerceProductOptionsController {
     if (store && !industryAllowsKey('products_option_groups', store.industries)) {
       return this.responseService.success([], 'Adiciones del producto obtenidas');
     }
+    // QUI-1005: «Permitir adiciones en la tienda en línea» apagado → sin
+    // grupos: la ficha se ve sin el paso de adiciones. El POS no usa esta ruta.
+    if (!(await this.productOptions.isAllowedOnline(store_id))) {
+      return this.responseService.success([], 'Adiciones del producto obtenidas');
+    }
     const groups = await this.productOptions.applicableForProduct(store_id, productId, { withCost: false });
     return this.responseService.success(groups, 'Adiciones del producto obtenidas');
   }

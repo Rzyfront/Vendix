@@ -4,6 +4,8 @@ import { AIEmbeddingProcessor } from '../queue/processors/ai-embedding.processor
 import { RequestContextService } from '../../common/context/request-context.service';
 const tool = (name: string, version = '1') => ({
   name,
+  access: 'public' as const,
+  accessReason: 'test fixture',
   version,
   domain: 'orders',
   description: `Consulta sintética ${name}`,
@@ -141,6 +143,36 @@ describe('ToolCatalogIndexerService B', () => {
       .at(-1)[0].where;
     expect(where.canonical_name.notIn).toEqual(['list_orders']);
     expect(where).not.toHaveProperty('document_key');
+  });
+  it('never retires or overwrites managed (release_hash=managed) documents', async () => {
+    registry.register(tool('list_orders', '2'));
+    rows.set('tool:list_orders:2', {
+      id: 99,
+      document_key: 'tool:list_orders:2',
+      release_hash: 'managed',
+      content_hash: 'x',
+      active: true,
+      status: 'ready',
+    });
+    await service.onApplicationBootstrap();
+    const snapshot = prisma.ai_knowledge_documents.updateMany.mock.calls
+      .filter(([a]) => a.where.entity_type)
+      .map(([a]) => a.where);
+    expect(snapshot.length).toBeGreaterThan(0);
+    for (const where of snapshot)
+      expect(where.release_hash).toEqual({ not: 'managed' });
+    await service.indexBatch(queue.add.mock.calls[0][1]);
+    expect(rows.get('tool:list_orders:2')).toMatchObject({
+      id: 99,
+      release_hash: 'managed',
+      content_hash: 'x',
+    });
+    expect(embeddings.storeGlobalKnowledgeEmbedding).not.toHaveBeenCalled();
+    const retirement = prisma.ai_knowledge_documents.updateMany.mock.calls.find(
+      ([arg]) => arg.where.version,
+    );
+    if (retirement)
+      expect(retirement[0].where.release_hash).toEqual({ not: 'managed' });
   });
   it('activates a new version only after embedding ready and retires old versions logically', async () => {
     registry.register(tool('list_orders', '2'));
