@@ -1,6 +1,6 @@
 # Sandbox de análisis en Python sobre AWS Lambda aislada (F9 · D3)
 
-**Estado (2026-11-22): desplegada en la cuenta de Vendix (`us-east-1`) como `vendix-vex-analysis-sandbox`, APAGADA y NO certificada. T53 corrida 4 FALLA en el punto 3 (inundación de enlaces duros en `/tmp`) sobre el digest desplegado: ver [`CERTIFICACION-T53.md`](CERTIFICACION-T53.md). `AI_ANALYSIS_CERTIFIED_DIGEST` no se fija hasta re-certificar.**
+**Estado (2026-11-22): desplegada en la cuenta de Vendix (`us-east-1`) como `vendix-vex-analysis-sandbox`, APAGADA y CERTIFICADA. T53 corrida 5 pasa los 6 puntos sobre la imagen `sha256:b8868d57…d74c` (runtime digest `sha256:1f10b7243591f87e9357b5c3a0fe8d2e11d3f375c7178b4076721d8fd1aa49eb`, `AI_ANALYSIS_CERTIFIED_DIGEST`): ver [`CERTIFICACION-T53.md`](CERTIFICACION-T53.md). Encender `AI_ANALYSIS_SANDBOX_ENABLED` sigue siendo decisión del dueño.**
 
 La infraestructura solo la despliega un operador con autorización explícita; nunca se ejecuta código del invitado en una máquina de desarrollo. El backend y sus workers **nunca** ejecutan código generado por IA en el host: el worker solo orquesta la cola, materializa tablas de la misma conversación, invoca la Lambda con `lambda:InvokeFunction`, valida el JSON de salida y persiste bloques (`table`, `chart`, `kpi`).
 
@@ -26,7 +26,7 @@ AWS Lambda (imagen contenedor Python 3.12 · Dockerfile + template.json)
           4. El hijo importa y precarga sus módulos, carga los datos y abre su archivo de resultado; justo antes de ejecutar el código del invitado baja `RLIMIT_NOFILE` a `(0, 0)` y comprueba que ya no puede crear descriptores (ver abajo). Si no lo consigue, falla cerrado sin ejecutar al invitado.
           5. El hijo recibe `wall_ms` menos una reserva de 2 s, para que la respuesta (incluida la limpieza) llegue antes de que el backend aborte a `wall_ms` exactos: un análisis que agota el tiempo llega como `ANALYSIS_TIMEOUT`, no como `ANALYSIS_EXPIRED`.
           6. Mata todo el grupo de procesos (`SIGKILL`) al terminar o vencer el tiempo y, después, a todo superviviente del uid del invitado (`kill(-1, SIGKILL)`); lo mismo antes de cargar los datos de cada tienda.
-          6b. Mientras corre el invitado vigila los inodos de /tmp y lo mata si crea más de 10 000 entradas (`mkdir`/`symlink`/`link` no necesitan descriptores), para que la limpieza quepa en la reserva.
+          6b. Mientras corre el invitado vigila /tmp cada 50 ms y lo mata si crea más de 10 000 inodos, más de 256 KiB de bloques de directorio (enlaces duros: entradas sin inodo) o más de 64 entradas en la raíz de /tmp (`mkdir`/`symlink`/`link` no necesitan descriptores), para que la limpieza, en el sitio y con plazo, quepa en la reserva.
           6c. Tras matar al invitado, comprueba sus propios límites (`RLIMIT_*`), `nice`, afinidad y planificador frente a los del arranque: el invitado comparte uid y puede bajarlos con `prlimit`. Restaura lo que puede; si no (por ejemplo, un límite duro bajado), termina el proceso para que Lambda reinicie el runtime en la invocación del atacante, no en la de la tienda siguiente.
           7. Lee `result.json` con `O_NOFOLLOW`, revalida `result` (tables/series/figures/notes) y devuelve solo JSON acotado.
 ```
@@ -96,7 +96,7 @@ Las pruebas de `handler.py` mockean `subprocess.Popen` y validan limpieza de `/t
 
 ## Compuertas de T53 (certificación de aislamiento)
 
-Resultado de la corrida del 2026-11-22 y evidencia: [`CERTIFICACION-T53.md`](CERTIFICACION-T53.md). Antes de encender `AI_ANALYSIS_SANDBOX_ENABLED=true` en cualquier entorno real, un operador debe construir la imagen (sección anterior), desplegar `template.json` y producir un informe de certificación que enlace el `runtime_digest` final con la evidencia real de:
+Resultado vigente (corrida 5, 2026-11-23 UTC, certificada) y evidencia: [`CERTIFICACION-T53.md`](CERTIFICACION-T53.md). Antes de encender `AI_ANALYSIS_SANDBOX_ENABLED=true` en cualquier entorno real, un operador debe construir la imagen (sección anterior), desplegar `template.json` y producir un informe de certificación que enlace el `runtime_digest` final con la evidencia real de:
 
 1. **Egreso cero**: intentos de DNS, HTTP/HTTPS, sockets TCP/UDP crudos, enlace al metadata service (`169.254.169.254`), la Runtime API de Lambda (`169.254.100.1:9001`, incluida la interceptación de la invocación siguiente) y conexiones hacia la VPC de producción fallan con bloqueo total.
 2. **Sistema de archivos, `/proc` y secretos**: intento de escritura fuera de `/tmp` falla (`Read-only file system`); symlink en `/tmp/result.json` rechazado (`O_NOFOLLOW`); entorno del hijo sin `AWS_*` ni credenciales; lectura de `/proc/<ppid>/environ`, `/proc/<ppid>/mem`, `process_vm_readv` y `ptrace` sobre el padre fallan (padre no-dumpable por el intérprete solo-ejecución); ningún secreto presente en proceso ni en logs.
