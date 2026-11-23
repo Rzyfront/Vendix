@@ -20,7 +20,7 @@ import {
   PasswordRequirementsComponent} from '../../../../../shared/components/index';
 import { passwordPolicyValidator } from '../../../../../core/utils/password-policy';
 import { UsersService } from '../services/users.service';
-import { CreateUserDto, UserState } from '../interfaces/user.interface';
+import { CreateUserDto, User, UserState } from '../interfaces/user.interface';
 
 
 @Component({
@@ -173,7 +173,8 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
 export class UserCreateModalComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   readonly isOpen = model<boolean>(false);
-  onUserCreated = output<void>();
+  /** Emite el usuario creado: el padre abre su modal de roles enseguida. */
+  onUserCreated = output<User>();
 
   private fb = inject(FormBuilder);
   private usersService = inject(UsersService);
@@ -216,8 +217,8 @@ onSubmit(): void {
         finalize(() => this.isCreating.set(false))
       )
       .subscribe({
-        next: () => {
-          this.onUserCreated.emit();
+        next: (user) => {
+          this.onUserCreated.emit(user);
           this.onCancel();
         },
         error: (error: any) => {

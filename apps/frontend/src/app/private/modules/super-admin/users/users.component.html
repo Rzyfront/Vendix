@@ -97,7 +97,7 @@
   @defer (when showCreateModal()) {
     <app-user-create-modal
       [(isOpen)]="showCreateModal"
-      (onUserCreated)="onUserCreated()"
+      (onUserCreated)="onUserCreated($event)"
     ></app-user-create-modal>
   }
 
