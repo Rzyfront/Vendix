@@ -18,6 +18,14 @@ test('no internet path: no IGW, NAT, endpoints or default routes', () => {
   assert.strictEqual(ofType('AWS::EC2::Route').length, 0);
 });
 
+test('no DNS channel: the VPC resolver is disabled (T53: security groups never filter Amazon DNS)', () => {
+  const vpcs = ofType('AWS::EC2::VPC');
+  assert.strictEqual(vpcs.length, 1);
+  assert.strictEqual(vpcs[0].Properties.EnableDnsSupport, false);
+  assert.strictEqual(vpcs[0].Properties.EnableDnsHostnames, false);
+  assert.strictEqual(ofType('AWS::Route53Resolver::ResolverEndpoint').length, 0);
+});
+
 test('subnets are private', () => {
   const subnets = ofType('AWS::EC2::Subnet');
   assert.ok(subnets.length >= 2);
@@ -60,9 +68,21 @@ test('function: image, sized, VPC-attached, no environment', () => {
   assert.strictEqual(p.EphemeralStorage.Size, 512);
   assert.ok(p.ReservedConcurrentExecutions);
   assert.strictEqual(p.Environment, undefined);
+  // No layers/extensions: the handler's kill(-1) assumes only guest processes share its uid.
+  assert.strictEqual(p.Layers, undefined);
   assert.ok(p.VpcConfig.SubnetIds.length >= 2 && p.VpcConfig.SecurityGroupIds.length === 1);
   assert.strictEqual(template.Parameters.ReservedConcurrency.Default, 3);
   assert.ok(template.Outputs.FunctionArn);
+});
+
+test('image: pinned base, read-only code and execute-only interpreter (T53: Lambda denies prctl)', () => {
+  const dockerfile = fs.readFileSync(path.join(__dirname, 'Dockerfile'), 'utf8');
+  assert.match(dockerfile, /^FROM public\.ecr\.aws\/lambda\/python:3\.12@sha256:[0-9a-f]{64}$/m);
+  assert.match(dockerfile, /chmod -R a-w \$\{LAMBDA_TASK_ROOT\}/);
+  // Unreadable binary => the kernel marks every process exec'd from it non-dumpable.
+  assert.match(dockerfile, /chmod 0711 \/var\/lang\/bin\/python3\.12\b/);
+  const runs = dockerfile.replace(/\\\n/g, ' ').split('\n').filter((l) => /^RUN /.test(l));
+  assert.match(runs[runs.length - 1], /chmod 0711/, 'no later RUN may need to read the interpreter');
 });
 
 test('backend invoke policy: only lambda:InvokeFunction on one non-wildcard ARN', () => {

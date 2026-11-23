@@ -27,8 +27,30 @@ const request = () => ({
 });
 const output = { figures: [{ label: 'n', value: 1 }] };
 
-function fixture(opts: { invoke?: (...a: any[]) => Promise<any> } = {}) {
+/** Stand-in for the shared Redis slot: one holder per store, like SET NX. */
+function slotStore() {
+  const held = new Map<number, string>();
+  return {
+    held,
+    acquire: jest.fn(async (store: number, token: string) => {
+      if (held.has(store)) return false;
+      held.set(store, token);
+      return true;
+    }),
+    release: jest.fn(async (store: number, token: string) => {
+      if (held.get(store) === token) held.delete(store);
+    }),
+  };
+}
+
+function fixture(
+  opts: {
+    invoke?: (...a: any[]) => Promise<any>;
+    slots?: ReturnType<typeof slotStore>;
+  } = {},
+) {
   const order: string[] = [];
+  const slots = opts.slots ?? slotStore();
   const audit = {
     sourceAvailable: jest.fn(() => true),
     start: jest.fn<any, any[]>(async () => {
@@ -59,12 +81,16 @@ function fixture(opts: { invoke?: (...a: any[]) => Promise<any> } = {}) {
     assertBudget: jest.fn(async () => {}),
   };
   const invocation = { durable } as never;
-  const broker = new SandboxAnalysisBrokerService(client as never, audit as never);
+  const broker = new SandboxAnalysisBrokerService(
+    client as never,
+    audit as never,
+    slots as never,
+  );
   const run = (req = request()) =>
     RequestContextService.runIsolated(ctx as never, () =>
       sandboxInvocation.run(invocation, () => broker.run(req)),
     );
-  return { broker, audit, client, durable, order, run };
+  return { broker, audit, client, durable, order, run, slots };
 }
 
 async function codeOf(p: Promise<unknown>): Promise<string | undefined> {
@@ -246,6 +272,117 @@ describe('SandboxAnalysisBrokerService', () => {
       ).toBe('ANALYSIS_INPUT');
       expect(f.audit.start).not.toHaveBeenCalled();
       expect(f.client.invoke).not.toHaveBeenCalled();
+    });
+
+    describe('one analysis in flight per store', () => {
+      it('rejects a second analysis of the same store with ANALYSIS_LIMIT before audit or invoke', async () => {
+        const slots = slotStore();
+        let finishFirst!: () => void;
+        const first = fixture({
+          slots,
+          invoke: () =>
+            new Promise((resolve) => {
+              finishFirst = () => resolve(output);
+            }),
+        });
+        const second = fixture({ slots });
+        const running = first.run();
+        await new Promise((r) => setImmediate(r));
+        expect(first.client.invoke).toHaveBeenCalledTimes(1);
+
+        let caught: AnalysisError | undefined;
+        try {
+          await second.run();
+        } catch (e) {
+          caught = e as AnalysisError;
+        }
+        expect(caught?.code).toBe('ANALYSIS_LIMIT');
+        expect(caught?.detail).toBe(
+          'another analysis is already running for this store',
+        );
+        expect(second.audit.start).not.toHaveBeenCalled();
+        expect(second.client.invoke).not.toHaveBeenCalled();
+
+        finishFirst();
+        await running;
+        expect(slots.held.size).toBe(0);
+        await second.run();
+        expect(second.client.invoke).toHaveBeenCalledTimes(1);
+      });
+
+      it('takes the slot with the execution id of the audited run', async () => {
+        const f = fixture();
+        const result = await f.run();
+        expect(f.slots.acquire).toHaveBeenCalledWith(ctx.store_id, result.run_id);
+        expect(f.slots.release).toHaveBeenCalledWith(ctx.store_id, result.run_id);
+      });
+
+      it.each(['ANALYSIS_RUNTIME', 'ANALYSIS_PROTOCOL', 'ANALYSIS_OUTPUT'] as const)(
+        'releases the slot after the Lambda answered with %s',
+        async (code) => {
+          const f = fixture({
+            invoke: async () => {
+              throw new AnalysisError(code);
+            },
+          });
+          expect(await codeOf(f.run())).toBe(code);
+          expect(f.slots.release).toHaveBeenCalledTimes(1);
+          expect(f.slots.held.size).toBe(0);
+        },
+      );
+
+      it.each(['ANALYSIS_EXPIRED', 'ANALYSIS_UNAVAILABLE'] as const)(
+        'keeps the slot until its TTL when %s leaves the Lambda possibly running',
+        async (code) => {
+          const f = fixture({
+            invoke: async () => {
+              throw new AnalysisError(code);
+            },
+          });
+          expect(await codeOf(f.run())).toBe(code);
+          expect(f.slots.release).not.toHaveBeenCalled();
+          expect(f.slots.held.get(ctx.store_id)).toBeDefined();
+        },
+      );
+
+      it('releases the slot when admission rejects before dispatch', async () => {
+        const f = fixture();
+        f.audit.start.mockRejectedValue(new ConflictException('capacity'));
+        expect(await codeOf(f.run())).toBe('ANALYSIS_LIMIT');
+        expect(f.client.invoke).not.toHaveBeenCalled();
+        expect(f.slots.held.size).toBe(0);
+      });
+
+      it('fails closed with ANALYSIS_UNAVAILABLE when the slot store errors', async () => {
+        const f = fixture();
+        f.slots.acquire.mockRejectedValue(new Error('redis down'));
+        expect(await codeOf(f.run())).toBe('ANALYSIS_UNAVAILABLE');
+        expect(f.audit.start).not.toHaveBeenCalled();
+        expect(f.client.invoke).not.toHaveBeenCalled();
+        expect(f.slots.release).not.toHaveBeenCalled();
+      });
+
+      it('lets two different stores run at the same time', async () => {
+        const slots = slotStore();
+        const gates: Array<() => void> = [];
+        const slow = () =>
+          new Promise((resolve) => gates.push(() => resolve(output)));
+        const a = fixture({ slots, invoke: slow });
+        const b = fixture({ slots, invoke: slow });
+        const runA = a.run();
+        const runB = RequestContextService.runIsolated(
+          { ...ctx, store_id: 99 } as never,
+          () =>
+            sandboxInvocation.run({ durable: b.durable } as never, () =>
+              b.broker.run(request()),
+            ),
+        );
+        await new Promise((r) => setImmediate(r));
+        expect(slots.held.size).toBe(2);
+        gates.forEach((open) => open());
+        await Promise.all([runA, runB]);
+        expect(slots.held.size).toBe(0);
+      });
     });
 
     it('swallows an audit finish failure without masking the result', async () => {

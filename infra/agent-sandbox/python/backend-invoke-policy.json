@@ -5,7 +5,7 @@
       "Sid": "InvokeAnalysisSandboxOnly",
       "Effect": "Allow",
       "Action": ["lambda:InvokeFunction"],
-      "Resource": "arn:aws:lambda:<REGION>:<ACCOUNT_ID>:function:vendix-agent-analysis"
+      "Resource": "arn:aws:lambda:<REGION>:<ACCOUNT_ID>:function:vendix-vex-analysis-sandbox"
     }
   ]
 }

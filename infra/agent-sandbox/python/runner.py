@@ -2,17 +2,21 @@
 
 Runs ONCE per execution in a fresh process spawned by handler.py. It loads the
 inputs as pandas DataFrames, executes the generated source and writes a
-validated result file. It is NOT a containment layer: containment is the Lambda
-itself (no VPC egress, empty role, no secrets) plus the rlimits/process-group
-kill applied by the parent. It never renders charts.
+validated result file. Containment is the Lambda itself (no VPC egress, empty
+role, no secrets) plus the rlimits/process-group kill applied by the parent,
+and ONE step only this process can take: right before the guest runs it seals
+descriptor creation (RLIMIT_NOFILE=0, see _seal_descriptors), because exec'ing
+the interpreter and importing pandas need descriptors. It never renders charts.
 
 The validation helpers at the top are pure (no pandas import) so the parent
 re-validates the child's output with the same code and tests can import them.
 """
+import errno
 import json
 import math
 import os
 import re
+import resource
 import sys
 
 MAX_CELL_CHARS = 500
@@ -28,10 +32,32 @@ ERROR_CODES = (
     "ANALYSIS_TIMEOUT", "ANALYSIS_MEMORY", "ANALYSIS_OUTPUT",
 )
 _PATH_RE = re.compile(r"(?:[A-Za-z]:)?(?:/[^\s:'\"()]+)+")
+# Imported and warmed BEFORE the descriptor seal: afterwards an import that is
+# not already loaded cannot open its file. Computation only -- never socket,
+# ctypes, subprocess or anything that reaches outside the process.
+PRELOAD_MODULES = (
+    "math", "cmath", "statistics", "datetime", "calendar", "time", "decimal",
+    "fractions", "random", "collections", "itertools", "functools", "operator",
+    "heapq", "bisect", "copy", "re", "json", "string", "textwrap", "typing",
+    "dataclasses", "enum", "numbers", "warnings", "zoneinfo",
+    "dateutil", "dateutil.parser", "dateutil.relativedelta", "pytz",
+    "scipy", "scipy.stats", "scipy.optimize", "scipy.interpolate",
+    "scipy.linalg", "scipy.special", "statsmodels.formula.api",
+    "statsmodels.tsa.api",
+)
+PRELOAD_TIMEZONES = ("UTC", "America/Bogota")
+SEALED_MESSAGE = (
+    "files, network, subprocesses and new imports are disabled in the sandbox; "
+    "use pd, np, sm and the preloaded standard library"
+)
 
 
 class OutputError(Exception):
     """The generated `result` does not satisfy the output schema/limits."""
+
+
+class SealError(Exception):
+    """RLIMIT_NOFILE=0 did not take effect: the guest must not run."""
 
 
 def sanitize_message(text, limit=500):
@@ -196,15 +222,74 @@ def validate_output(result, limits):
 # Child entrypoint
 # --------------------------------------------------------------------------
 
-def _write_result(tmpdir, payload):
+def _open_result(tmpdir):
+    """Opened BEFORE the seal: afterwards no descriptor can be created."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+    return os.open(os.path.join(tmpdir, "result.json.part"), flags, 0o600)
+
+
+def _write_result(tmpdir, fd, payload):
+    data = json.dumps(payload, allow_nan=False, separators=(",", ":")).encode("utf-8")
+    os.ftruncate(fd, 0)  # the guest may have written to this descriptor
+    os.lseek(fd, 0, os.SEEK_SET)
+    view = memoryview(data)
+    while view:
+        view = view[os.write(fd, view):]
+    os.close(fd)
     path = os.path.join(tmpdir, "result.json")
-    with open(path + ".part", "w", encoding="utf-8") as fh:
-        json.dump(payload, fh, allow_nan=False, separators=(",", ":"))
     os.replace(path + ".part", path)
 
 
-def _fail(tmpdir, code, message):
-    _write_result(tmpdir, {"status": "error", "error_code": code, "error_message": sanitize_message(message)})
+def _fail(tmpdir, fd, code, message):
+    _write_result(tmpdir, fd, {"status": "error", "error_code": code, "error_message": sanitize_message(message)})
+
+
+def _seal_descriptors():
+    """Forbid the guest from creating ANY new file descriptor.
+
+    T53, second run: the guest opened a TCP socket to the Lambda Runtime API
+    (169.254.100.1:9001, reachable inside the microVM whatever the security
+    group says), fetched its own invocation, posted a forged response and then
+    received -- and answered -- the next tenants' invocations while the
+    handler was still waiting for it. Lambda's seccomp profile denies seccomp()
+    and unshare(), so neither a syscall filter nor an empty network namespace
+    exists there; RLIMIT_NOFILE does. With soft and hard limit 0 every
+    fd-creating syscall (socket, open, pipe, dup, memfd, eventfd, epoll,
+    pidfd...) fails with EMFILE, the unprivileged guest cannot raise it back,
+    and the descriptors already open (stdio, result file) keep working.
+    Verified before returning; anything else fails closed.
+    """
+    resource.setrlimit(resource.RLIMIT_NOFILE, (0, 0))
+    for probe in (lambda: (os.open(os.devnull, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)),), os.pipe):
+        try:
+            fds = probe()
+        except OSError as exc:
+            if exc.errno == errno.EMFILE:
+                continue
+            raise SealError("descriptor probe failed: %s" % errno.errorcode.get(exc.errno, exc.errno))
+        for fd in fds:
+            os.close(fd)
+        raise SealError("RLIMIT_NOFILE did not take effect")
+
+
+def _preload(pd):
+    """Best effort: a module that fails here is simply unavailable to the guest."""
+    import importlib
+    for name in PRELOAD_MODULES:
+        try:
+            importlib.import_module(name)
+        except Exception:
+            pass
+    zoneinfo = sys.modules.get("zoneinfo")
+    for tz in PRELOAD_TIMEZONES:  # pandas/pytz/zoneinfo read tz files lazily
+        try:
+            pd.Timestamp("2000-01-01").tz_localize(tz)
+        except Exception:
+            pass
+        try:
+            zoneinfo.ZoneInfo(tz)
+        except Exception:
+            pass
 
 
 def _load_inputs(tmpdir, pd):
@@ -220,6 +305,7 @@ def _load_inputs(tmpdir, pd):
 
 
 def run(tmpdir):
+    out = _open_result(tmpdir)
     with open(os.path.join(tmpdir, "limits.json"), encoding="utf-8") as fh:
         limits = json.load(fh)
     # The script directory is the only path entry we want besides site-packages.
@@ -228,37 +314,46 @@ def run(tmpdir):
         import numpy as np
         import pandas as pd
     except Exception:  # pragma: no cover - image problem, not user error
-        return _fail(tmpdir, "ANALYSIS_RUNTIME", "pandas or numpy unavailable")
+        return _fail(tmpdir, out, "ANALYSIS_RUNTIME", "pandas or numpy unavailable")
     try:
         import statsmodels.api as sm
     except Exception:
         sm = None
+    _preload(pd)
     try:
         inputs = _load_inputs(tmpdir, pd)
     except Exception as exc:
-        return _fail(tmpdir, "ANALYSIS_INPUT", "inputs could not be loaded: %s" % type(exc).__name__)
+        return _fail(tmpdir, out, "ANALYSIS_INPUT", "inputs could not be loaded: %s" % type(exc).__name__)
     with open(os.path.join(tmpdir, "source.py"), encoding="utf-8") as fh:
         source = fh.read()
     try:
         code = compile(source, "<analysis>", "exec")
     except SyntaxError as exc:
-        return _fail(tmpdir, "ANALYSIS_SYNTAX", "%s (line %s)" % (exc.msg, exc.lineno))
+        return _fail(tmpdir, out, "ANALYSIS_SYNTAX", "%s (line %s)" % (exc.msg, exc.lineno))
     namespace = {"__name__": "__analysis__", "inputs": inputs, "pd": pd, "np": np, "sm": sm}
     try:
-        exec(code, namespace)  # noqa: S102 - the whole point; containment is the Lambda
+        _seal_descriptors()
+    except Exception:  # never run the guest without the seal
+        return _fail(tmpdir, out, "ANALYSIS_RUNTIME", "sandbox seal failed")
+    try:
+        exec(code, namespace)  # noqa: S102 - the whole point; containment is the Lambda + seal
     except MemoryError:
-        return _fail(tmpdir, "ANALYSIS_MEMORY", "memory limit exceeded")
+        return _fail(tmpdir, out, "ANALYSIS_MEMORY", "memory limit exceeded")
+    except OSError as exc:
+        if exc.errno == errno.EMFILE:
+            return _fail(tmpdir, out, "ANALYSIS_RUNTIME", SEALED_MESSAGE)
+        return _fail(tmpdir, out, "ANALYSIS_RUNTIME", "%s: %s" % (type(exc).__name__, exc))
     except BaseException as exc:  # includes SystemExit from generated code
-        return _fail(tmpdir, "ANALYSIS_RUNTIME", "%s: %s" % (type(exc).__name__, exc))
+        return _fail(tmpdir, out, "ANALYSIS_RUNTIME", "%s: %s" % (type(exc).__name__, exc))
     if "result" not in namespace:
-        return _fail(tmpdir, "ANALYSIS_OUTPUT", "result is not defined")
+        return _fail(tmpdir, out, "ANALYSIS_OUTPUT", "result is not defined")
     try:
         output = validate_output(namespace["result"], limits)
     except OutputError as exc:
-        return _fail(tmpdir, "ANALYSIS_OUTPUT", str(exc))
+        return _fail(tmpdir, out, "ANALYSIS_OUTPUT", str(exc))
     except MemoryError:
-        return _fail(tmpdir, "ANALYSIS_MEMORY", "memory limit exceeded")
-    _write_result(tmpdir, {"status": "ok", "output": output})
+        return _fail(tmpdir, out, "ANALYSIS_MEMORY", "memory limit exceeded")
+    _write_result(tmpdir, out, {"status": "ok", "output": output})
 
 
 if __name__ == "__main__":

@@ -19,6 +19,7 @@ import {
 } from './sandbox-audit.repository';
 import { sandboxInvocation } from './sandbox-invocation.context';
 import { SandboxLambdaClientService } from './sandbox-lambda-client.service';
+import { SandboxStoreSlotService } from './sandbox-store-slot.service';
 import { validateAnalysisInputs } from './analysis-output.validator';
 
 /** Constant fingerprint of the analysis protocol and its numeric limits. */
@@ -26,6 +27,11 @@ const POLICY_DIGEST = `sha256:${createHash('sha256')
   .update(JSON.stringify({ protocol: ANALYSIS_PROTOCOL, limits: ANALYSIS_LIMITS }))
   .digest('hex')}`;
 const TEARDOWN_RESERVE_MS = 2_000;
+/** Failures after dispatch that do not prove the Lambda has stopped running. */
+const MAYBE_RUNNING: ReadonlySet<AnalysisFailureCode> = new Set([
+  'ANALYSIS_EXPIRED',
+  'ANALYSIS_UNAVAILABLE',
+]);
 
 /**
  * Analysis runner behind the existing admission/audit guarantees. It never
@@ -38,6 +44,7 @@ export class SandboxAnalysisBrokerService implements AnalysisRunner {
   constructor(
     private readonly client: SandboxLambdaClientService,
     private readonly audit: SandboxAuditRepository,
+    private readonly slots: SandboxStoreSlotService,
   ) {}
 
   available(): boolean {
@@ -90,6 +97,9 @@ export class SandboxAnalysisBrokerService implements AnalysisRunner {
     let opened = false;
     let outcome = 'failed';
     let outputBytes = 0;
+    let slotHeld = false;
+    let dispatched = false;
+    let lambdaStopped = false;
     try {
       await invocation.durable.assertBudget();
       deadline.assertCanStart();
@@ -99,6 +109,18 @@ export class SandboxAnalysisBrokerService implements AnalysisRunner {
       );
       if (wallMs < 1) throw new AnalysisError('ANALYSIS_EXPIRED');
       const limits = { ...ANALYSIS_LIMITS, wall_ms: wallMs };
+      // One Lambda in flight per store across instances; checked before the
+      // audit row so a busy store does not spend one of its two attempts.
+      try {
+        slotHeld = await this.slots.acquire(ctx.store_id, executionId);
+      } catch {
+        throw new AnalysisError('ANALYSIS_UNAVAILABLE');
+      }
+      if (!slotHeld)
+        throw new AnalysisError(
+          'ANALYSIS_LIMIT',
+          'another analysis is already running for this store',
+        );
       // Audit intent (and admission: one slot per store, global cap) BEFORE dispatch.
       try {
         await this.audit.start({
@@ -136,9 +158,11 @@ export class SandboxAnalysisBrokerService implements AnalysisRunner {
         inputs,
         limits,
       };
-      const output = await deadline.run(() =>
-        this.client.invoke(payload, deadline.signal),
-      );
+      const output = await deadline.run(() => {
+        dispatched = true;
+        return this.client.invoke(payload, deadline.signal);
+      });
+      lambdaStopped = true;
       outputBytes = Buffer.byteLength(JSON.stringify(output), 'utf8');
       outcome = 'ok';
       return {
@@ -149,12 +173,16 @@ export class SandboxAnalysisBrokerService implements AnalysisRunner {
       };
     } catch (error) {
       const code = this.code(error);
+      lambdaStopped = !MAYBE_RUNNING.has(code);
       outcome = this.outcome(code, !!parent?.signal.aborted);
       throw error instanceof AnalysisError && error.code === code
         ? error
         : new AnalysisError(code);
     } finally {
       deadline.dispose();
+      // A Lambda that may still be running keeps the slot until its TTL.
+      if (slotHeld && (!dispatched || lambdaStopped))
+        await this.slots.release(ctx.store_id, executionId);
       if (opened) {
         try {
           // No source, inputs, outputs or guest text in audit metadata.

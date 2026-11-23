@@ -13,6 +13,7 @@ import { SandboxLambdaClientService } from './sandbox/sandbox-lambda-client.serv
 import { CodeModeBridgeService } from './sandbox/codemode-bridge.service';
 import { CodeModePolicyService } from './sandbox/codemode-policy.service';
 import { SandboxAnalysisBrokerService } from './sandbox/sandbox-analysis-broker.service';
+import { SandboxStoreSlotService } from './sandbox/sandbox-store-slot.service';
 
 import { createCodeExecutionTools } from './tools/domains/code-execution.tools';
 import { Global, Module, OnModuleInit } from '@nestjs/common';
@@ -105,6 +106,7 @@ import { ConversationCompactorService } from './context/conversation-compactor.s
     SandboxPolicyService,
     SandboxAuditRepository,
     SandboxLambdaClientService,
+    SandboxStoreSlotService,
     SandboxAnalysisBrokerService,
     CodeModePolicyService,
     CodeModeBridgeService,
