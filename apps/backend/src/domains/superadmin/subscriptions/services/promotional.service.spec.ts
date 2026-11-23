@@ -17,6 +17,11 @@ describe('PromotionalService', () => {
         update: jest.fn(),
         delete: jest.fn(),
       },
+      plan_ai_entitlements: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+      // remove() deletes the AI rows and the plan in one transaction (T12).
+      $transaction: jest.fn((fn: any) => fn(prisma)),
     };
     service = new PromotionalService(prisma);
   });

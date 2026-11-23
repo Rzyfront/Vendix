@@ -1,7 +1,8 @@
 export type SdkType =
   | 'openai_compatible'
   | 'anthropic_compatible'
-  | 'minimax_t2a';
+  | 'minimax_t2a'
+  | 'gemini_tts';
 export type AIModelType =
   | 'text'
   | 'image'
@@ -254,7 +255,7 @@ export const AI_FEATURE_CATEGORY_LABELS: Record<AIFeatureCategory, string> = {
   tool_agents: 'Agentes con herramientas',
   rag_embeddings: 'RAG / Embeddings',
   async_queue: 'Cola asincrona',
-  realtime_voice: 'Voz en tiempo real',
+  realtime_voice: 'Voz (dictado y lectura de respuestas)',
 };
 
 export interface AIEngineApp {
@@ -519,6 +520,15 @@ export const KNOWN_PROVIDERS: KnownProvider[] = [
     defaultUrl: 'https://api.minimax.io/v1/t2a_v2',
   },
   {
+    // F8 T50 — Gemini text-to-speech through the Generative Language API. Its
+    // own sdk type: the model goes in the URL and the audio comes back as raw
+    // PCM, so the OpenAI-compatible path cannot serve it.
+    name: 'Google Gemini TTS',
+    sdkType: 'gemini_tts',
+    models: ['gemini-2.5-flash-preview-tts', 'gemini-2.5-pro-preview-tts'],
+    defaultUrl: 'https://generativelanguage.googleapis.com/v1beta',
+  },
+  {
     // MiniMax's chat and vision models *are* OpenAI-compatible — the repo
     // already pins MiniMax-VL-01 this way for invoice and RUT scanning. Listed
     // apart from the entry above because only the speech endpoint needs the
@@ -544,3 +554,32 @@ export const KNOWN_PROVIDERS: KnownProvider[] = [
     models: [],
   },
 ];
+
+// --- Salud por app (ia-cargas F6): GET superadmin/ai-engine/app-health ---
+
+/** Una fila del tablero. Las tasas van de 0 a 100. */
+export interface AIAppHealthRow {
+  app_key: string;
+  total_calls: number;
+  error_calls: number;
+  truncated_calls: number;
+  validation_failed_calls: number;
+  error_rate: number;
+  truncated_rate: number;
+  validation_failed_rate: number;
+  avg_prompt_tokens: number;
+  avg_completion_tokens: number;
+  avg_total_tokens: number;
+}
+
+export interface AIAppHealthReport {
+  date_from: string;
+  date_to: string;
+  apps: AIAppHealthRow[];
+}
+
+/** Rango del tablero en fechas ISO (el backend usa 7 días si faltan). */
+export interface AIAppHealthQuery {
+  date_from?: string;
+  date_to?: string;
+}

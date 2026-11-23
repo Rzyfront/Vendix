@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { shareReplay, tap } from 'rxjs/operators';
+import { map, shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import {
   AIEngineConfig,
@@ -24,7 +24,14 @@ import {
   UpdateAIAgentDto,
   AIAgentQueryDto,
   PaginatedAIAgentResponse,
+  AIAppHealthQuery,
+  AIAppHealthReport,
 } from '../interfaces';
+import {
+  AgentRuntimeSheet,
+  AgentVoicePreview,
+  UpdateAgentRuntimeDto,
+} from '../interfaces/agent-runtime.interface';
 
 interface CacheEntry<T> {
   observable: T;
@@ -185,6 +192,25 @@ export class AIEngineService {
     );
   }
 
+  // --- Salud por app (ia-cargas F6): solo lectura ---
+
+  getAppHealth(query: AIAppHealthQuery = {}): Observable<AIAppHealthReport> {
+    let params = new HttpParams();
+    if (query.date_from) params = params.set('date_from', query.date_from);
+    if (query.date_to) params = params.set('date_to', query.date_to);
+    return this.http
+      .get<
+        { data?: AIAppHealthReport } | AIAppHealthReport
+      >(`${this.apiUrl}/superadmin/ai-engine/app-health`, { params })
+      .pipe(
+        map((response) =>
+          'apps' in response
+            ? response
+            : (response.data ?? { date_from: '', date_to: '', apps: [] }),
+        ),
+      );
+  }
+
   // --- AI Agents (F5: CRUD del endpoint F4) ---
 
   getAgents(query: AIAgentQueryDto = {}): Observable<PaginatedAIAgentResponse> {
@@ -220,6 +246,40 @@ export class AIEngineService {
     return this.http.delete<void>(
       `${this.apiUrl}/superadmin/ai-engine/agents/${id}`,
     );
+  }
+
+  // --- Ficha única del agente (Vex / Vexi): modelo, proveedor y voz ---
+
+  getAgentSheet(agentKey: string): Observable<AgentRuntimeSheet> {
+    return this.http
+      .get<{ data: AgentRuntimeSheet }>(
+        `${this.apiUrl}/superadmin/ai-engine/agent-runtime/${agentKey}`,
+      )
+      .pipe(map((r) => r.data));
+  }
+
+  updateAgentSheet(
+    agentKey: string,
+    data: UpdateAgentRuntimeDto,
+  ): Observable<AgentRuntimeSheet> {
+    return this.http
+      .patch<{ data: AgentRuntimeSheet }>(
+        `${this.apiUrl}/superadmin/ai-engine/agent-runtime/${agentKey}`,
+        data,
+      )
+      .pipe(map((r) => r.data));
+  }
+
+  previewAgentVoice(
+    agentKey: string,
+    text?: string,
+  ): Observable<AgentVoicePreview> {
+    return this.http
+      .post<{ data: AgentVoicePreview }>(
+        `${this.apiUrl}/superadmin/ai-engine/agent-runtime/${agentKey}/voice-preview`,
+        text ? { text } : {},
+      )
+      .pipe(map((r) => r.data));
   }
 
   invalidateCache(): void {

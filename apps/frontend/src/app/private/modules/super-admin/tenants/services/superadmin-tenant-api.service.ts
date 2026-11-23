@@ -3,6 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import { environment } from '../../../../../../environments/environment';
+import type { TenantAgentStatus } from '../pages/agents/tenant-agent-status.interface';
 import type {
   TenantApiResponse,
   TenantDirectoryQuery,
@@ -62,6 +63,18 @@ export class SuperadminTenantApiService {
   ): Observable<TenantApiResponse<TenantProfile>> {
     return this.http.get<TenantApiResponse<TenantProfile>>(
       `${this.base}/${scope}/${tenantId}/profile`,
+    );
+  }
+
+  /**
+   * Por qué Vex y Vexi están encendidos o apagados en una tienda. Es el mismo
+   * cálculo (y el mismo texto) que ve el dueño en Ajustes → Agentes IA.
+   */
+  getAiAgentStatus(
+    storeId: number,
+  ): Observable<TenantApiResponse<{ agents: TenantAgentStatus[] }>> {
+    return this.http.get<TenantApiResponse<{ agents: TenantAgentStatus[] }>>(
+      `${environment.apiUrl}/superadmin/ai-engine/agent-runtime/stores/${storeId}/status`,
     );
   }
 }

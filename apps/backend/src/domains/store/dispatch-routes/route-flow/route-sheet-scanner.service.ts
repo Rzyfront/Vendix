@@ -1,14 +1,26 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { dispatch_route_stop_result_enum } from '@prisma/client';
-import { AIEngineService } from '../../../../ai-engine/ai-engine.service';
-import { AIMessage } from '../../../../ai-engine/interfaces/ai-provider.interface';
-import { parseAiJson } from '../../../../ai-engine/utils/ai-json.util';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
 import { AiScanFile } from '@common/ai-scan-jobs/interfaces/ai-scan-job.interface';
 import { AiScanHandlerRegistry } from '@common/ai-scan-jobs/ai-scan-handler.registry';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
+import type { AiJobProgress } from '@common/ai-scan-jobs/ai-job-monitor.service';
+import { detectIngestFile, DetectedIngestFile } from '@common/ai-ingest/ingest-file.detector';
+import {
+  AiExtractionError,
+  AiExtractionService,
+  newIngestQuotaKey,
+} from '@common/ai-ingest/extraction/ai-extraction.service';
+import { DocumentPagesService } from '@common/ai-ingest/documents/document-pages.service';
+import { readDocumentWithAi } from '@common/ai-ingest/documents/document-reader';
+import {
+  buildRouteSheetInstruction,
+  mergeRouteSheetBatches,
+  ROUTE_SHEET_MAX_BYTES,
+  ROUTE_SHEET_PROFILE,
+} from './route-sheet-ingest.profile';
 import { RouteFlowService } from './route-flow.service';
 import { DispatchRoutesService } from '../dispatch-routes.service';
 import { SettleStopDto } from '../dto';
@@ -20,13 +32,12 @@ import {
   RouteSheetScanResult,
   RouteSheetScanStop,
 } from './dto/scan-route-sheet.dto';
-const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only (export default) but CJS runtime exports the function
 
 /**
  * Route-sheet AI scanner.
  *
  * 1:1 calque of `InvoiceScannerService` for dispatch route sheets:
- *   /scan    → preprocess + AIEngine.run('route_sheet_ocr') + normalize (no persist)
+ *   /scan    → shared page reader (ai-ingest) with 'route_sheet_ocr' + normalize (no persist)
  *   /match   → resolve each extracted row to a real stop (no persist)
  *   /confirm → settle confirmed stops via RouteFlowService.settleStop +
  *              persist the PDF (S3 KEY) and scan metadata on the route.
@@ -40,22 +51,25 @@ export class RouteSheetScannerService implements OnModuleInit {
   private readonly logger = new Logger(RouteSheetScannerService.name);
 
   constructor(
-    private readonly aiEngine: AIEngineService,
+    private readonly extraction: AiExtractionService,
     private readonly prisma: StorePrismaService,
     private readonly routeFlow: RouteFlowService,
     private readonly dispatchRoutes: DispatchRoutesService,
     private readonly s3Service: S3Service,
     private readonly aiScanRegistry: AiScanHandlerRegistry,
+    private readonly documentPages: DocumentPagesService,
   ) {}
 
   /** Registra el handler async `route_sheet` (cola generica `ai-scan`). */
   onModuleInit(): void {
     this.aiScanRegistry.register<RouteSheetScanResult>(
       'route_sheet',
-      ({ files, params }) =>
-        this.scanRouteSheetFromFiles(files, {
-          route_id: Number(params?.route_id),
-        }),
+      ({ files, params, reportProgress }) =>
+        this.scanRouteSheetFromFiles(
+          files,
+          { route_id: Number(params?.route_id) },
+          reportProgress,
+        ),
     );
   }
 
@@ -71,9 +85,8 @@ export class RouteSheetScannerService implements OnModuleInit {
 
   /**
    * Scan a hand-filled route sheet (image or PDF) into a normalized
-   * `RouteSheetScanResult`. Validates the file, preprocesses (sharp resize for
-   * images, raw passthrough for PDFs), sends it as an `image_url` data-uri to
-   * the `route_sheet_ocr` vision app, and normalizes the JSON. Does NOT persist.
+   * `RouteSheetScanResult`. Validates the file by its real type and reads it
+   * through the shared ai-ingest page reader. Does NOT persist.
    */
   async scanRouteSheet(
     routeId: number,
@@ -93,53 +106,69 @@ export class RouteSheetScannerService implements OnModuleInit {
   async scanRouteSheetFromFiles(
     files: AiScanFile[],
     _params: { route_id: number },
+    reportProgress?: (progress: AiJobProgress) => Promise<void>,
   ): Promise<RouteSheetScanResult> {
     const file = files?.[0];
-    this.assertValidScanFile(file);
+    const detected = this.assertValidScanFile(file);
 
-    const { base64, mimeType } = await this.preprocessImage(file);
-    const dataUri = `data:${mimeType};base64,${base64}`;
-
-    this.logger.debug(`[RouteSheetScan] DataURI length: ${dataUri.length} chars`);
-
-    const documentMessage: AIMessage = {
-      role: 'user',
-      content: [
-        {
-          type: 'text',
-          text: 'Extract the per-stop deliveries and cash collection from this hand-filled dispatch route sheet. Return ONLY the JSON object matching the schema defined in your system instructions.',
-        },
-        {
-          type: 'image_url',
-          image_url: { url: dataUri, detail: 'high' },
-        },
-      ],
-    };
-
-    this.logger.debug(`[RouteSheetScan] Sending to AI engine...`);
-    const response = await this.aiEngine.run('route_sheet_ocr', {}, [
-      documentMessage,
-    ]);
-
-    this.logger.debug(
-      `[RouteSheetScan] AI response: success=${response.success}, contentLength=${response.content?.length ?? 0}, model=${response.model}, error=${response.error}`,
-    );
-
-    if (!response.success || !response.content) {
-      this.logger.error(`AI route-sheet extraction failed: ${response.error}`);
-      throw new VendixHttpException(ErrorCodes.RTSCAN_AI_FAIL);
-    }
-
+    // ia-cargas F5a (#10): pages with native PDF text travel as text, scanned
+    // pages and photos as images (EXIF-straightened, ≤1536 px). Never the raw
+    // PDF. Up to 5 pages in ONE call; the answer is checked with a schema and
+    // repaired once. A photo stays ONE image: strips could read a stop twice
+    // in their overlap and settle its cash twice.
+    let read;
     try {
-      const parsed = parseAiJson(response.content);
-      return this.normalizeScanResponse(parsed);
+      read = await readDocumentWithAi<Record<string, any>>({
+        file: { buffer: file.buffer, originalName: file.originalName },
+        mimeType: detected.mime,
+        pages: this.documentPages,
+        extraction: this.extraction,
+        appKey: 'route_sheet_ocr',
+        schema: ROUTE_SHEET_PROFILE.documentSchema,
+        instruction: buildRouteSheetInstruction,
+        limits: ROUTE_SHEET_PROFILE.limits,
+        maxBytes: ROUTE_SHEET_MAX_BYTES,
+        splitTallImages: false,
+        // One unit of quota per scan, as the single call charged before.
+        quotaKey: newIngestQuotaKey(),
+        reportProgress,
+        logLabel: 'RouteSheetScan',
+      });
     } catch (err) {
-      if (err instanceof VendixHttpException) throw err;
-      this.logger.error(
-        `Failed to parse AI route-sheet response: ${response.content}`,
-      );
-      throw new VendixHttpException(ErrorCodes.RTSCAN_PARSE_FAIL);
+      throw this.toScanError(err);
     }
+
+    const result = this.normalizeScanResponse(mergeRouteSheetBatches(read.answers));
+    return {
+      ...result,
+      ...(read.warnings.length ? { warnings: read.warnings } : {}),
+      scan_source: {
+        pages: read.pages,
+        text_pages: read.textPages,
+        batches: read.batches.length,
+        ...(read.missingPages.length ? { missing_pages: read.missingPages } : {}),
+      },
+    };
+  }
+
+  /**
+   * Keeps the scanner's error contract: an unusable model answer is still
+   * `RTSCAN_PARSE_FAIL` and an AI failure `RTSCAN_AI_FAIL`. Document problems
+   * keep their `AI_INGEST_*` code and credits / rate limit their
+   * `AI_PROVIDER_*` one.
+   */
+  private toScanError(err: unknown): unknown {
+    const error = err instanceof AiExtractionError ? err.toHttpException() : err;
+    if (!(error instanceof VendixHttpException)) return error;
+    if (error.errorCode === ErrorCodes.AI_INGEST_PARSE_FAIL.code) {
+      this.logger.error('[RouteSheetScan] AI answer unusable after repair');
+      return new VendixHttpException(ErrorCodes.RTSCAN_PARSE_FAIL);
+    }
+    if (error.errorCode === ErrorCodes.AI_REQUEST_001.code) {
+      this.logger.error('[RouteSheetScan] AI route-sheet extraction failed');
+      return new VendixHttpException(ErrorCodes.RTSCAN_AI_FAIL);
+    }
+    return error;
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -466,19 +495,29 @@ export class RouteSheetScannerService implements OnModuleInit {
     };
   }
 
-  private assertValidScanFile(file?: AiScanFile): asserts file is AiScanFile {
-    if (!file) {
+  /**
+   * File present, size and REAL type by signature (never the client mimetype):
+   * a PDF or a photo (JPG, PNG, WebP). Anything else is `RTSCAN_INVALID_FILE`.
+   */
+  private assertValidScanFile(file?: AiScanFile): DetectedIngestFile {
+    if (!file?.buffer?.length) {
       throw new VendixHttpException(ErrorCodes.RTSCAN_NO_FILE);
     }
-    const allowedTypes = [
-      'image/jpeg',
-      'image/png',
-      'image/webp',
-      'application/pdf',
-    ];
-    if (!allowedTypes.includes(file.mimeType)) {
+    if (file.buffer.length > ROUTE_SHEET_MAX_BYTES) {
+      throw new VendixHttpException(
+        ErrorCodes.AI_INGEST_INVALID_FILE,
+        'La planilla debe pesar como máximo 15 MB.',
+      );
+    }
+    const detected = detectIngestFile({
+      buffer: file.buffer,
+      originalName: file.originalName,
+      mimeType: file.mimeType,
+    });
+    if (!detected || detected.kind === 'sheet') {
       throw new VendixHttpException(ErrorCodes.RTSCAN_INVALID_FILE);
     }
+    return detected;
   }
 
   /**
@@ -515,51 +554,6 @@ export class RouteSheetScannerService implements OnModuleInit {
 
   private normalizeRemision(value: string): string {
     return value.replace(/\s+/g, '').toLowerCase();
-  }
-
-  /**
-   * Try to optimize images via sharp; on failure (e.g. PDFs) fall back to the
-   * raw buffer with its original mimetype, so the vision model processes PDFs
-   * natively. Identical strategy to invoice/rut scanners.
-   */
-  private async preprocessImage(
-    file: AiScanFile,
-  ): Promise<{ base64: string; mimeType: string }> {
-    const MAX_DIMENSION = 1536;
-    const JPEG_QUALITY = 85;
-
-    try {
-      const metadata = await sharp(file.buffer).metadata();
-      const needsResize =
-        (metadata.width && metadata.width > MAX_DIMENSION) ||
-        (metadata.height && metadata.height > MAX_DIMENSION);
-
-      let pipeline = sharp(file.buffer);
-
-      if (needsResize) {
-        pipeline = pipeline.resize(MAX_DIMENSION, MAX_DIMENSION, {
-          fit: 'inside',
-          withoutEnlargement: true,
-        });
-      }
-
-      const processedBuffer = await pipeline
-        .jpeg({ quality: JPEG_QUALITY })
-        .toBuffer();
-
-      return {
-        base64: processedBuffer.toString('base64'),
-        mimeType: 'image/jpeg',
-      };
-    } catch (err) {
-      this.logger.warn(
-        `[RouteSheetScan] Image preprocessing failed, using raw: ${err.message}`,
-      );
-      return {
-        base64: file.buffer.toString('base64'),
-        mimeType: file.mimeType,
-      };
-    }
   }
 
   private normalizeScanResponse(parsed: any): RouteSheetScanResult {

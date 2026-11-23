@@ -56,6 +56,8 @@ const step = (order: number, status: any) => ({
 describe('AIAgentService.runAgentStream', () => {
   let chat: jest.Mock;
   let executeTool: jest.Mock;
+  /** Execution options the loop handed the registry, by tool name (H6). */
+  let executionOptions: jest.Mock;
   let awaitResult: jest.Mock;
   let emit: jest.Mock;
   let registry: any;
@@ -73,6 +75,7 @@ describe('AIAgentService.runAgentStream', () => {
     } as any);
     chat = jest.fn();
     executeTool = jest.fn().mockResolvedValue('{"ok":true}');
+    executionOptions = jest.fn();
     awaitResult = jest.fn().mockResolvedValue('{"ui":"ok"}');
     emit = jest.fn();
     const definitions = [
@@ -86,6 +89,22 @@ describe('AIAgentService.runAgentStream', () => {
       def('create_expense'),
       def('send_invoice_dian'),
       def('vex_render_table'),
+      def('remember'),
+      {
+        type: 'function' as const,
+        function: {
+          name: 'run_analysis',
+          description: 'run_analysis',
+          parameters: {
+            type: 'object',
+            properties: {
+              source: { type: 'string' },
+              inputs: { type: 'array' },
+              purpose: { type: 'string' },
+            },
+          },
+        },
+      },
     ];
     const domains: Record<string, string> = {
       list_things: 'things',
@@ -98,6 +117,8 @@ describe('AIAgentService.runAgentStream', () => {
       create_expense: 'expenses',
       send_invoice_dian: 'invoicing',
       vex_render_table: 'vex',
+      remember: 'memory',
+      run_analysis: 'sandbox',
     };
     registry = {
       getAvailableDefinitions: jest.fn((scopes: string[]) =>
@@ -112,6 +133,11 @@ describe('AIAgentService.runAgentStream', () => {
           return true;
         }),
       ),
+      getDeniedPermissions: jest.fn((scopes: string[] = []) =>
+        ['store:orders:cancel', 'store:orders:read', 'store:customers:read']
+          .filter((p) => !scopes.includes(p))
+          .sort(),
+      ),
       canonicalName: (n: string) => n,
       matchesScope: (n: string, scopes: Set<string>) =>
         !!domains[n] && (scopes.has(n) || scopes.has(domains[n])),
@@ -119,8 +145,10 @@ describe('AIAgentService.runAgentStream', () => {
         domains[n] ? { name: n, domain: domains[n] } : undefined,
       getDeprecation: () => undefined,
       isClientSide: (n: string) => n.startsWith('ui_'),
+      isReadOnly: (n: string) => n === 'run_analysis' || n.startsWith('list_'),
       executeTool,
       executeToolResult: async (name, args, options) => {
+        executionOptions(name, options);
         try {
           return normalizeToolResult(
             options?.confirmationToken
@@ -236,7 +264,7 @@ describe('AIAgentService.runAgentStream', () => {
     });
   });
 
-  it('offers only tools in the allowed domain', async () => {
+  it('a plan tools_allowed that omits a permitted tool no longer narrows the catalog (N4)', async () => {
     configureStorePlan(
       ['orders'],
       ['store:orders:read', 'store:customers:read'],
@@ -244,25 +272,20 @@ describe('AIAgentService.runAgentStream', () => {
 
     await drain({});
 
-    expect(offeredToolNames()).toContain('list_orders');
-    expect(offeredToolNames()).not.toContain('list_customers');
-    expect(offeredToolNames()).not.toContain('ui_navigate');
-    expect(chat.mock.calls[0][0]).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          role: 'system',
-          content: expect.stringContaining('No puedes mover la pantalla'),
-        }),
-      ]),
+    expect(offeredToolNames()).toEqual(
+      expect.arrayContaining(['list_orders', 'list_customers', 'ui_navigate']),
     );
   });
 
-  it('offers only an exact tool name from the plan', async () => {
-    configureStorePlan(['list_orders']);
+  it('an exact-name plan list does not hide the other tools the role allows', async () => {
+    configureStorePlan(['list_orders'], [
+      'store:orders:read',
+      'store:customers:read',
+    ]);
 
     await drain({});
 
-    expect(offeredToolNames()).toEqual(['list_orders']);
+    expect(offeredToolNames()).toContain('list_customers');
   });
 
   it('preserves a narrower agent filter after applying the plan', async () => {
@@ -273,22 +296,12 @@ describe('AIAgentService.runAgentStream', () => {
     expect(offeredToolNames()).toEqual(['list_orders']);
   });
 
-  it('does not offer operational tools for an explicit empty plan list', async () => {
-    configureStorePlan([]);
+  it('an explicit empty plan list is inert: role permissions still drive the catalog', async () => {
+    configureStorePlan([], ['store:orders:read']);
 
     await drain({});
 
-    expect(offeredToolNames()).toEqual([]);
-    expect(chat.mock.calls[0][0]).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          role: 'system',
-          content: expect.stringContaining(
-            'No tienes herramientas operativas para consultar datos actuales',
-          ),
-        }),
-      ]),
-    );
+    expect(offeredToolNames()).toContain('list_orders');
   });
 
   it('does not offer operational tools when the subscription gate denies access', async () => {
@@ -298,6 +311,36 @@ describe('AIAgentService.runAgentStream', () => {
     await drain({});
 
     expect(offeredToolNames()).toEqual([]);
+  });
+
+  it('tells the model which areas the role cannot use, without tool names (T13)', async () => {
+    configureStorePlan(['*'], ['store:orders:read']);
+
+    await drain({});
+
+    const system = (chat.mock.calls[0][0] as any[])
+      .filter((m) => m.role === 'system')
+      .map((m) => m.content as string)
+      .join('\n');
+    expect(system).toContain('Áreas que el rol de este usuario no permite');
+    expect(system).toContain('orders (cancel)');
+    expect(system).toContain('customers (read)');
+    expect(system).not.toContain('list_customers');
+  });
+
+  it('adds no denied-areas fragment for a role that holds every permission', async () => {
+    configureStorePlan(
+      ['*'],
+      ['store:orders:cancel', 'store:orders:read', 'store:customers:read'],
+    );
+
+    await drain({});
+
+    const system = (chat.mock.calls[0][0] as any[])
+      .filter((m) => m.role === 'system')
+      .map((m) => m.content as string)
+      .join('\n');
+    expect(system).not.toContain('Áreas que el rol de este usuario no permite');
   });
 
   it('keeps the permission filter when the plan allows all tools', async () => {
@@ -719,6 +762,44 @@ describe('AIAgentService.runAgentStream', () => {
     );
   });
 
+  // The durable path calls the same `withTurnConversationId` (surface-tools
+  // spec); no durable-session harness exists in this spec to drive it here.
+  it('(H6) remember gets the turn conversation, never the id the model sends', async () => {
+    chat
+      .mockResolvedValueOnce(
+        ok({
+          tool_calls: [
+            call('c1', 'remember', {
+              key: 'learning.format',
+              content: 'video',
+              conversation_id: 999,
+            }),
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(ok({ content: 'listo' }));
+
+    await drain({ agent_key: 'vex', conversation_id: 7 });
+
+    const remembered = executeTool.mock.calls.filter(
+      ([name]) => name === 'remember',
+    );
+    expect(remembered).toHaveLength(1);
+    // P0-1: the arguments never carry a conversation; the turn's travels in
+    // the execution options, which the registry puts in the tool context.
+    expect(remembered[0][1]).toEqual({
+      key: 'learning.format',
+      content: 'video',
+    });
+    const options = executionOptions.mock.calls.filter(
+      ([name]) => name === 'remember',
+    );
+    expect(options).toHaveLength(1);
+    expect(options[0][1]).toEqual(
+      expect.objectContaining({ conversationId: 7 }),
+    );
+  });
+
   it('(vex-v) a render tool success emits a ui_block frame', async () => {
     executeTool.mockResolvedValueOnce(
       JSON.stringify({
@@ -741,6 +822,141 @@ describe('AIAgentService.runAgentStream', () => {
       type: 'ui_block',
       ui_block: { block_id: 'b-9', kind: 'table', version: 1 },
     });
+  });
+
+  it('(vex-f9) excludes run_analysis from tool catalog when durable is absent', async () => {
+    configureStorePlan(['*'], ['p']);
+    await drain({ agent_key: 'vex' });
+    expect(offeredToolNames()).not.toContain('run_analysis');
+  });
+
+  it('(vex-f9) run_analysis emits every created ui_block frame with spec.analysis', async () => {
+    configureStorePlan(['*'], ['p']);
+    registry.getAgentDefinitions = jest.fn((scopes: string[]) =>
+      registry.getAvailableDefinitions(scopes),
+    );
+    const durable = {
+      objective_id: 'obj-f9',
+      objective: {
+        authority_snapshot: ['p'],
+        budget: { active_runtime_ms: 0 },
+        expires_at: new Date(Date.now() + 60_000),
+      },
+      recoveryState: jest.fn().mockResolvedValue({
+        schema_version: '1',
+        replans: 0,
+        expansions: 0,
+        corrections: 0,
+        transient_retries: 0,
+        failures: [],
+        unknown_effect: false,
+        exhausted: false,
+      }),
+      checkpointRecovery: jest.fn(),
+      assertBudget: jest.fn(),
+      assertCurrent: jest.fn(),
+      excludeWait: jest.fn(),
+      runProvider: jest.fn(async (fn) => fn()),
+      runTool: jest.fn(async (fn) => fn()),
+      addBudget: jest.fn(),
+      checkpointTool: jest.fn().mockResolvedValue('art-1'),
+      proposeWrite: jest.fn(),
+      finish: jest.fn(async () => ({
+        id: 'obj-f9',
+        version: 1,
+        semantic_status: 'complete',
+      })),
+      close: jest.fn(),
+    } as any;
+    executeTool.mockResolvedValueOnce(
+      JSON.stringify({
+        tool: 'run_analysis',
+        version: '1',
+        data: {
+          run_id: 'run-1',
+          source_hash: 'h-1',
+          purpose: 'projection',
+          blocks: [
+            { block_id: 'b-chart', kind: 'chart' },
+            { block_id: 'b-kpi', kind: 'kpi' },
+          ],
+          ui_blocks: [
+            {
+              block_id: 'b-chart',
+              kind: 'chart',
+              version: 1,
+              spec: {
+                kind: 'chart',
+                chart_type: 'line',
+                analysis: {
+                  run_id: 'run-1',
+                  source_hash: 'h-1',
+                  language: 'python',
+                  purpose: 'projection',
+                },
+              },
+              data: { rows: [] },
+            },
+            {
+              block_id: 'b-kpi',
+              kind: 'kpi',
+              version: 1,
+              spec: {
+                kind: 'kpi',
+                label: 'Proyección',
+                analysis: {
+                  run_id: 'run-1',
+                  source_hash: 'h-1',
+                  language: 'python',
+                  purpose: 'projection',
+                  source: 'SECRET_PY_TOKEN = 42\nresult = {}',
+                },
+              },
+              data: { value: 150 },
+            },
+          ],
+        },
+      }),
+    );
+    chat.mockReset();
+    chat
+      .mockResolvedValueOnce(
+        ok({
+          tool_calls: [
+            call('c1', 'run_analysis', {
+              source: 'SECRET_PY_TOKEN = 42\nresult = {}',
+              inputs: [],
+              purpose: 'projection',
+            }),
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(ok({ content: 'listo' }));
+
+    const { chunks, result } = await drain({ agent_key: 'vex', durable });
+    expect(offeredToolNames()).toContain('run_analysis');
+    const uiBlocks = chunks.filter((c) => c.type === 'ui_block').map((c) => c.ui_block);
+    expect(uiBlocks).toHaveLength(2);
+    expect(uiBlocks[0]).toMatchObject({ block_id: 'b-chart', kind: 'chart', version: 1 });
+    expect(uiBlocks[1]).toMatchObject({
+      block_id: 'b-kpi',
+      kind: 'kpi',
+      version: 1,
+      spec: expect.objectContaining({
+        analysis: expect.objectContaining({
+          source: 'SECRET_PY_TOKEN = 42\nresult = {}',
+        }),
+      }),
+    });
+    // Transcript tool args, checkpoint args, tool result and SSE tool_result must NOT carry raw Python source or ui_blocks.
+    expect(JSON.stringify(result.tools_used)).not.toContain('SECRET_PY_TOKEN');
+    expect(JSON.stringify(result.tools_used)).not.toContain('ui_blocks');
+    expect(JSON.stringify(durable.checkpointTool.mock.calls)).not.toContain(
+      'SECRET_PY_TOKEN',
+    );
+    const toolResultChunks = chunks.filter((c) => c.type === 'tool_result');
+    expect(JSON.stringify(toolResultChunks)).not.toContain('SECRET_PY_TOKEN');
+    expect(JSON.stringify(toolResultChunks)).not.toContain('ui_blocks');
   });
 
   it('(vex-vi) a write proposal emits plan_approval and ends the turn', async () => {
@@ -999,7 +1215,6 @@ describe('AIAgentService.runAgentStream', () => {
     await drain({ agent_key: 'vex' });
 
     expect(canUseAIFeature).toHaveBeenCalledWith(42, 'vex_agent');
-    expect(getAIFeatureConfig).toHaveBeenCalledWith(42, 'vex_agent');
     expect(consumeAIQuota).toHaveBeenCalledWith(
       42,
       'vex_agent',
@@ -1347,8 +1562,9 @@ describe('AIAgentService.runAgentStream', () => {
         expect.objectContaining({
           tool_count: expect.any(Number),
           catalog_hash: expect.any(String),
-          definition_tokens: null,
-          context_tokens: null,
+          definition_tokens: expect.any(Number),
+          context_tokens: expect.any(Number),
+          token_estimator: 'bytes_v1',
         }),
       );
       expect(byKind('root')[0].outcome).toBe('partial');
@@ -1679,7 +1895,7 @@ describe('AIAgentService.runAgentStream', () => {
     it('not-offered UI is blocked before dispatch, with an alternative and terminal metadata', async () => {
       configureStorePlan(['list_things']);
       chat.mockResolvedValue(ok({ tool_calls: [call('t1', 'ui_navigate')] }));
-      const { chunks, result } = await drain({});
+      const { chunks, result } = await drain({ tools: ['list_things'] });
       // A tool outside the turn's authority is a model mistake, never the
       // «tu usuario o plan / administrador» notice.
       expect(result.execution?.outcome).not.toBe('blocked');
@@ -1736,6 +1952,8 @@ describe('AIAgentService.runAgentStream', () => {
       } as any);
       realRegistry.register({
         name: 'create_expense',
+        access: 'public',
+        accessReason: 'test fixture',
         domain: 'expenses',
         description: 'qa',
         parameters: {},
@@ -1772,6 +1990,8 @@ describe('AIAgentService.runAgentStream', () => {
       const realRegistry = new AIToolRegistry({} as any);
       realRegistry.register({
         name: 'list_things',
+        access: 'public',
+        accessReason: 'test fixture',
         domain: 'qa',
         description: 'qa',
         parameters: {},
@@ -1868,6 +2088,8 @@ describe('AIAgentService B routed catalog boundary', () => {
     for (let i = 0; i < 50; i++)
       registry.register({
         name: `operation_${String(i).padStart(2, '0')}`,
+        access: 'public',
+        accessReason: 'test fixture',
         domain: 'inventory',
         description: `operation_${i}`,
         parameters: { type: 'object', properties: {} },
@@ -1980,6 +2202,8 @@ describe('AIAgentService B routed catalog boundary', () => {
   it('never emits an unauthorized UI tool_call nor dispatches to the browser', async () => {
     registry.register({
       name: 'zz_ui',
+      access: 'public',
+      accessReason: 'test fixture',
       domain: 'ui',
       description: 'UI',
       parameters: {},
@@ -2017,10 +2241,26 @@ describe('AIAgentService B routed catalog boundary', () => {
     expect(names(0)).toContain('search_tools');
     expect(handler).not.toHaveBeenCalled();
   });
+  it('routed authority ignores a plan tools_allowed that omits a permitted tool (N4)', async () => {
+    access.getAIFeatureConfig.mockResolvedValue({
+      enabled: true,
+      tools_allowed: ['search_tools'],
+    });
+    const authority = await service.resolveToolAuthority({
+      goal: 'x',
+    } as never);
+    expect(authority.map((d) => d.function.name)).toContain('operation_00');
+    access.canUseAIFeature.mockResolvedValue({ allowed: false, mode: 'block' });
+    expect(
+      await service.resolveToolAuthority({ goal: 'x' } as never),
+    ).toEqual([]);
+  });
   it('revokes a tool between provider response and execution, including cached working sets', async () => {
     chat.mockImplementationOnce(async () => {
-      access.getAIFeatureConfig.mockResolvedValue({
-        tools_allowed: ['search_tools'],
+      // The only plan-side revocation left is the agent gate (disabled / quota).
+      access.canUseAIFeature.mockResolvedValue({
+        allowed: false,
+        mode: 'block',
       });
       return ok({ tool_calls: [call('revoked', 'operation_00')] });
     });
@@ -2063,7 +2303,7 @@ describe('AIAgentService B routed catalog boundary', () => {
     expect(system).toContain('Pregunta antes solo por un dato');
   });
   it('fails authorization closed on plan lookup outage with routing ON', async () => {
-    access.getAIFeatureConfig.mockRejectedValue(new Error('redis down'));
+    access.canUseAIFeature.mockRejectedValue(new Error('redis down'));
     await drain();
     expect(chat.mock.calls[0][1].tools).toBeUndefined();
     expect(handler).not.toHaveBeenCalled();
@@ -2071,6 +2311,8 @@ describe('AIAgentService B routed catalog boundary', () => {
   it('does not smuggle a denied planning tool through the plan-hook shortcut', async () => {
     registry.register({
       name: 'ask_user',
+      access: 'public',
+      accessReason: 'test fixture',
       domain: 'planning',
       description: 'Pregunta',
       parameters: {},
@@ -2087,6 +2329,8 @@ describe('AIAgentService B routed catalog boundary', () => {
   it('keeps write approvals and never runs the write handler after discovery', async () => {
     registry.register({
       name: 'write_rare',
+      access: 'public',
+      accessReason: 'test fixture',
       domain: 'orders',
       description: 'Cambio raro',
       parameters: {},
@@ -2241,6 +2485,8 @@ describe('D1 durable loop seam', () => {
   it('persists proposed intent before showing a card and stops the rest of the batch without dispatch', async () => {
     registry.register({
       name: 'create_product',
+      access: 'public',
+      accessReason: 'test fixture',
       domain: 'products',
       description: 'Crear',
       parameters: {},
@@ -2275,6 +2521,8 @@ describe('D1 durable loop seam', () => {
   it('a refused preview checkpoints a recoverable receipt, never an uncertain effect', async () => {
     registry.register({
       name: 'create_product',
+      access: 'public',
+      accessReason: 'test fixture',
       domain: 'products',
       description: 'Crear',
       parameters: {},
@@ -2305,6 +2553,8 @@ describe('D1 durable loop seam', () => {
     const enqueue = jest.fn().mockResolvedValue('{"queued":true}');
     registry.register({
       name: 'queue_task',
+      access: 'public',
+      accessReason: 'test fixture',
       domain: 'tasks',
       description: 'Revisar',
       parameters: {},

@@ -6,7 +6,15 @@ export type VexUiBlockKind =
   | 'kpi'
   | 'image'
   | 'file'
-  | 'markdown';
+  | 'markdown'
+  | 'timeline'
+  | 'list'
+  // F4 T29: learning blocks (help center post, video, learning path).
+  | 'help_article'
+  | 'video'
+  | 'learning_path'
+  // F5 T34: batch write card
+  | 'write_batch';
 
 /**
  * A UI block Vex rendered inside a turn.
@@ -23,13 +31,50 @@ export interface VexUiBlock {
   version: number;
 }
 
+/** Python analysis behind a block's figures (server-owned, optional on any spec). */
+export interface VexAnalysisInfo {
+  run_id: string;
+  source_hash: string;
+  /** `js` = Code Mode run (F10): the source is NOT in the block, it is fetched by `run_id`. */
+  language: 'python' | 'js';
+  purpose: string;
+  source: string;
+}
+
+/** «Ver cómo lo calculé»: one Code Mode run, read-only (never args or results). */
+export interface VexScriptRun {
+  id: string;
+  outcome: string;
+  manifest: string[];
+  calls: Array<{
+    seq: number;
+    tool: string;
+    status: string;
+    rows: number | null;
+    duration_ms: number | null;
+  }>;
+  rounds: number | null;
+  duration_ms: number | null;
+  cut_reason: string | null;
+  created_at: string;
+  is_owner: boolean;
+  expired: boolean;
+  /** Null unless the requester ran it and it is inside the 7-day window. */
+  source: string | null;
+  source_hidden_reason: string | null;
+}
+
 export type VexBlockSpec =
   | VexTableSpec
   | VexChartSpec
   | VexKpiSpec
   | VexImageSpec
   | VexFileSpec
-  | VexMarkdownSpec;
+  | VexMarkdownSpec
+  | VexTimelineSpec
+  | VexListSpec
+  | VexLearningSpec
+  | VexWriteBatchSpec;
 
 export interface VexTableColumn {
   key: string;
@@ -46,11 +91,14 @@ export interface VexTableSpec {
   /** Row selection enabled (default true). Selection emits a block interaction. */
   selectable?: boolean;
   page_size?: number;
+  analysis?: VexAnalysisInfo;
 }
 
 export interface VexChartSeries {
   key: string;
   label?: string;
+  /** Per-series geometry for `combo` charts (default: first bar, rest line). */
+  type?: 'bar' | 'line';
 }
 
 export interface VexChartSpec {
@@ -64,12 +112,18 @@ export interface VexChartSpec {
     | 'area'
     | 'radar'
     | 'scatter'
-    | 'gauge';
+    | 'gauge'
+    | 'rose'
+    | 'stacked_bar'
+    | 'combo'
+    | 'funnel'
+    | 'heatmap';
   /** Key of each row holding the category label (bar/line/area). */
   x_axis_key?: string;
   /** Keys of each row holding the series values. */
   series?: VexChartSeries[];
   stacked?: boolean;
+  analysis?: VexAnalysisInfo;
 }
 
 export interface VexKpiSpec {
@@ -83,6 +137,7 @@ export interface VexKpiSpec {
   delta_label?: string;
   /** When true the delta renders with inverted sentiment colors. */
   invert_delta?: boolean;
+  analysis?: VexAnalysisInfo;
 }
 
 export interface VexImageSpec {
@@ -99,6 +154,52 @@ export interface VexFileSpec {
 
 export interface VexMarkdownSpec {
   kind: 'markdown';
+  title?: string;
+}
+
+export type VexBlockTone = 'success' | 'warning' | 'error' | 'info' | 'neutral';
+
+export interface VexTimelineSpec {
+  kind: 'timeline';
+  title?: string;
+}
+
+export interface VexTimelineEvent {
+  id?: string;
+  title: string;
+  description?: string;
+  /** ISO 8601 instant. */
+  timestamp?: string;
+  status?: VexBlockTone;
+  actor?: string;
+}
+
+export interface VexTimelineData {
+  events: VexTimelineEvent[];
+}
+
+export interface VexListSpec {
+  kind: 'list';
+  title?: string;
+  layout?: 'cards' | 'rows';
+}
+
+export interface VexListItem {
+  id?: string;
+  title: string;
+  subtitle?: string;
+  description?: string;
+  badge?: { label: string; tone?: VexBlockTone };
+  fields?: Array<{ label: string; value: string | number }>;
+}
+
+export interface VexListData {
+  items: VexListItem[];
+}
+
+/** F4 T29: payload lives in `data` (article / video / series), see CONTRACT. */
+export interface VexLearningSpec {
+  kind: 'help_article' | 'video' | 'learning_path';
   title?: string;
 }
 
@@ -181,6 +282,34 @@ export interface VexToolStep {
   status: 'running' | 'done' | 'failed' | 'waiting' | 'unknown';
 }
 
+export type VexFollowupKind = 'reminder' | 'log_entry';
+export type VexFollowupStatus = 'suggested' | 'saved' | 'dismissed';
+
+/**
+ * A follow-up Vex suggested on its own (never written until the person saves
+ * it). Persisted server-side in the message metadata, so it survives a reload.
+ */
+export interface VexFollowup {
+  id: string;
+  kind: VexFollowupKind;
+  title: string;
+  note?: string | null;
+  /** ISO instant (UTC); `null` for a dateless log entry. */
+  remind_at?: string | null;
+  link_label?: string | null;
+  source_phrase?: string | null;
+  status: VexFollowupStatus;
+  reminder_id?: number | null;
+}
+
+/** What the person changed on the card before saving. */
+export interface VexFollowupEdits {
+  title?: string;
+  note?: string | null;
+  /** Store-local wall clock `YYYY-MM-DDTHH:mm`, or `null` for no date. */
+  remind_at?: string | null;
+}
+
 export interface VexMessage {
   id: string;
   role: VexMessageRole;
@@ -198,6 +327,34 @@ export interface VexMessage {
   error?: string | null;
   /** The conversation is blocked or busy: offer "Empezar de nuevo". */
   restart_suggested?: boolean;
+  /** User message that never reached the server: offer «Reintentar». */
+  send_failed?: boolean;
+  /** Attachment handles sent with a user message, kept to resend them on retry. */
+  attachment_ids?: string[];
+  /** The answer was cut: offer «Reintentar» (resends the last user message). */
+  can_retry?: boolean;
+  /** Follow-ups Vex suggested in this turn (at most one per turn). */
+  followups?: VexFollowup[];
+}
+
+/** `context_budget` of the `done` frame: how full the model window is for the next turn. */
+export interface VexContextBudget {
+  estimated_input_tokens: number;
+  omitted_messages: number;
+  context_window_tokens: number;
+  provenance: 'configured' | 'fallback';
+  method: 'conservative_estimate';
+  /** Output the engine reserved for the answer. */
+  max_output_tokens?: number;
+  /** Percent at which the ring warns and the server compacts (≤ 75, under the engine ceiling). */
+  compaction_percent?: number;
+}
+
+/** Rolling summary of the older part of a conversation (compaction). */
+export interface VexCompaction {
+  summary: string;
+  /** Local message id (`m-<row id>`) after which the divider renders; null = top of the thread. */
+  through_message_id: string | null;
 }
 
 export interface VexConversation {
@@ -207,6 +364,10 @@ export interface VexConversation {
   created_at: Date;
   updated_at: Date;
   status?: string;
+  /** «No sugerir en este chat»: Vex stops suggesting follow-ups here. */
+  followups_muted?: boolean;
+  /** Not created on the server yet (its first message could not be sent). Hidden from the list. */
+  local?: boolean;
 }
 
 export interface VexModelOption {
@@ -218,3 +379,97 @@ export const VEX_MODEL_OPTIONS: VexModelOption[] = [
   { id: 'vex-flash', label: 'Flash' },
   { id: 'vex-pro', label: 'Pro' },
 ];
+
+// ── F5: write batch (one approval for up to 25 reversible writes) ──
+
+/** `write_batch` blocks carry everything in `data`; the spec is empty. */
+export type VexWriteBatchSpec = Record<string, never>;
+
+/** `data` of a persisted `write_batch` block (the card re-fetches by id). */
+export interface VexWriteBatchBlockData {
+  batch_id: string;
+  goal: string;
+  part_index: number;
+  part_total: number;
+  step_count: number;
+}
+
+export type VexWriteBatchStatus =
+  | 'proposed'
+  | 'executing'
+  | 'applied'
+  | 'partially_applied'
+  | 'failed'
+  | 'unknown_effect'
+  | 'rejected'
+  | 'expired';
+
+export type VexWriteBatchStepStatus =
+  | 'pending'
+  | 'running'
+  | 'applied'
+  | 'failed'
+  | 'unknown'
+  | 'skipped'
+  | 'unselected'
+  | 'cancelled'
+  | 'compensating'
+  | 'compensated'
+  | 'compensation_failed';
+
+export interface VexWriteBatchStep {
+  step_id: string;
+  order: number;
+  tool: string;
+  label: string;
+  preview: {
+    status: 'ok' | 'warning';
+    target: string;
+    changes: Array<{ field: string; label: string; from: unknown; to: unknown }>;
+    message?: string;
+    domain?: string;
+  };
+  compensable: boolean;
+  can_undo: boolean;
+  status: VexWriteBatchStepStatus;
+  result_summary?: string;
+  error?: string;
+}
+
+export interface VexWriteBatchSummary {
+  applied: number;
+  failed: number;
+  unknown: number;
+  skipped: number;
+  unselected: number;
+  compensable: number;
+  applied_through_order: number;
+  message: string;
+}
+
+/** Mirror of the backend `WriteBatchView` (fields the card uses). */
+export interface VexWriteBatch {
+  id: string;
+  goal: string;
+  status: VexWriteBatchStatus;
+  part_index: number;
+  part_total: number;
+  step_count: number;
+  steps: VexWriteBatchStep[];
+  summary: VexWriteBatchSummary | null;
+  undo_until: string | null;
+  expires_at: string;
+}
+
+export interface VexWriteBatchResult {
+  batch: VexWriteBatch;
+  replayed: boolean;
+}
+
+/** T39: a prebuilt task offered in the welcome gallery «Tareas». */
+export interface VexLaunchablePlaybook {
+  id: string;
+  title: string;
+  description: string;
+  prompt: string;
+}

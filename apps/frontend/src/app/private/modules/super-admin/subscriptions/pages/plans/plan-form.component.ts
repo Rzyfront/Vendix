@@ -10,18 +10,11 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { SubscriptionAdminService } from '../../services/subscription-admin.service';
 import {
-  AIFeatureFlags,
-  AIFeatureKey,
-  EngineAppLineage,
+  AIEntitlement,
   PlanPricing,
   PlanType,
   PlanState,
 } from '../../interfaces/subscription-admin.interface';
-import type {
-  AIAgent,
-  AIEngineApp,
-  AIToolCatalogEntry,
-} from '../../../ai-engine/interfaces';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import {
   InputComponent,
@@ -42,21 +35,23 @@ import {
   workflowLimitsToForm,
 } from './workflow-limits.util';
 import {
-  defaultAIFeatureFlags,
-  normalizeAIFeatureFlags,
+  completeAIEntitlements,
+  defaultNewPlanAIEntitlements,
 } from '../../utils/ai-feature-flags.util';
 import {
   PlanIncludedItem,
   isLegacyFeatureMatrix,
   normalizeIncludedItems,
 } from '../../../../../../shared/utils/plan-features.util';
-import { AiFeatureMatrixComponent } from '../../components/ai-feature-matrix.component';
+import {
+  AIPlanMatrixComponent,
+  AIPlanMatrixPlanOption,
+} from '../../components/ai-plan-matrix/ai-plan-matrix.component';
 import { PlanIncludesEditorComponent } from '../../components/plan-includes-editor.component';
 import { PricingCycleEditorComponent } from '../../components/pricing-cycle-editor.component';
 import { GraceThresholdEditorComponent } from '../../components/grace-threshold-editor.component';
 import { MarkdownEditorComponent } from '../../../../../../shared/components/markdown-editor/markdown-editor.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
-import { AIEngineService } from '../../../ai-engine/services/ai-engine.service';
 
 interface PlanFormControls {
   // Identity
@@ -98,7 +93,7 @@ interface PlanFormControls {
     ToggleComponent,
     SelectorComponent,
     StickyHeaderComponent,
-    AiFeatureMatrixComponent,
+    AIPlanMatrixComponent,
     PlanIncludesEditorComponent,
     PricingCycleEditorComponent,
     GraceThresholdEditorComponent,
@@ -304,14 +299,11 @@ interface PlanFormControls {
 
         @if (activeTab() === 'ai-matrix') {
           <div class="bg-surface rounded-card border border-border p-4 md:p-6">
-            <app-ai-feature-matrix
-              [initialValue]="aiFeatures()"
-              [systemModels]="systemAiModels()"
-              [availableTools]="engineTools()"
-              [availableAgents]="catalogAgentOptions()"
-              [appsByCategory]="catalogAppsByCategory()"
-              (valueChange)="onAIFeaturesChange($event)"
-            ></app-ai-feature-matrix>
+            <app-ai-plan-matrix
+              [(entitlements)]="aiEntitlements"
+              [otherPlans]="otherPlans()"
+              (copyFromPlan)="onCopyAIFromPlan($event)"
+            ></app-ai-plan-matrix>
           </div>
         }
 
@@ -460,14 +452,16 @@ export class PlanFormComponent {
   private service = inject(SubscriptionAdminService);
   private destroyRef = inject(DestroyRef);
   private toast = inject(ToastService);
-  private aiEngineService = inject(AIEngineService);
 
   readonly planId = signal<string | null>(null);
   readonly isEdit = signal(false);
   readonly submitting = signal(false);
   readonly activeTab = signal('overview');
   readonly isFreePlan = signal(false);
-  readonly aiFeatures = signal<AIFeatureFlags | undefined>(this.defaultAiFeatures());
+  /** The complete list of AI capability rows (catalog order); sent on every save. */
+  readonly aiEntitlements = signal<AIEntitlement[]>(defaultNewPlanAIEntitlements());
+  /** Other plans offered by «Copiar de otro plan». */
+  readonly otherPlans = signal<AIPlanMatrixPlanOption[]>([]);
   readonly pricing = signal<PlanPricing[] | undefined>(undefined);
   readonly detailsMd = signal<string>('');
   /** Lista de «ítems que incluye» del plan; se envía siempre, aunque esté vacía. */
@@ -475,47 +469,13 @@ export class PlanFormComponent {
   /** true si el plan llegó con el `feature_matrix` legado en forma de objeto. */
   readonly legacyMatrix = signal(false);
   readonly graceDays = signal<number | undefined>(undefined);
-  readonly systemAiModels = signal<string[]>([]);
-  /**
-   * F6 — catálogo vivo del Engine para el picker enlazado (apps por
-   * categoría, agentes por key, tools por nombre). Se carga una vez al abrir
-   * el formulario; la matriz solo pinta lo que llega por inputs.
-   */
-  readonly engineApps = signal<AIEngineApp[]>([]);
-  readonly engineAgents = signal<AIAgent[]>([]);
-  readonly engineTools = signal<AIToolCatalogEntry[]>([]);
-
-  readonly catalogAgentOptions = computed(() =>
-    this.engineAgents().map((agent) => ({
-      value: agent.key,
-      label: agent.is_active ? agent.name : `${agent.name} (inactivo)`,
-      description: `key: ${agent.key}`,
-    })),
-  );
-
-  readonly catalogAppsByCategory = computed<Partial<Record<AIFeatureKey, EngineAppLineage[]>>>(() => {
-    const grouped: Partial<Record<AIFeatureKey, EngineAppLineage[]>> = {};
-    for (const app of this.engineApps()) {
-      const category = app.ai_feature_category as AIFeatureKey | undefined;
-      if (!category) continue;
-      const bucket = grouped[category] ?? [];
-      bucket.push({
-        key: app.key,
-        name: app.name,
-        isActive: app.is_active,
-        modelLabel: app.config ? `${app.config.label} · ${app.config.model_id}` : null,
-      });
-      grouped[category] = bucket;
-    }
-    return grouped;
-  });
   private readonly paidPricingBeforeFree = signal<PlanPricing[] | undefined>(undefined);
   private setupFeeBeforeFree: number | null = null;
 
   readonly tabs: StickyHeaderTab[] = [
     { id: 'overview', label: 'Resumen', icon: 'file-text' },
     { id: 'incluye', label: 'Incluye', icon: 'list-checks' },
-    { id: 'ai-matrix', label: 'Matriz IA', icon: 'bot' },
+    { id: 'ai-matrix', label: 'Capacidades de IA', icon: 'bot' },
     { id: 'pricing', label: 'Precios', icon: 'credit-card' },
     { id: 'workflows', label: 'Límites de Flujos', icon: 'gauge' },
     { id: 'grace', label: 'Gracia y cobranza', icon: 'clock' },
@@ -617,8 +577,7 @@ export class PlanFormComponent {
       this.loadPlan(id);
     }
 
-    this.loadSystemAiModels();
-    this.loadEngineCatalog();
+    this.loadOtherPlans();
     this.bindFormRules();
   }
 
@@ -700,51 +659,37 @@ export class PlanFormComponent {
     }
   }
 
-  private loadSystemAiModels(): void {
-    this.aiEngineService
-      .getConfigs({ is_active: true, limit: 100 })
+  /** Plans the AI capabilities can be copied from (the plan being edited is excluded). */
+  private loadOtherPlans(): void {
+    this.service
+      .getPlans({ page: 1, limit: 100 })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
-          const labels = (res.data ?? [])
-            .map((config) => `${config.label} · ${config.model_id}`)
-            .filter((label, index, list) => list.indexOf(label) === index);
-          this.systemAiModels.set(labels);
+          const currentId = this.planId();
+          this.otherPlans.set(
+            (res?.data ?? [])
+              .filter((plan) => String(plan.id) !== currentId)
+              .map((plan) => ({ id: String(plan.id), name: plan.name })),
+          );
         },
-        error: () => this.systemAiModels.set([]),
+        error: () => this.otherPlans.set([]),
       });
   }
 
-  /**
-   * F6 — trae el catálogo vivo contra el que el backend valida el guardado:
-   * aplicaciones (con su categoría y modelo), agentes (por key) y tools (por
-   * nombre). Un catálogo que falla no bloquea el formulario: la matriz
-   * muestra el vacío y el backend responde 400 si se declara una ref rota.
-   */
-  private loadEngineCatalog(): void {
-    this.aiEngineService
-      .getApps({ page: 1, limit: 100 })
+  /** Loads the chosen plan and copies its AI rows into the form (nothing is saved yet). */
+  onCopyAIFromPlan(planId: string): void {
+    this.service
+      .getPlanById(planId)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (res: any) => this.engineApps.set(res?.data ?? []),
-        error: () => this.engineApps.set([]),
-      });
-    this.aiEngineService
-      .getAgents({ page: 1, limit: 100 })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (res: any) => this.engineAgents.set(res?.data ?? []),
-        error: () => this.engineAgents.set([]),
-      });
-    this.aiEngineService
-      .getTools()
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (res: any) => {
-          const data = res?.data ?? res ?? [];
-          this.engineTools.set(Array.isArray(data) ? data : []);
+        next: (res) => {
+          if (!res.success) return;
+          this.aiEntitlements.set(completeAIEntitlements(res.data.ai_entitlements));
         },
-        error: () => this.engineTools.set([]),
+        error: (error) => {
+          this.toast.error(extractApiErrorMessage(error), 'No se pudo copiar el plan');
+        },
       });
   }
 
@@ -758,18 +703,6 @@ export class PlanFormComponent {
         is_default: true,
       },
     ];
-  }
-
-  // Both delegate to the shared util. They used to hold their own copy of the
-  // same six-key normalizer, and since this component writes `ai_feature_flags`
-  // wholesale, the copy that fell behind the backend's key list is what deleted
-  // `realtime_voice` from every plan that got saved.
-  private defaultAiFeatures(): AIFeatureFlags {
-    return defaultAIFeatureFlags();
-  }
-
-  private normalizeAiFeatures(value: AIFeatureFlags | undefined): AIFeatureFlags {
-    return normalizeAIFeatureFlags(value);
   }
 
   loadPlan(id: string): void {
@@ -802,7 +735,7 @@ export class PlanFormComponent {
           },
           { emitEvent: false },
         );
-        this.aiFeatures.set(this.normalizeAiFeatures(plan.ai_feature_flags));
+        this.aiEntitlements.set(completeAIEntitlements(plan.ai_entitlements));
         this.limitsForm.setValue(workflowLimitsToForm(plan.workflow_limits));
         this.isFreePlan.set(plan.is_free);
         if (plan.is_free) {
@@ -827,10 +760,6 @@ export class PlanFormComponent {
         this.graceDays.set(plan.grace_period_soft_days ?? plan.grace_threshold_days ?? 0);
       },
     });
-  }
-
-  onAIFeaturesChange(flags: AIFeatureFlags): void {
-    this.aiFeatures.set(flags);
   }
 
   onPricingChange(pricing: PlanPricing[]): void {
@@ -891,12 +820,6 @@ export class PlanFormComponent {
     // Pricing default rige el base_price + billing_cycle + currency canónicos
     const pricingFirst = pricing.find((p) => p.is_default) ?? pricing[0];
 
-    // Warning si ai_feature_flags está vacío
-    const flags = this.aiFeatures() as Record<string, any> | undefined;
-    if (!flags || Object.keys(flags).length === 0) {
-      this.toast.warning('No se han configurado funciones de IA para este plan.', 'Funciones IA vacías');
-    }
-
     this.submitting.set(true);
 
     // getRawValue() incluye campos disabled (code en edit)
@@ -933,7 +856,9 @@ export class PlanFormComponent {
       setup_fee: isFree ? null : raw.setup_fee,
       is_free: isFree,
       redemption_code: raw.redemption_code.trim() || null,
-      ai_feature_flags: this.aiFeatures(),
+      // The COMPLETE list (one row per catalog entry) so saving never drops a
+      // capability. `ai_feature_flags` is no longer sent: the backend derives it.
+      ai_entitlements: completeAIEntitlements(this.aiEntitlements()),
       // Empty section = null: clears the limits so the platform defaults apply.
       workflow_limits: buildWorkflowLimits(this.limitsForm.getRawValue()),
       feature_matrix: includedItems,

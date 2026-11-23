@@ -9,9 +9,11 @@ describe('RouteFlowController.scanRouteSheetAsync', () => {
   let jobs: any;
   let response: any;
 
+  // ia-cargas F5a: the type is detected by signature (a real JPEG header).
+  const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0, 1]);
   const file = (mimetype = 'image/jpeg') =>
     ({
-      buffer: Buffer.from('x'),
+      buffer: mimetype.startsWith('image/') ? JPEG : Buffer.from('x'),
       mimetype,
       originalname: 'p.jpg',
       size: 1,

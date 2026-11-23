@@ -88,7 +88,8 @@
         "approval": "none",
         "arguments": {
           "query": "${inputs.product_query}"
-        }
+        },
+        "background": true
       },
       {
         "id": "stock",
@@ -102,7 +103,8 @@
         "arguments": {
           "product_id": "${inputs.product_id}",
           "location_id": "${inputs.location_id}"
-        }
+        },
+        "background": true
       },
       {
         "id": "movements",
@@ -115,7 +117,8 @@
         "approval": "none",
         "arguments": {
           "product_id": "${inputs.product_id}"
-        }
+        },
+        "background": true
       },
       {
         "id": "adjust",
@@ -125,7 +128,7 @@
         "depends_on": [
           "stock"
         ],
-        "approval": "individual",
+        "approval": "batch",
         "arguments": {
           "product_id": "${inputs.product_id}",
           "location_id": "${inputs.location_id}",
@@ -135,12 +138,22 @@
         }
       },
       {
+        "id": "propose-batch",
+        "section": "steps",
+        "tool": "propose_write_batch",
+        "instruction": "Proponer los cambios preparados como un solo lote; Vex no escribe nada hasta que el usuario apruebe el lote.",
+        "depends_on": [
+          "adjust"
+        ],
+        "approval": "none"
+      },
+      {
         "id": "verify",
         "section": "verification",
         "tool": "get_stock_levels",
         "instruction": "Releer la misma bodega y producto después del ajuste.",
         "depends_on": [
-          "adjust"
+          "propose-batch"
         ],
         "approval": "none",
         "arguments": {
@@ -254,7 +267,12 @@
         "expected": "not_verified"
       }
     ],
-    "gaps": []
+    "gaps": [],
+    "approval": "batch",
+    "launch": {
+      "title": "Ajustar inventario por conteo",
+      "prompt": "Quiero ajustar el stock según un conteo físico. Pregúntame lo mínimo y déjame aprobar el lote."
+    }
   }
 }
 ---
@@ -280,7 +298,9 @@ Resolver permisos actuales, tools/versiones del metadata y bodega. Nunca almacen
 Resolver producto, variante y bodega. Pedir la cantidad contada; no estimar. Leer existencias del sistema y comparar con el conteo. Si difieren, cargar discrepancy-preflight antes de adjust.
 
 ## approvals
-Cada escritura exige preview de dominio actual y tarjeta individual del circuito propose→confirm→execute; el playbook no es consentimiento general, no emite tokens ni ejecuta handlers. Tras rechazo/no respuesta conservar estado pendiente. Nunca repetir un efecto desconocido.
+
+Playbook de lote: los pasos en segundo plano solo leen y preparan; las escrituras entran a un único lote con `propose_write_batch` y nada se aplica hasta que el usuario apruebe el lote. Las herramientas irreversibles nunca entran al lote: salen con su propia tarjeta.
+Cada escritura del lote exige preview de dominio actual y la aprobación del lote en el circuito propose→confirm→execute; el playbook no es consentimiento general, no emite tokens ni ejecuta handlers. Tras rechazo/no respuesta conservar estado pendiente. Nunca repetir un efecto desconocido.
 Si algún write pierde preview/contrato vigente, degradar a preparación-only y registrar el gap, no aprobar a ciegas.
 
 ## recovery

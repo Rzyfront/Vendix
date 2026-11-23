@@ -11,3 +11,7 @@ export * from './documents/document-pages.service';
 export * from './documents/page-content';
 export * from './images/image-prep';
 export * from './documents/document-reader';
+export * from './documents/queued-document';
+export * from './documents/merge-answers';
+export * from './extraction/lax-schema';
+export * from './extraction/scanner-errors';

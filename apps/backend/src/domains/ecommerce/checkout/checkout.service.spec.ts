@@ -587,6 +587,50 @@ describe('CheckoutService - promotions and coupons', () => {
       expect(result.coupon_discount).toBe(0);
     });
 
+    it('F1: con promo persiste el bruto unitario publicado (final_unit_price) para que el resumen del comprador cuadre', async () => {
+      taxesService.calculateProductTaxes.mockResolvedValue({
+        total_rate: 0.19,
+        total_tax_amount: 1900,
+        taxes: [{ tax_rate_id: 5, name: 'IVA 19%', rate: 0.19, tax_type: 'iva', is_inclusive: false, amount: 1900, base: 10000 }],
+      });
+      promotionEngine.quoteDiscounts.mockResolvedValue({
+        subtotal: 10000,
+        total_discount: 1000,
+        promotional_subtotal: 9000,
+        applied_promotions: [
+          { promotion_id: 7, name: 'Producto 10%', code: null, type: 'percentage', scope: 'product', value: 10, is_auto_apply: true, discount_amount: 1000, applicable_item_ids: [0] },
+        ],
+        items: [
+          { line_id: 0, product_id: PRODUCT_BASE.id, variant_id: null, quantity: 1, original_unit_price: 10000, promotion_discount: 1000, final_unit_price: 9000, final_line_total: 9000, promotion_ids: [7] },
+        ],
+        order_promotions_snapshot: [{ promotion_id: 7, discount_amount: 1000 }],
+      });
+      mockOrderCreate(10900);
+
+      await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+      } as any);
+
+      const line = prisma.orders.create.mock.calls[0][0].data.order_items.create[0];
+      // Bruto publicado pre-descuento (base 10.000 + IVA 1.900), no el
+      // impuesto post-descuento que ahora lleva `tax_amount_item`.
+      expect(Number(line.final_unit_price)).toBe(11900);
+      expect(Number(line.tax_amount_item)).toBeLessThan(1900);
+      expect(line.discount_amount).toBeDefined();
+    });
+
+    it('sin descuento no persiste final_unit_price (la orden queda como siempre)', async () => {
+      mockOrderCreate(10000);
+      await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+      } as any);
+      const line = prisma.orders.create.mock.calls[0][0].data.order_items.create[0];
+      expect(line.final_unit_price).toBeUndefined();
+      expect(line.discount_amount).toBeUndefined();
+    });
+
     it('applies a category-scoped promotion using product_categories lookup', async () => {
       // Cart has a single product belonging to category 555. The promotion
       // engine receives `category_ids` resolved from product_categories.

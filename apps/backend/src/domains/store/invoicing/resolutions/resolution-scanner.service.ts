@@ -1,14 +1,35 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { AIEngineService } from '../../../../ai-engine/ai-engine.service';
-import { AIMessage } from '../../../../ai-engine/interfaces/ai-provider.interface';
-import { parseAiJson } from '../../../../ai-engine/utils/ai-json.util';
 import {
   isWellFormedTechnicalKey,
   TECHNICAL_KEY_LENGTHS_LABEL,
 } from '../fiscal-document-requirements';
 import { AiScanFile } from '@common/ai-scan-jobs/interfaces/ai-scan-job.interface';
-const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only (export default) but CJS runtime exports the function
+import type { AiJobProgress } from '@common/ai-scan-jobs/ai-job-monitor.service';
+import {
+  AiExtractionService,
+  newIngestQuotaKey,
+} from '@common/ai-ingest/extraction/ai-extraction.service';
+import { toScannerError } from '@common/ai-ingest/extraction/scanner-errors';
+import { DocumentPagesService } from '@common/ai-ingest/documents/document-pages.service';
+import {
+  readDocumentWithAi,
+  ReadDocumentResult,
+} from '@common/ai-ingest/documents/document-reader';
+import { detectQueuedDocument } from '@common/ai-ingest/documents/queued-document';
+import { mergeFormAnswers } from '@common/ai-ingest/documents/merge-answers';
+import {
+  buildFormInstruction,
+  conflictWarnings,
+  DocumentScanSource,
+  scanSourceOf,
+} from '@common/ai-ingest/documents/form-instruction';
+import {
+  RESOLUTION_FIELD_LABELS,
+  RESOLUTION_INGEST_PROFILE,
+  RESOLUTION_SCAN_INSTRUCTION,
+} from './resolution-ingest.profile';
 
 /**
  * One extracted field, already checked against the shape the DIAN actually
@@ -58,6 +79,10 @@ export interface DianResolutionScanResult {
   /** Human-readable reasons the extraction cannot be saved as-is. */
   blocking_issues: string[];
   extraction_notes: string | null;
+  /** Avisos de lectura en español (páginas sin leer, valores en conflicto). Opcional. */
+  warnings?: string[];
+  /** Qué se leyó (páginas, páginas de texto, llamadas). Opcional. */
+  scan_source?: DocumentScanSource;
 }
 
 /** Below this, a field is pre-filled but flagged for manual confirmation. */
@@ -89,15 +114,18 @@ const MAX_RANGE_SPAN = 500_000_000;
 export class ResolutionScannerService {
   private readonly logger = new Logger(ResolutionScannerService.name);
 
-  constructor(private readonly aiEngine: AIEngineService) {}
+  constructor(
+    private readonly aiEngine: AIEngineService,
+    private readonly extraction: AiExtractionService,
+    private readonly documentPages: DocumentPagesService,
+  ) {}
 
   /**
    * Scans a DIAN numbering-resolution document (image or PDF) and returns the
    * fields needed to create an `invoice_resolutions` row, each one annotated
    * with whether it can be trusted.
    *
-   * Mirrors `RutScannerService.scanRutDocument`: sharp preprocesses images and
-   * PDFs pass through raw as a data-uri the vision model reads natively.
+   * Reads it through the common ai-ingest reader (`scanResolutionFromFiles`).
    */
   async scanResolutionDocument(
     file: Express.Multer.File,
@@ -117,13 +145,21 @@ export class ResolutionScannerService {
     await this.aiEngine.assertVisionModelLinked('dian_resolution_scanner');
   }
 
-  /** Núcleo del escaneo: recibe buffer+mime (handler de la cola `ai-scan`). */
+  /**
+   * Núcleo del escaneo (handler `dian_resolution` de la cola `ai-scan`), por el
+   * lector común de ai-ingest (plan ia-cargas F5b, #13): tipo real por firma,
+   * cada página del PDF con su texto nativo y su imagen (los dígitos exactos
+   * del rango y la clave técnica, y la disposición del formulario), todas en
+   * UNA llamada con esquema y una reparación. Desde ahí, la misma
+   * `normalizeResponse`: prefijo, rangos, número y fechas idénticos.
+   */
   async scanResolutionFromFiles(
     files: AiScanFile[],
+    options: { reportProgress?: (progress: AiJobProgress) => Promise<void> } = {},
   ): Promise<DianResolutionScanResult> {
     const file = files[0];
     this.logger.debug(
-      `[ResolutionScan] File: mimetype=${file.mimeType}, size=${file.size}, buffer=${file.buffer?.length ?? 'NO BUFFER'}`,
+      `[ResolutionScan] File: mimetype=${file?.mimeType}, size=${file?.size}, buffer=${file?.buffer?.length ?? 'NO BUFFER'}`,
     );
 
     // Antes de gastar la llamada: sin modelo de visión enlazado, `run()` cae al
@@ -132,105 +168,67 @@ export class ResolutionScannerService {
     // acabaría usando.
     await this.assertReady();
 
-    const { base64, mimeType } = await this.preprocessImage(file);
-    const dataUri = `data:${mimeType};base64,${base64}`;
-
-    const documentMessage: AIMessage = {
-      role: 'user',
-      content: [
-        {
-          type: 'text',
-          text: 'Extract the numbering-resolution data from this Colombian DIAN resolution document. Return ONLY the JSON object matching the schema defined in your system instructions.',
-        },
-        {
-          type: 'image_url',
-          image_url: { url: dataUri, detail: 'high' },
-        },
-      ],
-    };
-
-    const response = await this.aiEngine.run('dian_resolution_scanner', {}, [
-      documentMessage,
-    ]);
-
-    this.logger.debug(
-      `[ResolutionScan] AI response: success=${response.success}, contentLength=${response.content?.length ?? 0}, model=${response.model}, error=${response.error}`,
+    const detected = detectQueuedDocument(
+      { buffer: file?.buffer, originalname: file?.originalName, mimetype: file?.mimeType },
+      'La resolución debe ser un PDF o una foto (JPG, PNG o WebP).',
     );
 
-    if (!response.success || !response.content) {
+    let read: ReadDocumentResult<Record<string, unknown>>;
+    try {
+      read = await readDocumentWithAi<Record<string, unknown>>({
+        file: { buffer: file.buffer, originalName: file.originalName ?? 'resolucion' },
+        mimeType: detected.mime,
+        pages: this.documentPages,
+        extraction: this.extraction,
+        appKey: 'dian_resolution_scanner',
+        schema: RESOLUTION_INGEST_PROFILE.documentSchema,
+        instruction: (batch, context) =>
+          buildFormInstruction(RESOLUTION_SCAN_INSTRUCTION, batch, context),
+        limits: RESOLUTION_INGEST_PROFILE.limits,
+        maxBytes: RESOLUTION_INGEST_PROFILE.limits.maxBytes,
+        splitTallImages: false,
+        renderTextPages: true,
+        quotaKey: newIngestQuotaKey(),
+        reportProgress: options.reportProgress,
+        logLabel: 'ResolutionScan',
+        rawExtractionErrors: true,
+      });
+    } catch (err) {
       this.logger.error(
-        `AI DIAN resolution extraction failed: ${response.error}`,
+        `AI DIAN resolution extraction failed: ${(err as Error)?.message}`,
       );
-      // Se propaga el error del proveedor. Un 502 genérico dejaba dos causas muy
-      // distintas indistinguibles: "la foto está ilegible" y "el modelo
-      // enlazado a esta app no acepta imágenes" — la segunda no se arregla
-      // tomando otra foto, se arregla enlazando un modelo de visión.
-      throw new VendixHttpException(
-        ErrorCodes.RESOLUTION_SCAN_AI_FAIL,
-        response.error
-          ? `La IA no pudo leer la resolución: ${response.error}`
-          : undefined,
-      );
+      // Se propaga el error del proveedor: "la foto está ilegible" y "el modelo
+      // enlazado a esta app no acepta imágenes" no se arreglan igual.
+      throw toScannerError(err, {
+        parseFail: ErrorCodes.RESOLUTION_SCAN_PARSE_FAIL,
+        aiFail: ErrorCodes.RESOLUTION_SCAN_AI_FAIL,
+        aiFailMessage: (e) => `La IA no pudo leer la resolución: ${e}`,
+      });
     }
 
+    const merged = mergeFormAnswers(read.answers);
+    let result: DianResolutionScanResult;
     try {
-      const parsed = parseAiJson(response.content);
-      return this.normalizeResponse(parsed);
+      result = this.normalizeResponse(merged.data);
     } catch (err) {
       if (err instanceof VendixHttpException) throw err;
       this.logger.error(
-        `Failed to parse AI DIAN resolution response: ${response.content}`,
+        `Failed to normalize AI DIAN resolution response: ${(err as Error)?.message}`,
       );
       throw new VendixHttpException(ErrorCodes.RESOLUTION_SCAN_PARSE_FAIL);
     }
+    const warnings = [
+      ...read.warnings,
+      ...conflictWarnings(merged.conflicts, RESOLUTION_FIELD_LABELS),
+    ];
+    return {
+      ...result,
+      ...(warnings.length ? { warnings } : {}),
+      scan_source: scanSourceOf(read),
+    };
   }
 
   // --- Private helpers ---
-
-  /**
-   * Same two-path preprocessing as the RUT scanner: sharp for images, raw
-   * passthrough when sharp throws (PDFs and unsupported formats), so a PDF
-   * reaches the vision model untouched instead of failing the request.
-   */
-  private async preprocessImage(
-    file: AiScanFile,
-  ): Promise<{ base64: string; mimeType: string }> {
-    const MAX_DIMENSION = 1536;
-    const JPEG_QUALITY = 85;
-
-    try {
-      const metadata = await sharp(file.buffer).metadata();
-      const needsResize =
-        (metadata.width && metadata.width > MAX_DIMENSION) ||
-        (metadata.height && metadata.height > MAX_DIMENSION);
-
-      let pipeline = sharp(file.buffer);
-
-      if (needsResize) {
-        pipeline = pipeline.resize(MAX_DIMENSION, MAX_DIMENSION, {
-          fit: 'inside',
-          withoutEnlargement: true,
-        });
-      }
-
-      const processedBuffer = await pipeline
-        .jpeg({ quality: JPEG_QUALITY })
-        .toBuffer();
-
-      return {
-        base64: processedBuffer.toString('base64'),
-        mimeType: 'image/jpeg',
-      };
-    } catch (err) {
-      this.logger.warn(
-        `[ResolutionScan] Image preprocessing failed, using raw: ${err.message}`,
-      );
-      return {
-        base64: file.buffer.toString('base64'),
-        mimeType: file.mimeType,
-      };
-    }
-  }
 
   private normalizeResponse(raw: unknown): DianResolutionScanResult {
     const parsed = (raw ?? {}) as Record<string, unknown>;

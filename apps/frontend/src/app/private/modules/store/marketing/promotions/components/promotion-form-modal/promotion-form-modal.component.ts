@@ -10,6 +10,8 @@ import {
   Validators,
 } from '@angular/forms';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
+import { buildPromotionDate, splitPromotionDate } from '../../utils/promotion-date.util';
 import { startWith } from 'rxjs/operators';
 import { forkJoin, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
@@ -397,8 +399,8 @@ interface NormalizedTier {
           </p>
         }
 
-        <!-- Dates + Min purchase -->
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <!-- Vigencia: fecha obligatoria + hora opcional (vacía = todo el día) -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <app-input
             label="Fecha inicio"
             type="date"
@@ -407,10 +409,28 @@ interface NormalizedTier {
             [error]="form.get('start_date')?.touched && form.get('start_date')?.invalid ? 'La fecha de inicio es requerida' : ''"
           ></app-input>
           <app-input
+            label="Hora inicio"
+            type="time"
+            formControlName="start_time"
+            helperText="Opcional. Vacía = desde las 00:00."
+          ></app-input>
+          <app-input
             label="Fecha fin"
             type="date"
             formControlName="end_date"
           ></app-input>
+          <app-input
+            label="Hora fin"
+            type="time"
+            formControlName="end_time"
+            helperText="Opcional. Vacía = todo el día."
+          ></app-input>
+        </div>
+        <p class="text-xs text-text-secondary -mt-1">
+          Las fechas y horas son en la hora de la tienda ({{ storeTimezone() }}).
+        </p>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <app-input
             label="Compra minima"
             type="number"
@@ -533,6 +553,10 @@ export class PromotionFormModalComponent {
   private categoriesService = inject(CategoriesService);
   private destroyRef = inject(DestroyRef);
   private fb = inject(FormBuilder);
+  private storeSettings = inject(StoreSettingsFacade);
+
+  /** Zona horaria de la tienda: las fechas y horas de la promo viven en ella. */
+  readonly storeTimezone = this.storeSettings.timezone;
 
   form!: FormGroup;
   readonly productOptions = signal<MultiSelectorOption[]>([]);
@@ -697,7 +721,9 @@ export class PromotionFormModalComponent {
        */
       quantity_grouping: ['cart_total' as 'cart_total' | 'per_product'],
       start_date: ['', Validators.required],
+      start_time: [''],
       end_date: [''],
+      end_time: [''],
       min_purchase_amount: [null],
       max_discount_amount: [null],
       usage_limit: [null],
@@ -937,6 +963,8 @@ export class PromotionFormModalComponent {
   }
 
   private populateForm(promotion: Promotion | null): void {
+    const start = splitPromotionDate(promotion?.start_date, 'start');
+    const end = splitPromotionDate(promotion?.end_date, 'end');
     this.form.reset({
       name: promotion?.name || '',
       description: promotion?.description || '',
@@ -950,8 +978,10 @@ export class PromotionFormModalComponent {
       quantity_grouping:
         (promotion?.quantity_grouping as 'cart_total' | 'per_product' | undefined) ??
         'cart_total',
-      start_date: this.toDateInputValue(promotion?.start_date),
-      end_date: this.toDateInputValue(promotion?.end_date),
+      start_date: start.date,
+      start_time: start.time,
+      end_date: end.date,
+      end_time: end.time,
       min_purchase_amount: promotion?.min_purchase_amount ?? null,
       max_discount_amount: promotion?.max_discount_amount ?? null,
       usage_limit: promotion?.usage_limit ?? null,
@@ -962,6 +992,15 @@ export class PromotionFormModalComponent {
       product_ids: promotion?.promotion_products?.map((pp) => pp.product_id) || [],
       category_ids: promotion?.promotion_categories?.map((pc) => pc.category_id) || [],
     }, { emitEvent: false });
+
+    // `reset({ emitEvent: false })` no emite `valueChanges`, y los chips de días
+    // leen el control a través de ese stream: al abrir una promo guardada se
+    // quedaban con el `[]` anterior (los 7 días encendidos). Se re-emite solo
+    // este control (`onlySelf`) para que los chips reflejen los días guardados
+    // sin disparar los efectos del resto del formulario.
+    this.form
+      .get('active_weekdays')
+      ?.updateValueAndValidity({ onlySelf: true });
 
     // Reset the tiers array explicitly (reset() keeps existing FormArray children
     // unless we clear them). Seed rows from the persisted promotion.
@@ -1186,10 +1225,6 @@ export class PromotionFormModalComponent {
       : { required: true };
   }
 
-  private toDateInputValue(value?: string | null): string {
-    return value ? value.split('T')[0] : '';
-  }
-
   private toNumberArray(value: unknown): number[] {
     return Array.isArray(value)
       ? value.map((item) => Number(item)).filter((item) => Number.isFinite(item))
@@ -1222,6 +1257,13 @@ export class PromotionFormModalComponent {
     const isBlank = (v: unknown) => v === null || v === undefined || v === '';
     clearIfEmpty('description', !dto.description);
     clearIfEmpty('code', !dto.code);
+    // Fecha + hora opcional → un solo valor. Sin hora viaja `YYYY-MM-DD` (día
+    // completo de la tienda); con hora, ISO con el offset de la zona de la tienda.
+    const tz = this.storeTimezone();
+    dto.start_date = buildPromotionDate(raw.start_date, raw.start_time, tz);
+    dto.end_date = buildPromotionDate(raw.end_date, raw.end_time, tz);
+    delete dto.start_time;
+    delete dto.end_time;
     clearIfEmpty('end_date', !dto.end_date);
     clearIfEmpty('min_purchase_amount', isBlank(dto.min_purchase_amount));
     clearIfEmpty('max_discount_amount', isBlank(dto.max_discount_amount) || dto.type !== 'percentage');

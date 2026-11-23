@@ -1209,6 +1209,8 @@ describe('AgentVerifierService server-only D2 evidence', () => {
     h.loader.getPlaybooks.mockReturnValue(documents);
     h.registry.register({
       name: 'not_supported',
+      access: 'public',
+      accessReason: 'test fixture',
       description: 'gap',
       domain: 'inventory',
       readOnly: true,

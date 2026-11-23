@@ -5,6 +5,8 @@ export interface ConversationWithMessages {
   user_id: number;
   title: string | null;
   summary: string | null;
+  /** Id of the last `ai_messages` row covered by `summary` (T22). */
+  summary_through_message_id: number | null;
   app_key: string | null;
   status: string;
   metadata: any;

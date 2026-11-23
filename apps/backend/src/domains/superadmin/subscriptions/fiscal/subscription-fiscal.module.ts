@@ -1,3 +1,4 @@
+import { AiIngestModule } from '../../../../common/ai-ingest/ai-ingest.module';
 import { Module } from '@nestjs/common';
 
 import { PrismaModule } from '../../../../prisma/prisma.module';
@@ -66,6 +67,7 @@ import { PlatformInvoicePaymentsService } from './platform-invoice-payments.serv
 
 @Module({
   imports: [
+    AiIngestModule,
     PrismaModule,
     ResponseModule,
     S3Module,

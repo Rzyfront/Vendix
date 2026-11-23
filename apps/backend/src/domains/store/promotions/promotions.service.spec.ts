@@ -62,7 +62,8 @@ describe('PromotionsService', () => {
       expect(args.orderBy).toEqual([{ priority: 'asc' }, { id: 'asc' }]);
       expect(args.where.OR).toEqual([
         { end_date: null },
-        { end_date: { gte: new Date('2026-11-19T00:00:00Z') } },
+        { end_date: { gte: new Date('2026-11-19T10:00:00Z') } },
+        { end_date: new Date('2026-11-19T00:00:00Z') },
       ]);
     });
   });
@@ -116,6 +117,65 @@ describe('PromotionsService', () => {
     });
   });
 
+  describe('fechas al crear y editar (reloj de la tienda)', () => {
+    const txWith = (tx: any) =>
+      prisma.$transaction.mockImplementation(async (cb: any) => cb(tx));
+
+    it('crear con fechas sin hora guarda el día completo de la tienda', async () => {
+      const tx = {
+        promotions: {
+          create: jest.fn().mockImplementation(async ({ data }) => ({ id: 9, ...data })),
+          findFirst: jest.fn().mockResolvedValue({ id: 9 }),
+        },
+        promotion_products: { createMany: jest.fn() },
+        promotion_categories: { createMany: jest.fn() },
+        promotion_quantity_tiers: { createMany: jest.fn() },
+      };
+      txWith(tx);
+      prisma.promotions.findFirst.mockResolvedValue(null);
+      await service.create({
+        name: 'Fin de semana',
+        type: 'percentage',
+        value: 10,
+        start_date: '2026-11-20',
+        end_date: '2026-11-21',
+      } as any);
+      const data = tx.promotions.create.mock.calls[0][0].data;
+      expect(data.start_date).toEqual(new Date('2026-11-20T00:00:00.000Z'));
+      expect(data.end_date).toEqual(new Date('2026-11-21T23:59:59.999Z'));
+    });
+
+    it('editar respeta la hora explícita y permite quitar la fecha fin', async () => {
+      const existing = {
+        id: 9,
+        scope: 'order',
+        rule_type: 'flat',
+        promotion_products: [],
+        promotion_categories: [],
+        promotion_quantity_tiers: [],
+      };
+      const tx = {
+        promotions: {
+          update: jest.fn().mockResolvedValue(existing),
+          findFirst: jest.fn().mockResolvedValue(existing),
+        },
+        promotion_products: { deleteMany: jest.fn(), createMany: jest.fn() },
+        promotion_categories: { deleteMany: jest.fn(), createMany: jest.fn() },
+        promotion_quantity_tiers: { deleteMany: jest.fn(), createMany: jest.fn() },
+      };
+      txWith(tx);
+      prisma.promotions.findFirst.mockResolvedValue(existing);
+
+      await service.update(9, { end_date: '2026-11-21T15:00:00-05:00' } as any);
+      expect(tx.promotions.update.mock.calls[0][0].data.end_date).toEqual(
+        new Date('2026-11-21T15:00:00.000Z'),
+      );
+
+      await service.update(9, { end_date: null } as any);
+      expect(tx.promotions.update.mock.calls[1][0].data.end_date).toBeNull();
+    });
+  });
+
   describe('getSummary', () => {
     it('cuenta como activas también las programadas cuya fecha ya llegó', async () => {
       await service.getSummary();
@@ -130,12 +190,17 @@ describe('PromotionsService', () => {
         promo({ id: 1, end_date: new Date('2026-11-18T00:00:00Z') }),
         promo({ id: 2, end_date: new Date('2026-11-19T00:00:00Z') }),
         promo({ id: 3, state: 'scheduled', start_date: new Date('2026-12-01T00:00:00Z') }),
+        // Con hora: terminó hoy a las 09:00 (ahora son las 10:00) / termina a las 23:59.
+        promo({ id: 4, end_date: new Date('2026-11-19T09:00:00Z') }),
+        promo({ id: 5, end_date: new Date('2026-11-19T23:59:59.999Z') }),
       ]);
       const { data } = await service.findAll({} as any);
       expect(data.map((p: any) => p.effective_state)).toEqual([
         'expired',
         'active',
         'scheduled',
+        'expired',
+        'active',
       ]);
     });
   });

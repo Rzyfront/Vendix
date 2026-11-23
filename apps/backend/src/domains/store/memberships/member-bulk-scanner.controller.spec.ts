@@ -4,7 +4,6 @@ import {
 } from './member-bulk-scanner.controller';
 import { MemberBulkScannerService } from './member-bulk-scanner.service';
 import { VendixHttpException } from '@common/errors';
-import * as XLSX from 'xlsx';
 
 describe('MemberBulkScannerController.scanAsync', () => {
   let controller: MemberBulkScannerController;
@@ -74,36 +73,9 @@ describe('MemberBulkScannerController.scanAsync', () => {
     );
   });
 
-  it('P0 #1291: el escaneo síncrono rechaza un xlsx declarado como image/png (400, sin parsear)', async () => {
-    const xlsx = XLSX.write(
-      (() => {
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['nombre'], ['Ana']]), 'S');
-        return wb;
-      })(),
-      { type: 'buffer', bookType: 'xlsx' },
-    ) as Buffer;
-    const scanRoster = jest.spyOn(scanner, 'scanRoster');
-
-    const error = await controller
-      .scan(file('image/png', xlsx, 'socios.png'))
-      .catch((e) => e);
-
-    expect(error).toBeInstanceOf(VendixHttpException);
-    expect(error).toMatchObject({ errorCode: 'MEMBER_SCAN_INVALID_FILE' });
-    expect(error.getStatus()).toBe(400);
-    expect(scanRoster).not.toHaveBeenCalled();
-  });
-
-  it('P0 #1291: el escaneo síncrono sigue aceptando imágenes reales', async () => {
-    const scanRoster = jest
-      .spyOn(scanner, 'scanRoster')
-      .mockResolvedValue({ members: [] } as any);
-
-    await controller.scan(file());
-
-    expect(scanRoster).toHaveBeenCalledTimes(1);
-    expect(response.success).toHaveBeenCalled();
+  it('ia-cargas F6: el POST síncrono (bulk-scan) ya no existe; solo queda el asíncrono', () => {
+    expect((controller as any).scan).toBeUndefined();
+    expect(typeof controller.scanAsync).toBe('function');
   });
 
   it('sin archivo -> error sin encolar', async () => {

@@ -6,7 +6,6 @@ import {
   AI_FEATURE_KEYS,
   isAIFeatureKey,
 } from '../../../store/subscriptions/types/access.types';
-import { AIToolRegistry } from '../../../../ai-engine/tools/ai-tool-registry';
 import { PlanModuleRulesService } from '../../../../common/access/plan-module-rules.service';
 import {
   CreatePlanDto,
@@ -15,21 +14,38 @@ import {
   PlanPricingDto,
 } from '../dto';
 import { parseWorkflowLimits } from '../../../store/workflows/limits/workflow-limits.validation';
+import {
+  AIEntitlement,
+  legacyFlagsToAIEntitlements,
+} from '../../../store/subscriptions/types/ai-capabilities';
+import {
+  completeAIEntitlements,
+  planAIEntitlements,
+  writeAIEntitlementsToLegacyFlags,
+} from '../../../store/subscriptions/services/ai-entitlements.logic';
+import { withAIEngineDefaults } from '../../../store/subscriptions/services/ai-engine-plan-defaults';
+import {
+  aiEntitlementRowData,
+  loadPlanAIEntitlements,
+  parsePlanAIEntitlements,
+  rowsAfterLegacySave,
+  upsertPlanAIEntitlements,
+} from './plan-ai-entitlements.write';
+
+/** T12 — AI rows and legacy JSON a save writes together (dual write). */
+interface PlanAIWrite {
+  flags: unknown;
+  rows: AIEntitlement[];
+  /** Ids rewritten on rows that already exist; omitted = all of them. */
+  overwrite?: Set<string>;
+}
 
 @Injectable()
 export class PlansService {
   private readonly logger = new Logger(PlansService.name);
 
-  /**
-   * F6 — `toolRegistry` es opcional a propósito: `AIEngineModule` es `@Global()`
-   * y en producción siempre resuelve, pero los specs unitarios históricos
-   * construyen el servicio con `new PlansService(prisma)` y deben seguir
-   * compilando. Sin registry, cualquier `tools_allowed` declarado se rechaza
-   * (fail-closed): no se puede probar el enlace, así que no se puede guardar.
-   */
   constructor(
     private readonly prisma: GlobalPrismaService,
-    @Optional() private readonly toolRegistry?: AIToolRegistry,
     // AccessModule es @Global: se resuelve sin importarlo en el módulo.
     @Optional() private readonly planModuleRules?: PlanModuleRulesService,
   ) {}
@@ -40,20 +56,17 @@ export class PlansService {
    * Reglas (todas → 400 `SUBSCRIPTION_VALIDATION`, nunca 500 crudo):
    *  1. Cada key superior de `ai_feature_flags` debe ser una categoría IA
    *     canónica (el mismo dominio que `ai_engine_applications`
-   *     usa en `ai_feature_category`) o un allowlist conocido
-   *     (`agents_allowed` / `tools_allowed`). Una key desconocida es una
+   *     usa en `ai_feature_category`) o un campo conocido
+   *     (`agents_allowed`; `tools_allowed` se tolera como inerte). Una key desconocida es una
    *     referencia rota: el gate nunca la evaluaría.
    *  2. Cada entrada de `agents_allowed` (nivel superior o anidada en la
    *     config de una feature, p. ej. `tool_agents.agents_allowed`) debe
    *     existir como `key` en `ai_agents`.
-   *  3. Cada entrada de `tools_allowed` debe existir en el `AIToolRegistry`
-   *     (resolución por nombre canónico, igual que el filtro F3 del turno).
-   *     Excepción: `['*']` como ÚNICO valor = todas las tools del registro,
-   *     incluidas las futuras (el runtime F3 y el resolver lo soportan).
-   *     `'*'` mezclado con otros nombres es ambiguo → 400. `[]` sigue
-   *     significando ninguna tool.
+   *  3. `tools_allowed` ya no se valida: el plan no restringe herramientas
+   *     (N4, las limita el rol), así que un valor heredado es inerte y se
+   *     acepta tal cual.
    *
-   * En update, las tools/agents desconocidas que YA estaban guardadas en el
+   * En update, los agents desconocidos que YA estaban guardadas en el
    * mismo punto (`persistedFlags`, por feature) se toleran con warn: las
    * persistió una versión anterior del catálogo/frontend y el form las
    * reenvía; solo se rechaza lo desconocido que se AÑADE. En create
@@ -61,7 +74,7 @@ export class PlansService {
    *
    * Los refs se validen estén o no habilitadas las features: un typo con el
    * switch apagado rompería igual al encenderlo. Sin tablas nuevas: solo
-   * lecturas a `ai_agents` + registry en memoria.
+   * lecturas a `ai_agents`.
    */
   private async assertAIFlagsLinked(
     flags: unknown,
@@ -79,10 +92,14 @@ export class PlansService {
 
     const raw = flags as Record<string, unknown>;
     const knownCategories = new Set<string>(AI_FEATURE_KEYS as readonly string[]);
-    const allowlistFields = new Set(['agents_allowed', 'tools_allowed']);
+    const allowlistFields = new Set(['agents_allowed']);
+    // Legacy key: accepted anywhere it used to be, never validated (inert).
+    const inertFields = new Set(['tools_allowed']);
 
     const unknownKeys = Object.keys(raw).filter(
-      (key) => !knownCategories.has(key) && !allowlistFields.has(key),
+      (key) => !knownCategories.has(key) &&
+        !allowlistFields.has(key) &&
+        !inertFields.has(key),
     );
     if (unknownKeys.length > 0) {
       throw new VendixHttpException(
@@ -97,7 +114,6 @@ export class PlansService {
     }
 
     const agentKeys = new Set<string>();
-    const toolNames = new Set<string>();
     // Valor ya guardado por ubicación (`path` + campo) para tolerar heredados.
     const persistedByLocation = new Map<string, Set<string>>();
     const locationsByItem = new Map<string, Set<string>>();
@@ -150,18 +166,8 @@ export class PlansService {
             { field: location },
           );
         }
-        if (field === 'tools_allowed' && (value as string[]).includes('*')) {
-          if ((value as string[]).length > 1) {
-            throw new VendixHttpException(
-              ErrorCodes.SUBSCRIPTION_VALIDATION,
-              `Plan declares '${location}' mixing the '*' wildcard with other tools: use ['*'] alone to allow every tool, or list tools explicitly`,
-              { field: location },
-            );
-          }
-          continue;
-        }
         for (const item of value as string[]) {
-          (field === 'agents_allowed' ? agentKeys : toolNames).add(item);
+          agentKeys.add(item);
           const mapKey = `${field}|${item}`;
           const locs = locationsByItem.get(mapKey) ?? new Set<string>();
           locs.add(path);
@@ -219,35 +225,6 @@ export class PlansService {
           ErrorCodes.SUBSCRIPTION_VALIDATION,
           `Plan references unknown AI agents: ${missing.join(', ')}`,
           { field: 'ai_feature_flags.agents_allowed', unknown_agents: missing },
-        );
-      }
-    }
-
-    if (toolNames.size > 0) {
-      const wanted = [...toolNames];
-      const allMissing = wanted.filter((name) => {
-        if (!this.toolRegistry) return true;
-        return !this.toolRegistry.get(this.toolRegistry.canonicalName(name));
-      });
-      const inheritedMissing = allMissing.filter((name) =>
-        isInherited('tools_allowed', name),
-      );
-      const missing = allMissing.filter((name) => !inheritedMissing.includes(name));
-      if (inheritedMissing.length > 0) {
-        this.logger.warn(
-          JSON.stringify({
-            event: 'PLAN_INHERITED_UNKNOWN_AI_REFS',
-            plan_id: planId,
-            feature: 'tools_allowed',
-            unknown_tools: inheritedMissing,
-          }),
-        );
-      }
-      if (missing.length > 0) {
-        throw new VendixHttpException(
-          ErrorCodes.SUBSCRIPTION_VALIDATION,
-          `Plan references unknown AI tools: ${missing.join(', ')}`,
-          { field: 'ai_feature_flags.tools_allowed', unknown_tools: missing },
         );
       }
     }
@@ -313,7 +290,11 @@ export class PlansService {
    * row of a multi-cycle group. Excludes per-cycle fields (code, billing_cycle,
    * base_price, currency) and the group/identity fields handled by the caller.
    */
-  private buildSharedCreateData(dto: CreatePlanDto, isPromotional: boolean) {
+  private buildSharedCreateData(
+    dto: CreatePlanDto,
+    isPromotional: boolean,
+    aiFlags: unknown,
+  ) {
     const workflowLimits = parseWorkflowLimits(dto.workflow_limits);
     return {
       name: dto.name,
@@ -326,7 +307,7 @@ export class PlansService {
       suspension_day: dto.suspension_day ?? 14,
       cancellation_day: dto.cancellation_day ?? 45,
       feature_matrix: this.toPlainFeatureMatrix(dto.feature_matrix) as any,
-      ai_feature_flags: (dto.ai_feature_flags ?? {}) as any,
+      ai_feature_flags: aiFlags as Prisma.InputJsonValue,
       // P7.1: omitted/null = platform defaults (the column stays NULL).
       ...(workflowLimits ? { workflow_limits: workflowLimits as Prisma.InputJsonValue } : {}),
       resellable: dto.resellable ?? !isPromotional,
@@ -342,15 +323,76 @@ export class PlansService {
     };
   }
 
+  /**
+   * T12 — AI rows and legacy JSON of a new plan. With `ai_entitlements`, a
+   * row not sent takes the legacy translation of the flags sent (or the
+   * catalog default) and the flags get the fields the rows own; without it,
+   * the rows are the legacy translation of the flags (same rule as migration
+   * 20261223100000), so every new plan starts with its 11 rows.
+   */
+  private buildAICreate(
+    dto: CreatePlanDto,
+    parsed: AIEntitlement[] | undefined,
+  ): PlanAIWrite {
+    const flags = withAIEngineDefaults(dto.ai_feature_flags);
+    const legacy = legacyFlagsToAIEntitlements(flags);
+    if (parsed === undefined) return { flags, rows: legacy };
+    const rows = completeAIEntitlements(parsed, legacy);
+    return { flags: writeAIEntitlementsToLegacyFlags(flags, rows), rows };
+  }
+
+  /**
+   * T12 — what an update writes to the AI rows of its group, or `null` when
+   * the caller sent no AI field. `ai_entitlements` completes against the
+   * plan's stored rows and rewrites the legacy fields they own (flags sent in
+   * the same payload are the base). A legacy-only save (older callers) keeps
+   * its JSON and rewrites only the rows of the features whose JSON changed, so
+   * resending the same flags never undoes a per-agent setting the legacy JSON
+   * cannot express.
+   */
+  private async resolveAIUpdate(
+    dto: UpdatePlanDto,
+    parsed: AIEntitlement[] | undefined,
+    persistedFlags: unknown,
+    loadStored: () => Promise<AIEntitlement[]>,
+  ): Promise<PlanAIWrite | null> {
+    if (parsed !== undefined) {
+      const rows = completeAIEntitlements(parsed, await loadStored());
+      return {
+        flags: writeAIEntitlementsToLegacyFlags(
+          dto.ai_feature_flags ?? persistedFlags,
+          rows,
+        ),
+        rows,
+      };
+    }
+    if (dto.ai_feature_flags !== undefined) {
+      return {
+        flags: dto.ai_feature_flags,
+        ...rowsAfterLegacySave(
+          await loadStored(),
+          persistedFlags,
+          dto.ai_feature_flags,
+        ),
+      };
+    }
+    return null;
+  }
+
   async create(dto: CreatePlanDto) {
     // F6 — el plan no se persiste si declara categorías, agentes o tools que
     // no existen en el catálogo vivo (400, antes de cualquier write).
     await this.assertAIFlagsLinked(dto.ai_feature_flags);
+    // T12: unknown/repeated AI capabilities → 400 before any write.
+    const ai = this.buildAICreate(
+      dto,
+      parsePlanAIEntitlements(dto.ai_entitlements),
+    );
     // P7.1: WORKFLOW_LIMITS_INVALID before any write.
     parseWorkflowLimits(dto.workflow_limits);
 
     if (Array.isArray(dto.pricings) && dto.pricings.length > 0) {
-      return this.createMultiCycle(dto);
+      return this.createMultiCycle(dto, ai);
     }
 
     const existing = await this.prisma.subscription_plans.findUnique({
@@ -366,7 +408,9 @@ export class PlansService {
 
     return this.prisma.subscription_plans.create({
       data: {
-        ...this.buildSharedCreateData(dto, isPromotional),
+        ...this.buildSharedCreateData(dto, isPromotional, ai.flags),
+        // Nested create: the plan and its AI rows land in one statement.
+        ai_entitlements: { create: ai.rows.map(aiEntitlementRowData) },
         code: dto.code,
         plan_type: planType as any,
         billing_cycle: (dto.billing_cycle as any) || 'monthly',
@@ -386,7 +430,7 @@ export class PlansService {
    * keeps the canonical `dto.code`, the rest get a `${code}-${cycle}` suffix.
    * Atomic: any code collision rolls back the whole group.
    */
-  private async createMultiCycle(dto: CreatePlanDto) {
+  private async createMultiCycle(dto: CreatePlanDto, ai: PlanAIWrite) {
     const pricings = dto.pricings as PlanPricingDto[];
 
     const defaults = pricings.filter((p) => p.is_default === true);
@@ -412,7 +456,7 @@ export class PlansService {
     const planType = this.resolvePlanType(dto.plan_type, dto.is_promotional);
     const isPromotional = planType === 'promotional';
     const groupCode = dto.plan_group_code ?? dto.code;
-    const shared = this.buildSharedCreateData(dto, isPromotional);
+    const shared = this.buildSharedCreateData(dto, isPromotional, ai.flags);
 
     return this.prisma.$transaction(
       async (tx) => {
@@ -436,6 +480,7 @@ export class PlansService {
           const row = await tx.subscription_plans.create({
             data: {
               ...shared,
+              ai_entitlements: { create: ai.rows.map(aiEntitlementRowData) },
               code,
               plan_type: planType as any,
               billing_cycle: pricing.billing_cycle as any,
@@ -612,6 +657,15 @@ export class PlansService {
       include: {
         parent_plan: { select: { id: true, code: true, name: true } },
         partner_overrides: true,
+        ai_entitlements: {
+          select: {
+            agent_key: true,
+            capability_key: true,
+            enabled: true,
+            cap_value: true,
+            on_limit: true,
+          },
+        },
       },
     });
 
@@ -647,10 +701,16 @@ export class PlansService {
       state: row.state,
     }));
 
+    // T12: always the 11 catalog rows (numbers, never BIGINT), from the table
+    // or, for a plan without rows yet, from the legacy translation.
+    const ai = planAIEntitlements(plan.ai_feature_flags, plan.ai_entitlements);
+
     return {
       ...plan,
       plan_group_code: groupCode,
       pricings,
+      ai_entitlements: ai.rows,
+      ai_entitlements_source: ai.source,
     };
   }
 
@@ -694,6 +754,8 @@ export class PlansService {
         id,
       );
     }
+    // T12: unknown/repeated AI capabilities → 400 before any write.
+    const parsedAI = parsePlanAIEntitlements(dto.ai_entitlements);
 
     // P7.1: `undefined` keeps the stored limits, `null` clears them.
     const workflowLimits = parseWorkflowLimits(dto.workflow_limits);
@@ -755,9 +817,7 @@ export class PlansService {
       ...(dto.feature_matrix !== undefined && {
         feature_matrix: this.toPlainFeatureMatrix(dto.feature_matrix) as any,
       }),
-      ...(dto.ai_feature_flags !== undefined && {
-        ai_feature_flags: dto.ai_feature_flags as any,
-      }),
+      // ai_feature_flags is added inside the transaction (T12 dual write).
       ...(workflowLimitsData !== undefined && { workflow_limits: workflowLimitsData }),
       ...(isLeavingPromotional
         ? { resellable: true }
@@ -798,10 +858,32 @@ export class PlansService {
           });
         }
 
+        // T12 — AI rows and legacy JSON are written together, read and
+        // written inside this transaction.
+        let storedAI: AIEntitlement[] | undefined;
+        const loadStoredAI = async () =>
+          (storedAI ??= await loadPlanAIEntitlements(
+            tx,
+            id,
+            existing.ai_feature_flags,
+          ));
+        const aiWrite = await this.resolveAIUpdate(
+          dto,
+          parsedAI,
+          existing.ai_feature_flags,
+          loadStoredAI,
+        );
+        const createdIds = new Set<number>();
+
         // 1. Propagate shared fields to every non-archived row of the group.
         await tx.subscription_plans.updateMany({
           where: { plan_group_code: groupCode, state: { not: 'archived' } },
-          data: sharedData,
+          data: {
+            ...sharedData,
+            ...(aiWrite && {
+              ai_feature_flags: aiWrite.flags as Prisma.InputJsonValue,
+            }),
+          },
         });
 
         // 2. Per-cycle reconciliation when the caller sends a pricings array.
@@ -842,8 +924,14 @@ export class PlansService {
                   `Plan code '${code}' already exists`,
                 );
               }
-              await tx.subscription_plans.create({
+              const createdRow = await tx.subscription_plans.create({
                 data: {
+                  // T12: the new cycle starts with the group's AI rows.
+                  ai_entitlements: {
+                    create: (aiWrite?.rows ?? (await loadStoredAI())).map(
+                      aiEntitlementRowData,
+                    ),
+                  },
                   // Derived per-cycle code (e.g. `enterprise-monthly`). Required
                   // by the schema; omitting it makes Prisma reject the insert.
                   code,
@@ -873,8 +961,8 @@ export class PlansService {
                   feature_matrix: this.toPlainFeatureMatrix(
                     dto.feature_matrix ?? existing.feature_matrix,
                   ) as any,
-                  ai_feature_flags: (dto.ai_feature_flags ??
-                    existing.ai_feature_flags) as any,
+                  ai_feature_flags: (aiWrite?.flags ??
+                    existing.ai_feature_flags) as Prisma.InputJsonValue,
                   workflow_limits:
                     workflowLimitsData ??
                     (existing.workflow_limits as Prisma.InputJsonValue | null) ??
@@ -900,6 +988,7 @@ export class PlansService {
                   updated_at: new Date(),
                 },
               });
+              if (createdRow?.id != null) createdIds.add(createdRow.id);
             }
           }
 
@@ -919,9 +1008,13 @@ export class PlansService {
                 },
               });
             } else {
-              // plan_module_rules.plan_id es ON DELETE RESTRICT: sus reglas
-              // se borran primero, en la misma transacción.
+              // plan_module_rules.plan_id y plan_ai_entitlements.plan_id son
+              // ON DELETE RESTRICT: sus filas se borran primero, en la misma
+              // transacción.
               await tx.plan_module_rules.deleteMany({
+                where: { plan_id: row.id },
+              });
+              await tx.plan_ai_entitlements.deleteMany({
                 where: { plan_id: row.id },
               });
               await tx.subscription_plans.delete({ where: { id: row.id } });
@@ -989,6 +1082,24 @@ export class PlansService {
           });
         }
 
+        // 3. T12 — AI rows of every surviving row of the group, like the
+        //    shared ai_feature_flags above (new cycles already got theirs).
+        if (aiWrite) {
+          const targets = await tx.subscription_plans.findMany({
+            where: { plan_group_code: groupCode, state: { not: 'archived' } },
+            select: { id: true },
+          });
+          for (const target of targets) {
+            if (createdIds.has(target.id)) continue;
+            await upsertPlanAIEntitlements(
+              tx,
+              target.id,
+              aiWrite.rows,
+              aiWrite.overwrite,
+            );
+          }
+        }
+
         return tx.subscription_plans.findMany({
           where: { plan_group_code: groupCode },
           orderBy: { base_price: 'asc' },
@@ -1029,9 +1140,11 @@ export class PlansService {
       throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);
     }
 
-    // Las reglas de la matriz (FK RESTRICT) caen antes que el plan, atómico.
+    // Las reglas de la matriz y los derechos de IA (FK RESTRICT) caen antes
+    // que el plan, atómico.
     await this.prisma.$transaction(async (tx) => {
       await tx.plan_module_rules.deleteMany({ where: { plan_id: id } });
+      await tx.plan_ai_entitlements.deleteMany({ where: { plan_id: id } });
       await tx.subscription_plans.delete({ where: { id } });
     });
     this.planModuleRules?.invalidate();

@@ -9,7 +9,7 @@ import { RegisteredTool } from '../interfaces/tool.interface';
  * refuses them so a mis-wired client fails loudly instead of silently
  * reporting success for something that never happened.
  *
- * No `requiredPermissions`: Vexi is already restricted to owner and admin, and
+ * `access: 'public'` (T13) instead of `requiredPermissions`: Vexi is already restricted to owner and admin, and
  * what a given user may actually reach is decided by the browser dispatcher
  * against the real visibility chain — the same one that paints the sidebar.
  * Duplicating that decision here would be a second source of truth that drifts.
@@ -23,6 +23,9 @@ import { RegisteredTool } from '../interfaces/tool.interface';
 export const uiTools: RegisteredTool[] = [
   {
     name: 'ui_list_modules',
+    access: 'public',
+    accessReason:
+      'Browser command: the client dispatcher decides what the user may reach against the panel visibility chain (the sidebar), and the server never executes it.',
     version: '1',
     domain: 'ui',
     clientSide: true,
@@ -42,6 +45,9 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_explain_module',
+    access: 'public',
+    accessReason:
+      'Browser command: the client dispatcher decides what the user may reach against the panel visibility chain (the sidebar), and the server never executes it.',
     version: '1',
     domain: 'ui',
     clientSide: true,
@@ -61,6 +67,9 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_why_hidden',
+    access: 'public',
+    accessReason:
+      'Browser command: the client dispatcher decides what the user may reach against the panel visibility chain (the sidebar), and the server never executes it.',
     version: '1',
     domain: 'ui',
     clientSide: true,
@@ -79,6 +88,9 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_navigate',
+    access: 'public',
+    accessReason:
+      'Browser command: the client dispatcher decides what the user may reach against the panel visibility chain (the sidebar), and the server never executes it.',
     version: '1',
     domain: 'ui',
     clientSide: true,
@@ -98,6 +110,9 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_pos_add_item',
+    access: 'public',
+    accessReason:
+      'Browser command: the client dispatcher decides what the user may reach against the panel visibility chain (the sidebar), and the server never executes it.',
     version: '1',
     domain: 'ui',
     clientSide: true,
@@ -121,6 +136,9 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_pos_remove_item',
+    access: 'public',
+    accessReason:
+      'Browser command: the client dispatcher decides what the user may reach against the panel visibility chain (the sidebar), and the server never executes it.',
     version: '1',
     domain: 'ui',
     clientSide: true,
@@ -139,6 +157,9 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_pos_set_customer',
+    access: 'public',
+    accessReason:
+      'Browser command: the client dispatcher decides what the user may reach against the panel visibility chain (the sidebar), and the server never executes it.',
     version: '1',
     domain: 'ui',
     clientSide: true,
@@ -157,6 +178,9 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_pos_read_cart',
+    access: 'public',
+    accessReason:
+      'Browser command: the client dispatcher decides what the user may reach against the panel visibility chain (the sidebar), and the server never executes it.',
     version: '1',
     domain: 'ui',
     clientSide: true,
@@ -166,6 +190,9 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_pos_checkout',
+    access: 'public',
+    accessReason:
+      'Browser command: the client dispatcher decides what the user may reach against the panel visibility chain (the sidebar), and the server never executes it.',
     version: '1',
     domain: 'ui',
     clientSide: true,
@@ -175,6 +202,9 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_refresh',
+    access: 'public',
+    accessReason:
+      'Browser command: the client dispatcher decides what the user may reach against the panel visibility chain (the sidebar), and the server never executes it.',
     version: '1',
     domain: 'ui',
     clientSide: true,
@@ -202,6 +232,9 @@ export const uiTools: RegisteredTool[] = [
   // impide armar estados que la propia pantalla rechazaría después.
   {
     name: 'ui_read_screen',
+    access: 'public',
+    accessReason:
+      'Browser command: the client dispatcher decides what the user may reach against the panel visibility chain (the sidebar), and the server never executes it.',
     version: '1',
     domain: 'ui',
     clientSide: true,
@@ -211,6 +244,9 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_list_actions',
+    access: 'public',
+    accessReason:
+      'Browser command: the client dispatcher decides what the user may reach against the panel visibility chain (the sidebar), and the server never executes it.',
     version: '1',
     domain: 'ui',
     clientSide: true,
@@ -220,6 +256,9 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_fill_form',
+    access: 'public',
+    accessReason:
+      'Browser command: the client dispatcher decides what the user may reach against the panel visibility chain (the sidebar), and the server never executes it.',
     version: '1',
     domain: 'ui',
     clientSide: true,
@@ -239,6 +278,9 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_set_filter',
+    access: 'public',
+    accessReason:
+      'Browser command: the client dispatcher decides what the user may reach against the panel visibility chain (the sidebar), and the server never executes it.',
     version: '1',
     domain: 'ui',
     clientSide: true,
@@ -258,6 +300,9 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_export',
+    access: 'public',
+    accessReason:
+      'Browser command: the client dispatcher decides what the user may reach against the panel visibility chain (the sidebar), and the server never executes it.',
     version: '1',
     domain: 'ui',
     clientSide: true,
@@ -291,6 +336,9 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_click_action',
+    access: 'public',
+    accessReason:
+      'Browser command: the client dispatcher decides what the user may reach against the panel visibility chain (the sidebar), and the server never executes it.',
     version: '1',
     domain: 'ui',
     clientSide: true,
@@ -313,6 +361,9 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_open_modal',
+    access: 'public',
+    accessReason:
+      'Browser command: the client dispatcher decides what the user may reach against the panel visibility chain (the sidebar), and the server never executes it.',
     version: '1',
     domain: 'ui',
     clientSide: true,
@@ -335,6 +386,9 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_wait_for',
+    access: 'public',
+    accessReason:
+      'Browser command: the client dispatcher decides what the user may reach against the panel visibility chain (the sidebar), and the server never executes it.',
     version: '1',
     domain: 'ui',
     clientSide: true,
@@ -366,6 +420,9 @@ export const uiTools: RegisteredTool[] = [
   // con `next_step` en español en vez de fingir.
   {
     name: 'ui_list_tours',
+    access: 'public',
+    accessReason:
+      'Browser command: the client dispatcher decides what the user may reach against the panel visibility chain (the sidebar), and the server never executes it.',
     version: '1',
     domain: 'ui',
     clientSide: true,
@@ -375,6 +432,9 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_start_tour',
+    access: 'public',
+    accessReason:
+      'Browser command: the client dispatcher decides what the user may reach against the panel visibility chain (the sidebar), and the server never executes it.',
     version: '1',
     domain: 'ui',
     clientSide: true,
@@ -394,6 +454,9 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_reset_tour',
+    access: 'public',
+    accessReason:
+      'Browser command: the client dispatcher decides what the user may reach against the panel visibility chain (the sidebar), and the server never executes it.',
     version: '1',
     domain: 'ui',
     clientSide: true,
@@ -413,6 +476,9 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_close_modal',
+    access: 'public',
+    accessReason:
+      'Browser command: the client dispatcher decides what the user may reach against the panel visibility chain (the sidebar), and the server never executes it.',
     version: '1',
     domain: 'ui',
     clientSide: true,
@@ -422,6 +488,9 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_confirm_dialog',
+    access: 'public',
+    accessReason:
+      'Browser command: the client dispatcher decides what the user may reach against the panel visibility chain (the sidebar), and the server never executes it.',
     version: '1',
     domain: 'ui',
     clientSide: true,
@@ -446,6 +515,9 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_read_selection',
+    access: 'public',
+    accessReason:
+      'Browser command: the client dispatcher decides what the user may reach against the panel visibility chain (the sidebar), and the server never executes it.',
     version: '1',
     domain: 'ui',
     clientSide: true,
@@ -455,6 +527,9 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_explain_screen',
+    access: 'public',
+    accessReason:
+      'Browser command: the client dispatcher decides what the user may reach against the panel visibility chain (the sidebar), and the server never executes it.',
     version: '1',
     domain: 'ui',
     clientSide: true,

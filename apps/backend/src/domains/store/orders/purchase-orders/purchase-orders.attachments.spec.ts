@@ -1,6 +1,7 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { InvoiceScannerService } from './invoice-scanner.service';
+import { AiExtractionService } from '@common/ai-ingest/extraction/ai-extraction.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PurchaseOrdersService } from './purchase-orders.service';
 import { PurchaseVatContributionService } from './purchase-vat-contribution.service';
@@ -337,17 +338,26 @@ describe('InvoiceScannerService.scanInvoice — documento guardado (QUI-855)', (
       } as any,
       null as any,
       null as any,
+      // ia-cargas F3: el lector común prepara la página (aquí, una foto ya lista).
+      {
+        prepareForAi: jest.fn().mockResolvedValue({
+          source: 'image',
+          pages: [
+            { page_number: 1, mode: 'image', text: '', image: 'data:image/jpeg;base64,AA' },
+          ],
+          page_count: 1,
+          unreadable_pages: [],
+        }),
+      } as any,
+      new AiExtractionService(ai as any),
     );
-    jest
-      .spyOn(svc as any, 'preprocessImage')
-      .mockResolvedValue({ base64: 'AA', mimeType: 'image/png' });
     jest
       .spyOn(svc as any, 'normalizeOcrResponse')
       .mockReturnValue({ total: 1 });
     return svc;
   };
   const f = {
-    buffer: Buffer.from('x'),
+    buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     originalname: 'a.png',
     mimetype: 'image/png',
     size: 1,

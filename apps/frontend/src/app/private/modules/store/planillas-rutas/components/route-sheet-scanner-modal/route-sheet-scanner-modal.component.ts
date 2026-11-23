@@ -294,6 +294,16 @@ interface EditableStopDecision {
             </app-badge>
           </div>
 
+          <!-- ia-cargas F5a: avisos de la lectura (páginas que no se leyeron) -->
+          @if (scanResult()?.warnings?.length) {
+            <div class="bg-amber-50 border border-amber-200 rounded-lg p-3">
+              <p class="text-xs font-semibold text-amber-800 mb-1">Lectura del documento</p>
+              @for (warn of scanResult()!.warnings!; track warn) {
+                <p class="text-xs text-amber-700">{{ warn }}</p>
+              }
+            </div>
+          }
+
           <!-- Warnings -->
           @if (matchResult()!.warnings.length > 0) {
             <div class="bg-amber-50 border border-amber-200 rounded-lg p-3">

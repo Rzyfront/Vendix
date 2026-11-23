@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, signal, computed, DestroyRef } from '@angular/core';
+import { Component, OnInit, inject, signal, computed, DestroyRef, viewChild, TemplateRef } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router, RouterModule } from '@angular/router';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
@@ -11,6 +11,9 @@ import {
   VideoStats,
 } from '../../store/help/video-library/models/video.model';
 import { VideoCategoriesTabComponent } from './components/video-categories-tab/video-categories-tab.component';
+import { VideoSeriesTabComponent } from './components/video-series-tab/video-series-tab.component';
+import { BadgeComponent } from '../../../../shared/components/badge/badge.component';
+import { TooltipComponent } from '../../../../shared/components/tooltip/tooltip.component';
 import { ButtonComponent } from '../../../../shared/components/button/button.component';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 import {
@@ -40,6 +43,9 @@ import { parseApiError } from '../../../../core/utils/parse-api-error';
     RouterModule,
     ReactiveFormsModule,
     VideoCategoriesTabComponent,
+    VideoSeriesTabComponent,
+    BadgeComponent,
+    TooltipComponent,
     ButtonComponent,
     SelectorComponent,
     StatsComponent,
@@ -50,6 +56,23 @@ import { parseApiError } from '../../../../core/utils/parse-api-error';
     CardComponent,
   ],
   template: `
+    <ng-template #titleCell let-video>
+      <div class="flex flex-col gap-1 items-start min-w-0">
+        <span class="font-medium truncate max-w-full">{{ video.title }}</span>
+        @if (video.search_text_insufficient) {
+          <app-tooltip
+            color="warning"
+            position="bottom"
+            content="Completa el resumen, la descripción, las etiquetas y las palabras clave para que Vex y el buscador encuentren este video."
+          >
+            <span tabindex="0" class="inline-flex">
+              <app-badge variant="warning" size="xs">Texto insuficiente para búsqueda</app-badge>
+            </span>
+          </app-tooltip>
+        }
+      </div>
+    </ng-template>
+
     <div class="flex flex-col gap-5 p-4 md:p-6 max-w-7xl mx-auto w-full">
       <!-- Stats Grid -->
       <div class="stats-container">
@@ -110,6 +133,16 @@ import { parseApiError } from '../../../../core/utils/parse-api-error';
           >
             Categorías
           </button>
+          <button
+            class="px-4 py-3 text-sm font-semibold transition-colors border-b-2 cursor-pointer"
+            [class.border-primary]="activeTab() === 'series'"
+            [class.text-primary]="activeTab() === 'series'"
+            [class.border-transparent]="activeTab() !== 'series'"
+            [class.text-neutral-500]="activeTab() !== 'series'"
+            (click)="setTab('series')"
+          >
+            Series
+          </button>
         </div>
 
         <!-- Tab 1: Videos -->
@@ -153,7 +186,7 @@ import { parseApiError } from '../../../../core/utils/parse-api-error';
             <!-- Data View -->
             <app-responsive-data-view
               [data]="videos()"
-              [columns]="tableColumns"
+              [columns]="tableColumns()"
               [actions]="tableActions"
               [cardConfig]="cardConfig"
               [loading]="loadingVideos()"
@@ -180,6 +213,11 @@ import { parseApiError } from '../../../../core/utils/parse-api-error';
         @if (activeTab() === 'categories') {
           <app-video-categories-tab></app-video-categories-tab>
         }
+
+        <!-- Tab 3: Series (learning paths) -->
+        @if (activeTab() === 'series') {
+          <app-video-series-tab></app-video-series-tab>
+        }
       </app-card>
 
       <!-- Confirmation Modal -->
@@ -201,7 +239,8 @@ export class VideoLibraryAdminComponent implements OnInit {
   private toast = inject(ToastService);
   private destroyRef = inject(DestroyRef);
 
-  activeTab = signal<'videos' | 'categories'>('videos');
+  activeTab = signal<'videos' | 'categories' | 'series'>('videos');
+  private readonly titleCell = viewChild<TemplateRef<unknown>>('titleCell');
   videos = signal<Video[]>([]);
   stats = signal<VideoStats | null>(null);
   loadingVideos = signal<boolean>(true);
@@ -233,7 +272,7 @@ export class VideoLibraryAdminComponent implements OnInit {
     { label: 'Archivados', value: 'ARCHIVED' },
   ];
 
-  tableColumns: TableColumn[] = [
+  private readonly baseColumns: TableColumn[] = [
     {
       key: 'title',
       label: 'Video',
@@ -287,6 +326,13 @@ export class VideoLibraryAdminComponent implements OnInit {
     },
   ];
 
+  // The title cell template only exists after the first render, hence computed.
+  readonly tableColumns = computed<TableColumn[]>(() =>
+    this.baseColumns.map((c) =>
+      c.key === 'title' ? { ...c, template: this.titleCell() } : c,
+    ),
+  );
+
   tableActions: TableAction[] = [
     {
       label: 'Editar',
@@ -312,6 +358,8 @@ export class VideoLibraryAdminComponent implements OnInit {
     subtitleKey: 'summary',
     badgeKey: 'status',
     badgeTransform: (status: string) => (status === 'PUBLISHED' ? 'Publicado' : 'Borrador'),
+    noteTransform: (item: Video) =>
+      item.search_text_insufficient ? 'Texto insuficiente para búsqueda' : null,
   };
 
   ngOnInit() {
@@ -339,7 +387,7 @@ export class VideoLibraryAdminComponent implements OnInit {
     this.loadVideos();
   }
 
-  setTab(tab: 'videos' | 'categories') {
+  setTab(tab: 'videos' | 'categories' | 'series') {
     this.activeTab.set(tab);
     if (tab === 'videos') {
       this.loadCategories();

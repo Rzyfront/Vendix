@@ -1,5 +1,17 @@
 import { VendixHttpException } from '@common/errors';
 import { DianHabilitationScannerService } from './dian-habilitation-scanner.service';
+import { AiExtractionService } from '@common/ai-ingest/extraction/ai-extraction.service';
+
+/** ia-cargas F5b: pages stub (a PDF → one page of native text + its image). */
+const fakePages = () => ({
+  prepareForAi: jest.fn().mockResolvedValue({
+    source: 'pdf',
+    pages: [{ page_number: 1, mode: 'text+image', text: 'DIAN ' + 'x'.repeat(220), image: 'data:image/jpeg;base64,AAAA' }],
+    page_count: 1,
+    unreadable_pages: [],
+  }),
+});
+
 
 describe('DianHabilitationScannerService (async core)', () => {
   const ai_json = JSON.stringify({
@@ -12,8 +24,8 @@ describe('DianHabilitationScannerService (async core)', () => {
   let service: DianHabilitationScannerService;
 
   const multers = [
-    { buffer: Buffer.from('a'), mimetype: 'application/pdf', originalname: 'a.pdf', size: 1 },
-    { buffer: Buffer.from('b'), mimetype: 'application/pdf', originalname: 'b.pdf', size: 1 },
+    { buffer: Buffer.from('%PDF-1.7 a'), mimetype: 'application/pdf', originalname: 'a.pdf', size: 10 },
+    { buffer: Buffer.from('%PDF-1.7 b'), mimetype: 'application/pdf', originalname: 'b.pdf', size: 10 },
   ] as Express.Multer.File[];
   const ai_files = multers.map((m) => ({
     buffer: m.buffer,
@@ -27,7 +39,11 @@ describe('DianHabilitationScannerService (async core)', () => {
       assertVisionModelLinked: jest.fn().mockResolvedValue(undefined),
       run: jest.fn().mockResolvedValue({ success: true, content: ai_json }),
     };
-    service = new DianHabilitationScannerService(aiEngine as any);
+    service = new DianHabilitationScannerService(
+      aiEngine as any,
+      new AiExtractionService(aiEngine as any),
+      fakePages() as any,
+    );
   });
 
   it('scanHabilitationFromFiles returns the same result as the sync method', async () => {

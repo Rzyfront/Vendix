@@ -72,6 +72,7 @@ import { SettingsService } from '../settings/settings.service';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
 import type {
   PromotionQuoteInput,
+  PromotionQuoteItemInput,
   PromotionQuoteResult,
   OrderPromotionSnapshot,
 } from '../promotions/dto';
@@ -129,10 +130,20 @@ import {
   type ShippingTaxSnapshot,
 } from '../shipping/utils/shipping-tax.util';
 import { buildOrderSaleTaxPayload } from './utils/order-sale-tax-payload.util';
+import { promotionDiscountByLine } from '../promotions/promotion-line-discount.util';
+import {
+  loadCategoryIdsByProduct,
+  persistedLineToPromotionQuoteItem,
+  resolvePreDiscountLineTax,
+  resolveRetaxRate,
+  retaxOpenOrderLines,
+} from '../promotions/open-order-promotion.util';
 import {
   applyGrossDiscountRetax,
   distributeAmount,
+  resolveGrossDiscountByLine,
   type GrossDiscountableLine,
+  type GrossDiscountSplit,
 } from '../taxes/utils/order-discount-tax.util';
 import {
   resolvePaymentReceivedSaleFields,
@@ -3440,35 +3451,51 @@ export class PaymentsService {
      * aplicada al guardar el borrador desaparecía al cobrarlo.
      */
     existingOrderId: number | null = null,
+    /**
+     * Cuenta de mesa: líneas YA persistidas de la orden, cotizadas junto a
+     * `dto.items` (en el cobro desde la mesa `dto.items` viene vacío y sin
+     * ellas el motor recibía 0 ítems). Su `line_id` es el índice en
+     * `[...existingItems, ...newItems]`; los de `dto.items` arrancan en
+     * `lineOffset`.
+     */
+    persisted: { items: PromotionQuoteItemInput[]; lineOffset: number } = {
+      items: [],
+      lineOffset: 0,
+    },
   ): Promise<PromotionQuoteResult> {
+    const dtoItems: PromotionQuoteItemInput[] = (dto.items || [])
+      .map((item, index) => ({ item, index }))
+      .filter(({ item }) => item.product_id)
+      .map(({ item, index }) => ({
+        line_id: persisted.lineOffset + index,
+        product_id: item.product_id as number,
+        variant_id: item.product_variant_id ?? null,
+        category_id: item.category_id ?? null,
+        category_ids: item.category_ids ?? null,
+        unit_price: Number(
+          item.final_unit_price ?? item.unit_price ?? 0,
+        ),
+        quantity: Number(item.quantity || 0),
+        applied_price_tier_id: item.applied_price_tier_id ?? null,
+        // El motor lee `stock_units_consumed` como "vendido por
+        // presentación" y lo usa como contador de tramos. En una línea de
+        // PESO es la pesada en unidades de stock (180 g), no paquetes: se
+        // omite para que la línea siga contando 1, como siempre.
+        stock_units_consumed:
+          Number(item.weight || 0) > 0
+            ? null
+            : (item.stock_units_consumed ?? null),
+      }));
     const input: PromotionQuoteInput = {
       customer_id: dto.customer_id ?? null,
       exclude_order_id: existingOrderId,
       manual_promotion_ids: Array.isArray(dto.promotion_ids)
         ? dto.promotion_ids
         : [],
-      items: (dto.items || [])
-        .filter((item) => item.product_id)
-        .map((item, index) => ({
-          line_id: index,
-          product_id: item.product_id as number,
-          variant_id: item.product_variant_id ?? null,
-          category_id: item.category_id ?? null,
-          category_ids: item.category_ids ?? null,
-          unit_price: Number(
-            item.final_unit_price ?? item.unit_price ?? 0,
-          ),
-          quantity: Number(item.quantity || 0),
-          applied_price_tier_id: item.applied_price_tier_id ?? null,
-          // El motor lee `stock_units_consumed` como "vendido por
-          // presentación" y lo usa como contador de tramos. En una línea de
-          // PESO es la pesada en unidades de stock (180 g), no paquetes: se
-          // omite para que la línea siga contando 1, como siempre.
-          stock_units_consumed:
-            Number(item.weight || 0) > 0
-              ? null
-              : (item.stock_units_consumed ?? null),
-        })),
+      // `line_id` = índice ORIGINAL en `dto.items` (antes de filtrar los ítems
+      // custom): es el que usa el reparto por línea del descuento (F1) para
+      // devolver cada `items[].promotion_discount` a su línea de la orden.
+      items: [...persisted.items, ...dtoItems],
     };
 
     // Promociones por código YA aplicadas a esta orden (borrador adoptado o
@@ -3745,12 +3772,12 @@ export class PaymentsService {
    * SIN impuesto y el impuesto se calcula sobre eso". Recibe las líneas de la
    * orden YA construidas (base + `order_item_taxes.create` pre-descuento) y
    * el descuento TOTAL en bruto (promoción + cupón, como se evalúan hoy
-   * contra el subtotal bruto, F-017 — eso no cambia). Reparte el descuento
-   * proporcional al bruto de cada línea (mismo criterio "whole-cart" que ya
-   * usa el preview del carrito — el motor de promociones no expone un mapeo
-   * `line_id` confiable hacia `dto.items` cuando hay ítems custom
-   * intercalados, así que no se intenta un reparto por-línea más fino aquí),
-   * y MUTA en sitio `item.order_item_taxes.create[].tax_amount` de cada línea
+   * contra el subtotal bruto, F-017 — eso no cambia). Con `split` (F1) la
+   * promoción de producto/categoría/escala va SOLO a las líneas a las que el
+   * motor la aplicó (`line_id` = índice original de `dto.items`) y el cupón
+   * se reparte sobre el bruto remanente (`resolveGrossDiscountByLine`); sin
+   * desglose (promoción de orden, sin mapeo) se reparte proporcional al bruto
+   * de cada línea como siempre. MUTA en sitio `item.order_item_taxes.create[].tax_amount` de cada línea
    * a su valor post-descuento (recalculado hacia adelante: `base_descontada ×
    * tarifa`). `total_price` (base) NUNCA se toca — `orders.subtotal_amount`
    * sigue siendo la base bruta pre-descuento (necesaria para que el asiento
@@ -3764,6 +3791,7 @@ export class PaymentsService {
   private retaxPosOrderItemsAfterDiscount(
     orderItems: any[],
     totalGrossDiscount: number,
+    split: GrossDiscountSplit | null = null,
   ): { tax_amount: number; discount_amount_base: number } {
     if (totalGrossDiscount <= 0) {
       // Contrato nuevo explícito en cada línea: sin descuento => 0 (NULL sólo
@@ -3805,10 +3833,15 @@ export class PaymentsService {
       };
     });
 
-    const grossDiscountByLine = distributeAmount(
-      totalGrossDiscount,
-      lines.map((l) => l.grossOriginal),
-    );
+    const grossDiscountByLine = split
+      ? resolveGrossDiscountByLine(
+          lines.map((l) => l.grossOriginal),
+          split,
+        )
+      : distributeAmount(
+          totalGrossDiscount,
+          lines.map((l) => l.grossOriginal),
+        );
     const retax = applyGrossDiscountRetax(lines, grossDiscountByLine);
 
     orderItems.forEach((item, i) => {
@@ -3837,6 +3870,67 @@ export class PaymentsService {
     };
   }
 
+  /**
+   * F1 — desglose del descuento bruto de una venta POS para el retax por
+   * línea: promoción por línea desde la cotización del motor (`line_id` =
+   * índice original de `dto.items`) y cupón agregado. `lineIndexOfDtoItem`
+   * traduce ese índice al de la línea que se retaxa (`null` = sin ubicar, y
+   * entonces se conserva el reparto por bruto).
+   */
+  private buildPosDiscountSplit(
+    promotionQuote: Partial<PromotionQuoteResult> | null | undefined,
+    couponDiscount: number,
+    lineCount: number,
+    lineIndexOfDtoItem: (dtoIndex: number) => number | null,
+  ): GrossDiscountSplit {
+    return {
+      promotionTotal: this.roundMoney(Number(promotionQuote?.total_discount) || 0),
+      couponTotal: this.roundMoney(Number(couponDiscount) || 0),
+      promotionByLine: promotionDiscountByLine(
+        promotionQuote,
+        lineCount,
+        (lineId) => {
+          const dtoIndex = Number(lineId);
+          return Number.isInteger(dtoIndex) && dtoIndex >= 0
+            ? lineIndexOfDtoItem(dtoIndex)
+            : null;
+        },
+      ),
+    };
+  }
+
+  /**
+   * Orden adoptada: el motor cotiza `dto.items` pero el retax corre sobre las
+   * líneas PERSISTIDAS (sin orden garantizado). Empareja cada ítem del DTO con
+   * una línea persistida del mismo producto, variante y cantidad, usando cada
+   * línea una sola vez. `null` = sin pareja (ese descuento no se ubica y la
+   * venta conserva el reparto por bruto).
+   */
+  private matchDtoItemsToPersistedLines(
+    dtoItems: ReadonlyArray<{
+      product_id?: number | null;
+      product_variant_id?: number | null;
+      quantity?: number | null;
+    }>,
+    persisted: ReadonlyArray<any>,
+  ): Array<number | null> {
+    const used = new Set<number>();
+    return dtoItems.map((item) => {
+      if (!item.product_id) return null;
+      const index = persisted.findIndex(
+        (row, i) =>
+          !used.has(i) &&
+          Number(row.product_id) === Number(item.product_id) &&
+          (row.product_variant_id ?? null) ===
+            (item.product_variant_id ?? null) &&
+          Number(row.quantity) === Number(item.quantity),
+      );
+      if (index < 0) return null;
+      used.add(index);
+      return index;
+    });
+  }
+
   /** Multiplicador de precio de una línea POS (1 si es pesable). */
   private posLineMultiplier(item: any): number {
     return Number(item.weight || 0) > 0
@@ -3853,21 +3947,7 @@ export class PaymentsService {
    * comportamiento previo (valor persistido).
    */
   private resolvePreDiscountLineTax(item: any, rows: any[]): number {
-    const base = Number(item.total_price || 0);
-    if (rows.length > 0) {
-      return rows.reduce((s: number, r: any) => {
-        const rate = Number(r.tax_rate || 0);
-        return (
-          s + (rate > 0 ? this.roundMoney(rate * base) : Number(r.tax_amount || 0))
-        );
-      }, 0);
-    }
-    const itemRate = Number(item.tax_rate || 0);
-    return itemRate > 0
-      ? this.roundMoney(itemRate * base)
-      : this.roundMoney(
-          Number(item.tax_amount_item || 0) * this.posLineMultiplier(item),
-        );
+    return resolvePreDiscountLineTax(item, rows);
   }
 
   /**
@@ -3886,166 +3966,25 @@ export class PaymentsService {
    * para líneas no pesables se reconstruye dividiendo el nuevo impuesto total
    * de línea por el mismo `multiplier` (`resolvePriceUnits`) que usa la suma
    * de `newTax` más arriba; para líneas pesables el multiplicador es 1 (el
-   * campo ya guarda el total de línea). Mismo criterio "whole-cart"
-   * proporcional al bruto que la rama de orden fresca.
+   * campo ya guarda el total de línea). Mismo reparto que la rama de orden
+   * fresca: con `split` (F1) la promoción va a sus líneas (índices sobre
+   * `[...existingItems, ...newItems]`) y el cupón al bruto remanente; sin
+   * desglose, proporcional al bruto de todas.
    */
   private async retaxMergedPosOrderItemsForTableClose(
     tx: any,
     existingItems: any[],
     newItems: any[],
     totalGrossDiscount: number,
+    split: GrossDiscountSplit | null = null,
   ): Promise<{ tax_amount: number; discount_amount_base: number }> {
-    const allItems = [...existingItems, ...newItems];
-    const rowsOf = (item: any): any[] =>
-      Array.isArray(item.order_item_taxes)
-        ? item.order_item_taxes
-        : (item.order_item_taxes?.create ?? []);
-    const multiplierOf = (item: any): number =>
-      Number(item.weight || 0) > 0
-        ? 1
-        : resolvePriceUnits(
-            Number(item.quantity || 1),
-            item.price_unit_quantity,
-          );
-
-    if (totalGrossDiscount <= 0) {
-      // Sin descuento: contrato nuevo explícito (0, no NULL) en cada línea.
-      // Una línea persistida que YA traía descuento (cierre previo con
-      // cupón, ahora retirado) restituye su impuesto pre-descuento.
-      for (let i = 0; i < allItems.length; i++) {
-        const item = allItems[i];
-        if (i >= existingItems.length) {
-          item.discount_amount = 0;
-          continue;
-        }
-        const data: any = { discount_amount: 0 };
-        if (Number(item.discount_amount || 0) > 0) {
-          const rows = rowsOf(item);
-          const base = Number(item.total_price || 0);
-          let restoredLine = 0;
-          for (const r of rows) {
-            const rate = Number(r.tax_rate || 0);
-            if (rate > 0) {
-              const amount = this.roundMoney(rate * base);
-              restoredLine += amount;
-              await tx.order_item_taxes.update({
-                where: { id: r.id },
-                data: { tax_amount: amount },
-              });
-              r.tax_amount = amount;
-            } else {
-              restoredLine += Number(r.tax_amount || 0);
-            }
-          }
-          if (rows.length > 0) {
-            const multiplier = multiplierOf(item);
-            data.tax_amount_item =
-              multiplier > 0
-                ? this.roundMoney(restoredLine / multiplier)
-                : restoredLine;
-            item.tax_amount_item = data.tax_amount_item;
-          }
-        }
-        await tx.order_items.update({ where: { id: item.id }, data });
-      }
-      const tax_amount = this.roundMoney(
-        allItems.reduce((sum, item) => {
-          const rows = rowsOf(item);
-          if (rows.length > 0) {
-            return (
-              sum +
-              rows.reduce(
-                (s: number, r: any) => s + Number(r.tax_amount || 0),
-                0,
-              )
-            );
-          }
-          return sum + Number(item.tax_amount_item || 0) * multiplierOf(item);
-        }, 0),
-      );
-      return { tax_amount, discount_amount_base: 0 };
-    }
-
-    const lines: GrossDiscountableLine[] = allItems.map((item) => {
-      const base = Number(item.total_price || 0);
-      const rows = rowsOf(item);
-      const isExistingLine = allItems.indexOf(item) < existingItems.length;
-      // Ítems persistidos: el impuesto guardado ya puede ser post-descuento
-      // (cierre reintentado sin pago exitoso) -> se reconstruye desde la
-      // tarifa. Ítems nuevos: `tax_amount` en memoria es pre-descuento.
-      const preDiscountTax = isExistingLine
-        ? this.resolvePreDiscountLineTax(item, rows)
-        : rows.length > 0
-          ? rows.reduce(
-              (s: number, r: any) => s + Number(r.tax_amount || 0),
-              0,
-            )
-          : this.roundMoney(
-              Number(item.tax_amount_item || 0) * multiplierOf(item),
-            );
-      return {
-        base,
-        grossOriginal: this.roundMoney(base + preDiscountTax),
-        taxRows: rows.map((r: any) => ({
-          rate: this.resolveRetaxRate(r, base),
-          tax_type: r.tax_type,
-          tax_rate_id: r.tax_rate_id,
-          tax_name: r.tax_name,
-        })),
-      };
-    });
-
-    const grossDiscountByLine = distributeAmount(
+    return retaxOpenOrderLines(
+      tx,
+      existingItems,
+      newItems,
       totalGrossDiscount,
-      lines.map((l) => l.grossOriginal),
+      split,
     );
-    const retax = applyGrossDiscountRetax(lines, grossDiscountByLine);
-
-    for (let i = 0; i < allItems.length; i++) {
-      const item = allItems[i];
-      const lineResult = retax.lines[i];
-      const isExisting = i < existingItems.length;
-      const rows = rowsOf(item);
-      const multiplier = multiplierOf(item);
-      const newTaxAmountItem =
-        multiplier > 0
-          ? this.roundMoney(lineResult.taxTotal / multiplier)
-          : lineResult.taxTotal;
-
-      if (isExisting) {
-        // Ítem YA persistido: requiere escritura explícita dentro de `tx`.
-        await tx.order_items.update({
-          where: { id: item.id },
-          data: {
-            tax_amount_item: newTaxAmountItem,
-            discount_amount: lineResult.baseDiscount,
-          },
-        });
-        for (let k = 0; k < rows.length; k++) {
-          if (lineResult.taxes[k] === undefined) continue;
-          await tx.order_item_taxes.update({
-            where: { id: rows[k].id },
-            data: { tax_amount: lineResult.taxes[k].amount },
-          });
-        }
-      } else {
-        // Ítem nuevo aún en memoria (pre-insert): mutar en sitio, igual que
-        // `retaxPosOrderItemsAfterDiscount`.
-        item.tax_amount_item = newTaxAmountItem;
-        item.discount_amount = lineResult.baseDiscount;
-        const createRows = item.order_item_taxes?.create;
-        if (Array.isArray(createRows)) {
-          createRows.forEach((r: any, k: number) => {
-            if (lineResult.taxes[k]) r.tax_amount = lineResult.taxes[k].amount;
-          });
-        }
-      }
-    }
-
-    return {
-      tax_amount: retax.totalTax,
-      discount_amount_base: retax.totalBaseDiscount,
-    };
   }
 
   /**
@@ -4054,10 +3993,7 @@ export class PaymentsService {
    * para no anular el impuesto al recalcular hacia adelante.
    */
   private resolveRetaxRate(row: any, base: number): number {
-    const rate = Number(row?.tax_rate || 0);
-    if (rate > 0) return rate;
-    const amount = Number(row?.tax_amount || 0);
-    return base > 0 && amount > 0 ? amount / base : 0;
+    return resolveRetaxRate(row, base);
   }
 
   private roundRate(value: number): number {
@@ -5609,9 +5545,23 @@ export class PaymentsService {
     const resolvedTipValue = resolvedTip.value;
     // Re-evaluate promotions + coupons over the merged subtotal so the
     // final total stays consistent with the fresh path.
+    // La promo se cotiza sobre TODAS las líneas vivas de la cuenta: las ya
+    // persistidas (bruto pre-descuento) más las nuevas de `dto.items`. Antes
+    // sólo se cotizaba `dto.items`, vacío en el cobro desde la mesa, y la
+    // promo de producto nunca llegaba a las líneas cargadas a la cuenta.
+    const persistedCategoryIds = await loadCategoryIdsByProduct(
+      tx,
+      existingItems.map((item: any) => Number(item.product_id)),
+    ).catch(() => new Map<number, number[]>());
+    const persistedQuoteItems = existingItems
+      .map((item: any, index: number) =>
+        persistedLineToPromotionQuoteItem(item, index, persistedCategoryIds),
+      )
+      .filter((item): item is PromotionQuoteItemInput => item != null);
     const promotionQuote = await this.calculatePosPromotionQuote(
       dto,
       session.order_id ?? null,
+      { items: persistedQuoteItems, lineOffset: existingItems.length },
     );
     const couponInfo = await this.calculatePosCouponDiscount(
       dto,
@@ -5630,11 +5580,21 @@ export class PaymentsService {
     // YA persistidas (`existingItems`) reciben `tx.order_items.update()` /
     // `tx.order_item_taxes.update()`; las nuevas se mutan en memoria antes
     // del `tx.orders.update` de abajo.
+    // F1: el motor cotizó el arreglo combinado `[...existingItems,
+    // ...newItems]` y su `line_id` ya es el índice de la línea que se retaxa.
+    const tableDiscountSplit = this.buildPosDiscountSplit(
+      promotionQuote,
+      couponInfo.discount_amount,
+      existingItems.length + newItems.length,
+      (lineIndex) =>
+        lineIndex < existingItems.length + newItems.length ? lineIndex : null,
+    );
     const retaxResult = await this.retaxMergedPosOrderItemsForTableClose(
       tx,
       existingItems,
       newItems,
       totalGrossDiscount,
+      tableDiscountSplit,
     );
     const newTax = retaxResult.tax_amount;
     const totalDiscount = retaxResult.discount_amount_base;
@@ -6760,16 +6720,31 @@ export class PaymentsService {
         // órdenes y no se retocan aquí (mismo criterio que subtotal/tax
         // arriba). `orders.discount_amount` cambia de semántica: antes era
         // el descuento en BRUTO, ahora es SOLO la parte de BASE.
+        // F1: la promoción de producto/categoría/escala va sólo a sus líneas.
+        // Venta nueva: `orderItems[i]` es `dto.items[i]`. Orden adoptada: el
+        // motor cotizó `dto.items` y el retax corre sobre las persistidas.
+        const adoptedLineOf = existingOrder
+          ? this.matchDtoItemsToPersistedLines(items, adoptedItems)
+          : null;
+        const discountSplit = this.buildPosDiscountSplit(
+          promotionQuote,
+          couponInfo.discount_amount,
+          existingOrder ? adoptedItems.length : orderItems.length,
+          (dtoIndex) =>
+            adoptedLineOf ? (adoptedLineOf[dtoIndex] ?? null) : dtoIndex,
+        );
         const retaxResult = existingOrder
           ? await this.retaxMergedPosOrderItemsForTableClose(
               tx,
               adoptedItems,
               [],
               totalGrossDiscount,
+              discountSplit,
             )
           : this.retaxPosOrderItemsAfterDiscount(
               orderItems,
               totalGrossDiscount,
+              discountSplit,
             );
         const calculatedTaxAmount = retaxResult
           ? retaxResult.tax_amount

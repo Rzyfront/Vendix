@@ -202,6 +202,23 @@ export interface TableSessionOrderItem {
    */
   final_unit_price?: number | string | null;
   final_total_price?: number | string | null;
+  /**
+   * Promo de producto aplicada a la línea: descuento de base y total de la
+   * línea ya descontado con su impuesto. Solo llegan si hay descuento.
+   */
+  discount_amount?: number | string | null;
+  discounted_total_price?: number | string | null;
+  /**
+   * Total de la línea con impuesto ANTES del descuento (precio tachado). Es el
+   * mismo valor que muestra el detalle de la orden; `final_total_price` no
+   * sirve para esto porque con impuesto incluido devuelve la base.
+   */
+  total_before_discount?: number | string | null;
+  /**
+   * Nombre de la promoción que produjo el descuento de la línea (aditivo,
+   * solo no-cocina). Sin él la fila no pinta badge de promo.
+   */
+  promotion_label?: string | null;
   inventory_consumed_at_fire: boolean;
   /**
    * C3 — nota de preparación por línea

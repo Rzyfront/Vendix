@@ -256,6 +256,18 @@ export class AIEngineConfigService {
       throw new VendixHttpException(ErrorCodes.AI_CONFIG_001);
     }
 
+    // F8 T49 — the FK is ON DELETE RESTRICT; answer with a readable reason
+    // instead of letting the database error surface as a 500.
+    const voices = await this.prisma.ai_voice_profiles.count({
+      where: { config_id: id },
+    });
+    if (voices > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        `Esta configuración tiene ${voices} voz(es) en el catálogo. Reasígnalas o desactívala en lugar de eliminarla.`,
+      );
+    }
+
     await this.prisma.ai_engine_configs.delete({ where: { id } });
     await this.aiEngine.reloadConfigurations();
   }

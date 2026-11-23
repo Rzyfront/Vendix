@@ -1068,10 +1068,13 @@ export interface InvoiceCardView {
   data: InvoiceCardData;
 }
 
+import { RecordDocumentsComponent } from '../../../../../../shared/components/record-documents/record-documents.component';
+
 @Component({
   selector: 'app-order-details-page',
   standalone: true,
   imports: [ProviderNamePipe, 
+    RecordDocumentsComponent,
     SplitAccountsPanelComponent,
     RouterModule,
     ReactiveFormsModule,
@@ -1232,6 +1235,15 @@ export class OrderDetailsPageComponent {
           sum + Number(item.final_total_price ?? item.total_price ?? 0),
         0,
       ),
+  );
+
+  /**
+   * Totales leídos de lo persistido: subtotal SIN impuesto, descuento,
+   * impuesto por tipo. `null` = el API no lo envió (rol cocina o backend
+   * anterior) y el resumen cae al desglose en bruto de siempre.
+   */
+  readonly totalsBreakdown = computed(
+    () => this.order()?.totals_breakdown ?? null,
   );
 
   // ── Discount snapshots (read-only from order; never recalculated) ──

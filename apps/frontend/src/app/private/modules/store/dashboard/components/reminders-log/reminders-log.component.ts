@@ -22,7 +22,7 @@ import { ModalComponent } from '../../../../../../shared/components/modal/modal.
 import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { DialogService } from '../../../../../../shared/components/dialog/dialog.service';
-import { formatStoreDateTime } from '../../../../../../shared/utils/date.util';
+import { formatStoreDateTime, toStoreWallClock } from '../../../../../../shared/utils/date.util';
 import { extractApiError } from '../../../../../../shared/utils/http-error.util';
 import {
   CreateReminderPayload,
@@ -64,27 +64,6 @@ function sameLink(
   b: { type: ReminderLinkType; id: number | null } | null,
 ): boolean {
   return (a?.type ?? null) === (b?.type ?? null) && (a?.id ?? null) === (b?.id ?? null);
-}
-
-/** Store-local wall clock `YYYY-MM-DDTHH:mm` of a UTC instant (for datetime-local inputs). */
-function toStoreWallClock(iso: string, tz: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return '';
-  const map: Record<string, string> = {};
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    hourCycle: 'h23',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).formatToParts(date);
-  for (const part of parts) {
-    if (part.type !== 'literal') map[part.type] = part.value;
-  }
-  const hour = map['hour'] === '24' ? '00' : map['hour'];
-  return `${map['year']}-${map['month']}-${map['day']}T${hour}:${map['minute']}`;
 }
 
 @Component({

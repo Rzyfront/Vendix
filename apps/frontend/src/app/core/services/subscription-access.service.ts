@@ -234,7 +234,32 @@ export interface AiUsageGroupEntry {
 export interface AiUsageReport {
   periodStart: string | null;
   consumption: AiUsageGroupEntry[] | null;
+  /**
+   * N7 — consumo por agente (mensajes, tokens y lectura en voz). Opcional: el
+   * backend lo agrega al mismo endpoint; si falta, la UI oculta el bloque.
+   */
+  agent_usage?: AgentUsageMap;
 }
+
+/** Un medidor de consumo de un agente (cupo del plan vs usado). */
+export interface AgentUsageMeter {
+  /** 'vex.agent' | 'vex.model_tokens' | 'vex.voice_readout' | 'vexi.agent' | ... */
+  capability_key: string;
+  kind: 'messages' | 'tokens' | 'voice_seconds';
+  /** 'Mensajes' | 'Tokens del modelo' | 'Lectura en voz' */
+  label: string;
+  unit: 'messages' | 'tokens' | 'seconds';
+  period: 'daily' | 'monthly';
+  used: number;
+  /** `null` = sin límite. */
+  cap: number | null;
+  enabled: boolean;
+}
+
+export type AgentUsageMap = Record<
+  'vex' | 'vexi',
+  { enabled: boolean; meters: AgentUsageMeter[] }
+>;
 
 /**
  * F7 — plan summary for the upgrade modal, served by `GET
@@ -938,12 +963,17 @@ export class SubscriptionAccessService {
       const res = await firstValueFrom(
         this.http.get<{
           success: boolean;
-          data: { period_start?: string | null; consumption?: AiUsageGroupEntry[] | null };
+          data: {
+            period_start?: string | null;
+            consumption?: AiUsageGroupEntry[] | null;
+            agent_usage?: AgentUsageMap;
+          };
         }>(`${environment.apiUrl}/store/subscriptions/usage`),
       );
       return {
         periodStart: res?.data?.period_start ?? null,
         consumption: res?.data?.consumption ?? null,
+        ...(res?.data?.agent_usage ? { agent_usage: res.data.agent_usage } : {}),
       };
     } catch {
       return empty;

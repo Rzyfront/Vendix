@@ -7,7 +7,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "2.2"
+  version: "2.3"
   scope: [root]
   auto_invoke:
     - "Changing tool routing, search_tools or the global tool knowledge catalog"
@@ -34,6 +34,13 @@ Source: `ai-engine/tools/tool-working-set.ts`, `tool-router.service.ts`, `tool-c
 - **Free discovery rounds:** rounds with only `search_tools`, an out-of-authority name or INVALID_ARGS on an unloaded tool give the round back, up to `FREE_DISCOVERY_ROUNDS_PER_TURN = 3`.
 - **Session-backed discovery (hotfix #936):** `search_playbooks`/`load_playbook` and `search_recipes`/`load_recipe` join the core ONLY when the turn created the matching session (`playbookSession` / `recipeSession`), always ∩ authority (`SESSION_DISCOVERY`, `enableSessionDiscovery`). Without session they answer `*_SESSION_REQUIRED`. Never tell the model a tool «quedó cargada» unless `load()` returned its name.
 - Exhausted rounds get ONE tool-free closing inference; the canned `exhausted` notice only if it fails, never after an `unknown_effect` write.
+
+## Progressive discovery and measurement (F10)
+
+- `AI_TOOL_DISCOVERY_STUBS` (off by default; a cost optimization, not a plan capability). Off: registry, core, `select` output, system text and trace attributes are byte-identical (golden hash in `ai-agent.discovery-stubs.spec.ts`). On: `select(..., { stubs: true })` sends preloaded tools as schema-less stubs (`name — line (lee|escribe)`, one system message per round) and `describe_tool` joins the core (`coreDiscovery()`).
+- `describe_tool(name)` returns the TypeScript declaration (`tool-declaration.builder.ts`) and examples as a TOOL RESULT; it never changes the definitions list. It derives from the same authorized documents as search, stubs and index: an unauthorized name answers «Tu rol no permite…», an unknown one «No existe…», same shape, nothing else revealed.
+- Every turn traces `definition_tokens`, `context_tokens`, `token_estimator: bytes_v1`, `offered_tool_count`, `authorized_tool_count`, `full_catalog_fallback`, `full_catalog_reason` (`index_coverage_below_90`, `no_evidence`, `router_timeout`, `router_error`). `FullCatalogRateMonitor` logs `TOOL_ROUTER_FULL_CATALOG_RATE` when more than 5 % of routed turns (window 200, minimum 20) fall back.
+- Measurement kit: `ai-engine/evals/tool-tokens/` (30-task bank, configs 0/1/2, `REPORT.md`). `bytes_v1` is a pessimistic byte estimate, not provider tokens. N14 gate: discovery turns on only with ≥ 30 % fewer input tokens per turn; scripts only with ≥ 50 % fewer tokens and ≥ 40 % fewer rounds on multi-step tasks; never with a lower success rate. Uncommitted tools leak into the measured registry: measure on a clean tree.
 
 ## Global knowledge (summary)
 

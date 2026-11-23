@@ -25,7 +25,6 @@ import {
 } from './dto/scan-roster.dto';
 import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
 import { IndustryModule } from '../../../common/decorators/industry-module.decorator';
-import { detectIngestFile } from '@common/ai-ingest/ingest-file.detector';
 
 /**
  * Member bulk scanner controller.
@@ -90,60 +89,6 @@ export class MemberBulkScannerController {
       ErrorCodes.SYS_CONFLICT_001,
       error?.message || fallback,
     );
-  }
-
-  /**
-   * @deprecated Usar `POST bulk-scan/async` (504 tras 60 s de proxy).
-   */
-  @Post()
-  @Permissions('store:memberships:bulk_import')
-  @UseInterceptors(
-    FileInterceptor('file', {
-      storage: memoryStorage(),
-      limits: { fileSize: MemberBulkScannerController.MAX_FILE_BYTES },
-      fileFilter: (_req, file, cb) => {
-        if (
-          !MemberBulkScannerController.ALLOWED_MIMETYPES.includes(file.mimetype)
-        ) {
-          return cb(
-            new VendixHttpException(ErrorCodes.MEMBER_SCAN_INVALID_FILE),
-            false,
-          );
-        }
-        cb(null, true);
-      },
-    }),
-  )
-  async scan(@UploadedFile() file?: Express.Multer.File) {
-    try {
-      if (!file) {
-        throw new VendixHttpException(ErrorCodes.MEMBER_SCAN_NO_FILE);
-      }
-      // The mimetype above is what the client claims: the real type comes
-      // from the bytes. This synchronous path runs inside the API, so it only
-      // takes images and PDFs; spreadsheets go through `bulk-scan/async`.
-      const detected = detectIngestFile(this.scannerService.toScanFile(file));
-      if (!detected || (detected.kind !== 'image' && detected.kind !== 'pdf')) {
-        throw new VendixHttpException(
-          ErrorCodes.MEMBER_SCAN_INVALID_FILE,
-          detected?.kind === 'sheet'
-            ? 'Las hojas de cálculo se cargan con el escaneo en segundo plano; este envío solo acepta imágenes o PDF.'
-            : 'El archivo no es una imagen ni un PDF válido.',
-        );
-      }
-      const result = await this.scannerService.scanRoster(file);
-      const fileInfo = await this.bulkUploadLogs.describeFile(
-        'memberships',
-        file.buffer,
-        file.originalname,
-      );
-      return this.responseService.success(
-        { ...result, ...fileInfo },
-        'Padrón escaneado exitosamente',
-      );
-    } catch (error) {
-      this.fail(error, 'Error al escanear el padrón');
-    }
   }
 
   @Post('async')

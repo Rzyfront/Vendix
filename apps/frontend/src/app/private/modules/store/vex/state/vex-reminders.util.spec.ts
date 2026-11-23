@@ -135,6 +135,18 @@ describe('vexActivityFingerprint (when the sidebar re-reads reminders)', () => {
     expect(done).not.toBe(streaming);
   });
 
+  it('changes when the person saves a suggested follow-up (it created a reminder)', () => {
+    const suggested = message('agent');
+    suggested.followups = [
+      { id: 'f1', kind: 'reminder', title: 'Llamar', status: 'suggested' },
+    ];
+    const saved = message('agent');
+    saved.followups = [{ id: 'f1', kind: 'reminder', title: 'Llamar', status: 'saved' }];
+    expect(vexActivityFingerprint([conversation([saved])], null)).not.toBe(
+      vexActivityFingerprint([conversation([suggested])], null),
+    );
+  });
+
   it('changes when a confirmed step starts and finishes applying (e.g. deleting a reminder)', () => {
     const convs = [conversation([message('user'), message('agent')])];
     const idle = vexActivityFingerprint(convs, null);

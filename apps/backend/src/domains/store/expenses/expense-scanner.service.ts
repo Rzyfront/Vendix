@@ -1,16 +1,43 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { AIEngineService } from '../../../ai-engine/ai-engine.service';
-import { AIMessage } from '../../../ai-engine/interfaces/ai-provider.interface';
-import { parseAiJson } from '../../../ai-engine/utils/ai-json.util';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
+import type { AiJobProgress } from '@common/ai-scan-jobs/ai-job-monitor.service';
+import {
+  AiExtractionError,
+  AiExtractionService,
+  newIngestQuotaKey,
+} from '@common/ai-ingest/extraction/ai-extraction.service';
+import { DocumentPagesService } from '@common/ai-ingest/documents/document-pages.service';
+import {
+  readDocumentWithAi,
+  ReadDocumentResult,
+} from '@common/ai-ingest/documents/document-reader';
+import {
+  decodeDataUri,
+  detectQueuedDocument,
+} from '@common/ai-ingest/documents/queued-document';
 import {
   ExpenseLineItem,
   ExpenseScanResult,
   ExpenseScanResponse,
   MatchedCategory,
 } from './dto/scan-expense.dto';
-const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only (export default) but CJS runtime exports the function
+import {
+  buildExpenseInstruction,
+  EXPENSE_INGEST_PROFILE,
+  mergeExpenseBatches,
+} from './expense-ingest.profile';
+
+export interface ExpenseScanFile {
+  buffer: Buffer;
+  /** Declared type (multipart/S3); the real one is detected by signature. */
+  mimeType?: string | null;
+  originalName?: string | null;
+}
+
+export interface ExpenseScanRunOptions {
+  reportProgress?: (progress: AiJobProgress) => Promise<void>;
+}
 
 @Injectable()
 export class ExpenseScannerService {
@@ -34,103 +61,140 @@ export class ExpenseScannerService {
   ]);
 
   constructor(
-    private readonly aiEngine: AIEngineService,
     private readonly prisma: StorePrismaService,
+    private readonly extraction: AiExtractionService,
+    private readonly documentPages: DocumentPagesService,
   ) {}
 
   /**
-   * ENQUEUE path (HTTP). Corre el preprocesamiento sharp sobre el buffer multer
-   * (que solo existe en el request) y devuelve el data URI listo para encolar.
-   * NO hace OCR síncrono: la parte pesada la ejecuta el worker vía
-   * `scanFromImage`.
+   * Real type of an upload, checked in the HTTP request before enqueueing:
+   * only a PDF or a photo (JPG, PNG, WebP; HEIC only if the server decodes
+   * it). Anything else is `AI_INGEST_INVALID_FILE`, a problem of the document.
    */
-  async prepareImage(
-    file: Express.Multer.File,
-  ): Promise<{ dataUri: string; mimeType: string }> {
-    this.logger.debug(
-      `[ExpenseScan] Preparing image: mimetype=${file.mimetype}, size=${file.size}, buffer=${file.buffer?.length ?? 'NO BUFFER'}`,
+  assertValidScanFile(file: { buffer: Buffer; originalname?: string; mimetype?: string }) {
+    return detectQueuedDocument(
+      file,
+      'La factura debe ser un PDF o una foto (JPG, PNG o WebP).',
     );
-
-    const { base64, mimeType } = await this.preprocessImage(file);
-    const dataUri = `data:${mimeType};base64,${base64}`;
-
-    this.logger.debug(
-      `[ExpenseScan] DataURI length: ${dataUri.length} chars`,
-    );
-
-    return { dataUri, mimeType };
   }
 
   /**
-   * WORKER path (BullMQ). Parte pesada del escaneo: OCR (run) + parse + matching
-   * de categoría. Debe correr dentro de `RequestContextService.run(...)` (lo hace
-   * el processor) para que el matching organization-scoped funcione.
+   * WORKER path (BullMQ). Lee la factura por el lector común de ai-ingest
+   * (plan ia-cargas F5a, #7) y luego hace el matching de categoría. Debe
+   * correr dentro de `RequestContextService.run(...)` (lo hace el processor)
+   * para que el matching organization-scoped funcione.
    *
-   * El retorno es exactamente `ExpenseScanResponse` (misma forma que el camino
-   * síncrono anterior) y queda persistido en `job.returnvalue`.
+   * - Un PDF se lee por páginas con el texto nativo primero (las escaneadas
+   *   como imagen); nunca viaja crudo. Una foto se endereza (EXIF) y se
+   *   reduce a 1536 px como antes.
+   * - Hasta 5 páginas van en UNA llamada; una factura más larga se lee en
+   *   lotes que se fusionan (`mergeExpenseBatches`) en UNA respuesta cruda.
+   * - La respuesta se valida con esquema (ajv) y, si no cuadra, se repara una
+   *   vez. Desde ahí todo sigue igual: la misma
+   *   `normalizeExpenseOcrResponse` (montos, impuestos, moneda) y el mismo
+   *   matching de categoría. `warnings` y `scan_source` son opcionales.
    */
-  async scanFromImage(
-    dataUri: string,
-    mimeType: string,
+  async scanFromFile(
+    file: ExpenseScanFile,
+    options: ExpenseScanRunOptions = {},
   ): Promise<ExpenseScanResponse> {
-    const scan = await this.runOcr(dataUri, mimeType);
+    const detected = detectQueuedDocument(
+      { buffer: file.buffer, originalname: file.originalName ?? undefined, mimetype: file.mimeType ?? undefined },
+      'La factura debe ser un PDF o una foto (JPG, PNG o WebP).',
+    );
+    this.logger.debug(
+      `[ExpenseScan] Reading document: mime=${detected.mime}, bytes=${file.buffer.length}`,
+    );
+
+    const read = await this.readPages(() =>
+      readDocumentWithAi<Record<string, any>>({
+        file: { buffer: file.buffer, originalName: file.originalName ?? 'factura' },
+        mimeType: detected.mime,
+        pages: this.documentPages,
+        extraction: this.extraction,
+        appKey: 'expense_invoice_ocr',
+        schema: EXPENSE_INGEST_PROFILE.documentSchema,
+        instruction: buildExpenseInstruction,
+        limits: EXPENSE_INGEST_PROFILE.limits,
+        maxBytes: EXPENSE_INGEST_PROFILE.limits.maxBytes,
+        // A photo stays ONE image, as before: strips of a tall receipt could
+        // read a line twice in their overlap and double an amount.
+        splitTallImages: false,
+        // One unit of quota per scan, as the single call charged before.
+        quotaKey: newIngestQuotaKey(),
+        reportProgress: options.reportProgress,
+        logLabel: 'ExpenseScan',
+      }),
+    );
+
+    const merged = mergeExpenseBatches(read.batches);
+    const scan = this.normalizeExpenseOcrResponse(merged.data);
     const matched_category = await this.matchCategory(
       scan.supplier_name,
       scan.line_items,
     );
-    return { scan, matched_category };
+    const warnings = [...read.warnings, ...merged.warnings];
+    return {
+      scan,
+      matched_category,
+      ...(warnings.length ? { warnings } : {}),
+      scan_source: {
+        pages: read.pages,
+        text_pages: read.textPages,
+        batches: read.batches.length,
+        ...(read.missingPages.length ? { missing_pages: read.missingPages } : {}),
+      },
+    };
+  }
+
+  /**
+   * Jobs queued before F5a carried a data URI (a JPEG prepared at enqueue, or
+   * the raw PDF as base64). They still work: the bytes go through the same
+   * reader as a new job.
+   */
+  async scanFromImage(
+    dataUri: string,
+    mimeType: string,
+    options: ExpenseScanRunOptions = {},
+  ): Promise<ExpenseScanResponse> {
+    const decoded = decodeDataUri(dataUri);
+    if (!decoded) {
+      throw new VendixHttpException(
+        ErrorCodes.AI_INGEST_INVALID_FILE,
+        'El documento del escaneo no llegó completo. Súbelo de nuevo.',
+      );
+    }
+    return this.scanFromFile(
+      { buffer: decoded.buffer, mimeType: mimeType || decoded.mime },
+      options,
+    );
   }
 
   // --- Private helpers ---
 
-  private async runOcr(
-    dataUri: string,
-    mimeType: string,
-  ): Promise<ExpenseScanResult> {
-    this.logger.debug(
-      `[ExpenseScan] Worker OCR: mimeType=${mimeType}, dataUri length=${dataUri.length} chars`,
-    );
-
-    const imageMessage: AIMessage = {
-      role: 'user',
-      content: [
-        {
-          type: 'text',
-          text: 'Extract the expense invoice data. Return ONLY valid JSON matching the schema defined in your system instructions.',
-        },
-        {
-          type: 'image_url',
-          image_url: { url: dataUri, detail: 'high' },
-        },
-      ],
-    };
-
-    this.logger.debug(`[ExpenseScan] Sending to AI engine...`);
-    const response = await this.aiEngine.run('expense_invoice_ocr', {}, [
-      imageMessage,
-    ]);
-
-    this.logger.debug(
-      `[ExpenseScan] AI response: success=${response.success}, contentLength=${response.content?.length ?? 0}, model=${response.model}, error=${response.error}`,
-    );
-    this.logger.debug(
-      `[ExpenseScan] AI content preview: ${response.content?.substring(0, 300)}`,
-    );
-
-    if (!response.success || !response.content) {
-      this.logger.error(`AI expense OCR failed: ${response.error}`);
-      throw new VendixHttpException(ErrorCodes.INV_SCAN_AI_FAIL);
-    }
-
+  /**
+   * Keeps the scanner's error contract: an unusable model answer is still
+   * `INV_SCAN_PARSE_FAIL` and an AI failure `INV_SCAN_AI_FAIL` (the queue
+   * retries both). Document problems keep their `AI_INGEST_*` code (no pages,
+   * too many pages, unsupported type, cut answer) and credits / rate limit
+   * their `AI_PROVIDER_*` one.
+   */
+  private async readPages<T>(
+    run: () => Promise<ReadDocumentResult<T>>,
+  ): Promise<ReadDocumentResult<T>> {
     try {
-      const parsed = parseAiJson(response.content);
-      return this.normalizeExpenseOcrResponse(parsed);
+      return await run();
     } catch (err) {
-      if (err instanceof VendixHttpException) throw err;
-      this.logger.error(
-        `Failed to parse AI expense OCR response: ${response.content}`,
-      );
-      throw new VendixHttpException(ErrorCodes.INV_SCAN_PARSE_FAIL);
+      const error = err instanceof AiExtractionError ? err.toHttpException() : err;
+      if (error instanceof VendixHttpException) {
+        if (error.errorCode === ErrorCodes.AI_INGEST_PARSE_FAIL.code) {
+          throw new VendixHttpException(ErrorCodes.INV_SCAN_PARSE_FAIL);
+        }
+        if (error.errorCode === ErrorCodes.AI_REQUEST_001.code) {
+          throw new VendixHttpException(ErrorCodes.INV_SCAN_AI_FAIL);
+        }
+      }
+      throw error;
     }
   }
 
@@ -262,56 +326,10 @@ export class ExpenseScannerService {
   }
 
   /**
-   * Replicado verbatim de `invoice-scanner.service.ts` / `rut-scanner.service.ts`:
-   * sharp resize ≤1536, JPEG q85; si falla (PDFs, formatos no soportados) pasa
-   * el buffer crudo con su mimetype original para que el modelo de visión lo
-   * procese nativamente.
+   * Model answer → `ExpenseScanResult`. Unchanged since before ia-cargas: the
+   * amounts, taxes and currency of a given answer are the same as always.
    */
-  private async preprocessImage(
-    file: Express.Multer.File,
-  ): Promise<{ base64: string; mimeType: string }> {
-    const MAX_DIMENSION = 1536;
-    const JPEG_QUALITY = 85;
-
-    try {
-      const metadata = await sharp(file.buffer).metadata();
-      const needsResize =
-        (metadata.width && metadata.width > MAX_DIMENSION) ||
-        (metadata.height && metadata.height > MAX_DIMENSION);
-
-      let pipeline = sharp(file.buffer);
-
-      if (needsResize) {
-        pipeline = pipeline.resize(MAX_DIMENSION, MAX_DIMENSION, {
-          fit: 'inside',
-          withoutEnlargement: true,
-        });
-      }
-
-      const processedBuffer = await pipeline
-        .jpeg({ quality: JPEG_QUALITY })
-        .toBuffer();
-
-      this.logger.debug(
-        `[ExpenseScan] Image preprocessed: ${file.size} bytes → ${processedBuffer.length} bytes (${metadata.width}x${metadata.height}${needsResize ? ' resized' : ''})`,
-      );
-
-      return {
-        base64: processedBuffer.toString('base64'),
-        mimeType: 'image/jpeg',
-      };
-    } catch (err) {
-      this.logger.warn(
-        `[ExpenseScan] Image preprocessing failed, using raw: ${err.message}`,
-      );
-      return {
-        base64: file.buffer.toString('base64'),
-        mimeType: file.mimetype,
-      };
-    }
-  }
-
-  private normalizeExpenseOcrResponse(parsed: any): ExpenseScanResult {
+  normalizeExpenseOcrResponse(parsed: any): ExpenseScanResult {
     const lineItems: ExpenseLineItem[] = Array.isArray(parsed.line_items)
       ? parsed.line_items.map((item: any, idx: number) => ({
           description: String(item.description ?? ''),

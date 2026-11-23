@@ -50,10 +50,40 @@ import {
   ApiResponse,
   InventoryCountScanResponse,
   MatchedCountProduct,
+  CountSkippedRow,
+  CountRowIssue,
   BatchCreateAdjustmentsRequest,
   AdjustableProduct,
   AdjustmentType,
 } from '../../interfaces';
+
+/**
+ * ia-cargas F5a — además de fotos y PDF, el conteo acepta hojas de cálculo
+ * (xlsx, xls, csv) que el backend lee con código; mismo tope de 10 MB.
+ */
+const ACCEPTED_DOCUMENT_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+const SHEET_EXTENSIONS = ['xlsx', 'xls', 'csv'];
+const SHEET_MIMETYPES = [
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
+  'text/csv',
+];
+const FILE_ACCEPT =
+  'image/jpeg,image/png,image/webp,application/pdf,.xlsx,.xls,.csv,' + SHEET_MIMETYPES.join(',');
+
+const SKIP_REASON_LABELS: Record<CountSkippedRow['reason'], string> = {
+  empty: 'Vacía',
+  total: 'Total',
+  header: 'Encabezado repetido',
+  limit: 'Tope',
+  unreadable: 'No se pudo leer',
+  duplicate: 'Repetida',
+};
+
+function isSheetFile(file: File): boolean {
+  const ext = (file.name.split('.').pop() ?? '').toLowerCase();
+  return SHEET_EXTENSIONS.includes(ext) || SHEET_MIMETYPES.includes(file.type);
+}
 
 /**
  * Copia editable de `MatchedCountProduct` con un campo extra `note`
@@ -190,7 +220,7 @@ interface EditableCountRow extends MatchedCountProduct {
                 Arrastra tu hoja de conteo aquí
               </p>
               <p class="text-xs text-text-secondary">
-                JPG, PNG, WebP o PDF — Máx 10MB
+                Foto, PDF, Excel o CSV — Máx 10MB
               </p>
             }
           </div>
@@ -200,7 +230,7 @@ interface EditableCountRow extends MatchedCountProduct {
             #fileInput
             type="file"
             class="hidden"
-            accept="image/jpeg,image/png,image/webp,application/pdf"
+            [accept]="fileAccept"
             (change)="onFileSelected($event)"
           />
           <input
@@ -282,6 +312,50 @@ interface EditableCountRow extends MatchedCountProduct {
             </div>
           }
 
+          <!-- ia-cargas F5a: hoja de cálculo — resumen, filas omitidas y avisos por fila -->
+          @if (scanResponse()!.stats?.source === 'sheet') {
+            <p class="text-xs text-text-secondary">
+              Se leyeron {{ scanResponse()!.stats!.imported_rows }} de {{ scanResponse()!.stats!.total_rows }} filas de la hoja
+              @if (scanResponse()!.stats!.mapping === 'ai') {
+                (columnas reconocidas con IA)
+              }.
+            </p>
+          } @else if ((scanResponse()!.stats?.pages ?? 0) > 1) {
+            <p class="text-xs text-text-secondary">
+              Documento leído en {{ scanResponse()!.stats!.pages }} páginas.
+            </p>
+          }
+          @if (skippedRows().length > 0) {
+            <details class="bg-muted/30 border border-border rounded-lg p-3" open>
+              <summary class="text-xs font-semibold text-text-primary cursor-pointer">
+                Filas omitidas ({{ skippedRows().length }})
+              </summary>
+              <div class="mt-2 space-y-1 max-h-48 overflow-y-auto">
+                @for (s of skippedRows(); track $index) {
+                  <p class="text-xs text-text-secondary">
+                    <span class="font-medium text-text-primary">{{ skippedLabel(s) }}:</span>
+                    {{ s.message }}
+                  </p>
+                }
+              </div>
+            </details>
+          }
+          @if (rowIssues().length > 0) {
+            <details class="bg-amber-50 border border-amber-200 rounded-lg p-3">
+              <summary class="text-xs font-semibold text-amber-800 cursor-pointer">
+                Avisos por fila ({{ rowIssues().length }})
+              </summary>
+              <div class="mt-2 space-y-1 max-h-48 overflow-y-auto">
+                @for (issue of rowIssues(); track $index) {
+                  <p class="text-xs text-amber-700">
+                    <span class="font-medium">{{ rowLabel(issue.row, issue.sheet) }}:</span>
+                    {{ issue.message }}
+                  </p>
+                }
+              </div>
+            </details>
+          }
+
           <!-- Excluded rows notice -->
           @if (excludedCount() > 0) {
             <div class="bg-amber-50 border border-amber-200 rounded-lg p-3">
@@ -325,6 +399,9 @@ interface EditableCountRow extends MatchedCountProduct {
                           [ngTemplateOutletContext]="{ item: item, i: i }"
                         ></ng-container>
                         <p class="text-[10px] text-text-secondary mt-1 line-clamp-1" [title]="item.description">
+                          @if (item.source_row) {
+                            <span class="font-medium">{{ rowLabel(item.source_row, item.source_sheet) }} ·</span>
+                          }
                           {{ item.description }}
                         </p>
                       </td>
@@ -391,6 +468,9 @@ interface EditableCountRow extends MatchedCountProduct {
                         [ngTemplateOutletContext]="{ item: item, i: i }"
                       ></ng-container>
                       <p class="text-[10px] text-text-secondary mt-1 line-clamp-2">
+                        @if (item.source_row) {
+                          <span class="font-medium">{{ rowLabel(item.source_row, item.source_sheet) }} ·</span>
+                        }
                         {{ item.description }}
                       </p>
                     </div>
@@ -723,6 +803,12 @@ export class InventoryScannerModalComponent {
   );
 
   private readonly MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+  protected readonly fileAccept = FILE_ACCEPT;
+
+  /** ia-cargas F5a: sheet rows the backend left out, with row and reason. */
+  readonly skippedRows = computed<CountSkippedRow[]>(() => this.scanResponse()?.skipped ?? []);
+  /** ia-cargas F5a: notices per sheet row (ambiguous quantity, repeated product). */
+  readonly rowIssues = computed<CountRowIssue[]>(() => this.scanResponse()?.row_issues ?? []);
 
   constructor() {
     // Re-attach to a count scan still running when the modal opens.
@@ -816,14 +902,8 @@ export class InventoryScannerModalComponent {
 
   private handleFile(file: File): void {
     this.fileError.set(null);
-    const validTypes = [
-      'image/jpeg',
-      'image/png',
-      'image/webp',
-      'application/pdf',
-    ];
-    if (!validTypes.includes(file.type)) {
-      this.fileError.set('Formato no soportado. Usa JPG, PNG, WebP o PDF.');
+    if (!ACCEPTED_DOCUMENT_TYPES.includes(file.type) && !isSheetFile(file)) {
+      this.fileError.set('Formato no soportado. Usa JPG, PNG, WebP, PDF, Excel (xlsx, xls) o CSV.');
       return;
     }
     if (file.size > this.MAX_FILE_SIZE) {
@@ -844,6 +924,15 @@ export class InventoryScannerModalComponent {
       this.filePreviewUrl.set(null);
       this.isProcessingFile.set(false);
     }
+  }
+
+  skippedLabel(s: CountSkippedRow): string {
+    const rows = s.row_end ? `Filas ${s.row}–${s.row_end}` : `Fila ${s.row}`;
+    return `${rows}${s.sheet ? ` (${s.sheet})` : ''} · ${SKIP_REASON_LABELS[s.reason] ?? s.reason}`;
+  }
+
+  rowLabel(row: number, sheet?: string): string {
+    return `Fila ${row}${sheet ? ` (${sheet})` : ''}`;
   }
 
   removeFile(): void {

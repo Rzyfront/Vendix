@@ -44,12 +44,48 @@ export interface MatchedCountProduct {
     confidence: number;
     product_variant_id?: number | null;
   }[];
+  /** ia-cargas F5a: row of the uploaded sheet this line came from (sheets only). */
+  source_row?: number;
+  source_sheet?: string;
+}
+
+/** ia-cargas F5a: a sheet row that did not become a counted line, and why. */
+export interface CountSkippedRow {
+  row: number;
+  row_end?: number;
+  sheet?: string;
+  reason: 'empty' | 'total' | 'header' | 'limit' | 'unreadable' | 'duplicate';
+  message: string;
+}
+
+/** ia-cargas F5a: something to check on a sheet row (the line was still read). */
+export interface CountRowIssue {
+  row: number;
+  sheet?: string;
+  level: 'warning' | 'error';
+  field?: string;
+  message: string;
+}
+
+export interface InventoryCountScanStats {
+  source: 'sheet' | 'document';
+  total_rows: number;
+  imported_rows: number;
+  skipped_rows: number;
+  mapping: 'synonyms' | 'ai' | null;
+  pages?: number;
+  text_pages?: number;
 }
 
 export interface InventoryCountScanResponse {
   scan: InventoryCountScanResult;
   matched_products: MatchedCountProduct[];
   warnings: string[];
+  /** ia-cargas F5a (all optional): sheet rows left out, notices per row, stats. */
+  skipped?: CountSkippedRow[];
+  row_issues?: CountRowIssue[];
+  columns?: Array<{ sheet?: string; column: string; field: string | null }>;
+  stats?: InventoryCountScanStats;
 }
 
 // ============================================================================

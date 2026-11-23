@@ -513,6 +513,45 @@ describe('VexiPlanStateService durable adapter', () => {
   );
 
   scopedIt(
+    'links the effect row to its write batch only when a batchId is passed',
+    async () => {
+      const f = fixture();
+      f.prisma.ai_agent_effects = {
+        updateMany: jest.fn(async () => ({ count: 1 })),
+      };
+      const dispatch = jest.fn(async () =>
+        JSON.stringify({ applied: true, id: 99 }),
+      );
+      await f.svc.applyDurableEffect(
+        {
+          conversationId: 1,
+          stepId: 'plain',
+          tool: 'create_customer',
+          args: { name: 'Juan' },
+        },
+        dispatch,
+      );
+      expect(f.prisma.ai_agent_effects.updateMany).not.toHaveBeenCalled();
+
+      await f.svc.applyDurableEffect(
+        {
+          conversationId: 1,
+          stepId: 'vex-batch:b1:s1',
+          batchId: 'b1',
+          tool: 'create_customer',
+          args: { name: 'Ana' },
+        },
+        dispatch,
+      );
+      expect(f.prisma.ai_agent_effects.updateMany).toHaveBeenCalledTimes(1);
+      expect(f.prisma.ai_agent_effects.updateMany).toHaveBeenCalledWith({
+        where: { operation_id: expect.any(String) },
+        data: { batch_id: 'b1' },
+      });
+    },
+  );
+
+  scopedIt(
     'a timeout after dispatch becomes unknown and a later approval cannot replay it',
     async () => {
       const f = fixture();
@@ -563,4 +602,38 @@ describe('VexiPlanStateService durable adapter', () => {
       expect(dispatch).toHaveBeenCalledTimes(1);
     },
   );
+});
+
+describe('VexiPlanStateService objective progress (P2-6)', () => {
+  it('GET objectives/:id returns token counters without the internal cost', async () => {
+    const row: any = {
+      id: '00000000-0000-4000-8000-000000000001',
+      conversation_id: 7,
+      goal: 'g',
+      semantic_status: 'active',
+      version: 3,
+      expires_at: new Date(Date.now() + 60_000),
+      next_step: null,
+      requires_revalidation: false,
+      budget: {
+        provider_attempts: 2,
+        prompt_tokens: 800,
+        completion_tokens: 90,
+        cost_usd: 0.0456,
+        tools: 1,
+        active_runtime_ms: 10,
+        expansions: 0,
+        recovery: 0,
+      },
+    };
+    const repo: any = { get: jest.fn().mockResolvedValue(row) };
+    const svc = new VexiPlanStateService({} as any, repo);
+    const progress = await svc.getObjectiveProgress(row.id);
+    expect(progress.budget).not.toHaveProperty('cost_usd');
+    expect(progress.budget).toMatchObject({
+      prompt_tokens: 800,
+      completion_tokens: 90,
+    });
+    expect(row.budget.cost_usd).toBe(0.0456);
+  });
 });

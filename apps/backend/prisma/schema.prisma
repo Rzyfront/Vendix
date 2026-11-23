@@ -7012,8 +7012,11 @@ model ai_engine_configs {
   created_at     DateTime?          @default(now()) @db.Timestamp(6)
   updated_at     DateTime?          @default(now()) @db.Timestamp(6)
 
-  applications ai_engine_applications[]
+  applications          ai_engine_applications[] @relation("ai_engine_application_config")
+  /// F3 T24: aplicaciones que usan esta configuración como respaldo.
+  fallback_applications ai_engine_applications[] @relation("ai_engine_application_fallback_config")
   logs         ai_engine_logs[]
+  voice_profiles        ai_voice_profiles[]
 
   @@unique([provider, model_id])
   @@index([model_type])
@@ -7025,6 +7028,8 @@ model ai_engine_applications {
   name                String             @db.VarChar(255)
   description         String?            @db.Text
   config_id           Int?
+  /// F3 T24: configuración de respaldo; ante error del proveedor o timeout el motor reintenta una vez con ella.
+  fallback_config_id  Int?
   system_prompt       String?            @db.Text
   prompt_template     String?            @db.Text
   temperature         Decimal?           @db.Decimal(3, 2)
@@ -7039,9 +7044,11 @@ model ai_engine_applications {
   created_at          DateTime?          @default(now()) @db.Timestamp(6)
   updated_at          DateTime?          @default(now()) @db.Timestamp(6)
 
-  config ai_engine_configs? @relation(fields: [config_id], references: [id], onDelete: SetNull)
+  config          ai_engine_configs? @relation("ai_engine_application_config", fields: [config_id], references: [id], onDelete: SetNull)
+  fallback_config ai_engine_configs? @relation("ai_engine_application_fallback_config", fields: [fallback_config_id], references: [id], onDelete: SetNull)
 
   @@index([config_id])
+  @@index([fallback_config_id])
   @@index([ai_feature_category])
   @@index([model_type])
 }
@@ -7085,11 +7092,38 @@ model ai_agents {
   timeout_seconds               Int?
   requires_confirmation_default Boolean   @default(false)
   is_active                     Boolean   @default(true)
+  /// F8 T49: voz del catálogo que lee las respuestas de este agente. NULL = respaldo (`metadata.speech`).
+  voice_profile_id              Int?
   created_at                    DateTime? @default(now()) @db.Timestamp(6)
   updated_at                    DateTime? @default(now()) @db.Timestamp(6)
 
+  voice_profile ai_voice_profiles? @relation(fields: [voice_profile_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
   @@index([is_active])
   @@index([app_key])
+  @@index([voice_profile_id])
+}
+
+/// F8 T49: catálogo de voces de lectura (TTS) que arma superadmin. Una voz = un
+/// proveedor de voz (`ai_engine_configs`) + el id de voz de ese proveedor.
+model ai_voice_profiles {
+  id          Int       @id @default(autoincrement())
+  config_id   Int
+  voice_id    String    @db.VarChar(150)
+  name        String    @db.VarChar(120)
+  language    String    @default("es") @db.VarChar(16)
+  speed       Decimal?  @db.Decimal(4, 2)
+  vol         Decimal?  @db.Decimal(4, 2)
+  sample_text String?   @db.VarChar(120)
+  is_active   Boolean   @default(true)
+  created_at  DateTime? @default(now()) @db.Timestamp(6)
+  updated_at  DateTime? @default(now()) @db.Timestamp(6)
+
+  config ai_engine_configs @relation(fields: [config_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  agents ai_agents[]
+
+  @@unique([config_id, voice_id])
+  @@index([is_active])
 }
 
 model ai_engine_logs {
@@ -7123,6 +7157,10 @@ model ai_engine_logs {
   status            String   @default("success") @db.VarChar(20)
   error_message     String?  @db.Text
   input_preview     String?  @db.Text
+  // ia-cargas F6: why a call failed or was cut (all nullable, no backfill).
+  finish_reason     String?  @db.VarChar(32)
+  attempt           Int?
+  validation_error  String?  @db.VarChar(500)
   created_at        DateTime @default(now()) @db.Timestamp(6)
 
   config ai_engine_configs? @relation(fields: [config_id], references: [id], onDelete: SetNull)
@@ -7213,6 +7251,8 @@ model ai_conversations {
   user_id         Int
   title           String?                     @db.VarChar(255)
   summary         String?                     @db.Text
+  /// F3 T22: id del último ai_messages cubierto por `summary` (sin FK: los mensajes solo se borran con la conversación).
+  summary_through_message_id Int?
   app_key         String?                     @db.VarChar(100)
   status          ai_conversation_status_enum @default(active)
   metadata        Json?
@@ -7300,11 +7340,19 @@ model ai_attachments {
   consumed_by_app_key String?   @db.VarChar(100)
   created_at          DateTime  @default(now()) @db.Timestamp(6)
   linked_at           DateTime? @db.Timestamp(6)
+  /// M10 (F6/T41): S3 key of the extracted text (derived). `s3_key` stays the original.
+  derived_text_key    String?   @db.VarChar(500)
+  /// M10 (F6/T44): document-module file this attachment was promoted to. Survives
+  /// a conversation purge because the stored file is owned by the record.
+  stored_file_id      Int?
+
+  stored_file stored_files? @relation(fields: [stored_file_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([store_id])
   @@index([store_id, user_id])
   @@index([conversation_id])
   @@index([linked_entity_type, linked_entity_id])
+  @@index([stored_file_id])
 }
 
 /// Trabajo de Vexi que no cabe en un turno de conversación.
@@ -7411,7 +7459,10 @@ model ai_agent_effects {
   store_id           Int
   organization_id    Int
   user_id            Int
-  objective_id       String   @db.Uuid
+  // Nullable desde el borrado de conversaciones: el efecto aplicado en el negocio
+  // sobrevive a la conversación y queda desvinculado (objective_id = NULL). El FK
+  // compuesto no se aplica con una columna NULL (MATCH SIMPLE).
+  objective_id       String?  @db.Uuid
   operation_id       String   @unique @db.VarChar(200)
   proposal_hash      String   @db.VarChar(64)
   step_id            String   @db.VarChar(200)
@@ -7419,16 +7470,148 @@ model ai_agent_effects {
   domain_receipt     Json?
   domain_reference   String?  @db.VarChar(300)
   evidence_result_id String?  @db.Uuid
+  // F5: lote de escritura de Vex al que pertenece el efecto (NULL fuera de lotes).
+  batch_id           String?  @db.Uuid
   history            Json     @default("[]")
   created_at         DateTime @default(now()) @db.Timestamptz(6)
   updated_at         DateTime @default(now()) @db.Timestamptz(6)
 
   evidence_result ai_agent_tool_results? @relation(fields: [evidence_result_id], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  objective ai_agent_objectives @relation(fields: [objective_id, store_id, organization_id, user_id], references: [id, store_id, organization_id, user_id], onDelete: Restrict, onUpdate: Restrict, map: "ai_agent_effects_objective_scope_fkey")
+  batch           ai_agent_write_batches? @relation(fields: [batch_id], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "ai_agent_effects_batch_id_fkey")
+  objective ai_agent_objectives? @relation(fields: [objective_id, store_id, organization_id, user_id], references: [id, store_id, organization_id, user_id], onDelete: Restrict, onUpdate: Restrict, map: "ai_agent_effects_objective_scope_fkey")
 
   @@unique([objective_id, step_id, proposal_hash], map: "ai_agent_effects_proposal_uq")
   @@index([store_id, organization_id, user_id, objective_id, status], map: "ai_agent_effects_owner_objective_status_idx")
   @@index([evidence_result_id])
+  @@index([batch_id], map: "ai_agent_effects_batch_id_idx")
+}
+
+/// Lote de escrituras de Vex (F5): hasta 25 escrituras reversibles que la persona
+/// aprueba con un clic. `steps` guarda cada paso con sus hashes y estado;
+/// `version` es la concurrencia optimista del deshacer. `conversation_id` es un
+/// entero plano sin FK (la purga puede borrar la conversación y el lote aplicado
+/// sobrevive). Una saga, no una transacción: ver `write-batch.types.ts`.
+model ai_agent_write_batches {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  store_id            Int
+  organization_id     Int
+  user_id             Int
+  conversation_id     Int?
+  goal                String    @db.VarChar(500)
+  status              String    @default("proposed") @db.VarChar(20)
+  steps               Json      @default("[]")
+  step_count          Int
+  affected_records    Int       @default(0)
+  part_index          Int       @default(1)
+  part_total          Int       @default(1)
+  group_id            String?   @db.Uuid
+  version             Int       @default(0)
+  approved_by_user_id Int?
+  approved_at         DateTime? @db.Timestamptz(6)
+  started_at          DateTime? @db.Timestamptz(6)
+  finished_at         DateTime? @db.Timestamptz(6)
+  summary             Json?
+  expires_at          DateTime  @db.Timestamptz(6)
+  created_at          DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime  @default(now()) @db.Timestamptz(6)
+
+  effects ai_agent_effects[]
+
+  @@index([store_id, organization_id, user_id, status], map: "ai_agent_write_batches_owner_status_idx")
+  @@index([conversation_id], map: "ai_agent_write_batches_conversation_id_idx")
+}
+
+/// Constancia del borrado físico de una conversación de Vex: quién, cuándo y
+/// cuántos elementos. NUNCA guarda título ni contenido. `conversation_id` es un
+/// entero plano sin FK (la fila de la conversación ya no existe).
+/// `pending_s3_keys` es la lista de objetos S3 aún por borrar; un job la vacía
+/// con reintentos (`s3_attempts`) y marca `s3_completed_at` al terminar.
+model ai_conversation_purges {
+  id              Int       @id @default(autoincrement())
+  store_id        Int
+  organization_id Int
+  user_id         Int
+  conversation_id Int
+  agent_key       String    @db.VarChar(80)
+  counts          Json
+  pending_s3_keys Json      @default("[]")
+  s3_attempts     Int       @default(0)
+  s3_completed_at DateTime? @db.Timestamp(6)
+  created_at      DateTime  @default(now()) @db.Timestamp(6)
+
+  @@index([store_id])
+  @@index([s3_completed_at, s3_attempts])
+}
+
+/// F4 T31 (M6, D7, N3): store memory, MEMORY.md style, loaded into every Vex session of the store.
+/// user_id NULL = whole store (always NULL today; ready for per-user memory without migration).
+/// Partial unique indexes live in SQL: (store_id, agent_key, key) WHERE user_id IS NULL and
+/// (store_id, agent_key, user_id, key) WHERE user_id IS NOT NULL.
+model ai_agent_memories {
+  id                     Int       @id @default(autoincrement())
+  store_id               Int
+  organization_id        Int
+  agent_key              String    @default("vex") @db.VarChar(80)
+  user_id                Int?
+  key                    String    @db.VarChar(120)
+  content                String    @db.VarChar(500)
+  kind                   String    @default("preference") @db.VarChar(20)
+  origin                 String    @default("agent") @db.VarChar(20)
+  source_conversation_id Int?
+  created_by_user_id     Int?
+  updated_by_user_id     Int?
+  last_used_at           DateTime? @db.Timestamp(6)
+  created_at             DateTime  @default(now()) @db.Timestamp(6)
+  updated_at             DateTime  @default(now()) @db.Timestamp(6)
+
+  @@index([store_id, agent_key])
+  @@index([source_conversation_id])
+}
+
+/// F4 T32 (M8, D5): "how is X done in Vendix" guides, global, editable from superadmin.
+model ai_agent_skills {
+  id                 Int       @id @default(autoincrement())
+  key                String    @unique @db.VarChar(120)
+  title              String    @db.VarChar(200)
+  module             String?   @db.VarChar(50)
+  body               String    @db.Text
+  candidate_tools    String[]  @default([])
+  help_article_id    Int?
+  video_id           Int?
+  agent_keys         String[]  @default(["vex"])
+  status             String    @default("draft") @db.VarChar(20)
+  version            Int       @default(1)
+  published_version  Int?
+  created_by_user_id Int?
+  updated_by_user_id Int?
+  published_at       DateTime? @db.Timestamp(6)
+  created_at         DateTime  @default(now()) @db.Timestamp(6)
+  updated_at         DateTime  @default(now()) @db.Timestamp(6)
+
+  versions ai_agent_skill_versions[]
+
+  @@index([status, module])
+}
+
+/// F4 T32 (M8, D5): immutable skill versions (insert-only; restore creates a new version).
+model ai_agent_skill_versions {
+  id              Int      @id @default(autoincrement())
+  skill_id        Int
+  version         Int
+  title           String   @db.VarChar(200)
+  module          String?  @db.VarChar(50)
+  body            String   @db.Text
+  candidate_tools String[] @default([])
+  help_article_id Int?
+  video_id        Int?
+  agent_keys      String[] @default(["vex"])
+  change_note     String?  @db.VarChar(500)
+  author_user_id  Int?
+  created_at      DateTime @default(now()) @db.Timestamp(6)
+
+  skill ai_agent_skills @relation(fields: [skill_id], references: [id], onDelete: Restrict)
+
+  @@unique([skill_id, version])
 }
 
 /// E system audit sink. Owner ACL and seven-day expiry enforced by SandboxAuditRepository.
@@ -7438,7 +7621,7 @@ model ai_agent_script_runs {
   store_id          Int
   organization_id   Int
   user_id           Int
-  objective_id      String    @db.Uuid
+  objective_id      String?   @db.Uuid
   source_hash       String    @db.VarChar(64)
   source_ciphertext Bytes
   source_nonce      Bytes
@@ -7455,6 +7638,13 @@ model ai_agent_script_runs {
   expires_at        DateTime  @db.Timestamptz(6)
   created_at        DateTime  @default(now()) @db.Timestamptz(6)
   finished_at       DateTime? @db.Timestamptz(6)
+  // F10 Code Mode audit (all nullable; objective_id is NULL for normal turns).
+  executor           String?   @db.VarChar(20)
+  rounds             Int?
+  lambda_request_ids Json?
+  tenant_hash        String?   @db.VarChar(64)
+  cut_reason         String?   @db.VarChar(40)
+  returned_bytes     Int?
 
   @@index([store_id, organization_id, user_id, created_at], map: "ai_agent_script_runs_owner_created_idx")
   @@index([store_id, organization_id, user_id, objective_id], map: "ai_agent_script_runs_owner_objective_idx")
@@ -7569,11 +7759,15 @@ model help_articles {
   created_by_id   Int?
   is_featured     Boolean                  @default(false)
   sort_order      Int                      @default(0)
+  /// F4 T27 (M7): optional video linked to the article (help center <-> video library).
+  video_id        Int?
   created_at      DateTime?                @default(now()) @db.Timestamp(6)
   updated_at      DateTime?                @default(now()) @db.Timestamp(6)
 
-  category   help_article_categories @relation(fields: [category_id], references: [id])
-  created_by users?                  @relation("help_article_author", fields: [created_by_id], references: [id], onDelete: SetNull)
+  category           help_article_categories @relation(fields: [category_id], references: [id])
+  created_by         users?                  @relation("help_article_author", fields: [created_by_id], references: [id], onDelete: SetNull)
+  video              videos?                 @relation("help_article_video", fields: [video_id], references: [id], onDelete: SetNull)
+  video_series_items video_series_items[]
 
   @@index([category_id])
   @@index([status])
@@ -7581,6 +7775,7 @@ model help_articles {
   @@index([module])
   @@index([is_featured])
   @@index([created_by_id])
+  @@index([video_id])
 }
 
 // ── Video Library ────────────────────────────────────────────────
@@ -7637,8 +7832,10 @@ model videos {
   created_at       DateTime?              @default(now()) @db.Timestamp(6)
   updated_at       DateTime?              @default(now()) @db.Timestamp(6)
 
-  category   video_categories @relation(fields: [category_id], references: [id])
-  created_by users?           @relation("video_author", fields: [created_by_id], references: [id], onDelete: SetNull)
+  category           video_categories     @relation(fields: [category_id], references: [id])
+  created_by         users?               @relation("video_author", fields: [created_by_id], references: [id], onDelete: SetNull)
+  help_articles      help_articles[]      @relation("help_article_video")
+  video_series_items video_series_items[]
 
   @@index([category_id])
   @@index([status])
@@ -7647,6 +7844,61 @@ model videos {
   @@index([is_featured])
   @@index([created_by_id])
   @@index([store_id])
+}
+
+/// F4 T27 (M7): ordered series of published videos (learning paths). Global content.
+model video_series {
+  id            Int               @id @default(autoincrement())
+  title         String            @db.VarChar(255)
+  slug          String            @unique @db.VarChar(280)
+  summary       String?           @db.VarChar(500)
+  description   String?           @db.Text
+  module        String?           @db.VarChar(50)
+  thumbnail_url String?           @db.Text
+  status        video_status_enum @default(DRAFT)
+  sort_order    Int               @default(0)
+  created_by_id Int?
+  created_at    DateTime          @default(now()) @db.Timestamp(6)
+  updated_at    DateTime          @default(now()) @db.Timestamp(6)
+
+  items video_series_items[]
+
+  @@index([status])
+  @@index([module])
+}
+
+/// F4 T27 (M7): items of a series. FKs RESTRICT on purpose: the app deletes items explicitly.
+model video_series_items {
+  id         Int      @id @default(autoincrement())
+  series_id  Int
+  video_id   Int
+  article_id Int?
+  position   Int
+  created_at DateTime @default(now()) @db.Timestamp(6)
+
+  series  video_series   @relation(fields: [series_id], references: [id], onDelete: Restrict)
+  video   videos         @relation(fields: [video_id], references: [id], onDelete: Restrict)
+  article help_articles? @relation(fields: [article_id], references: [id], onDelete: SetNull)
+
+  @@unique([series_id, video_id])
+  @@index([series_id, position])
+  @@index([video_id])
+}
+
+/// F4 T27 (M7): per-user learning progress on help videos. No FK to users on purpose (content progress).
+model user_learning_progress {
+  id              Int       @id @default(autoincrement())
+  user_id         Int
+  series_id       Int?
+  video_id        Int
+  seconds_watched Int       @default(0)
+  completed       Boolean   @default(false)
+  completed_at    DateTime? @db.Timestamp(6)
+  created_at      DateTime  @default(now()) @db.Timestamp(6)
+  updated_at      DateTime  @default(now()) @db.Timestamp(6)
+
+  @@unique([user_id, video_id])
+  @@index([user_id, series_id])
 }
 
 // ===== ELECTRONIC INVOICING DOMAIN =====
@@ -12474,6 +12726,7 @@ model subscription_plans {
   invoice_to_subs         subscription_invoices[]         @relation("invoice_to_plan")
   redemption_consumptions redemption_consumptions[]
   module_rules            plan_module_rules[]
+  ai_entitlements         plan_ai_entitlements[]
   created_at              DateTime                        @default(now()) @db.Timestamp(6)
   updated_at              DateTime                        @default(now()) @db.Timestamp(6)
   created_by              Int?
@@ -12503,6 +12756,32 @@ model plan_module_rules {
 enum plan_module_rule_mode_enum {
   exclusive
   blocked
+}
+
+/// Derechos de IA por plan (odd/tasks/vex-agente-avanzado.md §3.11, T9). Una
+/// fila = una capacidad de un agente (vex, vexi, platform) en un plan.
+/// `cap_value` NULL = sin limite, 0 = nada. Catalogo canonico y mapeo desde
+/// `ai_feature_flags`: `domains/store/subscriptions/types/ai-capabilities.ts`.
+/// Mientras dure el modo sombra (T10) el gate sigue leyendo `ai_feature_flags`.
+model plan_ai_entitlements {
+  id             Int                          @id @default(autoincrement())
+  plan_id        Int
+  agent_key      String                       @db.VarChar(16)
+  capability_key String                       @db.VarChar(64)
+  enabled        Boolean                      @default(false)
+  cap_value      BigInt?
+  on_limit       ai_entitlement_on_limit_enum @default(block)
+  created_at     DateTime                     @default(now()) @db.Timestamp(6)
+  updated_at     DateTime                     @default(now()) @updatedAt @db.Timestamp(6)
+  plan           subscription_plans           @relation(fields: [plan_id], references: [id], onDelete: Restrict)
+
+  @@unique([plan_id, agent_key, capability_key])
+  @@index([agent_key, capability_key])
+}
+
+enum ai_entitlement_on_limit_enum {
+  block
+  warn
 }
 
 model partner_plan_overrides {
@@ -16263,6 +16542,7 @@ model stored_files {
   store        stores          @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   items        dossier_items[]
   profile      document_file_profiles?
+  ai_attachments ai_attachments[]
 
   @@index([store_id, sha256])
 }

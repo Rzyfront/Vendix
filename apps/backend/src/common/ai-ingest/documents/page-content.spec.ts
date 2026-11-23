@@ -48,4 +48,18 @@ describe('page-content (native text first)', () => {
     expect(content[0]).toEqual({ type: 'text', text: 'Extract members' });
     expect(content).toHaveLength(2);
   });
+
+  it('pages of several files are labelled by document (F5b); one file keeps the old label', () => {
+    const doc = { index: 2, count: 3 };
+    expect(pageContentParts({ page_number: 4, mode: 'text', text: 'abc', document: doc })[0]).toEqual({
+      type: 'text',
+      text: '--- Document 2 of 3, page 4 (text extracted from the PDF) ---\nabc',
+    });
+    expect(
+      pageContentParts({ page_number: 1, mode: 'image', text: '', image: 'data:image/jpeg;base64,A', document: doc })[0],
+    ).toEqual({ type: 'text', text: '--- Document 2 of 3, page 1 ---' });
+    expect(
+      pageContentParts({ page_number: 1, mode: 'text', text: 'x', document: { index: 1, count: 1 } })[0].text,
+    ).toBe('--- Page 1 (text extracted from the PDF) ---\nx');
+  });
 });

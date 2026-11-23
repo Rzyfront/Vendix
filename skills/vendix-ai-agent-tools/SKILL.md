@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "3.4"
+  version: "3.5"
   scope: [root]
   auto_invoke:
     - "Creating new AI tools"
@@ -17,7 +17,7 @@ metadata:
     - "Debugging agent loop issues"
     - "Adding a write tool that needs user confirmation"
     - "Adding a clientSide tool the browser dispatches"
-    - "Exposing a tool to the realtime voice surface"
+    - "Exposing a tool to the realtime voice surface (retired: historical)"
 ---
 
 ## Source of Truth
@@ -30,9 +30,9 @@ metadata:
 
 ## Tool contract and categories
 
-`RegisteredTool`: `name`, `domain`, `description`, `parameters` (JSON Schema), `requiredPermissions?`, `requiresConfirmation?`, `readOnly?`, `clientSide?`, `irreversible?`, `preview?`, `handler?` (returns a string; `JSON.stringify` structured data; absent for clientSide).
+`RegisteredTool`: `name`, `domain`, `description`, `parameters` (JSON Schema), `requiredPermissions?`, `requiresConfirmation?`, `readOnly?`, `clientSide?`, `irreversible?`, `compensate?`, `preview?`, `handler?` (returns a string; `JSON.stringify` structured data; absent for clientSide).
 
-| Category | Declares | Executes | Voice |
+| Category | Declares | Executes | Voice (historical: realtime retired) |
 |---|---|---|---|
 | Read | `readOnly: true` | server `handler` | exposed |
 | Write | `requiresConfirmation: true` + `preview` | `handler` only after a token | hidden |
@@ -44,7 +44,8 @@ metadata:
 ## Registry
 
 - Unique `name`; permissions filter with `requiredPermissions.every(...)`, runtime permissions from `requestContext.permissions || context.roles || []`.
-- Narrowing (agent row, plan, caller `tools`) uses `matchesScope` on canonical names/aliases or domains (normalize with `canonicalName` first). Permissions filter first, `denied_tools` subtracts last. Authority/working-set rules: `vendix-ai-tool-routing`.
+- **The user's role is the only tool limit.** Every tool declares a non-empty `requiredPermissions` OR `access: 'public'` with a stated reason; a tool with neither is rejected at registration. The plan has no tool list (`tools_allowed` inert) and no action quota in the new model (the legacy `monthly_tool_calls_cap` is still metered by `consumeToolCallQuota` from `ai_feature_flags` until it is retired; add no new reader): never narrow tools by plan. Denied areas reach the prompt via `role-denied-areas.ts` so the agent answers "tu rol no permite <acción>; pídeselo al dueño" with no card.
+- Narrowing (agent row, caller `tools`) uses `matchesScope` on canonical names/aliases or domains (normalize with `canonicalName` first). Permissions filter first, `denied_tools` subtracts last. Authority/working-set rules: `vendix-ai-tool-routing`.
 - `executeTool()` rejects `clientSide` tools with `AI_AGENT_004` (guards voice/MCP); the loop short-circuits them before.
 
 ## Write circuit: propose → confirm → execute
@@ -54,6 +55,12 @@ metadata:
 - `ToolPreview` mirrors `BulkEditPreviewItemDto`; `domain` tells the browser which module to refresh. Name a human subject ("Coca Cola 1L", not "#4821").
 - A write without `preview` makes the user approve blind; `create_stock_adjustment` (`inventory.tools.ts`) still lacks one.
 - Result semantics (`ok`, `unknown_effect`, `applied`): `vendix-agent-execution-contract`.
+
+## Compensation and write batches
+
+- `compensate?: ToolCompensation` (`tool.interface.ts`) = `{ label, capture(args, ctx) → snapshot|null, undo({args, snapshot, handlerOutput, context}) → string }`. `capture` runs before the handler; `undo` is the inverse and is what Vex's batch «Deshacer» calls.
+- Declare it only when the inverse is exact and safe: a field edit restorable from the snapshot, with an optimistic re-check that the current value still equals what the tool wrote (else refuse, never overwrite a later change). Never on `irreversible: true` tools or anything with external effects (DIAN, payments, messages, stock movements that cascade). A tool without `compensate` is still batchable but its step reads «No reversible desde Vex».
+- Batch rules for tool authors: a tool needs a good `preview` (the batch card is built from it and `previewForConsent` gates it), honest `irreversible` (those never enter a batch), and a handler that re-verifies preconditions (steps run sequentially, first failure stops the rest). Batches are proposed only via `propose_write_batch`; do not build another multi-write path. Contract: `domains/store/vex/services/write-batch.types.ts`; behavior: `vendix-vex-agent`.
 
 ## Registration is decentralized
 
@@ -79,10 +86,11 @@ A flag every dangerous tool must carry needs a registry-wide spec, not review. E
 
 ## Gates and anti-patterns
 
+- Adding or changing a read-only tool can change the Code Mode allowlist (`sandbox/codemode-allowlist.spec.ts` fails): run `scripts/generate-codemode-allowlist.ts`, review the diff, and add a third-party caller to the exclusion list in `codemode-allowlist.derive.ts` with its reason (`vendix-agent-sandbox-security`).
 - `readOnly` is not `parallelSafe`; parallel reads need explicit audited metadata (`vendix-agent-durable-tasks`).
 - A resolved Promise containing `{error}` is not success; don't change quota/completion semantics without a discriminated contract.
 - Prefer scoped discovery + existing domain seams over hundreds of wrappers; never infer a full dataset from a truncated page. Benchmarks: `docs/vex-agent-improvement-process.md`.
-- Anti-patterns: central registration; write without `preview`; read tool without `readOnly`; `clientSide` with `handler`; treating `AI_AGENT_005` as an error; trusting the preview snapshot in `handler`; a cross-cutting flag without a coverage spec.
+- Anti-patterns: limiting tools by plan; a tool without `requiredPermissions` or `access: 'public'`; central registration; write without `preview`; read tool without `readOnly`; `clientSide` with `handler`; treating `AI_AGENT_005` as an error; trusting the preview snapshot in `handler`; a cross-cutting flag without a coverage spec.
 
 ## Related Skills
 

@@ -7,6 +7,7 @@ import {
   CardComponent,
   IconComponent,
 } from '../../../../shared/components';
+import { TenantAiAgentsCardComponent } from './pages/agents/tenant-ai-agents-card.component';
 import { seedTenantContextGuard } from './guards/seed-tenant-context.guard';
 import { provideSuperadminDianApi } from './services/superadmin-dian-context.factory';
 import type { TenantScopeSegment } from './interfaces/tenant-profile.interface';
@@ -36,7 +37,12 @@ import {
 @Component({
   selector: 'app-tenant-subscription',
   standalone: true,
-  imports: [CardComponent, IconComponent, BadgeComponent],
+  imports: [
+    CardComponent,
+    IconComponent,
+    BadgeComponent,
+    TenantAiAgentsCardComponent,
+  ],
   template: `
     <app-card [responsive]="true">
       @if (subscription(); as sub) {
@@ -103,10 +109,14 @@ import {
         </div>
       }
     </app-card>
+    @if (!isOrganization()) {
+      <app-tenant-ai-agents-card class="mt-3 block md:mt-4" />
+    }
   `,
 })
 export class TenantSubscriptionComponent {
   private readonly store = inject(TenantContextStore);
+  protected readonly isOrganization = this.store.isOrganization;
   protected readonly subscription = this.store.subscription;
 
   protected readonly emptyReason = computed(() =>

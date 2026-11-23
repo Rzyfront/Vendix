@@ -18,6 +18,7 @@ import { InventoryModule } from '../../inventory/inventory.module';
 import { S3Module } from '@common/services/s3.module';
 import { SettingsModule } from '../../settings/settings.module';
 import { AccountsPayableModule } from '../../accounts-payable/accounts-payable.module';
+import { AiIngestModule } from '@common/ai-ingest/ai-ingest.module';
 
 @Module({
   imports: [
@@ -29,6 +30,9 @@ import { AccountsPayableModule } from '../../accounts-payable/accounts-payable.m
     // FASE 3 — el PurchaseOrdersService inyecta AccountsPayableService para
     // espejar pagos PO→AP y backfill de anticipos.
     AccountsPayableModule,
+    // ia-cargas F3 — lector común de documentos (páginas, texto nativo primero)
+    // y extracción con esquema para facturas, revalidación y comprobantes.
+    AiIngestModule,
     // FASE TRACK B2 — cola dedicada `payment-receipt-scan` para OCR async
     // de comprobantes de pago (calque de dispatch-notes `receipt-scan` y
     // expenses `expense-scan`). El root BullMQ ya está configurado

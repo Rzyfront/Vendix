@@ -42,6 +42,9 @@ export function createCapabilityTools({
   return [
     {
       name: 'list_capabilities',
+      access: 'public',
+      accessReason:
+        'Describes what the app can do (catalog metadata); reads no business data.',
       version: '1',
       domain: 'capabilities',
       readOnly: true,
@@ -158,6 +161,9 @@ export function createCapabilityTools({
     },
     {
       name: 'explain_capability',
+      access: 'public',
+      accessReason:
+        'Describes what the app can do (catalog metadata); reads no business data.',
       version: '1',
       domain: 'capabilities',
       readOnly: true,

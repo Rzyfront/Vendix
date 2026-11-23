@@ -392,6 +392,38 @@ import {
             </div>
           }
 
+          <!-- ia-cargas F3: páginas leídas (solo si fueron varias) -->
+          @if (scanPagesNote(); as note) {
+            <p class="text-xs text-text-secondary" data-testid="pop-scan-pages-note">{{ note }}</p>
+          }
+
+          <!--
+            ia-cargas F3: una OC admite PURCHASE_ORDER_CREATE_ITEMS_MAX (10.000)
+            líneas. El límite de 100 del backend es por solicitud de líneas SIN
+            resolver y el POP ya las resuelve de a 100 antes de crear la OC, así
+            que una factura de 130 o 2.000 líneas entra completa en UNA orden.
+            Solo por encima de 10.000 se avisa; nada se recorta ni se divide.
+          -->
+          @if (overOrderLimit()) {
+            <div
+              class="bg-red-50 border border-red-200 rounded-lg p-3"
+              role="alert"
+              data-testid="pop-scan-over-limit"
+            >
+              <p class="text-xs font-semibold text-red-800 mb-1">
+                Esta factura supera el tope de una orden de compra
+              </p>
+              <p class="text-xs text-red-700">
+                Se leyeron {{ editableItems().length }} líneas y vas a cargar
+                {{ keptCount() }}; una orden de compra admite máximo
+                {{ orderLimitLabel }}. No se quitó
+                ninguna línea: descarta las que no van en esta compra (puedes
+                cargarlas en otra) antes de confirmar, porque una orden con más
+                de {{ orderLimitLabel }} líneas se rechaza.
+              </p>
+            </div>
+          }
+
           <!-- Line items table -->
           <div id="pop-scan-lines" tabindex="-1" class="outline-none">
             <h4 class="text-sm font-semibold text-text-primary mb-3">
@@ -1618,6 +1650,32 @@ export class InvoiceScannerModalComponent {
   readonly allDiscarded = computed(
     () => this.editableItems().length > 0 && this.keptCount() === 0,
   );
+
+  /**
+   * Tope de líneas de una OC: `PURCHASE_ORDER_CREATE_ITEMS_MAX` del backend
+   * (create-purchase-order.dto.ts). NO es el 100 de `PURCHASE_ORDER_ITEMS_MAX`:
+   * ese es por solicitud de líneas sin resolver y el POP ya las resuelve por
+   * lotes de 100 con `resolve-lines` antes de crear la orden.
+   */
+  readonly PURCHASE_ORDER_CREATE_ITEMS_MAX = 10000;
+  /** "10.000" para el aviso (sin pipe: el componente no importa DecimalPipe). */
+  readonly orderLimitLabel = this.PURCHASE_ORDER_CREATE_ITEMS_MAX.toLocaleString('es-CO');
+
+  /** ia-cargas F3: las líneas que se van a cargar superan el tope de la OC. */
+  readonly overOrderLimit = computed(
+    () => this.keptCount() > this.PURCHASE_ORDER_CREATE_ITEMS_MAX,
+  );
+
+  /** ia-cargas F3: "Factura leída en 3 páginas (2 con el texto del PDF)." */
+  readonly scanPagesNote = computed(() => {
+    const source = this.scanResult()?.scan_source;
+    if (!source || source.pages <= 1) return null;
+    const text =
+      source.text_pages > 0
+        ? ` (${source.text_pages} con el texto del PDF)`
+        : '';
+    return `Factura leída en ${source.pages} páginas${text}.`;
+  });
 
   // ===== QUI-855 paso 8b: revalidación con IA =====
   readonly REVALIDATE_NOTE_MAX = 2000;

@@ -59,6 +59,11 @@ import {
 import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
 import { ShippingCalculatorService } from '../shipping/shipping-calculator.service';
 import { resolveTierSnapshotsForItems } from '../products/services/tier-snapshot.util';
+import {
+  buildOrderLineBreakdown,
+  buildOrderTotalsBreakdown,
+} from './utils/order-breakdown.util';
+import { loadLinePromotionLabels } from '../promotions/utils/line-promotion-label.util';
 import { resolveWeightLinesStockUnits } from '../products/services/weight-stock-units.util';
 import {
   groupRatesByProductId,
@@ -114,8 +119,11 @@ import { CouponsService } from '../coupons/coupons.service';
 import {
   applyGrossDiscountRetax,
   distributeAmount,
+  resolveGrossDiscountByLine,
   type GrossDiscountableLine,
+  type GrossDiscountSplit,
 } from '../taxes/utils/order-discount-tax.util';
+import { promotionDiscountByLine } from '../promotions/promotion-line-discount.util';
 import { AuditService, AuditAction, AuditResource } from '@common/audit/audit.service';
 // F-222 — comparación de dinero en centavos enteros (no `Math.abs` en floats).
 import { differsByAtLeastCents } from '@common/money-kernel';
@@ -2075,6 +2083,38 @@ export class OrdersService {
         // viendo exactamente lo de siempre.
         item.unit_price_gross = finals.final_unit_price;
         item.line_total_gross = finals.final_total_price;
+      }
+      // Desglose leído de lo PERSISTIDO (aditivo): base, descuento de línea,
+      // filas de `order_item_taxes` y total con impuesto. Los `final_*` de
+      // arriba salen de las tasas vigentes del producto y con tasa incluida
+      // devuelven la base; el detalle pinta este desglose.
+      for (const item of order.order_items) {
+        item.line_breakdown = buildOrderLineBreakdown(item);
+      }
+      order.totals_breakdown = buildOrderTotalsBreakdown(order);
+      // Etiqueta de la promo por línea (display-only, ADITIVO): `order_items`
+      // guarda el descuento, no qué promoción lo produjo. Solo se etiquetan
+      // líneas con descuento; si el motor falla, el detalle sigue saliendo
+      // con el fallback y no se rompe.
+      try {
+        const labels = await loadLinePromotionLabels(
+          this.prisma as any,
+          order.id,
+          order.order_items.map((item: any) => ({
+            id: item.id,
+            product_id: item.product_id ?? null,
+            discount_amount: item.discount_amount,
+            unit_price: item.unit_price,
+          })),
+          (products) =>
+            this.promotionEngine.findActiveAutoPromotionsForProducts(products),
+        );
+        for (const item of order.order_items) {
+          const label = labels.get(item.id);
+          if (label) item.promotion_label = label;
+        }
+      } catch {
+        // La etiqueta es cosmética: nunca tumba el detalle de la orden.
       }
     }
 
@@ -4532,6 +4572,9 @@ export class OrdersService {
     // 9) Promotion quote: recotizamos server-side, NUNCA confiamos en
     //    `promotion_ids` como verdad. El motor decide qué aplica.
     let promotionDiscount = 0;
+    // F1: descuento promocional por línea (índice de `dto.items`); null =
+    // reparto por bruto (promoción de orden o sin desglose).
+    let promotionByLine: number[] | null = null;
     let promotionSnapshots: { promotion_id: number; discount_amount: number }[] =
       [];
     // Casilla única de código: si `coupon_code` no es un cupón sino una
@@ -4571,9 +4614,13 @@ export class OrdersService {
         manual_promotion_ids: Array.isArray(dto.promotion_ids)
           ? dto.promotion_ids
           : [],
+        // `line_id` = índice ORIGINAL en `dto.items` (antes del filtro): el
+        // plan de líneas es 1:1 con `dto.items` y el reparto por línea (F1)
+        // ubica cada descuento con él.
         items: dto.items
-          .filter((item) => item.product_id)
-          .map((item, index) => ({
+          .map((item, index) => ({ item, index }))
+          .filter(({ item }) => item.product_id)
+          .map(({ item, index }) => ({
             line_id: index,
             product_id: item.product_id as number,
             variant_id: item.product_variant_id ?? null,
@@ -4608,6 +4655,11 @@ export class OrdersService {
             ).quote
           : await this.promotionEngine.quoteDiscounts(promotionInput);
       promotionDiscount = promotionQuote.total_discount || 0;
+      promotionByLine = promotionDiscountByLine(
+        promotionQuote,
+        dto.items.length,
+        (lineId) => (Number.isInteger(Number(lineId)) ? Number(lineId) : null),
+      );
       promotionSnapshots = (promotionQuote.order_promotions_snapshot || []).map(
         (s) => ({
           promotion_id: s.promotion_id,
@@ -4819,6 +4871,11 @@ export class OrdersService {
       const retaxed = this.applyGrossDiscountToPlannedLines(
         plannedEditorLines,
         grossDiscountTotal,
+        {
+          promotionTotal: promotionDiscount,
+          promotionByLine,
+          couponTotal: couponDiscount,
+        },
       );
       plannedEditorLines = retaxed.lines;
       editorLineDiscounts = retaxed.discountByLine;
@@ -7392,7 +7449,9 @@ export class OrdersService {
 
   /**
    * Aplica un descuento en BRUTO (promoción + cupón) al plan de líneas con el
-   * contrato POS: reparto proporcional al bruto de cada línea, descuento
+   * contrato POS: con `split` (F1) la promoción va sólo a las líneas a las que
+   * el motor la aplicó y el cupón al bruto remanente; sin desglose, reparto
+   * proporcional al bruto de cada línea. Descuento
    * trasladado a la BASE e impuesto recalculado sobre la base descontada.
    * Devuelve líneas nuevas (no muta), el descuento de base por línea, el
    * impuesto total y el descuento de base total. Sin descuento reconstruye el
@@ -7401,6 +7460,7 @@ export class OrdersService {
   applyGrossDiscountToPlannedLines(
     lines: PlannedOrderLine[],
     grossDiscount: number,
+    split: GrossDiscountSplit | null = null,
   ): {
     lines: PlannedOrderLine[];
     discountByLine: number[];
@@ -7440,12 +7500,17 @@ export class OrdersService {
       };
     });
     const grossByLine =
-      grossDiscount > 0
-        ? distributeAmount(
-            grossDiscount,
-            discountable.map((l) => l.grossOriginal),
-          )
-        : discountable.map(() => 0);
+      grossDiscount <= 0
+        ? discountable.map(() => 0)
+        : split
+          ? resolveGrossDiscountByLine(
+              discountable.map((l) => l.grossOriginal),
+              split,
+            )
+          : distributeAmount(
+              grossDiscount,
+              discountable.map((l) => l.grossOriginal),
+            );
     const retax = applyGrossDiscountRetax(discountable, grossByLine);
     const out = lines.map((line, i) => {
       const result = retax.lines[i];

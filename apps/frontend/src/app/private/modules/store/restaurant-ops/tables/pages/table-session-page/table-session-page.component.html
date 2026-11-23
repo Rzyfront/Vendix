@@ -503,6 +503,21 @@
                             </span>
                           }
                           <!--
+                            Promo de la línea (aditivo): nombre de la
+                            promoción que produjo el descuento. El backend
+                            solo lo manda en líneas con descuento, así que
+                            su presencia ya es la señal.
+                          -->
+                          @if (item.promotion_label) {
+                            <span
+                              class="item-promo"
+                              [attr.title]="'Promoción aplicada: ' + item.promotion_label"
+                            >
+                              <app-icon name="tag" [size]="11"></app-icon>
+                              {{ item.promotion_label }}
+                            </span>
+                          }
+                          <!--
                             carril D / lina — D2: badge de cancelado en la
                             línea. El ítem queda visible con su motivo
                             persistido y la marca contable
@@ -656,7 +671,25 @@
 
                       <!-- Money column -->
                       <div class="item-money">
-                        {{ +(item.final_total_price ?? item.total_price) | currency }}
+                        @if (item.discounted_total_price != null) {
+                          <!-- Promo de producto: el total ya descontado manda;
+                               el precio de lista (con impuesto) queda tachado.
+                               Lista y ahorro salen de `total_before_discount`,
+                               igual que el detalle de la orden. -->
+                          @let listTotal = itemListTotal(item);
+                          @let savings = itemSavings(item);
+                          @if (listTotal !== null) {
+                            <span class="item-money__list">{{ listTotal | currency }}</span>
+                          }
+                          <span class="item-money__promo">{{
+                            +item.discounted_total_price | currency
+                          }}</span>
+                          @if (savings !== null) {
+                            <span class="item-money__discount">{{ -savings | currency }}</span>
+                          }
+                        } @else {
+                          {{ +(item.final_total_price ?? item.total_price) | currency }}
+                        }
                       </div>
 
                       <!-- Actions -->
@@ -819,6 +852,7 @@
   <app-add-items-modal
     [isOpen]="isAddItemsOpen()"
     [loading]="isAddingItems()"
+    [accountLines]="accountLines()"
     (isOpenChange)="isAddItemsOpen.set($event)"
     (addItems)="onAddItems($event)"
   />

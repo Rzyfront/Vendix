@@ -18,7 +18,10 @@ export interface PlaybookStep {
   tool?: string;
   depends_on: string[];
   arguments?: Record<string, unknown>;
-  approval: 'none' | 'individual';
+  /** `batch`: a write that only enters the single write batch of a batch playbook. */
+  approval: 'none' | 'individual' | 'batch';
+  /** Background steps run without the user and may only read/prepare, never write. */
+  background?: boolean;
   bridge?: { method: CatalogMethod; path: string };
 }
 /** Trusted caller supplies observations of domain reads, never the model's assertion of success. */
@@ -43,9 +46,18 @@ export interface PlaybookExample {
   observations: PlaybookObservation[];
   expected: 'verified' | 'not_verified';
 }
+/** Gallery metadata of a launchable playbook. */
+export interface PlaybookLaunch {
+  title: string;
+  /** Spanish starter message sent as the durable objective. */
+  prompt: string;
+}
 export interface PlaybookContract {
   schema_version: '1';
   mode: 'executable' | 'preparation_only';
+  /** `batch`: ends by proposing one write batch through `propose_write_batch`. */
+  approval?: 'batch';
+  launch?: PlaybookLaunch;
   inputs: PlaybookInput[];
   steps: PlaybookStep[];
   examples: PlaybookExample[];

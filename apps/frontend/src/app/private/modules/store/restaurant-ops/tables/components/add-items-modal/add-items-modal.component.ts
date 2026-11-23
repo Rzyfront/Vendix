@@ -61,8 +61,187 @@ interface AddItemsVariant {
   final_price?: number | string | null;
 }
 
+/**
+ * Promoción automática vigente que el listado de productos ya resuelve con el
+ * MISMO motor que cotiza la cuenta (`findActiveAutoPromotionsForProducts`,
+ * backend `products.service.ts` → `resolveActivePromotionsForListing`).
+ * `promotional_price` es el precio final (con impuesto) de UNA unidad sola.
+ *
+ * `max_discount_amount` y `min_purchase_amount` son reglas del TOTAL del
+ * alcance: `null` = la promo no las tiene; ausentes (`undefined`) = el backend
+ * no las informó y el modal no puede estimar con fidelidad (no pinta promo).
+ */
+export interface AddItemsActivePromotion {
+  id: number;
+  name?: string | null;
+  type?: 'percentage' | 'fixed_amount' | string;
+  discount_percentage?: number | string | null;
+  discount_amount?: number | string | null;
+  promotional_price: number | string;
+  badge_label?: string | null;
+  max_discount_amount?: number | string | null;
+  min_purchase_amount?: number | string | null;
+  is_quantity_tiered?: boolean;
+}
+
 interface AddItemsProductOption extends SellableProductOption {
   product_variants?: AddItemsVariant[];
+  active_promotion?: AddItemsActivePromotion | null;
+}
+
+/** Línea de la selección para estimar: `gross` = precio final × cantidad. */
+export interface PromoEstimateLine {
+  key: number;
+  gross: number;
+  promo?: AddItemsActivePromotion | null;
+}
+
+/**
+ * Línea viva que YA está en la cuenta de la mesa. El motor cotiza la cuenta
+ * completa, así que cuenta para la compra mínima y puede haber consumido ya
+ * el monto fijo o el tope de una promo.
+ */
+export interface AddItemsAccountLine {
+  product_id: number | null;
+  /** Total de lista con impuesto (antes del descuento). */
+  list_total: number;
+  has_discount: boolean;
+}
+
+const roundMoney = (value: number): number =>
+  Math.round((value + Number.EPSILON) * 100) / 100;
+
+interface FlatPromoRule {
+  id: number;
+  percentage: boolean;
+  value: number;
+  cap: number | null;
+  min: number | null;
+}
+
+const positiveOrNull = (value: unknown): number | null => {
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount > 0 ? amount : null;
+};
+
+/**
+ * Regla plana estimable de una promo, o `null` si el modal no puede calcularla
+ * igual que el motor (por cantidad, tipo desconocido o sin tope/compra mínima
+ * informados): mejor no mostrar que mostrar mal.
+ */
+function flatRuleOf(
+  promo: AddItemsActivePromotion | null | undefined,
+): FlatPromoRule | null {
+  if (!promo || promo.is_quantity_tiered) return null;
+  if (
+    promo.max_discount_amount === undefined ||
+    promo.min_purchase_amount === undefined
+  ) {
+    return null;
+  }
+  const percentage = promo.type === 'percentage';
+  if (!percentage && promo.type !== 'fixed_amount') return null;
+  const value = positiveOrNull(
+    percentage ? promo.discount_percentage : promo.discount_amount,
+  );
+  if (value == null) return null;
+  return {
+    id: promo.id,
+    percentage,
+    value,
+    cap: positiveOrNull(promo.max_discount_amount),
+    min: positiveOrNull(promo.min_purchase_amount),
+  };
+}
+
+/**
+ * Misma regla que `PromotionEngineService.computeDiscountAmount`: el
+ * descuento se calcula UNA vez sobre el total del alcance.
+ */
+function discountOverScope(rule: FlatPromoRule, scopeTotal: number): number {
+  if (!(scopeTotal > 0)) return 0;
+  let discount = rule.percentage
+    ? scopeTotal * (rule.value / 100)
+    : Math.min(rule.value, scopeTotal);
+  if (rule.cap != null) discount = Math.min(discount, rule.cap);
+  return roundMoney(Math.min(discount, scopeTotal));
+}
+
+/**
+ * Descuento estimado por línea de la selección (`Map<key, descuento>`), con la
+ * semántica del motor (`quoteDiscounts`):
+ *
+ *  - porcentaje → `min(total_alcance × pct/100, tope)`; monto fijo →
+ *    `min(valor, total_alcance)`; una sola vez por promo sobre la suma de sus
+ *    líneas, repartido en proporción (no por unidad).
+ *  - compra mínima contra el subtotal de la cuenta (lo que ya hay + lo nuevo).
+ *  - lo que ya está en la cuenta pudo consumir el monto fijo o el tope: solo se
+ *    estima el descuento ADICIONAL. Si hay líneas con descuento de productos
+ *    que el modal no conoce, una promo de monto fijo o con tope no se estima.
+ *
+ * Nunca anuncia más descuento del que puede justificar; ante la duda, cero.
+ */
+export function estimatePromotionDiscounts(
+  lines: PromoEstimateLine[],
+  accountLines: AddItemsAccountLine[] = [],
+  promoOfProduct: (
+    productId: number,
+  ) => AddItemsActivePromotion | null | undefined = () => undefined,
+): Map<number, number> {
+  const result = new Map<number, number>();
+  const subtotal =
+    accountLines.reduce((sum, line) => sum + (line.list_total || 0), 0) +
+    lines.reduce((sum, line) => sum + (line.gross > 0 ? line.gross : 0), 0);
+
+  const groups = new Map<
+    number,
+    { rule: FlatPromoRule; lines: PromoEstimateLine[] }
+  >();
+  for (const line of lines) {
+    if (!(line.gross > 0)) continue;
+    const rule = flatRuleOf(line.promo);
+    if (!rule) continue;
+    const group = groups.get(rule.id) ?? { rule, lines: [] };
+    group.lines.push(line);
+    groups.set(rule.id, group);
+  }
+
+  for (const { rule, lines: scoped } of groups.values()) {
+    if (rule.min != null && subtotal < rule.min) continue;
+    const newTotal = scoped.reduce((sum, line) => sum + line.gross, 0);
+
+    let alreadyInAccount = 0;
+    if (!rule.percentage || rule.cap != null) {
+      let unknownDiscounted = false;
+      for (const line of accountLines) {
+        const known =
+          line.product_id != null ? promoOfProduct(line.product_id) : undefined;
+        if (known === undefined) {
+          if (line.has_discount) unknownDiscounted = true;
+        } else if (known?.id === rule.id) {
+          alreadyInAccount += line.list_total || 0;
+        }
+      }
+      if (unknownDiscounted) continue;
+    }
+
+    const discount = roundMoney(
+      discountOverScope(rule, alreadyInAccount + newTotal) -
+        discountOverScope(rule, alreadyInAccount),
+    );
+    if (!(discount > 0)) continue;
+
+    let assigned = 0;
+    scoped.forEach((line, index) => {
+      const share =
+        index === scoped.length - 1
+          ? roundMoney(discount - assigned)
+          : roundMoney((line.gross / newTotal) * discount);
+      assigned = roundMoney(assigned + share);
+      if (share > 0) result.set(line.key, share);
+    });
+  }
+  return result;
 }
 
 /**
@@ -102,6 +281,12 @@ export class AddItemsModalComponent {
   readonly loadingInput = input(false, { alias: 'loading' });
   readonly internalLoading = signal(false);
   readonly loading = computed(() => this.loadingInput() || this.internalLoading());
+
+  /**
+   * Líneas vivas que ya están en la cuenta. El motor cotiza la cuenta entera:
+   * cuentan para la compra mínima y pueden haber agotado un monto fijo o tope.
+   */
+  readonly accountLines = input<AddItemsAccountLine[]>([]);
 
   readonly isOpenChange = output<boolean>();
   readonly addItems = output<TableSessionAddItem[]>();
@@ -173,14 +358,17 @@ export class AddItemsModalComponent {
     return false;
   });
 
+  /**
+   * Lo que la cuenta cobrará por la selección: precio de lista menos el
+   * descuento estimado con la regla del motor (sobre el total del alcance, no
+   * `precio promocional × cantidad`).
+   */
   readonly totalPreview = computed(() => {
-    const byId = this.productById();
+    const lines = this.selectionLines();
+    const discounts = this.estimateDiscounts(lines);
     let sum = 0;
-    for (const [id, qty] of this.selectedQty()) {
-      const p = byId.get(id);
-      if (p) sum += this.rowDisplayPrice(p) * qty;
-    }
-    return sum;
+    for (const line of lines) sum += line.gross - (discounts.get(line.key) ?? 0);
+    return roundMoney(sum);
   });
 
   constructor() {
@@ -416,6 +604,83 @@ export class AddItemsModalComponent {
         : undefined;
     if (variant) return this.variantFinalPrice(variant, row);
     return Number(row.final_price ?? row.base_price ?? 0);
+  }
+
+  /** Promo vigente de la fila (solo si baja el precio). */
+  rowPromotion(row: AddItemsProductOption): AddItemsActivePromotion | null {
+    return this.rowPromoPrice(row) != null ? (row.active_promotion ?? null) : null;
+  }
+
+  /** Etiqueta corta de la promo: badge del backend o su nombre. */
+  promotionLabel(row: AddItemsProductOption): string {
+    const promo = row.active_promotion;
+    return promo?.name?.trim() || promo?.badge_label?.trim() || 'Promoción';
+  }
+
+  /** Precio unitario efectivo de la fila con la promo; `null` sin promo. */
+  rowPromoPrice(row: AddItemsProductOption): number | null {
+    return this.effectiveUnitPrice(row, this.rowDisplayPrice(row));
+  }
+
+  /** Precio de una variante con la promo del producto; `null` sin promo. */
+  variantPromoPrice(
+    variant: AddItemsVariant,
+    product: AddItemsProductOption,
+  ): number | null {
+    return this.effectiveUnitPrice(
+      product,
+      this.variantFinalPrice(variant, product),
+    );
+  }
+
+  /** Lo que la cuenta cobrará por unidad: con promo si aplica. */
+  rowChargedPrice(row: AddItemsProductOption): number {
+    return this.rowPromoPrice(row) ?? this.rowDisplayPrice(row);
+  }
+
+  /** Selección actual como líneas a estimar (precio final × cantidad). */
+  private selectionLines(): PromoEstimateLine[] {
+    const byId = this.productById();
+    const lines: PromoEstimateLine[] = [];
+    for (const [id, qty] of this.selectedQty()) {
+      const product = byId.get(id);
+      if (!product || !(qty > 0)) continue;
+      lines.push({
+        key: id,
+        gross: this.rowDisplayPrice(product) * qty,
+        promo: product.active_promotion,
+      });
+    }
+    return lines;
+  }
+
+  private estimateDiscounts(lines: PromoEstimateLine[]): Map<number, number> {
+    const byId = this.productById();
+    return estimatePromotionDiscounts(lines, this.accountLines(), (id) => {
+      const product = byId.get(id);
+      return product ? (product.active_promotion ?? null) : undefined;
+    });
+  }
+
+  /**
+   * Precio por unidad que resulta de cotizar la fila DENTRO de la selección
+   * (con su cantidad actual, o 1 si aún no se agregó) a `unitPrice`. Así el
+   * precio de la fila y el total cuentan la misma historia: un monto fijo de
+   * 5.000 en 2 unidades de 30.000 se ve como 27.500 c/u, no 25.000.
+   */
+  private effectiveUnitPrice(
+    row: AddItemsProductOption,
+    unitPrice: number,
+  ): number | null {
+    if (!(unitPrice > 0)) return null;
+    const qty = Math.max(1, this.quantityOf(row.id));
+    const gross = unitPrice * qty;
+    const lines = this.selectionLines().filter((line) => line.key !== row.id);
+    lines.push({ key: row.id, gross, promo: row.active_promotion });
+    const discount = this.estimateDiscounts(lines).get(row.id) ?? 0;
+    if (!(discount > 0)) return null;
+    const price = roundMoney((gross - discount) / qty);
+    return price < unitPrice ? price : null;
   }
 
   /** Etiqueta legible de la variante (atributos → name → sku). */

@@ -1,4 +1,5 @@
 import { ExpenseScanResponse } from './dto/scan-expense.dto';
+import type { QueuedDocumentRef } from '@common/ai-ingest/documents/queued-document';
 
 /**
  * Contexto multi-tenant serializado dentro del job de escaneo de factura de
@@ -17,14 +18,15 @@ export interface ExpenseScanJobContext {
 /**
  * Payload del job encolado en la cola `expense-scan`.
  *
- * La imagen ya viene preprocesada (sharp resize ≤1536 / JPEG q85) como data URI
- * desde el ENQUEUE — el controller tiene el buffer multer y llama a
- * `ExpenseScannerService.prepareImage(file)` antes de encolar. El worker solo
- * corre la parte pesada (OCR + parse + matching) vía `scanFromImage`.
+ * ia-cargas F5a: el controller detecta el tipo REAL por firma, guarda el
+ * archivo original en S3 (`file_key`, mismo prefijo que la cola `ai-scan`) y
+ * encola solo la key; Redis ya no lleva el archivo. El worker lo descarga y lo
+ * lee por páginas (`ExpenseScannerService.scanFromFile`).
+ *
+ * Compatibilidad: un job encolado antes trae `dataUri` (imagen preparada o el
+ * PDF crudo en base64) y sigue funcionando por el mismo lector.
  */
-export interface ExpenseScanJob {
-  dataUri: string;
-  mimeType: string;
+export interface ExpenseScanJob extends QueuedDocumentRef {
   context: ExpenseScanJobContext;
 }
 

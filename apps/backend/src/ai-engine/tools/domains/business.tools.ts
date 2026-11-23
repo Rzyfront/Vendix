@@ -21,6 +21,9 @@ export function createBusinessTools({
   return [
     {
       name: 'get_store_profile',
+      access: 'public',
+      accessReason:
+        'Store identity (name, currency, timezone) every store member already sees in the panel; the agent needs it to read dates and amounts.',
       version: '1',
       domain: 'business',
       readOnly: true,
@@ -37,6 +40,7 @@ export function createBusinessTools({
     },
     {
       name: 'get_business_snapshot',
+      requiredPermissions: ['store:analytics:read'],
       version: '1',
       domain: 'business',
       readOnly: true,

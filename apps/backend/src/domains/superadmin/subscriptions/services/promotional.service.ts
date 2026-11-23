@@ -7,6 +7,13 @@ import {
   UpdatePromotionalDto,
   PromotionalQueryDto,
 } from '../dto';
+import { legacyFlagsToAIEntitlements } from '../../../store/subscriptions/types/ai-capabilities';
+import {
+  aiCapabilityIdsOfFeatures,
+  aiEntitlementRowData,
+  changedLegacyFeatures,
+  nestedPlanAIEntitlementUpserts,
+} from './plan-ai-entitlements.write';
 
 @Injectable()
 export class PromotionalService {
@@ -62,6 +69,12 @@ export class PromotionalService {
         cancellation_day: dto.cancellation_day ?? 45,
         feature_matrix: this.toPlainFeatureMatrix(dto.feature_matrix) as any,
         ai_feature_flags: (dto.ai_feature_flags ?? {}) as any,
+        // T12: the promo starts with its 11 AI rows (legacy translation).
+        ai_entitlements: {
+          create: legacyFlagsToAIEntitlements(dto.ai_feature_flags ?? {}).map(
+            aiEntitlementRowData,
+          ),
+        },
         resellable: false,
         is_promotional: true,
         promo_rules: dto.promo_rules as any,
@@ -192,6 +205,20 @@ export class PromotionalService {
         }),
         ...(dto.ai_feature_flags !== undefined && {
           ai_feature_flags: dto.ai_feature_flags as any,
+          // T12: rows of the features whose JSON changed follow it; the rest
+          // keep their value (missing rows are created).
+          ai_entitlements: {
+            upsert: nestedPlanAIEntitlementUpserts(
+              id,
+              legacyFlagsToAIEntitlements(dto.ai_feature_flags),
+              aiCapabilityIdsOfFeatures(
+                changedLegacyFeatures(
+                  existing.ai_feature_flags,
+                  dto.ai_feature_flags,
+                ),
+              ),
+            ),
+          },
         }),
         ...(dto.promo_rules !== undefined && {
           promo_rules: dto.promo_rules as any,
@@ -216,7 +243,12 @@ export class PromotionalService {
       throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);
     }
 
-    await this.prisma.subscription_plans.delete({ where: { id } });
+    // plan_ai_entitlements.plan_id is ON DELETE RESTRICT (T9): the promo's AI
+    // rows go first, in the same transaction.
+    await this.prisma.$transaction(async (tx) => {
+      await tx.plan_ai_entitlements.deleteMany({ where: { plan_id: id } });
+      await tx.subscription_plans.delete({ where: { id } });
+    });
   }
 
   /**

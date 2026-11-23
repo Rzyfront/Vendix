@@ -1,0 +1,16 @@
+{
+  "name": "vendix-agent-codemode-lambda",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Vex Code Mode executor (vendix.codemode/v1). Not a monorepo workspace; not deployed.",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test handler.test.cjs template.test.cjs"
+  },
+  "dependencies": {
+    "quickjs-emscripten": "0.32.0"
+  }
+}

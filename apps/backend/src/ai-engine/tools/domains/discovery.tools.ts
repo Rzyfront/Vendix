@@ -1,10 +1,16 @@
 import { RegisteredTool } from '../interfaces/tool.interface';
+import { DESCRIBE_TOOL, toolDiscoveryStubsEnabled } from '../tool-working-set';
 
 /** Loop-local state only. No mutable per-user catalog on this global factory. */
-export function createDiscoveryTools(): RegisteredTool[] {
-  return [
+export function createDiscoveryTools(
+  env: Record<string, string | undefined> = process.env,
+): RegisteredTool[] {
+  const tools: RegisteredTool[] = [
     {
       name: 'search_tools',
+      access: 'public',
+      accessReason:
+        "Searches the tool catalog of the turn, which is already filtered by the caller's permissions; it grants nothing.",
       version: '1',
       domain: 'discovery',
       readOnly: true,
@@ -45,4 +51,37 @@ export function createDiscoveryTools(): RegisteredTool[] {
         }),
     },
   ];
+  // F10/T61: registered only with AI_TOOL_DISCOVERY_STUBS=true, so the switch
+  // off leaves the registry (catalog hash, tool lists) byte-identical.
+  if (toolDiscoveryStubsEnabled(env))
+    tools.push({
+      name: DESCRIBE_TOOL,
+      access: 'public',
+      accessReason:
+        "Describes a tool of the turn's catalog, already filtered by the caller's permissions; it grants nothing.",
+      version: '1',
+      domain: 'discovery',
+      readOnly: true,
+      description:
+        'Devuelve la firma TypeScript y ejemplos de UNA herramienta que puedes usar en este turno, por su nombre exacto. Úsala antes de llamar una herramienta que viste solo como ficha corta. No la carga ni concede permisos.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            description:
+              'Nombre exacto de la herramienta (máximo 100 caracteres).',
+          },
+        },
+        required: ['name'],
+      },
+      handler: async () =>
+        JSON.stringify({
+          error:
+            'describe_tool solo está disponible dentro de un turno con routing activo.',
+          next_step:
+            'Consulta list_capabilities o list_endpoints con tus permisos actuales.',
+        }),
+    });
+  return tools;
 }

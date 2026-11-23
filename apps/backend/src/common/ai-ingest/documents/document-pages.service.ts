@@ -41,8 +41,20 @@ export interface AiDocumentPagesOptions extends DocumentPagesOptions {
   imageMaxEdge?: number;
   /** Read very tall photos in overlapping strips (long photographed lists). Default true. */
   splitTallImages?: boolean;
+  /**
+   * Upload size cap in bytes. Default 10 MiB; never above 25 MiB. Purchase
+   * invoices keep the 15 MB their endpoint always accepted.
+   */
+  maxBytes?: number;
   /** Real progress while pages are read (done of total pages). */
   onPage?: (done: number, total: number) => Promise<void> | void;
+  /**
+   * Fiscal forms (RUT, DIAN resolution, habilitación): a page with enough
+   * native text is ALSO rendered and goes as text + image, so the model keeps
+   * the boxes of the form (which number belongs to which casilla) while the
+   * text gives it the exact digits. Default false: native text alone.
+   */
+  renderTextPages?: boolean;
 }
 
 /**
@@ -61,6 +73,11 @@ export interface AiDocumentPage {
   image?: string;
   /** Photos read in strips: "strip 2 of 5". */
   strip?: { index: number; count: number };
+  /**
+   * Several files read together (one sale, one habilitación): which file this
+   * page belongs to (1-based). Absent when only one file is read.
+   */
+  document?: { index: number; count: number };
 }
 
 export interface AiDocumentPages {
@@ -137,6 +154,8 @@ interface PdfCanvasEntry {
 }
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+/** Ceiling of `AiDocumentPagesOptions.maxBytes` (render time and memory per job). */
+const ABSOLUTE_MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const MAX_TOTAL_OUTPUT_BYTES = 20 * 1024 * 1024;
 export const DEFAULT_MAX_PDF_PAGES = 10;
 /** Hard ceiling for any profile (render time and memory per job). */
@@ -202,7 +221,10 @@ export class DocumentPagesService {
   ): Promise<AiDocumentPages> {
     let mimeType: string;
     try {
-      mimeType = this.validateFile(file, { allowHeic: true });
+      mimeType = this.validateFile(file, {
+        allowHeic: true,
+        maxBytes: options.maxBytes,
+      });
     } catch (error) {
       throw this.toIngestError(error);
     }
@@ -232,7 +254,8 @@ export class DocumentPagesService {
     try {
       read = await this.readPdf(file.buffer, {
         maxPages: this.pageCap(options.maxPages),
-        shouldRender: (text) => classifyPageText(text) !== 'text',
+        shouldRender: (text) =>
+          !!options.renderTextPages || classifyPageText(text) !== 'text',
         tolerateRenderFailure: true,
         onPage: options.onPage,
       });
@@ -245,7 +268,9 @@ export class DocumentPagesService {
     for (const p of read.pages) {
       const textMode = classifyPageText(p.text);
       const text = p.text.trim();
-      if (textMode === 'text') {
+      if (textMode === 'text' && options.renderTextPages && p.data_uri) {
+        pages.push({ page_number: p.page_number, mode: 'text+image', text, image: p.data_uri });
+      } else if (textMode === 'text') {
         pages.push({ page_number: p.page_number, mode: 'text', text });
       } else if (p.data_uri) {
         pages.push({
@@ -315,12 +340,21 @@ export class DocumentPagesService {
     if (bytes > MAX_TOTAL_OUTPUT_BYTES) throw this.badRequest('Las páginas preparadas exceden el límite de 20 MiB.');
   }
 
-  private validateFile(file: DocumentSourceFile, options: { allowHeic?: boolean } = {}): string {
+  private validateFile(
+    file: DocumentSourceFile,
+    options: { allowHeic?: boolean; maxBytes?: number } = {},
+  ): string {
     if (!file?.buffer || !Buffer.isBuffer(file.buffer) || file.buffer.length === 0) {
       throw this.badRequest('Se requiere un archivo de imagen o PDF.');
     }
-    if (file.buffer.length > MAX_UPLOAD_BYTES || file.size !== file.buffer.length) {
-      throw this.badRequest('El archivo debe pesar como máximo 10 MiB.');
+    const maxBytes =
+      options.maxBytes != null && Number.isFinite(options.maxBytes) && options.maxBytes > 0
+        ? Math.min(ABSOLUTE_MAX_UPLOAD_BYTES, Math.floor(options.maxBytes))
+        : MAX_UPLOAD_BYTES;
+    if (file.buffer.length > maxBytes || file.size !== file.buffer.length) {
+      throw this.badRequest(
+        `El archivo debe pesar como máximo ${Math.round(maxBytes / (1024 * 1024))} MiB.`,
+      );
     }
 
     const mimeType = file.mimetype?.trim().toLowerCase();

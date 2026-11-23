@@ -1,29 +1,65 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { S3Service } from '../../../common/services/s3.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
-
-/**
- * Same ceiling and same MIME whitelist the native scanners enforce
- * (`purchase-orders.controller.ts`, `expenses.controller.ts`). Kept identical
- * on purpose: a document Vexi accepts must be a document those endpoints
- * accept, or the flow dies after the user already approved the write.
- */
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
-
-const ALLOWED_MIMETYPES = new Set([
-  'image/jpeg',
-  'image/jpg',
-  'image/png',
-  'image/webp',
-  'image/heic',
-  'image/heif',
-  'application/pdf',
-]);
+import { S3PathHelper } from '../../../common/helpers/s3-path.helper';
+import { bytesMatchMime } from '../documents/file-signature';
+import {
+  ATTACHABLE_ENTITY_TYPES,
+  RECORD_READ_PERMISSION,
+  XLSX_MIME,
+} from '../documents/documents.constants';
+import {
+  AI_ATTACHMENT_LABEL,
+  AI_ATTACHMENT_MAX_BYTES,
+  resolveAttachmentType,
+} from './ai-attachments';
+import type { AttachmentContent } from './attachment-content.types';
+import {
+  AttachmentUnreadableError,
+  extractAttachmentContent,
+  spreadsheetLimitProblem,
+} from './attachment-text-extractor';
 
 const HANDLE_PREFIX = 'att_';
+
+/** Matches no row: the filter of a caller without a user in context. */
+const NO_ROW = { id: -1 } as const;
+
+/**
+ * Who may read a chat attachment by its handle (B2). A handle is a sequential
+ * id the model or the client hands over, so it is never trusted on its own:
+ * the row must belong to the caller (`user_id`), or already be saved into a
+ * record whose read permission the caller holds (`RECORD_READ_PERMISSION`,
+ * the same one its own `GET :id` asks). Store isolation stays with
+ * `StorePrismaService`; this adds the per-user boundary inside the store.
+ */
+export function attachmentAccessWhere(): Record<string, unknown> {
+  const context = RequestContextService.getContext();
+  const userId = context?.user_id;
+  if (!userId) return NO_ROW;
+  const granted = context?.permissions?.length
+    ? context.permissions
+    : (context?.roles ?? []);
+  const readableRecords = ATTACHABLE_ENTITY_TYPES.filter((type) =>
+    granted.includes(RECORD_READ_PERMISSION[type]),
+  );
+  if (!readableRecords.length) return { user_id: userId };
+  return {
+    OR: [
+      { user_id: userId },
+      { linked_entity_type: { in: [...readableRecords] } },
+    ],
+  };
+}
+
+/** Mutations by handle only touch the caller's own rows. */
+function ownerWhere(): Record<string, unknown> {
+  const userId = RequestContextService.getContext()?.user_id;
+  return userId ? { user_id: userId } : NO_ROW;
+}
 
 export interface StoredAttachment {
   attachment_id: string;
@@ -37,6 +73,24 @@ export interface AttachmentPayload {
   mime_type: string;
   original_name: string;
   record: { id: number; s3_key: string };
+}
+
+/** What the document tools (T44) need to save a chat attachment into a record. */
+export interface AgentAttachmentRow {
+  id: number;
+  s3_key: string;
+  mime_type: string;
+  size_bytes: number;
+  original_name: string;
+  /** Set once the attachment was promoted to the document module. */
+  stored_file_id: number | null;
+}
+
+export interface MarkSavedToRecordInput {
+  attachmentId: number;
+  entityType: string;
+  entityId: number;
+  storedFileId: number;
 }
 
 /**
@@ -65,7 +119,14 @@ export class VexiAttachmentsService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly s3: S3Service,
-  ) {}
+    // Plain class without dependencies; the fallback keeps this service
+    // constructible by hand without registering a provider in AIEngineModule.
+    @Optional() paths?: S3PathHelper,
+  ) {
+    this.paths = paths ?? new S3PathHelper();
+  }
+
+  private readonly paths: S3PathHelper;
 
   /**
    * Validates, uploads and registers a document.
@@ -81,19 +142,47 @@ export class VexiAttachmentsService {
       throw new VendixHttpException(ErrorCodes.INV_SCAN_NO_FILE);
     }
 
-    if (!ALLOWED_MIMETYPES.has(file.mimetype)) {
+    const type = resolveAttachmentType(file.mimetype, file.originalname);
+    if (!type) {
       throw new VendixHttpException(
         ErrorCodes.INV_SCAN_INVALID_FILE,
-        `El tipo de archivo "${file.mimetype}" no se puede leer. Acepto fotos (JPG, PNG, WEBP, HEIC) y PDF.`,
+        `El tipo de archivo "${file.mimetype || file.originalname}" no se puede leer. Acepto: ${AI_ATTACHMENT_LABEL}.`,
       );
     }
 
-    if (file.size > MAX_FILE_BYTES) {
+    const size = file.size ?? file.buffer.length;
+    if (size > AI_ATTACHMENT_MAX_BYTES) {
       throw new VendixHttpException(
         ErrorCodes.INV_SCAN_INVALID_FILE,
-        `El archivo pesa ${Math.round(file.size / 1024 / 1024)} MB y el máximo son 10 MB. Manda una foto más liviana.`,
+        `El archivo pesa ${Math.round(size / 1024 / 1024)} MB y el máximo son ${AI_ATTACHMENT_MAX_BYTES / 1024 / 1024} MB. Acepto: ${AI_ATTACHMENT_LABEL}.`,
       );
     }
+
+    if (!bytesMatchMime(file.buffer, type.mime)) {
+      throw new VendixHttpException(
+        ErrorCodes.INV_SCAN_INVALID_FILE,
+        `El contenido de "${this.safeName(file.originalname)}" no coincide con su extensión. Acepto: ${AI_ATTACHMENT_LABEL}.`,
+      );
+    }
+
+    // B3: a workbook that would expand past the ceilings is refused here,
+    // from its ZIP directory alone, before it is stored or parsed.
+    if (type.mime === XLSX_MIME) {
+      const problem = spreadsheetLimitProblem(file.buffer);
+      if (problem) {
+        throw new VendixHttpException(ErrorCodes.INV_SCAN_INVALID_FILE, problem);
+      }
+    }
+
+    // B4: the content is extracted before anything is stored, in a bounded
+    // worker; a file that cannot be read in time is refused with a message
+    // instead of hanging the request (or the API for every store).
+    const originalName = this.safeName(file.originalname);
+    const content = await this.extractForUpload(
+      file.buffer,
+      type.mime,
+      originalName,
+    );
 
     const context = RequestContextService.getContext();
     const storeId = context?.store_id;
@@ -107,9 +196,34 @@ export class VexiAttachmentsService {
       );
     }
 
-    const key = `vexi-attachments/stores/${storeId}/${randomUUID()}${this.extensionOf(file)}`;
+    const [store, organization] = await Promise.all([
+      this.prisma.stores.findFirst({
+        where: { id: storeId, organization_id: organizationId },
+        select: { id: true, slug: true },
+      }),
+      this.prisma.organizations.findFirst({
+        where: { id: organizationId },
+        select: { id: true, slug: true },
+      }),
+    ]);
+    if (!store || !organization) {
+      throw new VendixHttpException(
+        ErrorCodes.AI_AGENT_004,
+        'No hay contexto de tienda para guardar el documento.',
+      );
+    }
 
-    await this.s3.uploadFile(file.buffer, key, file.mimetype);
+    const basePath = `${this.paths.buildStorePath(organization, store)}/ai-attachments`;
+    const id = randomUUID();
+    const key = `${basePath}/${id}.${type.extensions[0]}`;
+
+    await this.s3.uploadFile(file.buffer, key, type.mime);
+
+    const derivedKey = await this.storeDerived(
+      `${basePath}/derived/${id}.json`,
+      content,
+      originalName,
+    );
 
     const row = await this.prisma.ai_attachments.create({
       data: {
@@ -118,9 +232,10 @@ export class VexiAttachmentsService {
         user_id: userId,
         conversation_id: conversationId ?? null,
         s3_key: key,
-        mime_type: file.mimetype,
-        size_bytes: file.size,
-        original_name: this.safeName(file.originalname),
+        mime_type: type.mime,
+        size_bytes: size,
+        original_name: originalName,
+        derived_text_key: derivedKey,
       },
       select: {
         id: true,
@@ -140,6 +255,41 @@ export class VexiAttachmentsService {
       mime_type: row.mime_type,
       size_bytes: row.size_bytes,
     };
+  }
+
+  /**
+   * Extracted content of a document (table / text / image marker), for the
+   * `read_attachment` tool. Uses the derived JSON when present; legacy rows
+   * (uploaded before T41) are extracted on the fly and nothing is written.
+   */
+  async readContent(handle: string): Promise<AttachmentContent> {
+    const record = await this.requireRecord(handle);
+    if (record.derived_text_key) {
+      try {
+        const raw = await this.s3.downloadFile(record.derived_text_key);
+        return JSON.parse(raw.toString('utf8')) as AttachmentContent;
+      } catch (error) {
+        this.logger.warn(
+          `Derived content of ${handle} unreadable, extracting from the original: ${(error as Error)?.message}`,
+        );
+      }
+    }
+    const buffer = await this.s3.downloadFile(record.s3_key);
+    try {
+      return await extractAttachmentContent(
+        buffer,
+        record.mime_type,
+        record.original_name,
+      );
+    } catch (error) {
+      if (error instanceof AttachmentUnreadableError) {
+        throw new VendixHttpException(
+          ErrorCodes.INV_SCAN_INVALID_FILE,
+          error.message,
+        );
+      }
+      throw error;
+    }
   }
 
   /** The bytes behind a handle, for a vision tool or a multipart forward. */
@@ -192,7 +342,7 @@ export class VexiAttachmentsService {
 
     try {
       await this.prisma.ai_attachments.updateMany({
-        where: { id },
+        where: { id, ...ownerWhere() },
         data: {
           linked_entity_type: entityType,
           linked_entity_id: entityId,
@@ -213,7 +363,7 @@ export class VexiAttachmentsService {
 
     try {
       await this.prisma.ai_attachments.updateMany({
-        where: { id },
+        where: { id, ...ownerWhere() },
         data: { consumed_by_app_key: appKey },
       });
     } catch {
@@ -269,7 +419,7 @@ export class VexiAttachmentsService {
     if (!ids.length) return [];
 
     const rows = await this.prisma.ai_attachments.findMany({
-      where: { id: { in: ids } },
+      where: { AND: [{ id: { in: ids } }, attachmentAccessWhere()] },
       select: {
         id: true,
         original_name: true,
@@ -320,6 +470,47 @@ export class VexiAttachmentsService {
     });
   }
 
+  /**
+   * The attachment row behind `att_<id>` for the document tools (T44), or null
+   * when the caller cannot read it (`attachmentAccessWhere`): another store's
+   * id, or another person's attachment that is not in a record they can read,
+   * simply does not resolve.
+   */
+  async findAttachmentForAgent(id: number): Promise<AgentAttachmentRow | null> {
+    const row = await this.prisma.ai_attachments.findFirst({
+      where: { AND: [{ id }, attachmentAccessWhere()] },
+      select: {
+        id: true,
+        s3_key: true,
+        mime_type: true,
+        size_bytes: true,
+        original_name: true,
+        stored_file_id: true,
+      },
+    });
+    return (row ?? null) as AgentAttachmentRow | null;
+  }
+
+  /**
+   * Stamps, inside the caller's transaction, the record a chat attachment was
+   * saved into and its promoted stored file. The conversation purge keeps rows
+   * with these columns set, so the stamp commits or rolls back with the rest.
+   */
+  async markSavedToRecordForAgent(
+    tx: any,
+    input: MarkSavedToRecordInput,
+  ): Promise<void> {
+    await tx.ai_attachments.updateMany({
+      where: { id: input.attachmentId },
+      data: {
+        linked_entity_type: input.entityType,
+        linked_entity_id: input.entityId,
+        linked_at: new Date(),
+        stored_file_id: input.storedFileId,
+      },
+    });
+  }
+
   // ── Internals ───────────────────────────────────────────────────────────
 
   private async requireRecord(handle: string) {
@@ -332,13 +523,16 @@ export class VexiAttachmentsService {
       );
     }
 
+    // B2: someone else's handle reads as "no longer available" — the same
+    // answer as a missing one, so the id space cannot be probed.
     const record = await this.prisma.ai_attachments.findFirst({
-      where: { id },
+      where: { AND: [{ id }, attachmentAccessWhere()] },
       select: {
         id: true,
         s3_key: true,
         mime_type: true,
         original_name: true,
+        derived_text_key: true,
       },
     });
 
@@ -371,10 +565,56 @@ export class VexiAttachmentsService {
     return Number.isSafeInteger(id) && id > 0 ? id : null;
   }
 
-  private extensionOf(file: Express.Multer.File): string {
-    if (file.mimetype === 'application/pdf') return '.pdf';
-    const match = /^image\/(jpeg|jpg|png|webp|heic|heif)$/.exec(file.mimetype);
-    return match ? `.${match[1] === 'jpeg' ? 'jpg' : match[1]}` : '';
+  /**
+   * Extracted content for a new upload. A file that cannot be read within its
+   * limits (B4) is refused with the extractor's message; any other failure
+   * yields null and the upload goes on without a derived JSON.
+   */
+  private async extractForUpload(
+    buffer: Buffer,
+    mime: string,
+    originalName: string,
+  ): Promise<AttachmentContent | null> {
+    try {
+      return await extractAttachmentContent(buffer, mime, originalName);
+    } catch (error) {
+      if (error instanceof AttachmentUnreadableError) {
+        throw new VendixHttpException(
+          ErrorCodes.INV_SCAN_INVALID_FILE,
+          error.message,
+        );
+      }
+      this.logger.warn(
+        `Extraction failed for ${originalName}: ${(error as Error)?.message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Uploads the derived JSON next to the original. Never throws: a missing
+   * extraction or a failed upload leaves `derived_text_key` null and the
+   * original untouched (readContent extracts on the fly).
+   */
+  private async storeDerived(
+    key: string,
+    content: AttachmentContent | null,
+    originalName: string,
+  ): Promise<string | null> {
+    if (!content) return null;
+    try {
+      await this.s3.uploadFile(
+        Buffer.from(JSON.stringify(content), 'utf8'),
+        key,
+        'application/json',
+      );
+      return key;
+    } catch (error) {
+      this.logger.warn(
+        `Derived content not stored for ${originalName}: ${(error as Error)?.message}`,
+      );
+      return null;
+    }
   }
 
   /** Keeps the name recognisable to the user without letting it shape a path. */

@@ -37,6 +37,26 @@ export interface ApiResponse<T> {
   message?: string;
 }
 
+/** T12 — shadow-mode comparison of the legacy JSON and the entitlements model. */
+export interface AIEntitlementsShadowDifference {
+  capability: string;
+  kind: 'divergence' | 'new_model_only';
+  legacy: string;
+  current: string;
+}
+
+export interface AIEntitlementsShadowReport {
+  plans: Array<{
+    plan_id: number;
+    code: string;
+    name: string;
+    differences: AIEntitlementsShadowDifference[];
+  }>;
+  total_divergences: number;
+  total_new_model_only: number;
+  runtime: { days: Array<{ day: string; count: number }>; total: number };
+}
+
 export interface PaginatedResponse<T> {
   success: boolean;
   data: T[];
@@ -121,6 +141,8 @@ export class SubscriptionAdminService {
 
     // Feature matrices
     if (d.ai_feature_flags !== undefined) payload['ai_feature_flags'] = d.ai_feature_flags;
+    // T12: the complete list of capability rows (the backend derives the legacy JSON).
+    if (d.ai_entitlements !== undefined) payload['ai_entitlements'] = d.ai_entitlements;
     if (d.feature_matrix !== undefined) payload['feature_matrix'] = d.feature_matrix ?? [];
 
     // ---- Backwards-compat shim (legacy callers using slug / is_active / is_public / grace_threshold_days / pricing[]) ----
@@ -217,6 +239,7 @@ export class SubscriptionAdminService {
 
       feature_matrix: raw.feature_matrix ?? [],
       ai_feature_flags: raw.ai_feature_flags ?? ({} as any),
+      ai_entitlements: Array.isArray(raw.ai_entitlements) ? raw.ai_entitlements : undefined,
 
       resellable: Boolean(raw.resellable),
       max_partner_margin_pct,
@@ -409,6 +432,14 @@ export class SubscriptionAdminService {
           data: (res.data ?? []).map((row) => this.toFrontendPlan(row)),
         })),
       );
+  }
+
+  getAIEntitlementsShadowReport(): Observable<AIEntitlementsShadowReport> {
+    return this.http
+      .get<ApiResponse<AIEntitlementsShadowReport>>(
+        `${this.apiUrl}/superadmin/subscriptions/plans/ai-entitlements/shadow-report`,
+      )
+      .pipe(map((res) => res.data));
   }
 
   getPlanById(id: string): Observable<ApiResponse<SubscriptionPlan>> {

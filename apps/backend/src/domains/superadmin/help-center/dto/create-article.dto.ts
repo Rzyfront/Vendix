@@ -73,4 +73,10 @@ export class CreateArticleDto {
   @Type(() => Number)
   @IsNumber()
   sort_order?: number;
+
+  /** Video of the video library linked to this article (null unlinks it on update). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  video_id?: number | null;
 }

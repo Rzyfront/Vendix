@@ -2257,12 +2257,19 @@ export class VexiSettingsDto {
   @IsBoolean()
   enabled?: boolean;
 
+  /**
+   * @deprecated T16/N5 — la tienda ya no configura el motor de voz (lo define
+   * superadmin y la voz es solo por API). Se sigue aceptando UNA versión para que
+   * una pestaña abierta con el selector viejo no reciba un 400 al guardar, pero
+   * `SettingsService.updateSettings` lo descarta: nunca se persiste.
+   */
   @ApiProperty({
-    example: 'realtime',
+    example: 'pipeline',
     enum: ['realtime', 'pipeline'],
     required: false,
+    deprecated: true,
     description:
-      'Motor del modo voz. `realtime` negocia WebRTC speech-to-speech contra el proveedor; `pipeline` transcribe, responde con el agente de texto del chat y dicta la respuesta. Solo el pipeline puede ejecutar escrituras con confirmación, porque es el único que pasa por la tarjeta de aprobación del panel.',
+      'OBSOLETO: se acepta y se ignora. El motor de voz ya no es configurable por tienda.',
   })
   @IsOptional()
   @IsIn(['realtime', 'pipeline'])

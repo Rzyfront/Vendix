@@ -365,7 +365,8 @@ describe('PromotionEngineService - quoteDiscounts', () => {
       );
       expect(args.where.OR).toEqual([
         { end_date: null },
-        { end_date: { gte: new Date('2026-06-01T00:00:00Z') } },
+        { end_date: { gte: new Date('2026-06-01T07:00:00Z') } },
+        { end_date: new Date('2026-06-01T00:00:00Z') },
       ]);
       expect(result.applied_promotions).toEqual([]);
     });
@@ -528,7 +529,8 @@ describe('PromotionEngineService - quoteDiscounts', () => {
       });
       expect(where.OR).toEqual([
         { end_date: null },
-        { end_date: { gte: new Date('2026-02-28T00:00:00Z') } },
+        { end_date: { gte: new Date('2026-02-28T19:00:00Z') } },
+        { end_date: new Date('2026-02-28T00:00:00Z') },
       ]);
     });
   });
@@ -1292,6 +1294,47 @@ describe('PromotionEngineService - quoteDiscounts', () => {
       // scopedQty=5 >= 3 (and no higher tier) => tier already unlocked, no nudge.
       expect(result.tier_progress).toEqual([]);
       expect(result.total_discount).toBe(7500); // 15% of 50000, discount still fires
+    });
+  });
+
+  describe('reglas del alcance en el listado (findActiveAutoPromotionsForProducts)', () => {
+    it('expone el tope y la compra mínima de una promo plana, o null si no los tiene', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 301,
+          scope: 'product',
+          type: 'percentage',
+          value: 30,
+          max_discount_amount: 9000,
+          min_purchase_amount: 50000,
+          promotion_products: [{ product_id: 10 }],
+        }),
+        buildPromotion({
+          id: 302,
+          scope: 'product',
+          type: 'fixed_amount',
+          value: 5000,
+          max_discount_amount: null,
+          min_purchase_amount: null,
+          promotion_products: [{ product_id: 11 }],
+        }),
+      ]);
+
+      const map = await service.findActiveAutoPromotionsForProducts(
+        [
+          { product_id: 10, unit_price: 30000, category_ids: [] },
+          { product_id: 11, unit_price: 30000, category_ids: [] },
+        ],
+        REFERENCE_NOW,
+      );
+
+      expect(map.get(10)!.max_discount_amount).toBe(9000);
+      expect(map.get(10)!.min_purchase_amount).toBe(50000);
+      // El precio de UNA unidad no cambia: 30 % de 30.000 = 9.000 (el tope).
+      expect(map.get(10)!.promotional_price).toBe(21000);
+      expect(map.get(11)!.max_discount_amount).toBeNull();
+      expect(map.get(11)!.min_purchase_amount).toBeNull();
+      expect(map.get(11)!.promotional_price).toBe(25000);
     });
   });
 
@@ -2319,7 +2362,8 @@ describe('PromotionEngineService - auditoría y días de la semana', () => {
       const where = prisma.promotions.findMany.mock.calls[0][0].where;
       expect(where.OR).toEqual([
         { end_date: null },
-        { end_date: { gte: new Date('2026-11-30T00:00:00Z') } },
+        { end_date: { gte: new Date('2026-11-30T15:00:00Z') } },
+        { end_date: new Date('2026-11-30T00:00:00Z') },
       ]);
       // y la de inicio arranca a la medianoche LOCAL, no a las 19:00 del día anterior
       expect(where.start_date).toEqual({
@@ -2390,6 +2434,64 @@ describe('PromotionEngineService - auditoría y días de la semana', () => {
       // Antes: 25 del descuento de orden caía en la línea ya en 0 y se perdía.
       expect(lineDiscounts).toBe(150);
       expect(r.items[1].final_line_total).toBe(50);
+    });
+  });
+
+  describe('F5: el total de la promoción es la suma de sus líneas', () => {
+    const sumLines = (r: { items: Array<{ promotion_discount: number }> }) =>
+      Math.round(r.items.reduce((s, i) => s + i.promotion_discount, 0) * 100) / 100;
+
+    it('con el tope por línea (precio con fracción de centavo) Σ líneas == discount_amount == total_discount', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 740,
+          scope: 'product',
+          type: 'percentage',
+          value: 100,
+          promotion_products: [{ product_id: 1 }],
+        }),
+      ]);
+      const r = await service.quoteDiscounts({
+        items: [
+          { line_id: 0, product_id: 1, unit_price: 33.335, quantity: 1 },
+          { line_id: 1, product_id: 2, unit_price: 50, quantity: 1 },
+        ],
+        now: TUESDAY_10AM_BOGOTA,
+      });
+      expect(r.applied_promotions).toHaveLength(1);
+      expect(r.applied_promotions[0].discount_amount).toBe(r.total_discount);
+      expect(sumLines(r)).toBe(r.total_discount);
+      expect(r.order_promotions_snapshot[0].discount_amount).toBe(r.total_discount);
+      // Sólo la línea con promoción lleva descuento, y a centavo.
+      expect(r.items[1].promotion_discount).toBe(0);
+      // Antes: la línea quedaba en 33,335 (sin redondear) y la promoción en
+      // 33,34; ahora ambas son el mismo monto a centavo.
+      expect(r.items[0].promotion_discount).toBe(33.34);
+    });
+
+    it('promo de producto 10 % sobre A con B fuera de alcance: el desglose por línea queda en A', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 741,
+          scope: 'product',
+          type: 'percentage',
+          value: 10,
+          promotion_products: [{ product_id: 1 }],
+        }),
+      ]);
+      const r = await service.quoteDiscounts({
+        items: [
+          { line_id: 0, product_id: 1, unit_price: 119000, quantity: 1 },
+          { line_id: 1, product_id: 2, unit_price: 100000, quantity: 1 },
+        ],
+        now: TUESDAY_10AM_BOGOTA,
+      });
+      expect(r.total_discount).toBe(11900);
+      expect(r.items.map((i) => [i.line_id, i.promotion_discount])).toEqual([
+        [0, 11900],
+        [1, 0],
+      ]);
+      expect(sumLines(r)).toBe(11900);
     });
   });
 

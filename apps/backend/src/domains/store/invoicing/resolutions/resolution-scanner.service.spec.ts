@@ -1,5 +1,17 @@
 import { VendixHttpException } from '@common/errors';
 import { ResolutionScannerService } from './resolution-scanner.service';
+import { AiExtractionService } from '@common/ai-ingest/extraction/ai-extraction.service';
+
+/** ia-cargas F5b: pages stub (a PDF → one page of native text + its image). */
+const fakePages = () => ({
+  prepareForAi: jest.fn().mockResolvedValue({
+    source: 'pdf',
+    pages: [{ page_number: 1, mode: 'text+image', text: 'DIAN ' + 'x'.repeat(220), image: 'data:image/jpeg;base64,AAAA' }],
+    page_count: 1,
+    unreadable_pages: [],
+  }),
+});
+
 
 describe('ResolutionScannerService (async core)', () => {
   const ai_json = JSON.stringify({
@@ -17,7 +29,7 @@ describe('ResolutionScannerService (async core)', () => {
   let service: ResolutionScannerService;
 
   const multer = {
-    buffer: Buffer.from('not-an-image'),
+    buffer: Buffer.from('%PDF-1.7 doc'),
     mimetype: 'application/pdf',
     originalname: 'res.pdf',
     size: 12,
@@ -34,7 +46,11 @@ describe('ResolutionScannerService (async core)', () => {
       assertVisionModelLinked: jest.fn().mockResolvedValue(undefined),
       run: jest.fn().mockResolvedValue({ success: true, content: ai_json }),
     };
-    service = new ResolutionScannerService(aiEngine as any);
+    service = new ResolutionScannerService(
+      aiEngine as any,
+      new AiExtractionService(aiEngine as any),
+      fakePages() as any,
+    );
   });
 
   it('scanResolutionFromFiles returns the same result as the sync method', async () => {

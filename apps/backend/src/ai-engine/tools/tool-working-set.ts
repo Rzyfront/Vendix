@@ -38,6 +38,29 @@ export const CORE_DISCOVERY: readonly string[] = [
 ];
 
 /**
+ * F10/T61: progressive discovery switch. Off by default; with it off the core,
+ * the turn tool list and the `describe_tool` registration are exactly the
+ * pre-F10 ones. Read at call time so a test or a restart flips it.
+ */
+export function toolDiscoveryStubsEnabled(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  return env.AI_TOOL_DISCOVERY_STUBS === 'true';
+}
+
+/** Joins the core discovery set only while the switch is on. */
+export const DESCRIBE_TOOL = 'describe_tool';
+
+/** CORE_DISCOVERY of the turn: `describe_tool` is appended only with the switch on. */
+export function coreDiscovery(
+  env: Record<string, string | undefined> = process.env,
+): readonly string[] {
+  return toolDiscoveryStubsEnabled(env)
+    ? [...CORE_DISCOVERY, DESCRIBE_TOOL]
+    : CORE_DISCOVERY;
+}
+
+/**
  * Names with evidence, best first, whose score is ≥ ratio × best score.
  * Ties break by name so the same scores always yield the same list.
  */

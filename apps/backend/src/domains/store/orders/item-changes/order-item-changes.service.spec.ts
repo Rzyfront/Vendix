@@ -1248,6 +1248,56 @@ describe('OrderItemChangesService (QUI-650)', () => {
     });
   });
 
+  describe('F1) la promoción de producto se reparte sólo entre sus líneas', () => {
+    // A: 119 c/u (IVA 19 % incluido, base 100) · B: 100 (excluido). Promo
+    // automática 10 % de producto sobre A: al subir A de 1 a 2 entra la promo
+    // (23,80 en bruto) y debe quedar TODA en A, no repartida con B.
+    const mkA = () => mkLine(1, {
+      quantity: 1, unit_price: 100, final_unit_price: 119, total_price: 100,
+      discount_amount: 0, tax_amount_item: 19,
+      order_item_taxes: [{ id: 100, tax_rate_id: 1, tax_name: 'IVA 19%', tax_rate: 0.19, tax_amount: 19, tax_type: 'iva', is_compound: false, is_inclusive: true }],
+    });
+    const mkB = () => mkLine(2, {
+      quantity: 1, unit_price: 100, final_unit_price: 100, total_price: 100,
+      discount_amount: 0, tax_amount_item: 0, order_item_taxes: [],
+    });
+    const buildF1 = () => {
+      const ctx = build([mkA(), mkB()], { channel: 'pos', discount_amount: 0, order_promotions: [] });
+      ctx.db.promotions.findMany.mockResolvedValue([{ id: 8, name: '10 % en A' }]);
+      ctx.promotionEngine.quoteDiscounts.mockImplementation(async (input: any) => {
+        const a = input.items.find((i: any) => i.product_id === 11);
+        const discount = a.quantity >= 2 ? Math.round(0.1 * 119 * a.quantity * 100) / 100 : 0;
+        return {
+          total_discount: discount,
+          applied_promotions: discount > 0 ? [{ promotion_id: 8, scope: 'product', discount_amount: discount }] : [],
+          items: input.items.map((i: any) => ({
+            line_id: i.line_id,
+            promotion_discount: i.product_id === 11 ? discount : 0,
+          })),
+          order_promotions_snapshot: discount > 0 ? [{ promotion_id: 8, discount_amount: discount }] : [],
+        };
+      });
+      return ctx;
+    };
+
+    it('F1-1) A 1 → 2: A base 180 / IVA 34,20; B sin descuento', async () => {
+      const ctx = buildF1();
+      const dto = { update: [{ order_item_id: 1, quantity: 2 }] };
+      const p = await ctx.service.preview(ORDER_ID, dto);
+      expect(p.totals.after.subtotal).toBe(300);
+      expect(p.totals.after.discount).toBe(20);
+      expect(p.totals.after.tax).toBe(34.2);
+
+      await applyV(ctx, dto);
+      const updA = ctx.db.order_items.update.mock.calls.find((c: any) => c[0].where.id === 1)!;
+      expect(Number(updA[0].data.discount_amount)).toBe(20);
+      const taxA = ctx.db.order_item_taxes.update.mock.calls.find((c: any) => c[0].where.id === 100)!;
+      expect(Number(taxA[0].data.tax_amount)).toBe(34.2);
+      const updB = ctx.db.order_items.update.mock.calls.find((c: any) => c[0].where.id === 2);
+      expect(Number(updB?.[0].data.discount_amount ?? 0)).toBe(0);
+    });
+  });
+
   it('R4-6) si findOne falla post-commit: { order: null, reload_required: true } sin lanzar', async () => {
     const ctx = build([mkLine(1)]);
     ctx.ordersService.findOne.mockRejectedValue(new Error('boom'));

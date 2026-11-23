@@ -7,7 +7,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.4"
+  version: "1.5"
   scope: [root]
   auto_invoke:
     - "Raising bulk caps or chunking high-volume uploads (10k)"
@@ -61,6 +61,10 @@ The frontend renders: `OrdersBulkPrintService` → `OrdersBulkService.fetchPrint
 - Header maps keyed accent-free; code cells (barcode, NIT, phone) are text; never pad templates with empty cells; paged session commit `{session_id, offset?, limit≤100}`; commit re-validates the whole file; parent/child rows (variants via `SKU Padre`) persisted atomically through the owner service, never `variants` in `ProductsService.update`. Detail: `references/file-imports.md` (read on demand).
 - Files (products, employees, adjustments): S3 session + paged commit, 20 MB limit. Purchase orders: `resolve-lines` in batches, one atomic `create`, receive via job `PATCH :id/receive/async` → poll `receive-jobs/:jobId`. Anti-patterns: raising nginx/transaction timeouts instead of chunking, N queries per line inside a transaction, `sku: undefined` in a Prisma `where`. Detail: `references/alto-volumen.md` (read on demand).
 
+## AI Imports (free-format files)
+
+Imports where the file is not the official template (customers, member roster, counts, route sheets, purchase/expense invoices) go through `common/ai-ingest` and the `ai-scan` queue, never a synchronous endpoint: sheets are parsed and mapped deterministically (AI maps headers at most once), PDF/photos are read by pages with native text first, and every answer is schema-validated with repair and split. Then the same preview → commit flow and `bulk_upload_logs` row as any import. Caps, profiles and errors: `vendix-ai-ingest`.
+
 ## Reference Files
 
 - Backend: `apps/backend/src/domains/store/orders/{orders-bulk.controller.ts,orders-bulk.service.ts,dto/bulk-orders.dto.ts}`, `apps/backend/src/domains/store/products/{products-bulk.controller.ts,products-bulk.service.ts,products-bulk-edit.controller.ts}`.
@@ -74,3 +78,4 @@ The frontend renders: `OrdersBulkPrintService` → `OrdersBulkService.fetchPrint
 - `vendix-print-geometry` — POS ticket rendering and paper formats.
 - `vendix-product-variants` — variant semantics (stock, price override, availability).
 - `vendix-report-xlsx` — XLSX exports.
+- `vendix-ai-ingest` — AI imports of free-format sheets, PDF and photos.

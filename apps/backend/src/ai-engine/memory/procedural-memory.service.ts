@@ -90,6 +90,7 @@ export class ProceduralMemoryService {
           result.freshness !== 'observed' ||
           result.data_omitted ||
           result.tool_name === 'run_readonly_script' ||
+          result.tool_name === 'run_analysis' ||
           !result.receipt.evidence_refs?.length
         )
           return [];

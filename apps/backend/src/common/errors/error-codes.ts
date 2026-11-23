@@ -2444,6 +2444,16 @@ export const ErrorCodes = {
     httpStatus: 502,
     devMessage: 'The transcription provider did not return text',
   },
+  // N5: realtime voice is withdrawn from every surface. Only the creation of a
+  // NEW session answers this; tool-call and session/close stay alive so a
+  // session opened before the deploy still closes and bills.
+  VEXI_REALTIME_UNAVAILABLE: {
+    code: 'VEXI_REALTIME_UNAVAILABLE',
+    httpStatus: 410,
+    devMessage:
+      'Realtime voice is no longer available for new sessions; use dictation ' +
+      'and spoken replies (pipeline voice) instead',
+  },
   AI_APP_001: {
     code: 'AI_APP_001',
     httpStatus: 404,
@@ -2535,6 +2545,41 @@ export const ErrorCodes = {
     code: 'AI_CHAT_004',
     httpStatus: 400,
     devMessage: 'Message content is required',
+  },
+  AI_CHAT_005: {
+    code: 'AI_CHAT_005',
+    httpStatus: 409,
+    devMessage:
+      'Conversation has a running or pending task; stop it before deleting',
+  },
+  AI_CHAT_006: {
+    code: 'AI_CHAT_006',
+    httpStatus: 404,
+    devMessage: 'Follow-up suggestion not found in this conversation',
+  },
+  AI_CHAT_007: {
+    code: 'AI_CHAT_007',
+    httpStatus: 409,
+    devMessage: 'Follow-up suggestion was already dismissed',
+  },
+
+  // Vex store memory (F4 T31)
+  AI_MEMORY_LIMIT_001: {
+    code: 'AI_MEMORY_LIMIT_001',
+    httpStatus: 409,
+    devMessage:
+      'La memoria de la tienda llegó a su tope (40 recuerdos o 2000 caracteres contando la clave de cada uno). Edita o borra uno antes de agregar otro.',
+  },
+  AI_MEMORY_FORBIDDEN_001: {
+    code: 'AI_MEMORY_FORBIDDEN_001',
+    httpStatus: 422,
+    devMessage:
+      'No guardo contraseñas, datos de pago ni documentos de identidad en la memoria.',
+  },
+  AI_MEMORY_NOT_FOUND_001: {
+    code: 'AI_MEMORY_NOT_FOUND_001',
+    httpStatus: 404,
+    devMessage: 'El recuerdo no existe en la memoria de esta tienda.',
   },
 
   // Invoicing

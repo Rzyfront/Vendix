@@ -1582,6 +1582,102 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         },
       ]);
     });
+
+    // Hotfix promos-mesa — caso Pollo Árabe (store 105): 2 Pinchos de pollo a
+    // 30.000 (INC 8 % incluido) con la promo «-30 %» de producto. Antes
+    // `addItems` dejaba `discount = 0` "hasta el cobro" y la cuenta abierta
+    // no mostraba la promo.
+    it('la cuenta abierta persiste la promo cotizada: descuento base, impuesto post-descuento y total 42.000', async () => {
+      prismaMock.table_sessions.findFirst.mockResolvedValue({
+        id: 1,
+        order_id: 100,
+        closed_at: null,
+        table_id: 5,
+        order: { state: 'draft', order_items: [] },
+        table: { id: 5, name: 'Mesa 5', zone: null, status: 'occupied' },
+      });
+      prismaMock.products.findMany.mockResolvedValue([
+        {
+          id: 4273,
+          name: 'Pinchos de pollo',
+          base_price: 30000,
+          is_sellable: true,
+          state: 'active',
+          product_type: 'prepared',
+          track_inventory: false,
+        },
+      ]);
+      prismaMock.product_tax_assignments.findMany.mockResolvedValue([
+        {
+          product_id: 4273,
+          is_inclusive: true,
+          tax_categories: {
+            tax_type: 'inc',
+            tax_rates: [{ id: 68, name: 'INC', rate: 0.08, is_inclusive: true }],
+          },
+        },
+      ]);
+      prismaMock.order_items.create.mockResolvedValue({ id: 900 });
+      prismaMock.orders.update.mockResolvedValue({});
+      // El recotizador deja las líneas ya retaxadas: la cabecera las lee así.
+      const repriceInTx = jest.fn().mockResolvedValue({
+        subtotal: 55555.56,
+        tax_amount: 3111.11,
+        discount_amount: 16666.67,
+        items_total: 42000,
+      });
+      (service as any).openOrderPromotion = { repriceInTx };
+      prismaMock.order_items.findMany.mockResolvedValue([
+        {
+          total_price: 55555.56,
+          tax_amount_item: 1555.56,
+          quantity: 2,
+          weight: null,
+          price_unit_quantity: null,
+          order_item_taxes: [{ tax_amount: 3111.11 }],
+        },
+      ]);
+
+      await service.addItems(1, {
+        items: [{ product_id: 4273, quantity: 2 }],
+      } as any);
+
+      // La línea se crea con el bruto publicado (lo que cotiza el motor).
+      expect(prismaMock.order_items.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            total_price: new Prisma.Decimal(55555.56),
+            final_unit_price: new Prisma.Decimal(30000),
+          }),
+        }),
+      );
+      // Se recotiza DESPUÉS de crear la línea, en la misma transacción.
+      expect(repriceInTx).toHaveBeenCalledWith(prismaMock, 100);
+      expect(repriceInTx.mock.invocationCallOrder[0]).toBeGreaterThan(
+        (prismaMock.order_items.create as jest.Mock).mock.invocationCallOrder[0],
+      );
+      const data = (prismaMock.orders.update as jest.Mock).mock.calls[0][0].data;
+      expect(Number(data.subtotal_amount)).toBe(55555.56);
+      expect(Number(data.tax_amount)).toBe(3111.11);
+      expect(Number(data.discount_amount)).toBe(16666.67);
+      expect(Number(data.grand_total)).toBe(42000);
+    });
+
+    it('sin recotizador la cabecera queda como antes: sin tocar discount_amount', async () => {
+      prismaMock.table_sessions.findFirst.mockResolvedValue(openSession());
+      prismaMock.products.findMany.mockResolvedValue([trackedProduct()]);
+      prismaMock.order_items.create.mockResolvedValue({ id: 707 });
+      prismaMock.orders.update.mockResolvedValue({});
+      prismaMock.order_items.findMany.mockResolvedValue([
+        { total_price: 200, tax_amount_item: 0, quantity: 2, order_item_taxes: [] },
+      ]);
+
+      await service.addItems(1, { items: [{ product_id: 51, quantity: 2 }] } as any);
+
+      const data = (prismaMock.orders.update as jest.Mock).mock.calls[0][0].data;
+      expect(Number(data.grand_total)).toBe(200);
+      expect(data).not.toHaveProperty('discount_amount');
+    });
   });
 
   describe('openTableSessionPublic (QR-por-mesa, Fase 7)', () => {
@@ -2895,6 +2991,86 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       ).not.toHaveBeenCalled();
       // El resto del payload de cocina sigue igual.
       expect(Number(item.unit_price)).toBe(50000);
+    });
+
+    it('cancelOrderItem recotiza la promo de la cuenta tras quitar la línea y ajusta la cabecera', async () => {
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
+        findOneRow(),
+      );
+      (orderFlowService as any).cancelOrderItem = jest.fn().mockResolvedValue({});
+      const repriceInTx = jest.fn().mockResolvedValue({
+        subtotal: 54629.63,
+        tax_amount: 4370.37,
+        discount_amount: 0,
+        items_total: 59000,
+      });
+      (service as any).openOrderPromotion = { repriceInTx };
+      // Cabecera que dejó el seam: conserva el descuento viejo de la promo.
+      prismaMock.orders.findFirst.mockResolvedValue({
+        grand_total: new Prisma.Decimal(42333.33),
+        shipping_cost: new Prisma.Decimal(0),
+        tip_amount: new Prisma.Decimal(0),
+        remaining_balance: new Prisma.Decimal(42333.33),
+        payment_form: null,
+      });
+
+      await service.cancelOrderItem(83, 501, 'cliente se arrepintió');
+
+      expect(repriceInTx).toHaveBeenCalledWith(prismaMock, 9001);
+      expect(repriceInTx.mock.invocationCallOrder[0]).toBeGreaterThan(
+        (orderFlowService as any).cancelOrderItem.mock.invocationCallOrder[0],
+      );
+      const data = (prismaMock.orders.update as jest.Mock).mock.calls[0][0].data;
+      expect(Number(data.discount_amount)).toBe(0);
+      expect(Number(data.tax_amount)).toBe(4370.37);
+      expect(Number(data.grand_total)).toBe(59000);
+      expect(Number(data.remaining_balance)).toBe(59000);
+    });
+
+    it('si la recotización tras cancelar falla, la cancelación no se rompe', async () => {
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
+        findOneRow(),
+      );
+      (orderFlowService as any).cancelOrderItem = jest.fn().mockResolvedValue({});
+      (service as any).openOrderPromotion = {
+        repriceInTx: jest.fn().mockRejectedValue(new Error('boom')),
+      };
+      prismaMock.orders.findFirst.mockResolvedValue({ grand_total: 0 });
+
+      const view = await service.cancelOrderItem(83, 501, 'cliente se arrepintió');
+
+      expect(view.id).toBe(83);
+      expect(prismaMock.orders.update).not.toHaveBeenCalled();
+    });
+
+    it('findOne expone el descuento de la línea y su total ya descontado (no para cocina)', async () => {
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
+        findOneRow({
+          quantity: 2,
+          unit_price: new Prisma.Decimal(27777.78),
+          total_price: new Prisma.Decimal(55555.56),
+          tax_amount_item: new Prisma.Decimal(1555.56),
+          discount_amount: new Prisma.Decimal(16666.67),
+          order_item_taxes: [
+            {
+              tax_rate: new Prisma.Decimal(0.08),
+              tax_amount: new Prisma.Decimal(3111.11),
+            },
+          ],
+        }),
+      );
+
+      const view = await service.findOne(83);
+      const item = (view.order as any).order_items[0];
+
+      expect(item.discount_amount).toBe(16666.67);
+      expect(item.discounted_total_price).toBe(42000);
+      // INC incluido: el tachado es el bruto (60.000), no la base (55.555,56),
+      // igual que `total_before_discount` del detalle de la orden.
+      expect(item.total_before_discount).toBe(60000);
+      expect(item.total_before_discount - item.discounted_total_price).toBe(
+        18000,
+      );
     });
 
     it('cancelOrderItem es idempotente: el segundo llamado ve cancelled_at y no reescribe', async () => {

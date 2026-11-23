@@ -2025,6 +2025,11 @@ export interface InvoiceDraftNotice {
   pending: string[];
   noteApplied: string | null;
   extractionNotes: string | null;
+  /**
+   * Avisos de la lectura (ia-cargas F5b): páginas sin leer, documento leído en
+   * partes, líneas por encima del tope del borrador. Opcional.
+   */
+  readWarnings?: string[];
   /** Lo leído que la pantalla no pudo representar, en palabras. */
   unresolved: string[];
   /** `totals.consistent === false`: el total leído no cuadra con las líneas. */
@@ -2248,6 +2253,9 @@ export function planInvoiceDraft(
       pending,
       noteApplied: result.note_applied?.trim() || null,
       extractionNotes: result.extraction_notes?.trim() || null,
+      readWarnings: (result.warnings ?? [])
+        .map((w) => String(w ?? '').trim())
+        .filter((w) => w.length > 0),
       unresolved,
       totalsInconsistent: result.totals?.consistent === false,
       documentTotal:
@@ -2606,6 +2614,13 @@ function findScrollContainer(node: HTMLElement): HTMLElement | null {
                 <span class="mt-1 block text-xs font-normal">
                   Nota de la lectura: {{ notice.extractionNotes }}
                 </span>
+              }
+              @if (notice.readWarnings?.length) {
+                <ul class="mt-1 list-disc space-y-0.5 pl-4 text-xs font-medium text-warning">
+                  @for (warning of notice.readWarnings; track $index) {
+                    <li>{{ warning }}</li>
+                  }
+                </ul>
               }
               @if (notice.totalsInconsistent) {
                 <span class="mt-1 block text-xs font-medium text-warning">
