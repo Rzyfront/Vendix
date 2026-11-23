@@ -76,11 +76,13 @@
 --     row switched off by the matrix with updated_at = created_at under a
 --     legacy enabled = true stayed off; a row whose updated_at moved stayed
 --     untouched.
---   Dry-run over the real plans: NOT executed. It is required before the GO:
---     run the read-only queries above against a production snapshot.
---   Approval: PENDING. This file ships alone in a draft PR that must not be
---     merged without Rafael's written GO, a production snapshot and the
---     dry-run over the real plans.
+--   Dry-run over the real plans (2026-11-22, read-only on production; the
+--     table does not exist there yet, so the equivalent was computed on
+--     subscription_plans.ai_feature_flags): 19 plans, 0 features with a
+--     non-boolean `enabled`, 0 fractional caps (every numeric cap is an
+--     integer). Expected rows changed in production: 0.
+--   Approval: Rafael's general release GO (2026-11-22 22:45). Take the
+--     production snapshot before the deploy that applies it.
 --   Rollback: before applying, list the affected rows with the read-only
 --     queries above and keep that list; ai_feature_flags is untouched, so the
 --     gate (which decides with it) loses nothing. plan_ai_entitlements does
