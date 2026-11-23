@@ -1,11 +1,12 @@
 import { VexiVoiceSafetyService } from './vexi-voice-safety.service';
+import { VexiVoicePipelineService } from './vexi-voice-pipeline.service';
 import type {
   VoiceConsentContext,
   VoiceConsentReceipt,
 } from './vexi-voice-consent.model';
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, map, throwError } from 'rxjs';
+import { Observable, map, tap, throwError } from 'rxjs';
 import { voiceClickRequest } from './vexi-voice-consent.model';
 import {
   VexiReplayCursor,
@@ -100,7 +101,6 @@ export interface AIMessage {
   content: string;
   tool_calls: any;
   tokens_used: number;
-  cost_usd: number;
   metadata: any;
   created_at: string;
 }
@@ -136,6 +136,12 @@ export interface VexiUiContext {
 }
 
 /** Live narration of an agent turn, as it arrives over SSE. */
+/** T14 — why an answer or acknowledgement is not read aloud. */
+export interface VexiVoiceNotice {
+  code: 'voice_quota_exhausted' | 'voice_not_in_plan' | string;
+  message: string;
+}
+
 export interface VexiStreamChunk {
   type:
     | 'text'
@@ -149,6 +155,9 @@ export interface VexiStreamChunk {
     // content, and both are ignored by the chat mode.
     | 'audio'
     | 'timing'
+    // T14: this answer is not read aloud (voice not in the plan or the
+    // month's reading seconds ran out). `message` is the sentence to show.
+    | 'voice_notice'
     // The turn ran out of budget with work pending; open a continuation turn.
     | 'plan_continue';
   content?: string;
@@ -179,6 +188,9 @@ export interface VexiStreamChunk {
   /** Name of a `timing` mark, and its milliseconds from stream open. */
   mark?: string;
   ms?: number;
+  /** `voice_notice`: `voice_quota_exhausted` or `voice_not_in_plan`. */
+  code?: string;
+  message?: string;
 }
 
 /**
@@ -249,6 +261,7 @@ export interface PaginatedConversations {
 export class VexiApiService {
   private http = inject(HttpClient);
   private readonly voiceSafety = inject(VexiVoiceSafetyService);
+  private readonly voicePipeline = inject(VexiVoicePipelineService);
   private readonly replayStreams = new Set<string>();
 
   canReplayStream(streamId: string): boolean {
@@ -528,6 +541,8 @@ export class VexiApiService {
     /** Present only when `speak` was asked for and the synthesis succeeded. */
     audio_base64?: string;
     content_type?: string;
+    /** T14: why the acknowledgement came without audio. */
+    voice_notice?: VexiVoiceNotice;
   }> {
     return this.http
       .post<{
@@ -538,6 +553,7 @@ export class VexiApiService {
           execution?: VexiToolExecution;
           audio_base64?: string;
           content_type?: string;
+          voice_notice?: VexiVoiceNotice;
         };
       }>(`${environment.apiUrl}/store/vexi/confirmations/apply`, {
         tool,
@@ -553,7 +569,10 @@ export class VexiApiService {
         // never become a general text-to-speech surface.
         ...(speak ? { speak: true } : {}),
       })
-      .pipe(map((res) => res.data));
+      .pipe(
+        map((res) => res.data),
+        tap((data) => this.relayVoiceNotice(data.voice_notice)),
+      );
   }
 
   /** Explicit human click only. Original opaque identity survives voice cancellation; server owns the token. */
@@ -586,7 +605,15 @@ export class VexiApiService {
         proposal_id,
         ...(speak ? { speak: true } : {}),
       })
-      .pipe(map((response) => response.data));
+      .pipe(
+        map((response) => response.data),
+        tap((data) => this.relayVoiceNotice(data.voice_notice)),
+      );
+  }
+
+  /** T14 — an acknowledgement without audio says why, once. */
+  private relayVoiceNotice(notice?: VexiVoiceNotice): void {
+    if (notice?.message) this.voicePipeline.notice(notice.message);
   }
 
   /**

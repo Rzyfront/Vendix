@@ -4,10 +4,13 @@ import {
   computed,
   inject,
   input,
+  signal,
 } from '@angular/core';
+import { DocumentViewerComponent, documentViewerKind } from '../../../../../../shared/components/record-documents/document-viewer.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
+import { VEX_COPY } from '../../vex-copy';
 import { VexFileSpec, VexUiBlock } from '../../models/vex.models';
 
 /**
@@ -20,47 +23,65 @@ import { VexFileSpec, VexUiBlock } from '../../models/vex.models';
 @Component({
   selector: 'vendix-vex-block-file',
   standalone: true,
-  imports: [IconComponent],
+  imports: [IconComponent, DocumentViewerComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
-      class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 flex items-center gap-3"
-      aria-label="Archivo de Vex"
+      class="rounded-2xl border border-border bg-surface px-4 py-3 flex items-center gap-3"
+      [attr.aria-label]="copy.label"
     >
       <span
-        class="w-11 h-11 shrink-0 rounded-xl grid place-items-center bg-[rgba(var(--color-primary-rgb,46,204,113),0.12)] text-[var(--color-primary)]"
+        class="w-11 h-11 shrink-0 rounded-xl grid place-items-center bg-primary/10 text-primary"
         aria-hidden="true"
       >
         <app-icon [name]="icon()" [size]="22"></app-icon>
       </span>
       <div class="flex-1 min-w-0">
-        <p class="text-sm font-medium text-[var(--color-text-primary)] truncate">
+        <p class="text-sm font-medium text-text-primary truncate">
           {{ filename() }}
         </p>
         @if (meta_line()) {
-          <p class="text-xs text-[var(--color-text-secondary)]">{{ meta_line() }}</p>
+          <p class="text-xs text-text-secondary">{{ meta_line() }}</p>
         }
       </div>
+      @if (url() && viewable()) {
+        <button
+          type="button"
+          class="shrink-0 min-h-10 inline-flex items-center gap-2 px-4 rounded-xl border border-border text-sm font-medium text-text-primary hover:bg-surface"
+          [attr.aria-label]="copy.view + ' ' + filename()"
+          (click)="viewer_open.set(true)"
+        >
+          <app-icon name="eye" [size]="16"></app-icon>
+          {{ copy.view }}
+        </button>
+      }
       @if (url()) {
         <a
           [href]="url()"
           target="_blank"
           rel="noopener"
           download
-          class="shrink-0 min-h-10 inline-flex items-center gap-2 px-4 rounded-xl bg-[var(--color-primary)] text-[var(--color-text-on-primary)] text-sm font-medium hover:opacity-90"
+          class="shrink-0 min-h-10 inline-flex items-center gap-2 px-4 rounded-xl bg-primary text-on-primary text-sm font-medium hover:opacity-90"
         >
           <app-icon name="download" [size]="16"></app-icon>
-          Descargar
+          {{ copy.download }}
         </a>
       } @else {
-        <span class="shrink-0 text-xs text-[var(--color-text-secondary)]">
-          Enlace expirado
+        <span class="shrink-0 text-xs text-text-secondary">
+          {{ copy.expired }}
         </span>
       }
     </section>
+    <app-document-viewer
+      [(isOpen)]="viewer_open"
+      [url]="url()"
+      [mimeType]="mime()"
+      [name]="filename()"
+    />
   `,
 })
 export class VexBlockFileComponent {
+  protected readonly copy = VEX_COPY.blocks.file;
   private readonly settingsFacade = inject(StoreSettingsFacade);
   private readonly currencyFormat = inject(CurrencyFormatService);
 
@@ -86,7 +107,7 @@ export class VexBlockFileComponent {
     const from_spec = this.spec().filename;
     if (from_spec) return from_spec;
     const from_data = this.block().data['filename'];
-    return typeof from_data === 'string' && from_data ? from_data : 'Archivo';
+    return typeof from_data === 'string' && from_data ? from_data : this.copy.default_name;
   });
 
   readonly meta_line = computed(() => {
@@ -97,6 +118,17 @@ export class VexBlockFileComponent {
     if (typeof size === 'number' && size > 0) parts.push(formatBytes(size, this.number_locale()));
     return parts.join(' · ');
   });
+
+  readonly viewer_open = signal(false);
+
+  readonly mime = computed(() => {
+    const mime = this.spec().mime_type ?? this.block().data['mime_type'];
+    return typeof mime === 'string' ? mime : null;
+  });
+
+  readonly viewable = computed(
+    () => documentViewerKind(this.mime(), this.filename()) !== 'other',
+  );
 
   readonly icon = computed(() => {
     const mime = String(

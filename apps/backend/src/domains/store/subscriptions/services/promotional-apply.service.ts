@@ -511,13 +511,6 @@ export class PromotionalApplyService {
         }
       }
 
-      if (Array.isArray(b.tools_allowed) && Array.isArray(o.tools_allowed)) {
-        const oSet = new Set(o.tools_allowed);
-        merged.tools_allowed = b.tools_allowed.filter((t) => oSet.has(t));
-      } else if (Array.isArray(b.tools_allowed)) {
-        merged.tools_allowed = b.tools_allowed;
-      }
-
       if (b.period) merged.period = b.period;
 
       result[key] = merged;
@@ -568,12 +561,6 @@ export class PromotionalApplyService {
         } else if (typeof ov === 'number') {
           (merged as any)[f] = ov;
         }
-      }
-
-      const bTools = Array.isArray(b!.tools_allowed) ? b!.tools_allowed : [];
-      const oTools = Array.isArray(o!.tools_allowed) ? o!.tools_allowed : [];
-      if (bTools.length || oTools.length) {
-        merged.tools_allowed = Array.from(new Set([...bTools, ...oTools]));
       }
 
       if (b!.period || o!.period) merged.period = b!.period ?? o!.period;

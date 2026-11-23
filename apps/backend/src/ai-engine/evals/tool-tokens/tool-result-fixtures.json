@@ -1,0 +1,945 @@
+{
+ "_comment": "Una fila de muestra por herramienta, con la forma del resultado del handler. Valores ilustrativos, no datos de producción. fidelity: handler_shape = leído del handler; service_shape_approx = el handler devuelve el payload crudo del servicio y la fila es aproximada; assumed_shape = handler sin leer, forma supuesta.",
+ "tools": {
+  "get_sales_report": {
+   "rows_key": null,
+   "envelope": {
+    "periodo": "2026-11-01..2026-11-21",
+    "canal": "todos",
+    "criterio": "ventas finalizadas",
+    "totales": {
+     "ingresos": 18450000,
+     "ordenes": 312,
+     "ticket_promedio": 59134,
+     "unidades_vendidas": 904,
+     "clientes_distintos": 187
+    },
+    "variacion_vs_periodo_anterior": {
+     "ingresos_pct": 8.4,
+     "ordenes_pct": 5.1,
+     "ticket_promedio_pct": 3.2
+    }
+   },
+   "fidelity": "handler_shape",
+   "derived_from": "tools/domains/analytics get_sales_report handler"
+  },
+  "get_top_products": {
+   "rows_key": "data",
+   "envelope": {
+    "periodo": "2026-11",
+    "ordenado_por": "margen",
+    "canal": "todos",
+    "criterio": "ventas finalizadas",
+    "mostrando": 10,
+    "limite_aplicado": 10,
+    "nota": "Margen calculado con el costo vigente.",
+    "margen_nota": "margen_pct = (precio - costo) / precio"
+   },
+   "fidelity": "handler_shape",
+   "derived_from": "get_top_products handler",
+   "sample_row": {
+    "product_id": 1042,
+    "producto": "Camiseta algodón talla M",
+    "sku": "CAM-M-001",
+    "unidades_vendidas": 48,
+    "ingresos": 2160000,
+    "precio_promedio": 45000,
+    "margen_pct": 38.5
+   },
+   "default_rows": 10
+  },
+  "list_products": {
+   "rows_key": "products",
+   "envelope": {
+    "currency": "COP",
+    "page": 1,
+    "limit": 20,
+    "returned": 20,
+    "total": 412,
+    "total_pages": 21,
+    "has_more": true,
+    "note": "Usa find_product para búsquedas por nombre."
+   },
+   "fidelity": "handler_shape",
+   "derived_from": "list_products handler",
+   "sample_row": {
+    "product_id": 1042,
+    "name": "Camiseta algodón talla M",
+    "sku": "CAM-M-001",
+    "brand": "Vendix Basics",
+    "state": "active",
+    "product_type": "physical",
+    "net_price": 37815,
+    "unit_price": 45000,
+    "inventory_tracked": true,
+    "available_stock": 64,
+    "has_variants": false,
+    "variant_count": 0,
+    "requires_variant_selection": false
+   },
+   "default_rows": 20
+  },
+  "find_product": {
+   "rows_key": "products",
+   "envelope": {
+    "query": "camiseta",
+    "matched_by": "name",
+    "match_count": 3,
+    "ambiguous": true,
+    "currency": "COP",
+    "next_step": "Pide al usuario que elija una variante.",
+    "notes": []
+   },
+   "fidelity": "handler_shape",
+   "derived_from": "find_product handler",
+   "sample_row": {
+    "product_id": 1042,
+    "name": "Camiseta algodón talla M",
+    "sku": "CAM-M-001",
+    "net_price": 37815,
+    "unit_price": 45000,
+    "available_stock": 64
+   },
+   "default_rows": 3
+  },
+  "list_categories": {
+   "rows_key": "categories",
+   "envelope": {
+    "total": 14,
+    "shown": 14,
+    "has_more": false
+   },
+   "fidelity": "handler_shape",
+   "derived_from": "list_categories handler",
+   "sample_row": {
+    "id": 7,
+    "name": "Camisetas",
+    "state": "active",
+    "product_count": 36
+   },
+   "default_rows": 14
+  },
+  "get_stock_levels": {
+   "rows_key": "data",
+   "envelope": {
+    "summary": {
+     "items": 25,
+     "total_on_hand": 1380,
+     "total_available": 1290
+    }
+   },
+   "fidelity": "handler_shape",
+   "derived_from": "get_stock_levels handler",
+   "sample_row": {
+    "product_id": 1042,
+    "product": "Camiseta algodón talla M",
+    "sku": "CAM-M-001",
+    "location": "Bodega Principal",
+    "location_type": "warehouse",
+    "on_hand": 64,
+    "reserved": 4,
+    "available": 60,
+    "reorder_point": 20
+   },
+   "default_rows": 25
+  },
+  "get_low_stock_alerts": {
+   "rows_key": "data",
+   "envelope": {
+    "summary": {
+     "alertas": 12,
+     "sin_stock": 3
+    }
+   },
+   "fidelity": "handler_shape",
+   "derived_from": "get_low_stock_alerts handler",
+   "sample_row": {
+    "product_id": 1042,
+    "product": "Camiseta algodón talla M",
+    "location_id": 3,
+    "location": "Bodega Principal",
+    "current_stock": 6,
+    "reorder_point": 20,
+    "deficit": 14
+   },
+   "default_rows": 12
+  },
+  "list_orders": {
+   "rows_key": "data",
+   "envelope": {
+    "paginacion": {
+     "total_ordenes": 58,
+     "pagina": 1,
+     "por_pagina": 20,
+     "total_paginas": 3,
+     "hay_mas": true
+    },
+    "mostrando": 20
+   },
+   "fidelity": "handler_shape",
+   "derived_from": "tools/_adapters/order.adapter.ts compactOrder",
+   "sample_row": {
+    "order_id": 9120,
+    "numero": "ORD-9120",
+    "cliente": "Marta Rodríguez",
+    "customer_id": 3321,
+    "estado": "processing",
+    "canal": "pos",
+    "tipo_entrega": "domicilio",
+    "total": 184000,
+    "pagado": 184000,
+    "saldo_pendiente": 0,
+    "cumplimiento_despacho": "pendiente",
+    "items": 3,
+    "creada": "2026-11-20T15:42:00Z"
+   },
+   "default_rows": 20
+  },
+  "get_order": {
+   "rows_key": null,
+   "envelope": {
+    "order_id": 9120,
+    "numero": "ORD-9120",
+    "estado": "processing",
+    "cliente": {
+     "nombre": "Marta Rodríguez",
+     "telefono": "3001234567"
+    },
+    "items": [
+     {
+      "producto": "Camiseta algodón talla M",
+      "cantidad": 2,
+      "precio_unitario": 45000,
+      "total": 90000
+     },
+     {
+      "producto": "Gorra negra",
+      "cantidad": 1,
+      "precio_unitario": 94000,
+      "total": 94000
+     }
+    ],
+    "total": 184000,
+    "pagos": [
+     {
+      "metodo": "efectivo",
+      "monto": 184000,
+      "estado": "completed"
+     }
+    ],
+    "envio": {
+     "metodo": "domicilio",
+     "direccion": "Cra 15 # 85-20, Bogotá",
+     "estado": "pendiente"
+    },
+    "factura_electronica": {
+     "estado": "accepted",
+     "numero": "FE-1042"
+    }
+   },
+   "fidelity": "service_shape_approx",
+   "derived_from": "get_order handler (parcial: pagos[], envio{}, factura_electronica)"
+  },
+  "find_customer": {
+   "rows_key": "customers",
+   "envelope": {
+    "query": "marta",
+    "matched_by": "name",
+    "match_count": 2,
+    "ambiguous": true,
+    "currency": "COP",
+    "next_step": "Confirma el cliente con el usuario."
+   },
+   "fidelity": "handler_shape",
+   "derived_from": "find_customer handler",
+   "sample_row": {
+    "customer_id": 3321,
+    "name": "Marta Rodríguez",
+    "document": "52123456",
+    "phone": "3001234567",
+    "email": "marta@example.com",
+    "city": "Bogotá",
+    "state": "active",
+    "finished_orders": 14,
+    "total_spent": 2310000,
+    "last_purchase_at": "2026-11-20",
+    "days_since_last_purchase": 2
+   },
+   "default_rows": 2
+  },
+  "get_customer_history": {
+   "rows_key": "recent_orders",
+   "envelope": {
+    "customer": {
+     "customer_id": 3321,
+     "name": "Marta Rodríguez",
+     "document": "52123456",
+     "phone": "3001234567",
+     "email": "marta@example.com"
+    },
+    "currency": "COP",
+    "purchase_summary": {
+     "finished_orders": 14,
+     "total_spent": 2310000,
+     "avg_ticket": 165000,
+     "first_purchase_at": "2025-03-02",
+     "last_purchase_at": "2026-11-20"
+    },
+    "open_balance": {
+     "total": 0,
+     "orders": 0
+    },
+    "bookings_count": 0,
+    "top_products": [
+     {
+      "name": "Camiseta algodón talla M",
+      "units": 12
+     }
+    ],
+    "note": "Últimas 5 órdenes."
+   },
+   "fidelity": "handler_shape",
+   "derived_from": "get_customer_history handler",
+   "sample_row": {
+    "order_id": 9120,
+    "order_number": "ORD-9120",
+    "state": "processing",
+    "channel": "pos",
+    "total": 184000,
+    "paid": 184000,
+    "balance": 0,
+    "created_at": "2026-11-20T15:42:00Z",
+    "completed_at": null
+   },
+   "default_rows": 5
+  },
+  "find_customers_by_criteria": {
+   "rows_key": "sample",
+   "envelope": {
+    "success": true,
+    "data": {
+     "count": 37,
+     "customer_ids": [
+      3300,
+      3301,
+      3302,
+      3303,
+      3304,
+      3305,
+      3306,
+      3307,
+      3308,
+      3309,
+      3310,
+      3311,
+      3312,
+      3313,
+      3314,
+      3315,
+      3316,
+      3317,
+      3318,
+      3319,
+      3320,
+      3321,
+      3322,
+      3323,
+      3324,
+      3325,
+      3326,
+      3327,
+      3328,
+      3329,
+      3330,
+      3331,
+      3332,
+      3333,
+      3334,
+      3335,
+      3336
+     ],
+     "truncated": false
+    }
+   },
+   "fidelity": "service_shape_approx",
+   "derived_from": "find_customers_by_criteria handler (la muestra va dentro de data en el real)",
+   "sample_row": {
+    "id": 3321,
+    "name": "Marta Rodríguez",
+    "orders_count": 14,
+    "total_spent": 2310000,
+    "last_order_at": "2026-11-20"
+   },
+   "default_rows": 10
+  },
+  "list_dispatch_routes": {
+   "rows_key": "planillas",
+   "envelope": {
+    "resumen": {
+     "total": 9,
+     "abiertas": 4
+    },
+    "pagina": 1,
+    "paginas": 1
+   },
+   "fidelity": "handler_shape",
+   "derived_from": "list_dispatch_routes handler",
+   "sample_row": {
+    "route_id": 77,
+    "route_number": "PL-0077",
+    "route_code": "R-77",
+    "status": "in_progress",
+    "planned_date": "2026-11-21",
+    "driver": "Carlos Gómez",
+    "vehicle_plate": "ABC123",
+    "stops_count": 11,
+    "total_to_collect": 1840000,
+    "total_collected": 620000,
+    "total_prepaid": 900000,
+    "cash_variance": 0
+   },
+   "default_rows": 9
+  },
+  "list_dispatch_notes": {
+   "rows_key": "remisiones",
+   "envelope": {
+    "resumen": {
+     "total": 24
+    },
+    "pagina": 1,
+    "paginas": 2
+   },
+   "fidelity": "handler_shape",
+   "derived_from": "list_dispatch_notes handler",
+   "sample_row": {
+    "dispatch_note_id": 501,
+    "dispatch_number": "REM-0501",
+    "status": "confirmed",
+    "direction": "outbound",
+    "subtype": "sale",
+    "customer": "Marta Rodríguez",
+    "grand_total": 184000,
+    "order_id": 9120,
+    "emission_date": "2026-11-20",
+    "agreed_delivery_date": "2026-11-22",
+    "items_count": 3
+   },
+   "default_rows": 20
+  },
+  "list_purchase_orders": {
+   "rows_key": "ordenes",
+   "envelope": {
+    "resumen": {
+     "total": 17,
+     "abiertas": 6
+    },
+    "pagina": 1,
+    "paginas": 1
+   },
+   "fidelity": "handler_shape",
+   "derived_from": "list_purchase_orders handler",
+   "sample_row": {
+    "purchase_order_id": 233,
+    "order_number": "PO-0233",
+    "supplier_id": 12,
+    "supplier": "Distribuciones Andina",
+    "location": "Bodega Principal",
+    "status": "ordered",
+    "payment_status": "pending",
+    "subtotal": 2400000,
+    "tax": 456000,
+    "total": 2856000,
+    "order_date": "2026-11-10",
+    "expected_date": "2026-11-24",
+    "next_payment_date": "2026-12-10",
+    "lines_count": 8
+   },
+   "default_rows": 17
+  },
+  "find_supplier": {
+   "rows_key": "candidatos",
+   "envelope": {
+    "busqueda": "lácteos",
+    "encontrados": 3,
+    "total_coincidencias": 3,
+    "hay_mas": false,
+    "resolucion": "ambigua"
+   },
+   "fidelity": "assumed_shape",
+   "derived_from": "find_supplier handler (candidatos[] sin leer; fila supuesta)",
+   "sample_row": {
+    "supplier_id": 12,
+    "nombre": "Lácteos del Valle",
+    "nit": "900123456",
+    "telefono": "6015551234"
+   },
+   "default_rows": 3
+  },
+  "get_supplier_summary": {
+   "rows_key": null,
+   "envelope": {
+    "supplier_id": 12,
+    "proveedor": "Lácteos del Valle",
+    "ticket_promedio": 1900000,
+    "deuda_formalizada": 2856000,
+    "deuda_vencida": 0,
+    "max_dias_vencido": 0,
+    "compromiso_sin_cxp": 0,
+    "ordenes_abiertas": 2,
+    "comprado_ytd_sin_iva": 21400000,
+    "ultima_orden": {
+     "order_number": "PO-0233",
+     "fecha": "2026-11-10"
+    },
+    "alcance": "tienda"
+   },
+   "fidelity": "handler_shape",
+   "derived_from": "get_supplier_summary handler"
+  },
+  "get_income_statement": {
+   "rows_key": null,
+   "envelope": {
+    "accounting_entity": {
+     "id": 1,
+     "name": "Tienda Demo"
+    },
+    "fiscal_period": {
+     "id": 11,
+     "name": "Noviembre 2026"
+    },
+    "period_selection": "current",
+    "date_filter": {
+     "from": "2026-11-01",
+     "to": "2026-11-21"
+    },
+    "totals": {
+     "total_revenue": 18450000,
+     "total_expenses": 14120000,
+     "net_income": 4330000,
+     "margin_pct": 23.5
+    },
+    "revenue": [
+     {
+      "code": "4135",
+      "name": "Comercio al por mayor y menor",
+      "amount": 18450000
+     }
+    ],
+    "expenses": [
+     {
+      "code": "5105",
+      "name": "Gastos de personal",
+      "amount": 6200000
+     },
+     {
+      "code": "5135",
+      "name": "Servicios",
+      "amount": 1800000
+     },
+     {
+      "code": "6135",
+      "name": "Costo de ventas",
+      "amount": 6120000
+     }
+    ],
+    "notes": []
+   },
+   "fidelity": "handler_shape",
+   "derived_from": "get_income_statement handler"
+  },
+  "list_expenses": {
+   "rows_key": "data",
+   "envelope": {
+    "meta": {
+     "total": 46,
+     "page": 1,
+     "limit": 20,
+     "totalPages": 3
+    }
+   },
+   "fidelity": "service_shape_approx",
+   "derived_from": "raw service findAll {data, meta}",
+   "sample_row": {
+    "id": 881,
+    "expense_number": "EXP-0881",
+    "description": "Servicio de aseo",
+    "amount": 120000,
+    "state": "paid",
+    "expense_date": "2026-11-18",
+    "category": "Aseo",
+    "supplier": "Limpieza Total"
+   },
+   "default_rows": 20
+  },
+  "list_receivables": {
+   "rows_key": "data",
+   "envelope": {
+    "meta": {
+     "total": 23,
+     "page": 1,
+     "limit": 20,
+     "totalPages": 2
+    }
+   },
+   "fidelity": "service_shape_approx",
+   "derived_from": "raw service findAll {data, meta}",
+   "sample_row": {
+    "id": 412,
+    "document_number": "CXC-0412",
+    "customer_id": 3321,
+    "customer": "Marta Rodríguez",
+    "amount": 350000,
+    "balance": 350000,
+    "due_date": "2026-11-05",
+    "days_overdue": 16,
+    "state": "overdue"
+   },
+   "default_rows": 20
+  },
+  "list_payroll_runs": {
+   "rows_key": "data",
+   "envelope": {
+    "meta": {
+     "total": 11
+    }
+   },
+   "fidelity": "assumed_shape",
+   "derived_from": "list_payroll_runs handler sin leer",
+   "sample_row": {
+    "id": 41,
+    "run_number": "NOM-2026-10",
+    "period": "2026-10",
+    "state": "paid",
+    "employees": 8,
+    "total_earnings": 16400000,
+    "total_deductions": 1900000,
+    "net_pay": 14500000,
+    "employer_cost": 22100000
+   },
+   "default_rows": 6
+  },
+  "get_payroll_run": {
+   "rows_key": "employees",
+   "envelope": {
+    "id": 41,
+    "run_number": "NOM-2026-10",
+    "period": "2026-10",
+    "state": "paid",
+    "totals": {
+     "earnings": 16400000,
+     "deductions": 1900000,
+     "net_pay": 14500000,
+     "employer_contributions": 5700000,
+     "provisiones": 2900000
+    }
+   },
+   "fidelity": "assumed_shape",
+   "derived_from": "get_payroll_run handler sin leer",
+   "sample_row": {
+    "employee": "Ana Pérez",
+    "base_salary": 2000000,
+    "earnings": 2000000,
+    "deductions": 240000,
+    "net_pay": 1760000,
+    "employer_contributions": 700000
+   },
+   "default_rows": 8
+  },
+  "list_fiscal_obligations": {
+   "rows_key": "data",
+   "envelope": {
+    "meta": {
+     "total": 9
+    }
+   },
+   "fidelity": "assumed_shape",
+   "derived_from": "list_fiscal_obligations handler sin leer",
+   "sample_row": {
+    "id": 5,
+    "obligation": "IVA bimestral",
+    "period": "2026-09/2026-10",
+    "due_date": "2026-11-12",
+    "state": "pending",
+    "amount_estimated": 3200000
+   },
+   "default_rows": 9
+  },
+  "get_vat_summary": {
+   "rows_key": null,
+   "envelope": {
+    "periodo": "2026-09/2026-10",
+    "iva_generado": 5400000,
+    "iva_descontable": 2200000,
+    "iva_a_pagar": 3200000,
+    "saldo_a_favor": 0
+   },
+   "fidelity": "assumed_shape",
+   "derived_from": "get_vat_summary handler sin leer"
+  },
+  "list_cash_sessions": {
+   "rows_key": "data",
+   "envelope": {
+    "meta": {
+     "total": 30
+    }
+   },
+   "fidelity": "assumed_shape",
+   "derived_from": "list_cash_sessions handler sin leer",
+   "sample_row": {
+    "id": 602,
+    "register": "Caja 1",
+    "opened_by": "Pedro Ruiz",
+    "opened_at": "2026-11-20T08:00:00Z",
+    "closed_at": "2026-11-20T20:10:00Z",
+    "state": "closed",
+    "expected_cash": 1250000,
+    "counted_cash": 1245000,
+    "difference": -5000
+   },
+   "default_rows": 10
+  },
+  "get_cash_session_close_report": {
+   "rows_key": null,
+   "envelope": {
+    "session_id": 602,
+    "register": "Caja 1",
+    "state": "closed",
+    "ventas_por_metodo": {
+     "efectivo": 980000,
+     "tarjeta": 1450000,
+     "transferencia": 310000
+    },
+    "retiros": 0,
+    "entradas": 100000,
+    "expected_cash": 1250000,
+    "counted_cash": 1245000,
+    "difference": -5000
+   },
+   "fidelity": "assumed_shape",
+   "derived_from": "get_cash_session_close_report handler sin leer"
+  },
+  "list_reconciliations": {
+   "rows_key": "data",
+   "envelope": {
+    "meta": {
+     "total": 12
+    }
+   },
+   "fidelity": "assumed_shape",
+   "derived_from": "list_reconciliations handler sin leer",
+   "sample_row": {
+    "id": 19,
+    "account": "Bancolombia 1234",
+    "period": "2026-09",
+    "state": "open",
+    "statement_balance": 5200000,
+    "book_balance": 5240000,
+    "difference": -40000
+   },
+   "default_rows": 6
+  },
+  "get_business_snapshot": {
+   "rows_key": null,
+   "envelope": {
+    "tienda": "Tienda Demo",
+    "moneda": "COP",
+    "hoy": {
+     "ventas": 1240000,
+     "ordenes": 21
+    },
+    "semana": {
+     "ventas": 7900000,
+     "ordenes": 131
+    },
+    "mes": {
+     "ventas": 18450000,
+     "ordenes": 312,
+     "gastos": 14120000
+    },
+    "caja": {
+     "abierta": true,
+     "esperado": 1250000
+    },
+    "inventario": {
+     "bajo_stock": 12,
+     "sin_stock": 3
+    },
+    "pendientes": {
+     "por_cobrar": 3920000,
+     "por_pagar": 5100000,
+     "ordenes_sin_despachar": 7
+    }
+   },
+   "fidelity": "service_shape_approx",
+   "derived_from": "JSON.stringify(vexiContext.buildSnapshot())"
+  },
+  "search_playbooks": {
+   "rows_key": "playbooks",
+   "envelope": {
+    "query": "devolución reembolso",
+    "count": 3
+   },
+   "fidelity": "assumed_shape",
+   "derived_from": "outsideLoop handler: resultado lo produce la sesión",
+   "sample_row": {
+    "id": "pb-return-refund",
+    "title": "Devolución con reembolso",
+    "summary": "Pasos para devolver y reembolsar una orden finalizada.",
+    "score": 0.82
+   },
+   "default_rows": 3
+  },
+  "load_playbook": {
+   "rows_key": "steps",
+   "envelope": {
+    "id": "pb-return-refund",
+    "title": "Devolución con reembolso",
+    "when_to_use": "Cuando el cliente devuelve productos de una orden finalizada."
+   },
+   "fidelity": "assumed_shape",
+   "derived_from": "outsideLoop handler: resultado lo produce la sesión",
+   "sample_row": {
+    "n": 1,
+    "action": "Buscar la orden",
+    "tool": "get_order",
+    "note": "Confirmar productos y pagos."
+   },
+   "default_rows": 6
+  },
+  "get_product_pricing": {
+   "rows_key": null,
+   "envelope": {
+    "product_id": 1042,
+    "producto": "Camiseta algodón talla M",
+    "costo": 27675,
+    "precio_base": 37815,
+    "impuesto": {
+     "tipo": "IVA",
+     "tarifa": 19,
+     "incluido": false
+    },
+    "precio_final": 45000,
+    "margen_pct": 38.5,
+    "categoria": "Camisetas",
+    "promedio_categoria": {
+     "precio_final": 48200,
+     "margen_pct": 41.2
+    }
+   },
+   "fidelity": "assumed_shape",
+   "derived_from": "get_product_pricing handler sin leer"
+  },
+  "suggest_followup": {
+   "rows_key": null,
+   "envelope": {
+    "data": {
+     "suggested": true,
+     "followup": {
+      "kind": "reminder",
+      "title": "Llamar al proveedor de lácteos",
+      "due_at": "2026-11-27T09:00:00-05:00"
+     }
+    }
+   },
+   "fidelity": "service_shape_approx",
+   "derived_from": "suggest_followup handler {data:{suggested,followup}}"
+  },
+  "create_reminder": {
+   "rows_key": null,
+   "envelope": {
+    "created": true,
+    "display": "Recordatorio creado: revisar el inventario de bebidas, mañana 9:00 a. m."
+   },
+   "fidelity": "handler_shape",
+   "derived_from": "create_reminder handler"
+  },
+  "propose_write_batch": {
+   "rows_key": null,
+   "envelope": {
+    "success": true,
+    "data": {
+     "proposal_id": "prop_01",
+     "requires_confirmation": true,
+     "actions": [
+      {
+       "tool": "update_product_price",
+       "summary": "Subir 5% categoría Accesorios"
+      },
+      {
+       "tool": "create_expense",
+       "summary": "Gasto papelería 80.000"
+      }
+     ],
+     "display": "Preparé 2 cambios para aprobar en un clic."
+    }
+   },
+   "fidelity": "assumed_shape",
+   "derived_from": "propose_write_batch handler sin leer"
+  },
+  "compute": {
+   "rows_key": null,
+   "envelope": {
+    "success": true,
+    "data": {
+     "expression": "(18450000-14120000)/18450000*100",
+     "result": 23.47,
+     "precision": 2
+    }
+   },
+   "fidelity": "service_shape_approx",
+   "derived_from": "compute: buildToolSuccessEnvelope"
+  },
+  "vex_render_table": {
+   "rows_key": null,
+   "envelope": {
+    "success": true,
+    "data": {
+     "block_id": "blk_01",
+     "type": "table",
+     "rendered": true
+    }
+   },
+   "fidelity": "service_shape_approx",
+   "derived_from": "vex_render_*: buildToolSuccessEnvelope (el bloque viaja por el canal UI, no por el resultado)"
+  },
+  "vex_render_chart": {
+   "rows_key": null,
+   "envelope": {
+    "success": true,
+    "data": {
+     "block_id": "blk_01",
+     "type": "chart",
+     "rendered": true
+    }
+   },
+   "fidelity": "service_shape_approx",
+   "derived_from": "vex_render_*: buildToolSuccessEnvelope (el bloque viaja por el canal UI, no por el resultado)"
+  },
+  "vex_render_kpi": {
+   "rows_key": null,
+   "envelope": {
+    "success": true,
+    "data": {
+     "block_id": "blk_01",
+     "type": "kpi",
+     "rendered": true
+    }
+   },
+   "fidelity": "service_shape_approx",
+   "derived_from": "vex_render_*: buildToolSuccessEnvelope (el bloque viaja por el canal UI, no por el resultado)"
+  },
+  "vex_render_list": {
+   "rows_key": null,
+   "envelope": {
+    "success": true,
+    "data": {
+     "block_id": "blk_01",
+     "type": "list",
+     "rendered": true
+    }
+   },
+   "fidelity": "service_shape_approx",
+   "derived_from": "vex_render_*: buildToolSuccessEnvelope (el bloque viaja por el canal UI, no por el resultado)"
+  }
+ }
+}

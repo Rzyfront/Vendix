@@ -107,7 +107,8 @@
         "instruction": "Resolver ubicaciones y alcance operativo.",
         "depends_on": [],
         "approval": "none",
-        "arguments": {}
+        "arguments": {},
+        "background": true
       },
       {
         "id": "availability",
@@ -121,7 +122,8 @@
         "arguments": {
           "product_id": "${inputs.product_id}",
           "quantity": "${inputs.quantity}"
-        }
+        },
+        "background": true
       },
       {
         "id": "transfer",
@@ -131,7 +133,7 @@
         "depends_on": [
           "availability"
         ],
-        "approval": "individual",
+        "approval": "batch",
         "arguments": {
           "mode": "${inputs.mode}",
           "from_location_id": "${inputs.from_location_id}",
@@ -140,12 +142,22 @@
         }
       },
       {
+        "id": "propose-batch",
+        "section": "steps",
+        "tool": "propose_write_batch",
+        "instruction": "Proponer los cambios preparados como un solo lote; Vex no escribe nada hasta que el usuario apruebe el lote.",
+        "depends_on": [
+          "transfer"
+        ],
+        "approval": "none"
+      },
+      {
         "id": "stock",
         "section": "steps",
         "tool": "get_stock_levels",
         "instruction": "Releer existencias origen/destino conservando producto/variante.",
         "depends_on": [
-          "transfer"
+          "propose-batch"
         ],
         "approval": "none",
         "arguments": {}
@@ -165,7 +177,8 @@
         "bridge": {
           "method": "GET",
           "path": "store/stock-transfers/:id"
-        }
+        },
+        "background": true
       }
     ],
     "examples": [
@@ -302,7 +315,12 @@
         "expected": "not_verified"
       }
     ],
-    "gaps": []
+    "gaps": [],
+    "approval": "batch",
+    "launch": {
+      "title": "Trasladar inventario",
+      "prompt": "Quiero trasladar inventario entre ubicaciones. Pregúntame lo mínimo y déjame aprobar el lote."
+    }
   }
 }
 ---
@@ -335,7 +353,9 @@ No mover entre tiendas si scope STORE lo prohíbe. Cada acción conserva costo/v
 Las dependencias son orden lógico, no scheduler automático. Reutilizar IDs/evidencia del objetivo sin repetir descubrimiento; revalidar stock, saldo y estado antes de proponer cambios. Una tool resuelta con error/pending/unknown nunca prueba éxito.
 
 ## approvals
-Cada escritura exige preview de dominio actual y tarjeta individual del circuito propose→confirm→execute; el playbook no es consentimiento general, no emite tokens ni ejecuta handlers. Tras rechazo/no respuesta conservar estado pendiente. Nunca repetir un efecto desconocido ni un pago por un segundo seam.
+
+Playbook de lote: los pasos en segundo plano solo leen y preparan; las escrituras entran a un único lote con `propose_write_batch` y nada se aplica hasta que el usuario apruebe el lote. Las herramientas irreversibles nunca entran al lote: salen con su propia tarjeta.
+Cada escritura del lote exige preview de dominio actual y la aprobación del lote en el circuito propose→confirm→execute; el playbook no es consentimiento general, no emite tokens ni ejecuta handlers. Tras rechazo/no respuesta conservar estado pendiente. Nunca repetir un efecto desconocido ni un pago por un segundo seam.
 Si algún write pierde preview/contrato vigente, degradar a preparación-only y registrar el gap, no aprobar a ciegas.
 
 ## recovery

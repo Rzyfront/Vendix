@@ -805,4 +805,104 @@ describe('SandboxAuditRepository phase E', () => {
     expect(sql).not.toMatch(/\b(?:DROP|TRUNCATE|DELETE|UPDATE|CASCADE)\b/i);
     expect(sql).not.toContain('"source" TEXT');
   });
+
+  describe('F10 Code Mode audit (objective-less runs)', () => {
+    const TENANT = 'e'.repeat(64);
+    const codeMode = (patch: Partial<SandboxAuditStart> = {}) => {
+      const { objective_id: _omit, ...rest } = input();
+      return {
+        ...rest,
+        executor: 'lambda-js',
+        tenant_hash: TENANT,
+        ...patch,
+      } as SandboxAuditStart;
+    };
+
+    it('starts without an objective: no objective/attempt queries, NULL objective_id, executor and tenant_hash stored, admission still enforced', async () => {
+      await scoped(() => repository.start(codeMode()));
+      const sqls = tx.$queryRaw.mock.calls.map(([q]: [Query]) => q.sql);
+      expect(sqls.some((q) => q.includes('FROM ai_agent_objectives'))).toBe(false);
+      expect(sqls.some((q) => q.includes('AS attempt_count'))).toBe(false);
+      expect(sqls.some((q) => q.includes('AS global_count'))).toBe(true);
+      const insert = inserts(tx)[0];
+      expect(insert.sql).toContain('executor, tenant_hash');
+      expect(insert.values[4]).toBeNull();
+      expect(insert.values).toContain('lambda-js');
+      expect(insert.values).toContain(TENANT);
+      expect(inserts(tx)).toHaveLength(1);
+    });
+
+    it('still enforces store/global capacity for objective-less runs', async () => {
+      tx.$queryRaw.mockImplementation(async (query: Query) =>
+        query.sql.includes('AS global_count') ? [{ global_count: 0, store_count: 1 }] : [],
+      );
+      await expect(scoped(() => repository.start(codeMode()))).rejects.toBeInstanceOf(ConflictException);
+      expect(inserts(tx)).toHaveLength(0);
+    });
+
+    it('rejects malformed executor / tenant_hash before any SQL', async () => {
+      for (const patch of [{ executor: 'Lambda JS' }, { tenant_hash: 'nothex' }, { executor: '' }]) {
+        await expect(scoped(() => repository.start(codeMode(patch)))).rejects.toBeInstanceOf(BadRequestException);
+      }
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('keeps the durable insert unchanged when no Code Mode metadata is given (previous behavior)', async () => {
+      await scoped(() => repository.start(input()));
+      const insert = inserts(tx)[0];
+      expect(insert.sql).not.toContain('executor');
+      expect(insert.values[4]).toBe(OBJECTIVE);
+    });
+
+    it('finish with Code Mode facts records them and releases the lease; without them it is the legacy statement', async () => {
+      await scoped(() =>
+        repository.finish(ID, 'ok', { calls: 1 }, {
+          rounds: 3,
+          lambda_request_ids: ['req-1', 'req-2'],
+          cut_reason: 'CODEMODE_LIMIT',
+          returned_bytes: 120,
+        }),
+      );
+      const query = tx.$queryRaw.mock.calls[0][0] as Query;
+      expect(query.sql).toContain('LEAST(lease_until, CURRENT_TIMESTAMP)');
+      expect(query.values).toEqual(expect.arrayContaining([3, 'CODEMODE_LIMIT', 120]));
+      expect(JSON.stringify(query.values)).toContain('req-1');
+      tx.$queryRaw.mockClear();
+      await scoped(() => repository.finish(ID, 'ok', { calls: 1 }));
+      expect((tx.$queryRaw.mock.calls[0][0] as Query).sql).not.toContain('LEAST');
+    });
+
+    it('rejects invalid Code Mode finish facts', async () => {
+      for (const extra of [
+        { rounds: -1 },
+        { cut_reason: 'lower case' },
+        { lambda_request_ids: ['bad id with spaces'] },
+        { returned_bytes: 1.5 },
+      ]) {
+        await expect(scoped(() => repository.finish(ID, 'ok', {}, extra))).rejects.toBeInstanceOf(BadRequestException);
+      }
+    });
+
+    it('codemode migration is additive and idempotent: relaxes one constraint, adds nullable columns, no destructive SQL', () => {
+      const migration = readFileSync(
+        resolve(
+          __dirname,
+          '../../../prisma/migrations/20261227100000_ai_agent_script_runs_codemode/migration.sql',
+        ),
+        'utf8',
+      );
+      const sql = migration
+        .split('\n')
+        .filter((line) => !line.trimStart().startsWith('--'))
+        .join('\n');
+      expect(migration).toContain('-- DATA IMPACT:');
+      expect(sql).toContain('ALTER COLUMN "objective_id" DROP NOT NULL');
+      expect(sql.match(/ADD COLUMN IF NOT EXISTS/g)).toHaveLength(6);
+      for (const column of ['executor', 'rounds', 'lambda_request_ids', 'tenant_hash', 'cut_reason', 'returned_bytes'])
+        expect(sql).toContain(`"${column}"`);
+      expect(sql).not.toMatch(/ADD COLUMN[^;]*NOT NULL/i);
+      expect(sql).not.toMatch(/\b(?:DROP TABLE|DROP COLUMN|TRUNCATE|DELETE|UPDATE|CASCADE)\b/i);
+      expect(sql).toContain('IF NOT EXISTS');
+    });
+  });
 });

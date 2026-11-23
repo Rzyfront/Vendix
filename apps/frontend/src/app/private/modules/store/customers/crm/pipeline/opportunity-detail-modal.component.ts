@@ -1,4 +1,15 @@
-import { Component, computed, effect, inject, input, model, output, signal, untracked } from '@angular/core';
+import {
+  Component,
+  computed,
+  effect,
+  inject,
+  input,
+  model,
+  output,
+  signal,
+  untracked,
+  viewChild,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
@@ -14,8 +25,15 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import { CrmService } from '../shared/crm.service';
-import { CrmNote, CrmOpportunity, personName } from '../shared/crm.interface';
-import { formatDateOnly, formatDateTime } from '../shared/crm.utils';
+import { CrmNote, CrmOpportunity, CrmTask, personName } from '../shared/crm.interface';
+import {
+  crmCanSeeAll,
+  formatDateOnly,
+  formatDateTime,
+  taskCompletedMessage,
+} from '../shared/crm.utils';
+import { TaskCompleteModalComponent } from '../shared/task-complete-modal.component';
+import { TaskFormModalComponent } from '../shared/task-form-modal.component';
 import { CustomersService } from '../../services/customers.service';
 import { Customer } from '../../models/customer.model';
 import { CustomerDataSheetComponent } from '../../components/customer-data-sheet/customer-data-sheet.component';
@@ -26,12 +44,17 @@ const STATUS_LABELS: Record<CrmOpportunity['status'], string> = {
   lost: 'Perdida',
 };
 
+/** Pending tasks shown in the detail; the rest are in Clientes → Tareas. */
+const TASKS_SHOWN = 10;
+
 const NO_CUSTOMER_PERMISSION = 'No tienes permiso para ver los datos del cliente.';
 
 /**
- * Opportunity detail: summary, full customer data, CRM notes and the
- * customer data sheet, so the seller keeps the context without leaving the
- * pipeline.
+ * Opportunity detail: summary, full customer data, pending tasks, CRM notes
+ * and the customer data sheet, so the seller keeps the context without
+ * leaving the pipeline. Tasks are only asked for when the detail opens (never
+ * per board card); creating or completing one emits `tasksChanged` so the
+ * board re-reads stages a task may have moved.
  */
 @Component({
   selector: 'app-crm-opportunity-detail-modal',
@@ -46,6 +69,8 @@ const NO_CUSTOMER_PERMISSION = 'No tienes permiso para ver los datos del cliente
     ModalComponent,
     SpinnerComponent,
     CustomerDataSheetComponent,
+    TaskCompleteModalComponent,
+    TaskFormModalComponent,
   ],
   template: `
     <app-modal
@@ -162,6 +187,76 @@ const NO_CUSTOMER_PERMISSION = 'No tienes permiso para ver los datos del cliente
             }
           </section>
 
+          <!-- Tareas -->
+          @if (customerId() && canManageTasks()) {
+            <section aria-labelledby="opp-tasks" class="border-t border-[var(--color-border)] pt-4">
+              <div class="mb-3 flex items-center justify-between gap-2">
+                <h3 id="opp-tasks" class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]">
+                  <app-icon name="check-square" [size]="16"></app-icon> Tareas pendientes
+                </h3>
+                <app-button variant="outline" size="sm" (clicked)="openTaskForm()">
+                  <app-icon slot="icon" name="plus" [size]="14"></app-icon> Nueva tarea
+                </app-button>
+              </div>
+              @if (tasksLoading() && !tasks().length) {
+                <div class="flex justify-center py-4"><app-spinner></app-spinner></div>
+              } @else if (tasksError(); as message) {
+                <p class="text-sm text-[var(--color-text-secondary)]">{{ message }}</p>
+              } @else {
+                <ul class="flex flex-col gap-2" role="list">
+                  @for (task of tasks(); track task.id) {
+                    <li
+                      data-testid="opp-task"
+                      [class]="taskRowClass(task)"
+                    >
+                      <button
+                        type="button"
+                        class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-[var(--color-border)] bg-surface text-primary hover:bg-primary/10 disabled:opacity-50"
+                        [attr.aria-label]="'Completar ' + task.title"
+                        title="Marcar como hecha"
+                        [disabled]="completingId() !== null"
+                        (click)="completeTask(task)"
+                      >
+                        <app-icon name="check" [size]="16"></app-icon>
+                      </button>
+                      <div class="min-w-0 flex-1">
+                        <p class="break-words text-sm font-semibold text-[var(--color-text-primary)]">{{ task.title }}</p>
+                        <p class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--color-text-secondary)]">
+                          <span [class]="task.is_overdue ? 'inline-flex items-center gap-1 font-semibold text-[var(--color-error)]' : 'inline-flex items-center gap-1'">
+                            <app-icon name="calendar" [size]="12"></app-icon>
+                            {{ task.due_at ? dateTime(task.due_at) : 'Sin fecha' }}
+                          </span>
+                          @if (task.is_overdue) {
+                            <app-badge variant="error" size="xs">Vencida</app-badge>
+                          } @else {
+                            <app-badge variant="warning" size="xs">Pendiente</app-badge>
+                          }
+                          @if (task.opportunity && task.opportunity.id !== opportunity()?.id) {
+                            <span class="inline-flex min-w-0 items-center gap-1">
+                              <app-icon name="briefcase" [size]="12"></app-icon>
+                              <span class="truncate">{{ task.opportunity.title }}</span>
+                            </span>
+                          }
+                        </p>
+                      </div>
+                    </li>
+                  } @empty {
+                    <li class="text-sm text-[var(--color-text-muted)]">Sin tareas pendientes.</li>
+                  }
+                </ul>
+                @if (tasksTotal() > tasks().length) {
+                  <a
+                    routerLink="/admin/customers/tasks"
+                    class="mt-3 inline-flex text-xs font-semibold text-primary hover:underline"
+                    (click)="isOpen.set(false)"
+                  >
+                    Ver las {{ tasksTotal() }} en Tareas
+                  </a>
+                }
+              }
+            </section>
+          }
+
           <!-- Notas -->
           @if (customerId()) {
             <section aria-labelledby="opp-notes" class="border-t border-[var(--color-border)] pt-4">
@@ -238,6 +333,18 @@ const NO_CUSTOMER_PERMISSION = 'No tienes permiso para ver los datos del cliente
         }
       </div>
     </app-modal>
+
+    @if (canManageTasks()) {
+      <!-- After the detail in the DOM, so they open on top of it. -->
+      <app-crm-task-form-modal
+        [isOpen]="taskFormOpen()"
+        (isOpenChange)="taskFormOpen.set($event)"
+        [fixedCustomer]="opportunity()?.customer ?? null"
+        [presetOpportunityId]="opportunity()?.id ?? null"
+        (saved)="onTaskSaved()"
+      ></app-crm-task-form-modal>
+      <app-crm-task-complete-modal></app-crm-task-complete-modal>
+    }
   `,
 })
 export class OpportunityDetailModalComponent {
@@ -251,6 +358,10 @@ export class OpportunityDetailModalComponent {
   readonly canManage = input(false);
   readonly editRequested = output<void>();
   readonly deleteRequested = output<void>();
+  /** A task of the customer was created or completed: the board re-reads. */
+  readonly tasksChanged = output<void>();
+
+  private readonly completer = viewChild(TaskCompleteModalComponent);
 
   protected readonly customer = signal<Customer | null>(null);
   protected readonly customerLoading = signal(false);
@@ -260,6 +371,12 @@ export class OpportunityDetailModalComponent {
   protected readonly notesError = signal<string | null>(null);
   protected readonly noteDraft = signal('');
   protected readonly savingNote = signal(false);
+  protected readonly tasks = signal<CrmTask[]>([]);
+  protected readonly tasksTotal = signal(0);
+  protected readonly tasksLoading = signal(false);
+  protected readonly tasksError = signal<string | null>(null);
+  protected readonly completingId = signal<number | null>(null);
+  protected readonly taskFormOpen = signal(false);
 
   protected readonly name = personName;
   protected readonly dateOnly = formatDateOnly;
@@ -267,6 +384,9 @@ export class OpportunityDetailModalComponent {
   protected readonly customerId = computed(() => this.opportunity()?.customer?.id ?? null);
   protected readonly canUpdateCustomer = computed(
     () => this.auth.isOwner() || this.auth.hasPermission('store:customers:update'),
+  );
+  protected readonly canManageTasks = computed(
+    () => this.auth.isOwner() || this.auth.hasPermission('store:crm_tasks:manage'),
   );
   protected readonly statusLabel = computed(() => {
     const o = this.opportunity();
@@ -301,6 +421,7 @@ export class OpportunityDetailModalComponent {
   });
 
   private request = 0;
+  private tasksRequest = 0;
 
   constructor() {
     effect(() => {
@@ -329,10 +450,85 @@ export class OpportunityDetailModalComponent {
     }
   }
 
+  /** An overdue task stands out in the error color. */
+  protected taskRowClass(task: CrmTask): string {
+    const tone = task.is_overdue
+      ? 'border-[var(--color-error)] bg-[var(--color-error-light)]'
+      : 'border-[var(--color-border)] bg-[var(--color-background)]';
+    return `flex items-start gap-3 rounded-lg border p-3 ${tone}`;
+  }
+
+  openTaskForm(): void {
+    this.taskFormOpen.set(true);
+  }
+
+  onTaskSaved(): void {
+    const id = this.customerId();
+    if (id) void this.loadTasks(id);
+    this.tasksChanged.emit();
+  }
+
+  async completeTask(task: CrmTask): Promise<void> {
+    const id = this.customerId();
+    if (!id || this.completingId() !== null) return;
+    this.completingId.set(task.id);
+    try {
+      const completer = this.completer();
+      const completed = completer
+        ? await completer.complete(task)
+        : await firstValueFrom(this.crm.completeTask(task.id));
+      // Dismissed: nothing changed.
+      if (!completed) return;
+      this.toast.success(taskCompletedMessage(completed));
+      void this.loadTasks(id);
+      // Completing may move an opportunity to another stage.
+      this.tasksChanged.emit();
+    } catch (error) {
+      this.toast.error(parseApiError(error).userMessage);
+    } finally {
+      this.completingId.set(null);
+    }
+  }
+
+  /** Pending tasks of the customer, as the customer panel lists them. */
+  private async loadTasks(id: number): Promise<void> {
+    if (!this.canManageTasks()) return;
+    // Own token: a slower earlier reload never overwrites a newer list.
+    const request = ++this.tasksRequest;
+    this.tasksLoading.set(true);
+    this.tasksError.set(null);
+    try {
+      const page = await firstValueFrom(
+        this.crm.tasks({
+          customer_id: id,
+          status: 'pending',
+          assigned: crmCanSeeAll(this.auth) ? 'all' : 'me',
+          limit: TASKS_SHOWN,
+        }),
+      );
+      if (request !== this.tasksRequest) return;
+      this.tasks.set(page.data);
+      this.tasksTotal.set(page.total);
+    } catch (error) {
+      if (request !== this.tasksRequest) return;
+      this.tasks.set([]);
+      this.tasksTotal.set(0);
+      this.tasksError.set(
+        (error as { status?: number })?.status === 403
+          ? 'No tienes permiso para ver las tareas del cliente.'
+          : parseApiError(error).userMessage,
+      );
+    } finally {
+      if (request === this.tasksRequest) this.tasksLoading.set(false);
+    }
+  }
+
   private async loadCustomerContext(id: number): Promise<void> {
     const request = ++this.request;
     this.customer.set(null);
     this.notes.set([]);
+    this.tasks.set([]);
+    this.tasksTotal.set(0);
     this.customerError.set(null);
     this.notesError.set(null);
     this.customerLoading.set(true);
@@ -368,6 +564,6 @@ export class OpportunityDetailModalComponent {
         if (request === this.request) this.notesLoading.set(false);
       }
     };
-    await Promise.all([loadCustomer(), loadNotes()]);
+    await Promise.all([loadCustomer(), loadNotes(), this.loadTasks(id)]);
   }
 }

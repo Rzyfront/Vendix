@@ -73,6 +73,12 @@ export interface ToolExecutionContext {
   store_id?: number;
   user_id?: number;
   roles?: string[];
+  /**
+   * Conversation of the agent turn running the tool, from
+   * `ToolExecutionOptions.conversationId` (the server's turn binding). Never
+   * a tool argument; absent outside a turn (MCP, scripts).
+   */
+  conversation_id?: number;
   /** Cooperative cancellation only; never an authority or rollback guarantee. */
   signal?: AbortSignal;
   deadlineMs?: number;
@@ -104,7 +110,20 @@ export interface RegisteredTool {
    * implanta T5.
    */
   deprecated?: ToolDeprecation;
+  /**
+   * T13 (N4) — the user's role is the only limit on a tool; the plan never
+   * removes one. Every tool declares exactly one of:
+   *  - `requiredPermissions`: every listed permission must be held, or
+   *  - `access: 'public'` + `accessReason`: no role can be denied it. Only for
+   *    agent scaffolding (planning, discovery, blocks) and data already scoped
+   *    to the caller (own reminders, own attachments); never for business data.
+   * `AIToolRegistry.register` throws on a tool that declares neither, so the
+   * backend does not boot with an open tool.
+   */
   requiredPermissions?: string[];
+  access?: 'public';
+  /** Written reason a public tool needs no permission. Required with `access`. */
+  accessReason?: string;
   requiresConfirmation?: boolean;
   /**
    * Marks a write whose effect cannot be walked back (DIAN issuance/voids,
@@ -118,6 +137,14 @@ export interface RegisteredTool {
    * still caught by its domain.
    */
   irreversible?: boolean;
+  /**
+   * F5 (T36) — honest inverse of this write, used ONLY by Vex write batches to
+   * offer "Deshacer". Declare it only when the inverse restores the previous
+   * state without losing data (restore the previous value, archive what was
+   * just created). Never on an `irreversible` tool. A tool without it is
+   * reported as "no reversible desde Vex".
+   */
+  compensate?: ToolCompensation;
   /**
    * Where a confirmed write lands. Default (absent): IN PROCESS — the handler
    * awaits a domain service, so returning a structured result without a
@@ -187,6 +214,35 @@ export interface RegisteredTool {
  * frontend confirmation card can render agent proposals and bulk-edit
  * previews with one component.
  */
+/**
+ * F5 (T36) — inverse operation a write tool declares so a Vex write batch can
+ * undo it. Contract:
+ *  - `capture` runs right BEFORE the handler, with the same args and context,
+ *    and returns the state needed to undo (e.g. the previous price). Returning
+ *    `null` means "nothing to undo for these args": the step is then reported
+ *    as not reversible. It must not write.
+ *  - `undo` runs later (only inside the batch's undo window) with that
+ *    snapshot plus the handler's output, re-verifies its own preconditions
+ *    (the record may have changed since) and returns a human one-liner. It
+ *    throws when the inverse is no longer honest (e.g. the value was edited
+ *    again after the batch): the step then stays applied.
+ *  - `undo` runs through the same permission gate as the tool itself.
+ */
+export interface ToolCompensation {
+  /** Human label of the inverse: "Restaurar el precio anterior". */
+  label: string;
+  capture: (
+    args: Record<string, any>,
+    context: ToolExecutionContext,
+  ) => Promise<unknown | null>;
+  undo: (input: {
+    args: Record<string, any>;
+    snapshot: unknown;
+    handlerOutput: string;
+    context: ToolExecutionContext;
+  }) => Promise<string>;
+}
+
 export interface ToolPreview {
   status: 'ok' | 'warning' | 'error';
   /** Human-readable subject of the change: "Coca Cola 1L", not "#4821". */

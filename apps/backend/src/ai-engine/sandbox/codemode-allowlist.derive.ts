@@ -1,0 +1,130 @@
+import {
+  DEFAULT_TOOL_VERSION,
+  RegisteredTool,
+} from '../tools/interfaces/tool.interface';
+import { hashContract } from './sandbox-policy.service';
+
+/**
+ * F10 (T65) Code Mode allowlist: pure derivation shared by the release script
+ * (`scripts/generate-codemode-allowlist.ts`), the snapshot spec and the policy.
+ * Nothing here reads the environment, prompts or the database: the allowlist is
+ * owned by the release and only changes through a reviewed regeneration.
+ */
+
+export const CODEMODE_ALLOWLIST_VERSION = 'codemode-readonly-v1';
+
+export interface CodeModeAllowlistEntry {
+  name: string;
+  domain: string;
+  version: string;
+  /** Permissions the tool declares, sorted. At least one. */
+  permissions: readonly string[];
+  /** `hashContract(tool.parameters)`: parameters pinned like the Deno audit. */
+  parameters_hash: string;
+}
+
+/**
+ * Read-only tools that STILL must not reach a script because they call a third
+ * party, persist an artifact, or go back out over HTTP. One reason per entry;
+ * adding a tool here is a reviewed change, like the generated file itself.
+ */
+export const CODEMODE_EXCLUDED: Readonly<Record<string, string>> = Object.freeze({
+  get_dian_status: 'DIAN-facing operational status (certificate and emission state)',
+  get_production_readiness: 'DIAN production checklist evaluated against the tax authority setup',
+  get_payroll_dian_status:
+    'queries the DIAN provider with the stored CUNE and syncs the payroll state',
+  get_payment_status: 'may query the payment gateway for the live state of a payment',
+  semantic_search: 'calls the AI embedding model to vectorize the query',
+  quote_shipping: 'geocoding and routing providers are consulted to price the shipment',
+  list_shipping_config:
+    'check_buyer forward-geocodes the buyer address and asks the routing provider for the distance',
+  get_route_map:
+    'geocodes stops without coordinates through the external geocoder and saves them to addresses',
+  analyze_report: 'goes back out over HTTP to the API (loopback fetch), outside the registry ALS',
+  export_report: 'loopback HTTP fetch that also uploads a file artifact',
+  get_report: 'loopback HTTP fetch of the report endpoints, outside the registry ALS',
+  get_pila_flatfile: 'generates a file artifact instead of reading rows',
+  list_entry_failures:
+    'queries accounting_entry_failures via withoutScope() without store/organization filter; pending tenant-scoped listUnresolved with tests',
+  get_employee_fiscal_profile:
+    'creates missing employee_fiscal_profiles rows in getOrCreate() and queries via withoutScope() filtering only by organization_id',
+  list_tables:
+    'passing table_id calls getQr(), which updates tables.public_token in the database',
+  get_crm_pipeline:
+    'listPipelines() calls ensureDefaultCrmPipeline(), inserting default CRM pipeline and stages',
+  get_store_settings:
+    'getSettings() calls ensureDefaults() and lazily updates store_settings JSON in the database',
+});
+
+/** Shape every allowlisted tool must hold, today (generation) and live (policy). */
+export function codeModeShapeOk(tool: RegisteredTool | undefined): boolean {
+  return !!(
+    tool &&
+    tool.readOnly === true &&
+    !tool.clientSide &&
+    !tool.requiresConfirmation &&
+    !tool.irreversible &&
+    typeof tool.handler === 'function' &&
+    Array.isArray(tool.requiredPermissions) &&
+    tool.requiredPermissions.length > 0 &&
+    tool.access !== 'public' &&
+    !tool.name.startsWith('ui_')
+  );
+}
+
+export function codeModeEntryFor(tool: RegisteredTool): CodeModeAllowlistEntry {
+  return {
+    name: tool.name,
+    domain: tool.domain,
+    version: tool.version ?? DEFAULT_TOOL_VERSION,
+    permissions: [...(tool.requiredPermissions ?? [])].sort(),
+    parameters_hash: hashContract(tool.parameters),
+  };
+}
+
+/** Whether a live tool is a candidate for the allowlist (shape + not excluded). */
+export function codeModeCandidate(tool: RegisteredTool | undefined): boolean {
+  return codeModeShapeOk(tool) && !Object.prototype.hasOwnProperty.call(CODEMODE_EXCLUDED, tool!.name);
+}
+
+/**
+ * Builds the allowlist from tool definitions, sorted by name. Throws when two
+ * definitions share a name but differ in what the allowlist pins.
+ */
+export function deriveCodeModeAllowlist(
+  tools: readonly RegisteredTool[],
+): CodeModeAllowlistEntry[] {
+  const byName = new Map<string, CodeModeAllowlistEntry>();
+  for (const tool of tools) {
+    if (!codeModeCandidate(tool)) continue;
+    const entry = codeModeEntryFor(tool);
+    const known = byName.get(entry.name);
+    if (known && JSON.stringify(known) !== JSON.stringify(entry))
+      throw new Error(`Conflicting definitions for tool ${entry.name}`);
+    byName.set(entry.name, entry);
+  }
+  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Exact text of `codemode-allowlist.generated.ts` for a derived list. */
+export function renderCodeModeAllowlist(
+  entries: readonly CodeModeAllowlistEntry[],
+): string {
+  const rows = entries
+    .map(
+      (e) =>
+        `  { name: '${e.name}', domain: '${e.domain}', version: '${e.version}', permissions: [${e.permissions
+          .map((p) => `'${p}'`)
+          .join(', ')}], parameters_hash: '${e.parameters_hash}' },`,
+    )
+    .join('\n');
+  return `// GENERATED by apps/backend/scripts/generate-codemode-allowlist.ts. DO NOT EDIT.
+// Regenerate after any change to a read-only tool and review the diff: this list
+// is what a Code Mode script may ever call. Never extend it from env, prompts or DB.
+import type { CodeModeAllowlistEntry } from './codemode-allowlist.derive';
+
+export const CODEMODE_ALLOWLIST: readonly CodeModeAllowlistEntry[] = Object.freeze([
+${rows}
+]);
+`;
+}

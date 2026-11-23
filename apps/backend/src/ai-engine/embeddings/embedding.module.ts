@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AIQueueModule } from '../queue/ai-queue.module';
 import { KnowledgeEmbeddingService } from './knowledge-embedding.service';
@@ -7,6 +7,9 @@ import { EmbeddingService } from './embedding.service';
 import { RAGService } from './rag.service';
 import { EmbeddingEventsListener } from './embedding-events.listener';
 import { EmbeddingBackfillService } from './embedding-backfill.service';
+import { AIToolRegistry } from '../tools/ai-tool-registry';
+import { createHelpTools } from '../tools/domains/help.tools';
+import { HelpKnowledgeIndexerService } from './help-knowledge-indexer.service';
 import { AIEmbeddingProcessor } from '../queue/processors/ai-embedding.processor';
 
 @Module({
@@ -18,8 +21,21 @@ import { AIEmbeddingProcessor } from '../queue/processors/ai-embedding.processor
     RAGService,
     EmbeddingEventsListener,
     EmbeddingBackfillService,
+    HelpKnowledgeIndexerService,
     AIEmbeddingProcessor,
   ],
-  exports: [KnowledgeEmbeddingService, KnowledgeSearchService, EmbeddingService, RAGService, EmbeddingBackfillService],
+  exports: [KnowledgeEmbeddingService, KnowledgeSearchService, EmbeddingService, RAGService, EmbeddingBackfillService, HelpKnowledgeIndexerService],
 })
-export class EmbeddingModule {}
+export class EmbeddingModule implements OnModuleInit {
+  constructor(
+    private readonly toolRegistry: AIToolRegistry,
+    private readonly helpIndexer: HelpKnowledgeIndexerService,
+  ) {}
+
+  /** T28: Vex help tools (search_help, get_help_article, get_learning_path, mark_learning_progress). */
+  onModuleInit(): void {
+    this.toolRegistry.registerMany(
+      createHelpTools({ knowledge: this.helpIndexer }),
+    );
+  }
+}

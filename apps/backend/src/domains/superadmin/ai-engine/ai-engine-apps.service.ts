@@ -12,6 +12,33 @@ export class AIEngineAppsService {
     private readonly aiEngine: AIEngineService,
   ) {}
 
+  /**
+   * `fallback_config_id` must be an active config different from the primary.
+   * Reuses AI_CONFIG_001 (missing/inactive) and AI_APP_005 (same as primary).
+   */
+  private async assertValidFallback(
+    fallbackConfigId: number | null | undefined,
+    primaryConfigId: number | null | undefined,
+    appModelType?: ai_model_type_enum,
+  ): Promise<void> {
+    if (!fallbackConfigId) return;
+    if (fallbackConfigId === primaryConfigId) {
+      throw new VendixHttpException(ErrorCodes.AI_APP_005);
+    }
+    const config = await this.prisma.ai_engine_configs.findUnique({
+      where: { id: fallbackConfigId },
+      select: { id: true, is_active: true, model_type: true },
+    });
+    if (!config || !config.is_active) {
+      throw new VendixHttpException(ErrorCodes.AI_CONFIG_001);
+    }
+    // A fallback of another kind (e.g. image model behind a text app) would
+    // "answer" with the wrong modality exactly when the primary is down.
+    if (appModelType && config.model_type !== appModelType) {
+      throw new VendixHttpException(ErrorCodes.AI_APP_005);
+    }
+  }
+
   async create(dto: CreateAIAppDto) {
     const existing = await this.prisma.ai_engine_applications.findUnique({
       where: { key: dto.key },
@@ -49,12 +76,19 @@ export class AIEngineAppsService {
     const effectiveModelType: ai_model_type_enum =
       dto.model_type ?? configModelType ?? 'text';
 
+    await this.assertValidFallback(
+      dto.fallback_config_id,
+      dto.config_id,
+      effectiveModelType,
+    );
+
     return this.prisma.ai_engine_applications.create({
       data: {
         key: dto.key,
         name: dto.name,
         description: dto.description,
         config_id: dto.config_id || null,
+        fallback_config_id: dto.fallback_config_id || null,
         system_prompt: dto.system_prompt,
         prompt_template: dto.prompt_template,
         temperature: dto.temperature,
@@ -211,6 +245,21 @@ export class AIEngineAppsService {
     // Effective model_type after the update: incoming dto value, else current row value.
     const effectiveModelType: ai_model_type_enum | undefined =
       dto.model_type ?? existing.model_type;
+
+    if (
+      dto.fallback_config_id !== undefined ||
+      dto.config_id !== undefined ||
+      dto.model_type !== undefined
+    ) {
+      await this.assertValidFallback(
+        dto.fallback_config_id !== undefined
+          ? dto.fallback_config_id
+          : (existing as { fallback_config_id?: number | null })
+              .fallback_config_id,
+        dto.config_id !== undefined ? dto.config_id : existing.config_id,
+        effectiveModelType,
+      );
+    }
 
     // Cross-validate model_type: when both sides are known, they must match.
     if (

@@ -3053,6 +3053,14 @@
       </div>
     </div>
 
+    <!-- Documentos guardados en la orden (por Vex o por flujos). -->
+    <div class="max-w-[1600px] mx-auto mt-4">
+      <app-card shadow="sm" [responsivePadding]="true">
+        <h3 class="text-sm font-semibold text-text-primary mb-3">Documentos</h3>
+        <app-record-documents subjectType="order" [subjectId]="orderData.id"></app-record-documents>
+      </app-card>
+    </div>
+
     <!-- ═══════════════════════════════════════════════════════════
          FLOW MODALS
          ═══════════════════════════════════════════════════════════ -->

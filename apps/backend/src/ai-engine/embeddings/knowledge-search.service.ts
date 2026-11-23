@@ -83,9 +83,14 @@ export class KnowledgeSearchService {
     documents: ToolDocument[],
     scopeSignature: string,
     domain?: string,
-    type: 'tool' | 'process' | 'recipe' = 'tool',
+    type: 'tool' | 'process' | 'recipe' | 'skill' = 'tool',
   ): Promise<KnowledgeRanking> {
-    if (type !== 'tool' && type !== 'process' && type !== 'recipe')
+    if (
+      type !== 'tool' &&
+      type !== 'process' &&
+      type !== 'recipe' &&
+      type !== 'skill'
+    )
       throw new Error('INVALID_KNOWLEDGE_TYPE');
 
     documents = documents.filter(
@@ -305,7 +310,7 @@ export class KnowledgeSearchService {
 
   private readyDocuments(
     documents: ToolDocument[],
-    type: 'tool' | 'process' | 'recipe',
+    type: 'tool' | 'process' | 'recipe' | 'skill',
   ): Promise<ReadyDocument[]> {
     return this.prisma.$transaction(
       async (tx: Prisma.TransactionClient) => {

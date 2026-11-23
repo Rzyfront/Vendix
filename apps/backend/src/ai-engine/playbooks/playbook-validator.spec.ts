@@ -451,3 +451,112 @@ describe('release playbook contract against real factories (no business executio
     );
   });
 });
+
+describe('batch playbooks (approval: batch)', () => {
+  const BATCH_IDS = [
+    'ajustar-inventario-conteo',
+    'cambio-precios',
+    'crear-cliente',
+    'reserva-servicio',
+    'trasladar-inventario',
+  ];
+  const batchDoc = (id = 'cambio-precios') =>
+    release().find((d) => d.id === id)!;
+
+  it('publishes exactly 5 batch playbooks and they pass the batch rules', () => {
+    const docs = release();
+    expect(
+      docs
+        .filter((d) => d.contract.approval === 'batch')
+        .map((d) => d.id)
+        .sort(),
+    ).toEqual(BATCH_IDS);
+    expect(() => validatePlaybookCatalog(docs, catalog())).not.toThrow();
+    for (const id of BATCH_IDS) {
+      const doc = batchDoc(id);
+      const steps = doc.contract.steps;
+      expect(steps.filter((s) => s.tool === 'propose_write_batch')).toHaveLength(
+        1,
+      );
+      expect(doc.contract.launch?.title).toBeTruthy();
+      expect(doc.contract.launch?.prompt).toMatch(/lote/);
+      expect(steps.filter((s) => s.approval === 'individual')).toHaveLength(0);
+    }
+  });
+
+  it('rejects a batch playbook that lists an irreversible tool as a batch step', () => {
+    const doc = batchDoc();
+    const write = doc.contract.steps.find((s) => s.approval === 'batch')!;
+    const cat = catalog();
+    cat.tools.find((t) => t.name === write.tool)!.irreversible = true;
+    expect(() => validatePlaybookCatalog([doc], cat)).toThrow(
+      'PLAYBOOK_BATCH_IRREVERSIBLE',
+    );
+  });
+
+  it('rejects a background step that writes', () => {
+    const doc = batchDoc();
+    doc.contract.steps.find((s) => s.approval === 'batch')!.background = true;
+    expect(() => validatePlaybookCatalog([doc], catalog())).toThrow(
+      'PLAYBOOK_BATCH_BACKGROUND_WRITE',
+    );
+  });
+
+  it('rejects a batch playbook that does not end by proposing the batch', () => {
+    const noProposal = batchDoc();
+    noProposal.contract.steps = noProposal.contract.steps.filter(
+      (s) => s.tool !== 'propose_write_batch',
+    );
+    noProposal.contract.steps.forEach((s) => {
+      s.depends_on = s.depends_on.filter((d) => d !== 'propose-batch');
+    });
+    expect(() => validatePlaybookCatalog([noProposal], catalog())).toThrow(
+      'PLAYBOOK_BATCH_PROPOSAL',
+    );
+    const notInProposal = batchDoc();
+    notInProposal.contract.steps.find(
+      (s) => s.tool === 'propose_write_batch',
+    )!.depends_on = [];
+    expect(() => validatePlaybookCatalog([notInProposal], catalog())).toThrow(
+      'PLAYBOOK_BATCH_PROPOSAL',
+    );
+  });
+
+  it('rejects a write after the proposal and a batch write with individual approval', () => {
+    const after = batchDoc('trasladar-inventario');
+    const proposal = after.contract.steps.find(
+      (s) => s.tool === 'propose_write_batch',
+    )!;
+    const write = after.contract.steps.find((s) => s.approval === 'batch')!;
+    write.depends_on = [proposal.id];
+    proposal.depends_on = [];
+    expect(() => validatePlaybookCatalog([after], catalog())).toThrow(
+      'PLAYBOOK_BATCH_PROPOSAL',
+    );
+    const individual = batchDoc();
+    individual.contract.steps.find((s) => s.approval === 'batch')!.approval =
+      'individual';
+    expect(() => validatePlaybookCatalog([individual], catalog())).toThrow(
+      'PLAYBOOK_APPROVAL',
+    );
+  });
+
+  it('refuses batch steps in a playbook that does not declare approval: batch', () => {
+    const doc = batchDoc();
+    doc.contract.approval = undefined;
+    expect(() => validatePlaybookCatalog([doc], catalog())).toThrow(
+      'PLAYBOOK_BATCH_UNDECLARED',
+    );
+  });
+
+  it('requires launch metadata on a batch playbook', () => {
+    expect(() =>
+      parsePlaybookMarkdown(
+        editFrontmatter((f) => {
+          delete f.vendix_contract.launch;
+        }, 'cambio-precios'),
+        'bad.md',
+      ),
+    ).toThrow('PLAYBOOK_SCHEMA');
+  });
+});

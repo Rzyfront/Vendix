@@ -68,6 +68,32 @@
       }
     </button>
     <button
+      (click)="switchTab('skills')"
+      class="px-4 py-2.5 text-sm font-medium transition-colors relative"
+      [class.text-primary]="activeTab() === 'skills'"
+      [class.text-text-secondary]="activeTab() !== 'skills'"
+    >
+      Skills
+      @if (activeTab() === "skills") {
+        <span
+          class="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-t-full"
+        ></span>
+      }
+    </button>
+    <button
+      (click)="switchTab('voices')"
+      class="px-4 py-2.5 text-sm font-medium transition-colors relative"
+      [class.text-primary]="activeTab() === 'voices'"
+      [class.text-text-secondary]="activeTab() !== 'voices'"
+    >
+      Voces
+      @if (activeTab() === "voices") {
+        <span
+          class="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-t-full"
+        ></span>
+      }
+    </button>
+    <button
       (click)="switchTab('health')"
       class="px-4 py-2.5 text-sm font-medium transition-colors relative"
       [class.text-primary]="activeTab() === 'health'"
@@ -81,6 +107,16 @@
       }
     </button>
   </div>
+
+  <!-- Voces (F8 T49): catálogo de voces de lectura -->
+  @if (activeTab() === "voices") {
+    <app-ai-voices-panel></app-ai-voices-panel>
+  }
+
+  <!-- Skills de Vex (F4 T33): carga al abrir la pestaña -->
+  @if (activeTab() === "skills") {
+    <app-ai-skills-panel></app-ai-skills-panel>
+  }
 
   <!-- Salud por app (ia-cargas F6): solo lectura, carga al abrir la pestaña -->
   @if (activeTab() === "health") {
@@ -752,4 +788,15 @@
     (submit)="saveAgent($event)"
   >
   </app-ai-engine-agent-modal>
+}
+
+@defer (when showAgentSheet()) {
+  <app-ai-engine-agent-sheet
+    [isOpen]="showAgentSheet()"
+    (isOpenChange)="showAgentSheet.set($event)"
+    [agentKey]="sheetAgentKey()"
+    [tools]="tools()"
+    (saved)="loadAgents()"
+  >
+  </app-ai-engine-agent-sheet>
 }

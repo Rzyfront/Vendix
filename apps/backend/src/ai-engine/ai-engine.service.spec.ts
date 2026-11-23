@@ -617,6 +617,48 @@ describe('AIEngineService.consumeSubscriptionQuota wiring', () => {
     );
   });
 
+  it('T14: los tokens de Vexi (chat_assistant) van a su contador por agente, por llamada', async () => {
+    const { service, prisma, subscriptionAccess } = buildService();
+    const agentQuota = { consumeAgentTokens: jest.fn().mockResolvedValue(undefined) };
+    (service as any).agentQuota = agentQuota;
+    prisma.ai_engine_applications.findUnique.mockResolvedValue(
+      textApp('chat_assistant', 'conversations'),
+    );
+    withTextProvider(service);
+
+    await inRequest(async () => {
+      await service.run('chat_assistant');
+      await service.run('chat_assistant');
+    });
+
+    const calls = agentQuota.consumeAgentTokens.mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0].slice(0, 3)).toEqual([STORE_ID, 'vexi', 15]);
+    expect(calls[0][3]).toMatch(new RegExp(`^${BASE}:.+:vexi-tokens$`));
+    expect(calls[0][3]).not.toEqual(calls[1][3]);
+    // El cobro previo de streaming_chat no cambia: 1 unidad por request.
+    expect(subscriptionAccess.consumeAIQuota).toHaveBeenCalledWith(
+      STORE_ID,
+      'streaming_chat',
+      1,
+      BASE,
+    );
+  });
+
+  it('T14: Vex (vex_assistant) no toca el contador de tokens de Vexi', async () => {
+    const { service, prisma } = buildService();
+    const agentQuota = { consumeAgentTokens: jest.fn() };
+    (service as any).agentQuota = agentQuota;
+    prisma.ai_engine_applications.findUnique.mockResolvedValue(
+      textApp('vex_assistant', 'conversations'),
+    );
+    withTextProvider(service);
+
+    await inRequest(() => service.run('vex_assistant'));
+
+    expect(agentQuota.consumeAgentTokens).not.toHaveBeenCalled();
+  });
+
   it('does not consume quota for vex_assistant (own counters)', async () => {
     const { service, prisma, subscriptionAccess } = buildService();
     prisma.ai_engine_applications.findUnique.mockResolvedValue(
@@ -894,7 +936,8 @@ describe('AIEngineService phase A provider attempts and quota isolation', () => 
     });
     expect(chunks).toEqual([
       { type: 'text', content: 'ok' },
-      { type: 'done', usage: success.usage },
+      // T24: `done` now carries the real cost of the serving config.
+      { type: 'done', usage: success.usage, cost_usd: 0.14 },
     ]);
     expect(
       [...rows.values()].filter((row) => row.kind === 'provider_call'),

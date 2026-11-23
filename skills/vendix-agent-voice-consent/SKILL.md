@@ -7,7 +7,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.1"
+  version: "1.2"
   scope: [root]
   auto_invoke:
     - "Changing Vex/Vexi spoken consent or voice confirmation challenges"
@@ -15,6 +15,8 @@ metadata:
 ---
 
 # Agent Voice Consent
+
+> **Realtime voice is retired (N5).** A new realtime session answers a typed 410 `VEXI_REALTIME_UNAVAILABLE` for every plan; only `tool-call` and `session/close` stay alive for sessions opened before the deploy (close still bills). Voice today is per-reply TTS through the API (cap: voice-readout seconds/month per agent in `plan_ai_entitlements`, `NULL` = unlimited, `0` = nothing) plus dictation and dedicated push-to-talk consent; `vexi.voice_engine` is accepted and ignored and voice config lives only in superadmin's agent sheet. Rules below that mention realtime proposals/sessions are **historical**: they apply only to sessions opened before the retirement or if the feature returns (`VexiRealtimeService.createSession` is kept for that). The consent rules for dedicated capture and the shared apply choke remain current. A voice write is still limited only by the user's role.
 
 ## Critical rules
 

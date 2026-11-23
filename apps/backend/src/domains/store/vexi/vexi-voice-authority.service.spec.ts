@@ -293,6 +293,73 @@ describe('VexiVoiceAuthorityService scoped execution authority', () => {
       await expect(service.assertWritable(authority)).rejects.toThrow();
     }));
 
+  describe('T14 — voz por agente (comportamiento previo de Vexi fijado)', () => {
+    const withQuota = (status: string) => {
+      const agentQuota = {
+        checkAgentVoice: jest
+          .fn()
+          .mockResolvedValue({ status, cap: 60, used: 60 }),
+      };
+      const scoped = new VexiVoiceAuthorityService(
+        prisma as never,
+        globalPrisma as never,
+        agent as never,
+        access as never,
+        plans as never,
+        objectives as never,
+        agentQuota as never,
+      );
+      return { agentQuota, scoped };
+    };
+
+    it('con el cupo de lectura agotado Vexi sigue confirmando por voz', () =>
+      asOwner(async () => {
+        const { agentQuota, scoped } = withQuota('exhausted');
+        await expect(scoped.resolveAuthority(8, 'vexi')).resolves.toBeTruthy();
+        expect(agentQuota.checkAgentVoice).toHaveBeenCalledWith(5, 'vexi');
+        expect(access.canUseAIFeature).not.toHaveBeenCalledWith(
+          5,
+          'realtime_voice',
+        );
+      }));
+
+    it('apagar la voz de Vexi en el plan bloquea la voz de Vexi y no la de Vex', () =>
+      asOwner(async () => {
+        const agentQuota = {
+          checkAgentVoice: jest.fn(async (_store: number, key: string) => ({
+            status: key === 'vexi' ? 'disabled' : 'ok',
+            cap: 60,
+            used: 0,
+          })),
+        };
+        const scoped = new VexiVoiceAuthorityService(
+          prisma as never,
+          globalPrisma as never,
+          agent as never,
+          access as never,
+          plans as never,
+          objectives as never,
+          agentQuota as never,
+        );
+        await expect(scoped.resolveAuthority(8, 'vexi')).rejects.toThrow(
+          'La voz o las herramientas de este agente no están disponibles en el plan actual.',
+        );
+        prisma.ai_conversations.findFirst.mockResolvedValue({
+          id: 8,
+          metadata: { agent_key: 'vex' },
+          status: 'active',
+        });
+        await expect(scoped.resolveAuthority(8, 'vex')).resolves.toBeTruthy();
+        expect(agentQuota.checkAgentVoice).toHaveBeenLastCalledWith(5, 'vex');
+      }));
+
+    it('una decisión no disponible no bloquea la voz', () =>
+      asOwner(async () => {
+        const { scoped } = withQuota('unavailable');
+        await expect(scoped.resolveAuthority(8, 'vexi')).resolves.toBeTruthy();
+      }));
+  });
+
   it('does not read a process-global fallback without an authenticated ALS context', async () => {
     RequestContextService.run(owner, () => undefined);
     await expect(service.resolveAuthority(8, 'vexi')).rejects.toThrow();

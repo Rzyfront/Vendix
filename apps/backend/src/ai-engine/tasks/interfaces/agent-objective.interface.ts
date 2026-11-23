@@ -32,6 +32,19 @@ export interface ObjectiveBudget {
   recovery: number;
 }
 
+/**
+ * T24 / P2-6: the budget a store user may see. `cost_usd` stays in
+ * `ai_agent_objectives.budget` and internal logs; clients get tokens only.
+ */
+export type ClientObjectiveBudget = Omit<ObjectiveBudget, 'cost_usd'>;
+
+export function clientObjectiveBudget(
+  budget: ObjectiveBudget | ClientObjectiveBudget,
+): ClientObjectiveBudget {
+  const { cost_usd: _internal, ...rest } = budget as ObjectiveBudget;
+  return rest;
+}
+
 export const emptyObjectiveBudget = (): ObjectiveBudget => ({
   provider_attempts: 0,
   prompt_tokens: 0,
@@ -158,7 +171,7 @@ export interface ObjectiveProgress {
   version: number;
   semantic_status: string;
   next_step: string | null;
-  budget: ObjectiveBudget;
+  budget: ClientObjectiveBudget;
   expires_at: string;
   requires_revalidation: boolean;
 }

@@ -23,6 +23,7 @@ Source: `ai-engine/tools/interfaces/tool.interface.ts`, `ai-engine/tools/tool-re
 - `executeTool()` keeps its string ABI, aliases and confirmation exceptions for MCP/voice/apply. `executeToolResult()` runs the SAME permission, validation, preview and token checks; it is not a bypass. Do not rewrite handlers or the global HTTP envelope.
 - `ok` means a tool answered, NOT an objective verified. D0 never emits `completed_verified` (that is D2, `vendix-agent-durable-tasks`).
 - `pending_confirmation`, `needs_user_input` and `unknown_effect` are distinct non-success states. A preview refusal without a token is NOT a proposal. A proposal never runs the handler nor consumes successful-tool quota.
+- A Vex write batch (`propose_write_batch`) is a proposal too: nothing runs until its approval claims it atomically; step statuses end terminal and an unverifiable step is `unknown_effect` for the batch. See `vendix-vex-agent`.
 - A timeout/5xx after entering a write handler may have committed. A legacy `applied:false` network error without definitive status, or `applied:true` wrapping an HTTP 200 failure, is `unknown_effect`: stop and reconcile before any retry. A single-use token is not distributed exactly-once.
 
 ## `applied` is fail-closed

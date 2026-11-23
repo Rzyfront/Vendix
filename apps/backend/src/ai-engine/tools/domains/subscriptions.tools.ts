@@ -1119,6 +1119,9 @@ export function createSubscriptionTools(
     // ─── F-80: get_subscription_access ───────────────────────────────────
     {
       name: 'get_subscription_access',
+      access: 'public',
+      accessReason:
+        "Mirror of the subscription HTTP reads that only require authentication: every store member's panel reads them for the banner and paywall.",
       version: '1',
       domain: 'subscriptions',
       readOnly: true,
@@ -1175,6 +1178,9 @@ export function createSubscriptionTools(
     // ─── F-81: get_ai_usage ──────────────────────────────────────────────
     {
       name: 'get_ai_usage',
+      access: 'public',
+      accessReason:
+        "Mirror of the subscription HTTP reads that only require authentication: every store member's panel reads them for the banner and paywall.",
       version: '1',
       domain: 'subscriptions',
       readOnly: true,

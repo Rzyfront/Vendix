@@ -21,9 +21,10 @@ import {
   requireObjectiveScope,
   objectiveOperationId,
 } from '../../../ai-engine/tasks/agent-objective.repository';
-import type {
-  AgentObjective,
-  ObjectiveLease,
+import {
+  clientObjectiveBudget,
+  type AgentObjective,
+  type ObjectiveLease,
 } from '../../../ai-engine/tasks/interfaces/agent-objective.interface';
 
 import { createHash, randomUUID } from 'crypto';
@@ -202,7 +203,7 @@ export class VexiPlanStateService {
       version: objective.version,
       expires_at: objective.expires_at.toISOString(),
       next_step: objective.next_step,
-      budget: objective.budget,
+      budget: clientObjectiveBudget(objective.budget),
       requires_revalidation: objective.requires_revalidation,
     };
   }
@@ -566,6 +567,11 @@ export class VexiPlanStateService {
     input: {
       conversationId?: number;
       stepId?: string;
+      /**
+       * F5: marks the effect row as one step of a Vex write batch. Optional;
+       * when absent nothing changes for the Vexi/Vex plan paths.
+       */
+      batchId?: string;
       tool: string;
       args: Record<string, any>;
       consent?: {
@@ -683,6 +689,14 @@ export class VexiPlanStateService {
         },
         lease,
       );
+      if (input.batchId) {
+        // Scoped client: the tenant predicate is injected, the operation id is
+        // unique, so this can only ever touch this step's own effect row.
+        await this.prisma.ai_agent_effects.updateMany({
+          where: { operation_id: operationId },
+          data: { batch_id: input.batchId },
+        });
+      }
       // Even a new token cannot replay an operation whose dispatch may have committed.
       if (!['proposed', 'approved'].includes(effect.status))
         throw new ConflictException(

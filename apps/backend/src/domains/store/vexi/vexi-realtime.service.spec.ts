@@ -383,6 +383,8 @@ describe('VexiRealtimeService G session authority', () => {
       },
       {
         name: 'write_without_preview',
+        access: 'public',
+        accessReason: 'test fixture',
         version: '1',
         domain: 'products',
         requiresConfirmation: true,
@@ -392,6 +394,8 @@ describe('VexiRealtimeService G session authority', () => {
       },
       {
         name: 'unclassified',
+        access: 'public',
+        accessReason: 'test fixture',
         version: '1',
         domain: 'products',
         description: 'No read flag',
@@ -400,6 +404,8 @@ describe('VexiRealtimeService G session authority', () => {
       },
       {
         name: 'ui_navigate',
+        access: 'public',
+        accessReason: 'test fixture',
         version: '1',
         domain: 'ui',
         clientSide: true,
@@ -408,6 +414,8 @@ describe('VexiRealtimeService G session authority', () => {
       },
       {
         name: 'propose_plan',
+        access: 'public',
+        accessReason: 'test fixture',
         version: '1',
         domain: 'planning',
         readOnly: true,
@@ -417,6 +425,8 @@ describe('VexiRealtimeService G session authority', () => {
       },
       {
         name: 'search_tools',
+        access: 'public',
+        accessReason: 'test fixture',
         version: '1',
         domain: 'discovery',
         readOnly: true,
@@ -430,6 +440,8 @@ describe('VexiRealtimeService G session authority', () => {
       },
       {
         name: 'search_playbooks',
+        access: 'public',
+        accessReason: 'test fixture',
         version: '1',
         domain: 'playbooks',
         readOnly: true,
@@ -443,6 +455,8 @@ describe('VexiRealtimeService G session authority', () => {
       },
       {
         name: 'load_playbook',
+        access: 'public',
+        accessReason: 'test fixture',
         version: '1',
         domain: 'playbooks',
         readOnly: true,
@@ -1130,6 +1144,7 @@ describe('VexiRealtimeService G session authority', () => {
       retrievalSource: 'lexical',
       degraded: [],
       catalogHash: 'hash',
+      fullCatalogReason: null,
     });
     const result = await run(() =>
       service.executeSessionToolCall(sessionId, 'search_tools', {

@@ -1,0 +1,37 @@
+name: Agent sandbox (Python) offline specs
+
+# Offline contracts of the Vex analysis Lambda (infra/agent-sandbox/python) on
+# Linux. They mock subprocess, kill(-1), prctl, System V IPC and setrlimit: no
+# guest code runs here and nothing reaches AWS. They do not certify isolation;
+# T53 against the real Lambda does (CERTIFICACION-T53.md). No secrets.
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'infra/agent-sandbox/python/**'
+      - '.github/workflows/agent-sandbox-python.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-specs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: infra/agent-sandbox/python
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest -v test_runner
+      - run: python -m unittest -v test_handler
+      - run: node --test template.test.cjs
+      - name: Runtime digest is reproducible
+        run: ./runtime-digest.sh

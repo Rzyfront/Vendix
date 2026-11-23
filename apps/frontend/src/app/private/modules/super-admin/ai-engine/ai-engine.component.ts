@@ -33,7 +33,10 @@ import {
   AIEngineConfigModalComponent,
   AIEngineAppModalComponent,
   AIEngineAgentModalComponent,
+  AIEngineAgentSheetComponent,
   AIAppHealthPanelComponent,
+  AISkillsPanelComponent,
+  AiVoicesPanelComponent,
 } from './components/index';
 
 import {
@@ -69,7 +72,15 @@ import {
   Validators,
 } from '@angular/forms';
 
-type ActiveTab = 'configs' | 'apps' | 'tools' | 'jobs' | 'agents' | 'health';
+type ActiveTab =
+  | 'configs'
+  | 'apps'
+  | 'tools'
+  | 'jobs'
+  | 'agents'
+  | 'skills'
+  | 'voices'
+  | 'health';
 
 @Component({
   selector: 'app-ai-engine',
@@ -81,7 +92,10 @@ type ActiveTab = 'configs' | 'apps' | 'tools' | 'jobs' | 'agents' | 'health';
     AIEngineConfigModalComponent,
     AIEngineAppModalComponent,
     AIEngineAgentModalComponent,
+    AIEngineAgentSheetComponent,
     AIAppHealthPanelComponent,
+    AISkillsPanelComponent,
+    AiVoicesPanelComponent,
     EmptyStateComponent,
     ResponsiveDataViewComponent,
     InputsearchComponent,
@@ -179,6 +193,9 @@ export class AIEngineComponent implements OnInit {
   isLoadingAgents = signal<boolean>(false);
   selectedAgent = signal<AIAgent | null>(null);
   showAgentModal = signal<boolean>(false);
+  // Ficha única de Vex / Vexi (modelo, proveedor y voz).
+  showAgentSheet = signal<boolean>(false);
+  sheetAgentKey = signal<'vex' | 'vexi'>('vex');
   isSubmittingAgent = signal<boolean>(false);
   agentPagination = { page: 1, limit: 10, total: 0, totalPages: 0 };
 
@@ -1278,6 +1295,11 @@ export class AIEngineComponent implements OnInit {
 
   editAgent(agent: AIAgent): void {
     this.ensureToolCatalog();
+    if (agent.key === 'vex' || agent.key === 'vexi') {
+      this.sheetAgentKey.set(agent.key);
+      this.showAgentSheet.set(true);
+      return;
+    }
     this.selectedAgent.set(agent);
     this.showAgentModal.set(true);
   }

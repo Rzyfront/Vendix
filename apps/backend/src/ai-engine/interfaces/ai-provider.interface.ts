@@ -6,7 +6,8 @@ import type {
 export type SdkType =
   | 'openai_compatible'
   | 'anthropic_compatible'
-  | 'minimax_t2a';
+  | 'minimax_t2a'
+  | 'gemini_tts';
 export type AIModelType =
   | 'text'
   | 'image'
@@ -165,6 +166,8 @@ export interface AIResponse {
   error?: string;
   tool_calls?: AIToolCall[];
   finish_reason?: 'stop' | 'tool_calls' | 'length';
+  /** Real USD cost of this call on the config that served it; absent = unknown. */
+  cost_usd?: number;
 }
 
 export interface AIStreamChunk {
@@ -197,12 +200,38 @@ export interface AIStreamChunk {
   model?: string;
   error_code?: string;
   usage_state?: 'reported' | 'unknown';
+  /**
+   * Present on `done`: real USD cost of the turn (every provider call the turn
+   * made, fallback retry included). The chat persists it in
+   * `ai_messages.cost_usd`; absent means unknown, never "free".
+   */
+  cost_usd?: number;
   context_budget?: {
     estimated_input_tokens: number;
     omitted_messages: number;
     context_window_tokens: number;
     provenance: 'configured' | 'fallback';
     method: 'conservative_estimate';
+    /** Output reserved for the answer. */
+    max_output_tokens?: number;
+    /** Ring percent at which the UI warns and the next turn compacts. */
+    compaction_percent?: number;
+  };
+  /**
+   * P2-6: present on the Vex/Vexi chat `done` frame instead of any cost — the
+   * store's plan limit for the agent (used / cap per period; `cap: null` = no
+   * limit). Read from `AgentQuotaService.getAgentUsage`; absent when unknown.
+   */
+  quota?: {
+    agent_key: 'vex' | 'vexi';
+    meters: Array<{
+      capability_key: string;
+      label: string;
+      unit: 'messages' | 'tokens' | 'seconds';
+      period: 'daily' | 'monthly';
+      used: number;
+      cap: number | null;
+    }>;
   };
   /** Transport cursor is observational and grants no execution authority. */
   replay?: {
@@ -220,7 +249,16 @@ export interface AIStreamChunk {
   /** Present on `ui_block`: the rendered block reference and payload. */
   ui_block?: {
     block_id: string;
-    kind: 'table' | 'chart' | 'kpi' | 'image' | 'file' | 'markdown';
+    kind:
+      | 'table'
+      | 'chart'
+      | 'kpi'
+      | 'image'
+      | 'file'
+      | 'markdown'
+      | 'timeline'
+      | 'list'
+      | 'write_batch';
     version?: number;
     spec?: Record<string, any>;
     data?: unknown;

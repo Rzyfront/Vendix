@@ -31,6 +31,8 @@ export interface VoiceConsentReceipt {
   execution?: VexiToolExecution;
   audio_base64?: string;
   content_type?: string;
+  /** T14: why the acknowledgement came without audio. */
+  voice_notice?: { code: string; message: string };
   step_status?: 'pending' | 'applied' | 'failed' | 'cancelled' | 'unknown';
   plan_status?:
     | 'proposed'

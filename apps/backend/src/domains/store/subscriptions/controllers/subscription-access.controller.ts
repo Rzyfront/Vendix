@@ -1,9 +1,13 @@
-import { Controller, Get, Logger } from '@nestjs/common';
+import { Controller, Get, Logger, Optional } from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ResponseService } from '../../../../common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { SubscriptionResolverService } from '../services/subscription-resolver.service';
 import { SubscriptionAccessService } from '../services/subscription-access.service';
+import {
+  AgentQuotaService,
+  type AgentUsage,
+} from '../services/agent-quota.service';
 import {
   AccessCheckResponseDto,
   SubscriptionBannerLevel,
@@ -34,6 +38,9 @@ export class SubscriptionAccessController {
     private readonly resolver: SubscriptionResolverService,
     private readonly access: SubscriptionAccessService,
     private readonly responseService: ResponseService,
+    // T14 (N7) — barras de consumo por agente. Opcional y al final: sin él la
+    // respuesta sale como antes, sin `agent_usage`.
+    @Optional() private readonly agentQuota?: AgentQuotaService,
   ) {}
 
   @Get('current/access')
@@ -180,8 +187,25 @@ export class SubscriptionAccessController {
         })
       : null;
 
+    // Lectura de solo consumo: un fallo deja la barra fuera, nunca el endpoint.
+    let agent_usage: AgentUsage | null = null;
+    if (this.agentQuota) {
+      try {
+        agent_usage = await this.agentQuota.getAgentUsage(storeId);
+      } catch (err) {
+        this.logger.warn(
+          `agent_usage unavailable for store=${storeId}: ${(err as Error).message}`,
+        );
+      }
+    }
+
     return this.responseService.success(
-      { features, period_start, consumption },
+      {
+        features,
+        period_start,
+        consumption,
+        ...(agent_usage && { agent_usage }),
+      },
       'Usage retrieved',
     );
   }

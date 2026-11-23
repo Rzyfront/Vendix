@@ -19,6 +19,7 @@ import { KnowledgeEmbeddingService } from '../embeddings/knowledge-embedding.ser
 import { AIKnowledgeIndexJob } from '../queue/interfaces/ai-queue.interface';
 import { PlaybookLoaderService } from '../playbooks/playbook-loader.service';
 import { PlaybookService } from '../playbooks/playbook.service';
+import { MANAGED_RELEASE_HASH } from '../skills/skill.types';
 import { AIToolRegistry } from './ai-tool-registry';
 import {
   buildToolManifest,
@@ -89,6 +90,8 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
           store_id: null,
           organization_id: null,
           status: { not: 'retired' },
+          // Managed documents (skills, help) are not release-owned: never retired here.
+          release_hash: { not: MANAGED_RELEASE_HASH },
         },
         data: { active: false, status: 'retired', updated_at: new Date() },
       });
@@ -300,6 +303,8 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
       const old = await this.prisma.ai_knowledge_documents.findUnique({
         where: { document_key: doc.key },
       });
+      // A managed row is owned by its admin flow; a release never overwrites it.
+      if (old?.release_hash === MANAGED_RELEASE_HASH) continue;
       if (
         old?.active &&
         old.status === 'ready' &&
@@ -367,6 +372,7 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
             knowledge_scope: 'global',
             id: { not: saved.id },
             version: { not: doc.version },
+            release_hash: { not: MANAGED_RELEASE_HASH },
           },
           data: { status: 'retired', active: false, updated_at: new Date() },
         });

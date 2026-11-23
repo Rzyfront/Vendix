@@ -10,10 +10,46 @@ import {
   ValidateNested,
   MaxLength,
   Min,
+  Max,
   IsIn,
+  IsInt,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PlanFeatureItemDto } from './plan-feature-item.dto';
+import {
+  AI_AGENT_KEYS,
+  AI_CAPABILITIES,
+  AI_ON_LIMIT_MODES,
+} from '../../../store/subscriptions/types/ai-capabilities';
+
+/**
+ * T12 — one AI capability of the plan (`plan_ai_entitlements` row). The pair
+ * agent_key + capability_key must exist in the catalog
+ * (`libs/shared-types/ai-capabilities.ts`); PlansService rejects unknown or
+ * repeated pairs with SUBSCRIPTION_VALIDATION. `cap_value`: NULL or omitted =
+ * unlimited, 0 = nothing; only capabilities with a cap accept a number.
+ */
+export class PlanAIEntitlementDto {
+  @IsIn(AI_AGENT_KEYS as unknown as string[])
+  agent_key: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  capability_key: string;
+
+  @IsBoolean()
+  enabled: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(Number.MAX_SAFE_INTEGER)
+  cap_value?: number | null;
+
+  @IsIn(AI_ON_LIMIT_MODES as unknown as string[])
+  on_limit: string;
+}
 
 export class PlanPricingDto {
   @IsIn(['monthly', 'quarterly', 'semiannual', 'annual'])
@@ -112,6 +148,19 @@ export class CreatePlanDto {
   @IsOptional()
   @IsObject()
   ai_feature_flags?: Record<string, any>;
+
+  /**
+   * T12 — AI capabilities per agent (new model). Omitted = untouched. Rows not
+   * sent keep their stored value (update) or the legacy/catalog default
+   * (create). Saving them also rewrites the fields of `ai_feature_flags` they
+   * own, so the gate (still on the old model, shadow mode) agrees with them.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(AI_CAPABILITIES.length)
+  @ValidateNested({ each: true })
+  @Type(() => PlanAIEntitlementDto)
+  ai_entitlements?: PlanAIEntitlementDto[];
 
   /**
    * P7.1: Flows limits of the plan. Omitted = untouched, `null` = platform

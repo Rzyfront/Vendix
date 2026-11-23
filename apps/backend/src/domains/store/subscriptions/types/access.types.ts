@@ -1,6 +1,26 @@
 import { store_subscription_state_enum } from '@prisma/client';
 
 /**
+ * T9 — the plan AI capability catalog (Vex, Vexi, platform) lives once in
+ * `ai-capabilities.ts`, a byte-identical copy of
+ * `libs/shared-types/ai-capabilities.ts`. The legacy `AIFeatureKey` model below
+ * keeps deciding the gate until the shadow comparison of T10 reaches zero.
+ */
+export {
+  AI_AGENT_KEYS,
+  AI_CAPABILITIES,
+  aiCapabilityId,
+  findAICapability,
+  legacyFlagsToAIEntitlements,
+} from './ai-capabilities';
+export type {
+  AIAgentKey,
+  AICapabilityDefinition,
+  AIEntitlement,
+  AIOnLimit,
+} from './ai-capabilities';
+
+/**
  * Canonical AI feature keys consumed by the gate.
  * Keep in sync with `subscription_plans.ai_feature_flags` JSON shape and
  * with `ai_engine_applications.ai_feature_category` column values.
@@ -39,7 +59,6 @@ export interface FeatureConfig {
   monthly_tokens_cap?: number;
   daily_messages_cap?: number;
   retention_days?: number;
-  tools_allowed?: string[];
   indexed_docs_cap?: number;
   monthly_jobs_cap?: number;
   /**
@@ -108,9 +127,8 @@ export const FEATURE_QUOTA_CONFIG: Record<
   text_generation: { capField: 'monthly_tokens_cap', period: 'monthly' },
   streaming_chat: { capField: 'daily_messages_cap', period: 'daily' },
   conversations: null, // not quota-gated per call (retention_days is housekeeping)
-  // F3 — doble gate: la lista `tools_allowed` filtra el catálogo del turno
-  // (ver AIAgentService) y `monthly_tool_calls_cap` limita las ejecuciones
-  // del periodo. Sin cap declarado el contador sigue escribiéndose pero el
+  // N4 — el plan no restringe herramientas (las limita el rol): solo
+  // `monthly_tool_calls_cap` limita las ejecuciones del periodo. Sin cap declarado el contador sigue escribiéndose pero el
   // gate nunca bloquea por cuota (cap ausente = ilimitado).
   tool_agents: { capField: 'monthly_tool_calls_cap', period: 'monthly' },
   rag_embeddings: { capField: 'indexed_docs_cap', period: 'monthly' },

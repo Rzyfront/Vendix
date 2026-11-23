@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { getPrismaClient } from './shared/client';
+import { syncSeedPlanAIEntitlements } from './shared/plan-ai-entitlements';
 
 export interface SeedSubscriptionPlansResult {
   plansCreated: number;
@@ -140,15 +141,19 @@ export async function seedSubscriptionPlans(
         !Array.isArray(existing.ai_feature_flags)
           ? (existing.ai_feature_flags as Record<string, unknown>)
           : {};
+      const mergedFlags = {
+        ...currentFlags,
+        vex_agent: aiFeatureFlags.vex_agent,
+      };
       await tx.subscription_plans.update({
         where: { code: TRIAL_DEFAULT_CODE },
-        data: {
-          ai_feature_flags: {
-            ...currentFlags,
-            vex_agent: aiFeatureFlags.vex_agent,
-          },
-        },
+        data: { ai_feature_flags: mergedFlags },
       });
+      // T11 — rewrite only the rows of the merged vex_agent flag; the rest
+      // are created when missing and otherwise keep the superadmin config.
+      await syncSeedPlanAIEntitlements(tx, existing.id, mergedFlags, [
+        'vex_agent',
+      ]);
       plansSkipped++;
       console.log(
         `    Preserved user config, merged vex_agent flag: ${TRIAL_DEFAULT_CODE}`,
@@ -171,9 +176,10 @@ export async function seedSubscriptionPlans(
       );
     }
 
-    await tx.subscription_plans.create({
+    const created = await tx.subscription_plans.create({
       data: planData,
     });
+    await syncSeedPlanAIEntitlements(tx, created.id, aiFeatureFlags);
     plansCreated++;
     console.log(`    Created: ${TRIAL_DEFAULT_CODE} (is_default=true)`);
   });

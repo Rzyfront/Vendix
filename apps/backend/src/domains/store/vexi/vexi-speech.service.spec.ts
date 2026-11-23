@@ -474,7 +474,152 @@ describe('VexiSpeechService', () => {
     });
   });
 
+  describe('resolveParams with a catalog voice (F8 T49)', () => {
+    const app = {
+      metadata: {
+        speech: {
+          voice: 'base-voice',
+          response_format: 'mp3',
+          speed: 1.1,
+          vol: 1.5,
+          agent_voices: { vex: { voice: 'legacy-vex-voice' } },
+        },
+      },
+      config: { model_id: 'app-model' },
+    };
+    const profileOf = (over: Record<string, unknown> = {}) => ({
+      voice_profile: {
+        voice_id: 'Kore',
+        speed: null,
+        vol: null,
+        is_active: true,
+        config: { id: 42, model_id: 'gemini-tts', is_active: true },
+        ...over,
+      },
+    });
+    let agents: { findUnique: jest.Mock };
+
+    beforeEach(() => {
+      agents = { findUnique: jest.fn() };
+      (prisma as any).ai_agents = agents;
+      prisma.ai_engine_applications.findUnique.mockResolvedValue(app);
+    });
+
+    it('reads with the profile assigned to the agent, over metadata.speech', async () => {
+      agents.findUnique.mockResolvedValue(profileOf());
+
+      await expect(service.resolveParams('vex')).resolves.toEqual({
+        model: 'gemini-tts',
+        voice: 'Kore',
+        format: 'mp3',
+        speed: 1.1,
+        vol: 1.5,
+        configId: 42,
+      });
+      expect(agents.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { key: 'vex' } }),
+      );
+    });
+
+    it('lets the profile carry its own speed and volume', async () => {
+      agents.findUnique.mockResolvedValue(profileOf({ speed: '0.9', vol: 2 }));
+
+      await expect(service.resolveParams('vex')).resolves.toMatchObject({
+        speed: 0.9,
+        vol: 2,
+      });
+    });
+
+    it('assigning a voice to Vex leaves Vexi on its own voice', async () => {
+      agents.findUnique.mockImplementation(({ where }: any) =>
+        where.key === 'vex' ? profileOf() : { voice_profile: null },
+      );
+
+      const vex = await service.resolveParams('vex');
+      const vexi = await service.resolveParams('vexi');
+
+      expect(vex).toMatchObject({ voice: 'Kore', configId: 42 });
+      expect(vexi).toEqual({
+        model: 'app-model',
+        voice: 'base-voice',
+        format: 'mp3',
+        speed: 1.1,
+        vol: 1.5,
+      });
+    });
+
+    it('falls back to metadata.speech when the agent has no profile', async () => {
+      agents.findUnique.mockResolvedValue({ voice_profile: null });
+
+      const out = await service.resolveParams('vex');
+
+      expect(out.voice).toBe('legacy-vex-voice');
+      expect(out.configId).toBeUndefined();
+    });
+
+    it.each([
+      ['the profile is inactive', profileOf({ is_active: false })],
+      [
+        'its provider is inactive',
+        profileOf({ config: { id: 42, model_id: 'm', is_active: false } }),
+      ],
+    ])('falls back when %s', async (_name, row) => {
+      agents.findUnique.mockResolvedValue(row);
+
+      const out = await service.resolveParams('vex');
+
+      expect(out.voice).toBe('legacy-vex-voice');
+      expect(out.configId).toBeUndefined();
+    });
+
+    it('falls back when the profile lookup fails', async () => {
+      agents.findUnique.mockRejectedValue(new Error('db down'));
+
+      await expect(service.resolveParams('vex')).resolves.toMatchObject({
+        voice: 'legacy-vex-voice',
+      });
+    });
+
+    it('does not look for a profile without an agent', async () => {
+      await service.resolveParams();
+
+      expect(agents.findUnique).not.toHaveBeenCalled();
+    });
+  });
+
   describe('synthesize', () => {
+    it('synthesizes a catalog voice on its own provider and model', async () => {
+      await service.synthesize('Hola.', {
+        ...params,
+        model: 'gemini-tts',
+        voice: 'Kore',
+        configId: 42,
+      });
+
+      expect(aiEngine.runSpeech).toHaveBeenCalledWith(
+        'vexi_voice_tts',
+        { text: 'Hola.' },
+        expect.objectContaining({ voice: 'Kore', model: 'gemini-tts' }),
+        { configId: 42 },
+      );
+    });
+
+    it('keeps the fallback call unchanged: no model, no provider override', async () => {
+      await service.synthesize('Hola.', params);
+
+      const call = aiEngine.runSpeech.mock.calls[0];
+      expect(call).toHaveLength(3);
+      expect(call[2]).not.toHaveProperty('model');
+    });
+
+    it('never serves one provider\'s cached audio for another', async () => {
+      await service.synthesize('Listo.', { ...params, configId: 42 });
+      await service.synthesize('Listo.', { ...params, configId: 43 });
+      await service.synthesize('Listo.', params);
+
+      expect(aiEngine.runSpeech).toHaveBeenCalledTimes(3);
+    });
+
     it('sends stripped prose while the caller keeps the markers', async () => {
       await service.synthesize('El **total** es 1.500 pesos.', params);
 
@@ -515,6 +660,21 @@ describe('VexiSpeechService', () => {
       await service.synthesize('Hola.', params);
 
       expect(aiEngine.runSpeech).toHaveBeenCalledTimes(2);
+    });
+
+    it('T14: marca el audio generado con sus segundos y el acierto de caché como gratis', async () => {
+      const text = 'Tenés cuarenta y siete ventas hoy.';
+      const first = await service.synthesize(text, params);
+      const second = await service.synthesize(text, params);
+
+      // 'AAAA' no es un MP3 legible: cae al estimado por texto (15 car/s).
+      expect(first).toEqual(
+        expect.objectContaining({ generated: true, audioBase64: 'AAAA' }),
+      );
+      expect(first!.seconds).toBeCloseTo(text.length / 15, 5);
+      expect(second).toEqual(
+        expect.objectContaining({ generated: false, seconds: 0 }),
+      );
     });
   });
 

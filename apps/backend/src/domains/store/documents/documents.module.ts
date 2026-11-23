@@ -1,9 +1,15 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
+import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+import { VexiAttachmentsService } from '../vexi/vexi-attachments.service';
+import { createDocumentTools } from '../../../ai-engine/tools/domains/documents.tools';
 import { ResponseModule } from '@common/responses/response.module';
 import { S3Module } from '@common/services/s3.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { DossiersController } from './documents.controller';
 import { DossiersService } from './dossiers.service';
+import { RecordAttachmentsService } from './record-attachments.service';
+import { RecordDocumentsController } from './record-documents.controller';
+import { RecordDocumentsService } from './record-documents.service';
 import { StoredFilesService } from './stored-files.service';
 import { ReceivedDocumentPagesService } from '../../received-documents/services/received-document-pages.service';
 import { BasePdfPagesService } from './templates/base-pdf-pages.service';
@@ -62,6 +68,8 @@ import { DocumentSearchService } from './search/document-search.service';
     DocumentExpiryController,
     DocumentRetentionController,
     DocumentSearchController,
+    // B1: a record's documents in every industry, behind the record's read permission.
+    RecordDocumentsController,
     SignaturesController,
     DocumentTemplatesController,
     IssuedDocumentsController,
@@ -69,6 +77,9 @@ import { DocumentSearchService } from './search/document-search.service';
   providers: [
     StoredFilesService,
     DossiersService,
+    // T44: Vex saves a chat attachment into a record's folder.
+    RecordAttachmentsService,
+    RecordDocumentsService,
     // P4.4/P4.6/P4.7: perfil del archivo, retención y purga, vencimientos, búsqueda y carpetas.
     DocumentFileProfilesService,
     DocumentRetentionService,
@@ -104,4 +115,21 @@ import { DocumentSearchService } from './search/document-search.service';
     DocumentTemplatesService,
   ],
 })
-export class DocumentsModule {}
+export class DocumentsModule implements OnModuleInit {
+  constructor(
+    private readonly toolRegistry: AIToolRegistry,
+    // Provided by the @Global() AIEngineModule, like AIToolRegistry.
+    private readonly attachments: VexiAttachmentsService,
+    private readonly recordAttachments: RecordAttachmentsService,
+  ) {}
+
+  /** T44: Vex saves a chat attachment into a record's folder (permission per target entity). */
+  onModuleInit(): void {
+    this.toolRegistry.registerMany(
+      createDocumentTools({
+        attachments: this.attachments,
+        recordAttachments: this.recordAttachments,
+      }),
+    );
+  }
+}

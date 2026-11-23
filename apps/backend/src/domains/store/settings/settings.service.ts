@@ -722,6 +722,24 @@ export class SettingsService {
       );
     }
 
+    // T16/N5 — `vexi.voice_engine` está obsoleto: se acepta (una pestaña vieja lo
+    // sigue enviando) pero se descarta ANTES del merge, de modo que nunca se
+    // persiste ni pisa el valor legado. Si no queda nada más en `vexi`, la sección
+    // se quita del PATCH: sin cambio real no hay merge ni fila de auditoría.
+    let ignoredDeprecatedOnly = false;
+    if (dto.vexi !== undefined && 'voice_engine' in (dto.vexi as object)) {
+      const { voice_engine: _ignored, ...rest } = dto.vexi as Record<
+        string,
+        unknown
+      >;
+      if (Object.values(rest).every((value) => value === undefined)) {
+        delete (dto as Record<string, unknown>).vexi;
+        ignoredDeprecatedOnly = Object.keys(dto).length === 0;
+      } else {
+        (dto as Record<string, unknown>).vexi = rest;
+      }
+    }
+
     // Merge solo las secciones enviadas
     const updatedSettings = { ...currentSettings };
     for (const key of Object.keys(dto)) {
@@ -1025,6 +1043,9 @@ export class SettingsService {
     }
 
     // Registrar auditoría de actualización de settings
+    if (ignoredDeprecatedOnly) {
+      return mergeStoreSettingsWithDefaults(result.settings);
+    }
     try {
       // Solo guardar las secciones que cambiaron (no todo el objeto de settings)
       const changedSections: Record<string, any> = {};

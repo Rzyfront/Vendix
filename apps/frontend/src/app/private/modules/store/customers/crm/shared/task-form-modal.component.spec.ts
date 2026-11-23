@@ -97,7 +97,11 @@ describe('TaskFormModalComponent — linked opportunity and support people', () 
   }
 
   async function open(
-    options: { task?: CrmTask | null; fixedCustomer?: CrmPerson | null } = {},
+    options: {
+      task?: CrmTask | null;
+      fixedCustomer?: CrmPerson | null;
+      presetOpportunityId?: number | null;
+    } = {},
   ): Promise<void> {
     crm = jasmine.createSpyObj<CrmService>('CrmService', [
       'openOpportunities',
@@ -133,6 +137,7 @@ describe('TaskFormModalComponent — linked opportunity and support people', () 
     fixture = TestBed.createComponent(TaskFormModalComponent);
     fixture.componentRef.setInput('task', options.task ?? null);
     fixture.componentRef.setInput('fixedCustomer', options.fixedCustomer ?? null);
+    fixture.componentRef.setInput('presetOpportunityId', options.presetOpportunityId ?? null);
     fixture.componentRef.setInput('isOpen', true);
     await settle();
   }
@@ -177,6 +182,28 @@ describe('TaskFormModalComponent — linked opportunity and support people', () 
     expect(form().opportunitiesLoaded()).toBeTrue();
     expect(form().opportunityId()).toBeNull();
     expect(text()).not.toContain('Este cliente no tiene oportunidades abiertas');
+  });
+
+  it('preselects the opportunity it was opened from, even among several and past the first 20', async () => {
+    openByCustomer[1] = [opportunity(50, 'Cotización X'), opportunity(51, 'Renovación')];
+    await open({ fixedCustomer: person(1, 'Carla'), presetOpportunityId: 51 });
+
+    expect(crm.openOpportunities).toHaveBeenCalledWith(1, 51);
+    expect(form().opportunityId()).toBe(51);
+
+    await saveWith();
+    const body = crm.createTask.calls.mostRecent().args[0];
+    expect(body.opportunity_id).toBe(51);
+    expect(body.customer_id).toBe(1);
+  });
+
+  it('ignores a preset opportunity that is no longer open', async () => {
+    openByCustomer[1] = [opportunity(50, 'Cotización X'), opportunity(51, 'Renovación')];
+    await open({ fixedCustomer: person(1, 'Carla'), presetOpportunityId: 77 });
+
+    expect(form().opportunityId()).toBeNull();
+    await saveWith();
+    expect('opportunity_id' in crm.createTask.calls.mostRecent().args[0]).toBeFalse();
   });
 
   it('clears the chosen opportunity and detects again when the customer changes', async () => {

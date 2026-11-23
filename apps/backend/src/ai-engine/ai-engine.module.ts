@@ -9,6 +9,11 @@ import { SandboxBrokerService } from './sandbox/sandbox-broker.service';
 import { SandboxClientService } from './sandbox/sandbox-client.service';
 import { SandboxPolicyService } from './sandbox/sandbox-policy.service';
 import { SandboxAuditRepository } from './sandbox/sandbox-audit.repository';
+import { SandboxLambdaClientService } from './sandbox/sandbox-lambda-client.service';
+import { CodeModeBridgeService } from './sandbox/codemode-bridge.service';
+import { CodeModePolicyService } from './sandbox/codemode-policy.service';
+import { SandboxAnalysisBrokerService } from './sandbox/sandbox-analysis-broker.service';
+import { SandboxStoreSlotService } from './sandbox/sandbox-store-slot.service';
 
 import { createCodeExecutionTools } from './tools/domains/code-execution.tools';
 import { Global, Module, OnModuleInit } from '@nestjs/common';
@@ -17,6 +22,7 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { ApiCatalogService } from './tools/bridge/api-catalog.service';
 import { createApiBridgeTools } from './tools/bridge/api-bridge.tools';
 import { AIEngineService } from './ai-engine.service';
+import { AgentRuntimeConfigService } from './agent-runtime-config.service';
 import { AILoggingService } from './ai-logging.service';
 import { AgentTraceService } from './observability/agent-trace.service';
 import { AIQueueModule } from './queue/ai-queue.module';
@@ -52,6 +58,7 @@ import { AgentEvidenceService } from './tasks/agent-evidence.service';
 import { AgentDurableSessionService } from './tasks/agent-durable-session.service';
 import { S3Module } from '../common/services/s3.module';
 import { S3Service } from '../common/services/s3.service';
+import { ConversationCompactorService } from './context/conversation-compactor.service';
 
 /**
  * Tool registration is decentralized: each domain module registers its own
@@ -81,6 +88,7 @@ import { S3Service } from '../common/services/s3.service';
   controllers: [AIStreamController],
   providers: [
     AIEngineService,
+    AgentRuntimeConfigService,
     AILoggingService,
     AgentTraceService,
     AIAgentService,
@@ -97,6 +105,11 @@ import { S3Service } from '../common/services/s3.service';
     SandboxClientService,
     SandboxPolicyService,
     SandboxAuditRepository,
+    SandboxLambdaClientService,
+    SandboxStoreSlotService,
+    SandboxAnalysisBrokerService,
+    CodeModePolicyService,
+    CodeModeBridgeService,
     AIToolRegistry,
     ToolRouterService,
     ToolCatalogIndexerService,
@@ -131,6 +144,7 @@ import { S3Service } from '../common/services/s3.service';
     // the worker needs `AIAgentService`, which lives in this module — the reverse
     // import would close a cycle.
     AIAgentProcessor,
+    ConversationCompactorService,
   ],
   exports: [
     AgentObjectiveRepository,
@@ -138,7 +152,14 @@ import { S3Service } from '../common/services/s3.service';
     AgentEvidenceService,
     AgentDurableSessionService,
     AgentVerifierService,
+    SandboxLambdaClientService,
+    SandboxAnalysisBrokerService,
+    CodeModeBridgeService,
+    CodeModePolicyService,
+    // F10/T67: «Ver cómo lo calculé» reads runs from the Vex history service.
+    SandboxAuditRepository,
     AIEngineService,
+    AgentRuntimeConfigService,
     AILoggingService,
     AgentTraceService,
     AIAgentService,
@@ -155,6 +176,7 @@ import { S3Service } from '../common/services/s3.service';
     CapabilityRegistryService,
     AIQueueModule,
     EmbeddingModule,
+    ConversationCompactorService,
   ],
 })
 export class AIEngineModule implements OnModuleInit {

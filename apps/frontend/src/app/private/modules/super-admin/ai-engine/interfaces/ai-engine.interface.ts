@@ -1,7 +1,8 @@
 export type SdkType =
   | 'openai_compatible'
   | 'anthropic_compatible'
-  | 'minimax_t2a';
+  | 'minimax_t2a'
+  | 'gemini_tts';
 export type AIModelType =
   | 'text'
   | 'image'
@@ -254,7 +255,7 @@ export const AI_FEATURE_CATEGORY_LABELS: Record<AIFeatureCategory, string> = {
   tool_agents: 'Agentes con herramientas',
   rag_embeddings: 'RAG / Embeddings',
   async_queue: 'Cola asincrona',
-  realtime_voice: 'Voz en tiempo real',
+  realtime_voice: 'Voz (dictado y lectura de respuestas)',
 };
 
 export interface AIEngineApp {
@@ -517,6 +518,15 @@ export const KNOWN_PROVIDERS: KnownProvider[] = [
     sdkType: 'minimax_t2a',
     models: ['speech-2.8-hd', 'speech-2.5-hd-preview', 'speech-02-hd'],
     defaultUrl: 'https://api.minimax.io/v1/t2a_v2',
+  },
+  {
+    // F8 T50 — Gemini text-to-speech through the Generative Language API. Its
+    // own sdk type: the model goes in the URL and the audio comes back as raw
+    // PCM, so the OpenAI-compatible path cannot serve it.
+    name: 'Google Gemini TTS',
+    sdkType: 'gemini_tts',
+    models: ['gemini-2.5-flash-preview-tts', 'gemini-2.5-pro-preview-tts'],
+    defaultUrl: 'https://generativelanguage.googleapis.com/v1beta',
   },
   {
     // MiniMax's chat and vision models *are* OpenAI-compatible — the repo

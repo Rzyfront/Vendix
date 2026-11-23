@@ -227,19 +227,6 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
                         }
                       </div>
                     }
-
-                    @if (row.tools.length > 0) {
-                      <div class="flex flex-wrap items-center gap-1.5">
-                        <span class="text-xs text-text-secondary">Tools:</span>
-                        @for (tool of row.tools; track tool.name) {
-                          @if (tool.missing) {
-                            <app-badge variant="error" size="sm">rota: {{ tool.name }}</app-badge>
-                          } @else {
-                            <app-badge variant="neutral" size="sm">{{ tool.name }}</app-badge>
-                          }
-                        }
-                      </div>
-                    }
                   </div>
                 } @empty {
                   <div class="rounded-lg border border-dashed border-border bg-background px-3 py-4 text-center text-sm text-text-secondary">
@@ -295,9 +282,7 @@ export class PlanDetailComponent {
   readonly featureLineage = computed<PlanFeatureLineage[]>(() => {
     const flags = (this.plan()?.ai_feature_flags as Record<string, any>) ?? {};
     const agentByKey = new Map(this.engineAgents().map((agent) => [agent.key, agent]));
-    const liveTools = new Set(this.engineTools().map((tool) => tool.name));
     const topAgents = toStringList(flags['agents_allowed']);
-    const topTools = toStringList(flags['tools_allowed']);
     const rows: PlanFeatureLineage[] = [];
 
     for (const key of AI_FEATURE_KEYS) {
@@ -310,10 +295,8 @@ export class PlanDetailComponent {
         name: agentByKey.get(agentKey)?.name ?? null,
         missing: !agentByKey.has(agentKey),
       }));
-      const tools = dedupe([
-        ...toStringList(config['tools_allowed']),
-        ...(key === 'tool_agents' ? topTools : []),
-      ]).map((name) => ({ name, missing: !liveTools.has(name) }));
+      // `tools_allowed` is inert since T13 (tools follow the role): not shown.
+      const tools: PlanFeatureLineage['tools'] = [];
       const enabled = config['enabled'] === true;
       if (!enabled && agents.length === 0 && tools.length === 0) continue;
 

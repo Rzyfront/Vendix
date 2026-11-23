@@ -13,6 +13,7 @@ import { InventoryModule } from './inventory/inventory.module';
 import { PurchaseOrdersModule } from './orders/purchase-orders/purchase-orders.module';
 import { StoreUsersModule } from './store-users/store-users.module';
 import { SettingsModule } from './settings/settings.module';
+import { StoreAIAgentsModule } from './ai-agents/ai-agents.module';
 import { CustomersModule } from './customers/customers.module';
 import { CrmInboxModule } from './customers/crm/conversations/crm-inbox.module';
 import { CustomerCrmModule } from './customers/crm/customer-crm.module';
@@ -99,9 +100,11 @@ import { ServiceDepositsModule } from './service-deposits/service-deposits.modul
 import { ServiceRemindersModule } from './service-reminders/service-reminders.module';
 import { ServiceBudgetsModule } from './service-budgets/service-budgets.module';
 import { RemindersModule } from './reminders/reminders.module';
+import { AiAgentMemoryModule } from './ai-agent-memory/ai-agent-memory.module';
 
 @Module({
   imports: [
+    StoreAIAgentsModule,
     BrandsModule,
     CategoriesModule,
     ProductsModule,
@@ -201,6 +204,7 @@ import { RemindersModule } from './reminders/reminders.module';
     ServiceRemindersModule,
     ServiceBudgetsModule,
     RemindersModule,
+    AiAgentMemoryModule,
   ],
   exports: [PrintFormatsModule],
 })

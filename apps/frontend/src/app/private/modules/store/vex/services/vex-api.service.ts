@@ -11,9 +11,16 @@ import type { VexiToolExecution } from '../../../../../core/services/vexi-api.se
 import { environment } from '../../../../../../environments/environment';
 import {
   VexBlockInteraction,
+  VexContextBudget,
+  VexFollowup,
+  VexFollowupEdits,
   VexPlanProposal,
   VexPlanStep,
+  VexScriptRun,
+  VexLaunchablePlaybook,
   VexUiBlock,
+  VexWriteBatch,
+  VexWriteBatchResult,
 } from '../models/vex.models';
 
 /**
@@ -184,6 +191,9 @@ export interface VexBackendConversation {
   created_at: string;
   updated_at: string;
   messages?: VexBackendMessage[];
+  /** Rolling summary of the compacted part of the conversation, when Vex compacted it. */
+  summary?: string | null;
+  summary_through_message_id?: number | null;
 }
 
 export interface VexBackendMessage {
@@ -209,7 +219,15 @@ export interface VexStreamChunk {
     | 'done'
     | 'error'
     | 'audio'
-    | 'timing';
+    | 'timing'
+    | 'conversation_title'
+    | 'followup_suggestion'
+    | 'context_compacted'
+    // T14: this answer is not read aloud; `message` says why.
+    | 'voice_notice';
+  /** `voice_notice`: `voice_quota_exhausted` or `voice_not_in_plan`. */
+  code?: string;
+  message?: string;
   audio_base64?: string;
   content_type?: string;
   index?: number;
@@ -232,7 +250,19 @@ export interface VexStreamChunk {
     completionTokens: number;
     totalTokens: number;
   };
+  /** `done` frame: share of the context window the next turn would use. */
+  context_budget?: VexContextBudget;
+  /** `context_compacted` frame: the new summary and the last message it covers. */
+  summary?: string;
+  summary_through_message_id?: number;
   error?: string;
+  /** Closed error code of an `error` frame, when the backend sends one. */
+  error_code?: string;
+  /** `conversation_title` frame: the generated title, sent just before `done` of the first turn. */
+  conversation_id?: number;
+  title?: string;
+  /** `followup_suggestion` frame: the card of this turn, sent just before `done`. */
+  followup?: VexFollowup;
 }
 
 export interface VexAttachment {
@@ -290,6 +320,21 @@ export interface VexApplyStepResult {
   execution?: VexiToolExecution;
 }
 
+/** `GET conversations/:id/purge-preview`: figures shown before deleting. */
+export interface VexPurgePreview {
+  messages: number;
+  attachments: number;
+  blocks: number;
+  memories: number;
+  has_running_task: boolean;
+}
+
+/** `DELETE conversations/:id`. */
+export interface VexPurgeResult {
+  purged: boolean;
+  counts?: Partial<Record<'messages' | 'attachments' | 'blocks' | 'memories', number>>;
+}
+
 export interface VexConversationsPage {
   data: VexBackendConversation[];
   meta: { total: number; page: number; limit: number; totalPages: number };
@@ -303,6 +348,64 @@ export class VexApiService {
   private readonly chatBase = `${environment.apiUrl}/store/ai-chat`;
   private readonly vexBase = `${environment.apiUrl}/store/vex`;
   private readonly vexiBase = `${environment.apiUrl}/store/vexi`;
+
+  /** F5/T39: playbooks the person can start from the welcome gallery. */
+  getLaunchablePlaybooks(): Observable<VexLaunchablePlaybook[]> {
+    return this.http
+      .get<{ data: VexLaunchablePlaybook[] }>(
+        `${this.vexBase}/playbooks/launchable`,
+      )
+      .pipe(map((res) => res.data ?? []));
+  }
+
+  /** F10 T67: «Ver cómo lo calculé» for one Code Mode run of this store. */
+  getScriptRun(runId: string): Observable<VexScriptRun> {
+    return this.http
+      .get<{ data: VexScriptRun }>(
+        `${environment.apiUrl}/store/ai-agents/history/script-runs/${encodeURIComponent(runId)}`,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /** F5: current state of a write batch (the card polls this while executing). */
+  getBatch(batchId: string): Observable<VexWriteBatch> {
+    return this.http
+      .get<{ data: VexWriteBatch }>(
+        `${this.vexBase}/batches/${encodeURIComponent(batchId)}`,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /** F5: approves the ticked steps; returns once the batch is terminal. */
+  approveBatch(
+    batchId: string,
+    stepIds: string[],
+  ): Observable<VexWriteBatchResult> {
+    return this.http
+      .post<{ data: VexWriteBatchResult }>(
+        `${this.vexBase}/batches/${encodeURIComponent(batchId)}/approve`,
+        { step_ids: stepIds },
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  rejectBatch(batchId: string): Observable<VexWriteBatchResult> {
+    return this.http
+      .post<{ data: VexWriteBatchResult }>(
+        `${this.vexBase}/batches/${encodeURIComponent(batchId)}/reject`,
+        {},
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  undoBatchStep(batchId: string, stepId: string): Observable<VexWriteBatch> {
+    return this.http
+      .post<{ data: VexWriteBatch }>(
+        `${this.vexBase}/batches/${encodeURIComponent(batchId)}/steps/${encodeURIComponent(stepId)}/undo`,
+        {},
+      )
+      .pipe(map((res) => res.data));
+  }
 
   listConversations(params?: {
     page?: number;
@@ -354,11 +457,91 @@ export class VexApiService {
       .pipe(map((res) => res.data));
   }
 
-  archiveConversation(id: number): Observable<VexBackendConversation> {
+  /** Renames a conversation (1–80 characters, validated server-side too). */
+  renameConversation(
+    id: number,
+    title: string,
+  ): Observable<VexBackendConversation | null> {
     return this.http
       .patch<{
-        data: VexBackendConversation;
-      }>(`${this.chatBase}/conversations/${id}/archive`, {})
+        data?: VexBackendConversation;
+      }>(`${this.chatBase}/conversations/${id}/title`, { title })
+      .pipe(map((res) => res?.data ?? null));
+  }
+
+  /** Saves a suggested follow-up: creates the reminder in the bitácora. */
+  saveFollowup(
+    conversationId: number,
+    followupId: string,
+    edits: VexFollowupEdits = {},
+  ): Observable<VexFollowup> {
+    return this.http
+      .post<{
+        data: { followup: VexFollowup };
+      }>(
+        `${this.chatBase}/conversations/${conversationId}/followups/${followupId}/save`,
+        edits,
+      )
+      .pipe(map((res) => res.data.followup));
+  }
+
+  /** Discards a suggested follow-up; it is never suggested again. */
+  dismissFollowup(
+    conversationId: number,
+    followupId: string,
+  ): Observable<VexFollowup> {
+    return this.http
+      .post<{
+        data: { followup: VexFollowup };
+      }>(
+        `${this.chatBase}/conversations/${conversationId}/followups/${followupId}/dismiss`,
+        {},
+      )
+      .pipe(map((res) => res.data.followup));
+  }
+
+  /** Welcome suggestions for this store (ids only; wording lives in `vex-copy.ts`). */
+  getSuggestions(): Observable<{ id: string; count?: number }[]> {
+    return this.http
+      .get<{
+        data: { suggestions: { id: string; count?: number }[] };
+      }>(`${this.vexBase}/suggestions`)
+      .pipe(map((res) => res.data?.suggestions ?? []));
+  }
+
+  /** «No sugerir en este chat» (and its undo). */
+  muteFollowups(conversationId: number, muted: boolean): Observable<boolean> {
+    return this.http
+      .patch<{
+        data: { followups_muted: boolean };
+      }>(`${this.chatBase}/conversations/${conversationId}/followups/mute`, {
+        muted,
+      })
+      .pipe(map((res) => res.data.followups_muted));
+  }
+
+  /**
+   * What a real deletion would erase, for the confirmation dialog. Read-only:
+   * nothing is deleted here. 404 when the conversation is not the user's.
+   */
+  purgePreview(id: number): Observable<VexPurgePreview> {
+    return this.http
+      .get<{
+        data: VexPurgePreview;
+      }>(`${this.chatBase}/conversations/${id}/purge-preview`)
+      .pipe(map((res) => res.data));
+  }
+
+  /**
+   * Deletes the conversation for real (messages, blocks, attachments in S3,
+   * durable tasks). 409 while a task of the conversation is running; 404 when
+   * it is not the user's.
+   */
+  purgeConversation(id: number): Observable<VexPurgeResult> {
+    return this.http
+      .delete<{
+        data: VexPurgeResult;
+      }>(`${this.chatBase}/conversations/${id}`)
       .pipe(map((res) => res.data));
   }
 
@@ -602,6 +785,17 @@ export class VexApiService {
         confirmation_token: confirmationToken,
         conversation_id: conversationId,
       })
+      .pipe(map((res) => res.data));
+  }
+
+  /** Short-lived signed URL (plus mime/name) of a chat attachment handle. */
+  getAttachmentUrl(
+    handle: string,
+  ): Observable<{ url: string; mime_type: string; original_name: string }> {
+    return this.http
+      .get<{
+        data: { url: string; mime_type: string; original_name: string };
+      }>(`${this.vexBase}/attachments/${encodeURIComponent(handle)}/url`)
       .pipe(map((res) => res.data));
   }
 

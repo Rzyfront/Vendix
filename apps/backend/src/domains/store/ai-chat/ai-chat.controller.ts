@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Body,
   Param,
   Query,
@@ -10,6 +11,7 @@ import {
   Sse,
   MessageEvent,
   ParseIntPipe,
+  ParseUUIDPipe,
   UseGuards,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
@@ -25,13 +27,50 @@ import {
   SendMessageDto,
   ConversationQueryDto,
   StreamIntentDto,
+  UpdateConversationTitleDto,
+  SaveFollowupDto,
+  MuteFollowupsDto,
 } from './dto';
+import { VexFollowupService } from './vex-followup.service';
+
+/**
+ * T24: `ai_messages.cost_usd` is the provider's real cost, internal to the
+ * platform. Message rows leave the store API without it.
+ */
+export function withoutMessageCost<T extends object>(conversation: T): T {
+  if (!('messages' in conversation) || !Array.isArray(conversation.messages))
+    return conversation;
+  const rows = conversation.messages as Array<Record<string, unknown>>;
+  const messages = rows.map(({ cost_usd: _cost, ...rest }) =>
+    'metadata' in rest
+      ? { ...rest, metadata: withoutNestedCost(rest.metadata) }
+      : rest,
+  );
+  return { ...conversation, messages };
+}
+
+/**
+ * P2-6: rows persisted before the fix keep `metadata.objective.budget.cost_usd`.
+ * Drops every `cost_usd` key at read time; the stored row is untouched.
+ */
+function withoutNestedCost(value: unknown, depth = 0): unknown {
+  if (depth > 8 || value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value))
+    return value.map((item) => withoutNestedCost(item, depth + 1));
+  const out: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (key === 'cost_usd') continue;
+    out[key] = withoutNestedCost(item, depth + 1);
+  }
+  return out;
+}
 
 @Controller('store/ai-chat')
 export class AIChatController {
   constructor(
     private readonly chatService: AIChatService,
     private readonly responseService: ResponseService,
+    private readonly followups: VexFollowupService,
   ) {}
 
   // Gate de Vex (paso 3): cuando la conversación es de `agent_key='vex'` el
@@ -54,7 +93,7 @@ export class AIChatController {
   async listConversations(@Query() query: ConversationQueryDto) {
     const result = await this.chatService.listConversations(query);
     return this.responseService.success(
-      result.data,
+      result.data.map(withoutMessageCost),
       'Conversations retrieved',
       result.meta,
     );
@@ -63,7 +102,23 @@ export class AIChatController {
   @Get('conversations/:id')
   async getConversation(@Param('id', ParseIntPipe) id: number) {
     const conversation = await this.chatService.getConversation(id);
-    return this.responseService.success(conversation, 'Conversation retrieved');
+    return this.responseService.success(
+      withoutMessageCost(conversation),
+      'Conversation retrieved',
+    );
+  }
+
+  @Get('conversations/:id/purge-preview')
+  async purgePreview(@Param('id', ParseIntPipe) id: number) {
+    const preview = await this.chatService.previewConversationPurge(id);
+    return this.responseService.success(preview, 'Purge preview retrieved');
+  }
+
+  // Borrado físico: solo el dueño y solo hilos de Vex (lo valida el servicio).
+  @Delete('conversations/:id')
+  async purgeConversation(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.chatService.purgeConversation(id);
+    return this.responseService.success(result, 'Conversation deleted');
   }
 
   @Post('conversations/:id/messages')
@@ -223,9 +278,40 @@ export class AIChatController {
   @Patch('conversations/:id/title')
   async updateTitle(
     @Param('id', ParseIntPipe) id: number,
-    @Body('title') title: string,
+    @Body() dto: UpdateConversationTitleDto,
   ) {
-    const conversation = await this.chatService.updateTitle(id, title);
+    const conversation = await this.chatService.updateTitle(id, dto.title);
     return this.responseService.success(conversation, 'Title updated');
+  }
+
+  /** Guardar la ficha de seguimiento: crea el recordatorio en la bitácora. */
+  @Post('conversations/:id/followups/:followupId/save')
+  async saveFollowup(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('followupId', ParseUUIDPipe) followupId: string,
+    @Body() dto: SaveFollowupDto,
+  ) {
+    const result = await this.followups.save(id, followupId, dto);
+    return this.responseService.success(result, 'Follow-up saved');
+  }
+
+  /** «No»: descarta la ficha y no vuelve a sugerirse. */
+  @Post('conversations/:id/followups/:followupId/dismiss')
+  async dismissFollowup(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('followupId', ParseUUIDPipe) followupId: string,
+  ) {
+    const result = await this.followups.dismiss(id, followupId);
+    return this.responseService.success(result, 'Follow-up dismissed');
+  }
+
+  /** «No sugerir en este chat». */
+  @Patch('conversations/:id/followups/mute')
+  async muteFollowups(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: MuteFollowupsDto,
+  ) {
+    const result = await this.followups.setMuted(id, dto.muted);
+    return this.responseService.success(result, 'Follow-up preference updated');
   }
 }

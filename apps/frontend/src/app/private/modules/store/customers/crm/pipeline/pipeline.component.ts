@@ -1,8 +1,25 @@
-import { Component, computed, effect, inject, signal, untracked } from '@angular/core';
+import {
+  Component,
+  DestroyRef,
+  ElementRef,
+  afterNextRender,
+  computed,
+  effect,
+  inject,
+  signal,
+  untracked,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { CdkDrag, CdkDragDrop, CdkDropList, CdkDropListGroup } from '@angular/cdk/drag-drop';
-import { firstValueFrom } from 'rxjs';
+import {
+  CdkDrag,
+  CdkDragDrop,
+  CdkDragHandle,
+  CdkDropList,
+  CdkDropListGroup,
+} from '@angular/cdk/drag-drop';
+import { CdkScrollable, ScrollDispatcher } from '@angular/cdk/scrolling';
+import { firstValueFrom, fromEvent } from 'rxjs';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -32,6 +49,7 @@ import {
   CrmBoard,
   CrmBoardStage,
   CrmOpportunity,
+  CrmPerson,
   personName,
 } from '../shared/crm.interface';
 import { crmCanSeeAll, formatDateOnly } from '../shared/crm.utils';
@@ -41,6 +59,7 @@ import {
 } from './opportunity-form-modal.component';
 import { OpportunityDetailModalComponent } from './opportunity-detail-modal.component';
 import { StageTemplatesModalComponent } from './stage-templates-modal.component';
+import { TaskFormModalComponent } from '../shared/task-form-modal.component';
 
 type PipelineView = 'board' | 'list';
 
@@ -59,10 +78,26 @@ const STATUS_LABELS: Record<CrmOpportunity['status'], string> = {
   lost: 'Perdida',
 };
 
+/** Nearest ancestor that scrolls vertically (the admin layout's `<main>`). */
+function verticalScrollParent(element: HTMLElement): HTMLElement | null {
+  let node = element.parentElement;
+  while (node && node !== document.body && node !== document.documentElement) {
+    const overflowY = getComputedStyle(node).overflowY;
+    if (overflowY === 'auto' || overflowY === 'scroll') return node;
+    node = node.parentElement;
+  }
+  return null;
+}
+
 /**
  * Clientes → Pipeline (PLAN-CRM §7, H4): kanban by stage with drag and drop
  * (`@angular/cdk/drag-drop`), a list view and, on mobile, "Mover a" on every
  * card. Dropping on a "lost" stage asks for the reason first.
+ *
+ * A card is dragged only from its grip strip (`cdkDragHandle`), so touching
+ * the rest of the card scrolls the board natively. While dragging, CDK
+ * auto-scrolls every registered scroll container near the pointer: the stages
+ * row (`cdkScrollable`), each column (the drop list itself) and the page.
  */
 @Component({
   selector: 'app-crm-pipeline',
@@ -71,8 +106,10 @@ const STATUS_LABELS: Record<CrmOpportunity['status'], string> = {
     FormsModule,
     RouterLink,
     CdkDrag,
+    CdkDragHandle,
     CdkDropList,
     CdkDropListGroup,
+    CdkScrollable,
     BadgeComponent,
     ButtonComponent,
     CardComponent,
@@ -89,6 +126,7 @@ const STATUS_LABELS: Record<CrmOpportunity['status'], string> = {
     OpportunityFormModalComponent,
     OpportunityDetailModalComponent,
     StageTemplatesModalComponent,
+    TaskFormModalComponent,
   ],
   styles: [
     `
@@ -208,7 +246,11 @@ const STATUS_LABELS: Record<CrmOpportunity['status'], string> = {
               Se muestran las 500 oportunidades más recientes. Usa el buscador para encontrar otras.
             </p>
           }
-          <div class="flex gap-4 overflow-x-auto pb-2" cdkDropListGroup>
+          <div
+            class="flex gap-4 overflow-x-auto pb-2"
+            cdkDropListGroup
+            cdkScrollable
+          >
             @for (stage of stages(); track stage.id) {
               <div class="board-column flex flex-col rounded-2xl border border-[var(--color-border)] bg-[var(--color-background)]">
                 <div class="flex items-center justify-between gap-2 border-b border-[var(--color-border)] px-3 py-2">
@@ -225,7 +267,7 @@ const STATUS_LABELS: Record<CrmOpportunity['status'], string> = {
                   </div>
                 </div>
                 <div
-                  class="flex min-h-[8rem] flex-1 flex-col gap-2 p-2"
+                  class="flex max-h-[calc(100dvh-12rem)] min-h-[8rem] flex-1 flex-col gap-2 overflow-y-auto p-2"
                   cdkDropList
                   [id]="'stage-' + stage.id"
                   [cdkDropListData]="stage"
@@ -234,13 +276,26 @@ const STATUS_LABELS: Record<CrmOpportunity['status'], string> = {
                 >
                   @for (card of stage.opportunities; track card.id) {
                     <article
-                      class="cursor-pointer rounded-xl border border-[var(--color-border)] bg-surface p-3 shadow-sm active:cursor-grabbing"
+                      class="flex shrink-0 cursor-pointer overflow-hidden rounded-xl border border-[var(--color-border)] bg-surface shadow-sm"
                       cdkDrag
                       [cdkDragData]="card"
                       (cdkDragStarted)="dragging = true"
                       (cdkDragEnded)="onDragEnded()"
                       (click)="openDetail(card)"
                     >
+                      @if (canManage()) {
+                        <div
+                          cdkDragHandle
+                          class="flex w-11 shrink-0 cursor-grab touch-none select-none items-center justify-center self-stretch border-r border-[var(--color-border)] bg-[var(--color-background)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] active:cursor-grabbing"
+                          role="img"
+                          [attr.aria-label]="'Arrastrar ' + card.title"
+                          title="Arrastra para mover de etapa"
+                          (click)="$event.stopPropagation()"
+                        >
+                          <app-icon name="grip-vertical" [size]="18"></app-icon>
+                        </div>
+                      }
+                      <div class="min-w-0 flex-1 p-3">
                       <div class="flex items-start justify-between gap-2">
                         <button
                           type="button"
@@ -249,8 +304,20 @@ const STATUS_LABELS: Record<CrmOpportunity['status'], string> = {
                           <app-icon name="briefcase" [size]="14" class="mt-0.5 shrink-0 text-[var(--color-text-muted)]"></app-icon>
                           <span class="min-w-0 break-words">{{ card.title }}</span>
                         </button>
-                        @if (canManage()) {
+                        @if (canManage() || canManageTasks()) {
                           <div class="flex shrink-0 items-center gap-0.5">
+                            @if (canManageTasks()) {
+                              <button
+                                type="button"
+                                class="inline-flex h-7 w-7 items-center justify-center rounded-md text-primary hover:bg-[var(--color-background)]"
+                                aria-label="Crear tarea"
+                                title="Crear tarea"
+                                (click)="openTask(card); $event.stopPropagation()"
+                              >
+                                <app-icon name="calendar-plus" [size]="14"></app-icon>
+                              </button>
+                            }
+                            @if (canManage()) {
                             <button
                               type="button"
                               class="inline-flex h-7 w-7 items-center justify-center rounded-md hover:bg-[var(--color-background)]"
@@ -269,6 +336,7 @@ const STATUS_LABELS: Record<CrmOpportunity['status'], string> = {
                             >
                               <app-icon name="trash-2" [size]="14"></app-icon>
                             </button>
+                            }
                           </div>
                         }
                       </div>
@@ -324,6 +392,7 @@ const STATUS_LABELS: Record<CrmOpportunity['status'], string> = {
                           }
                         </select>
                       }
+                      </div>
                     </article>
                   } @empty {
                     <p class="px-1 py-4 text-center text-xs text-[var(--color-text-muted)]">Suelta aquí</p>
@@ -412,6 +481,7 @@ const STATUS_LABELS: Record<CrmOpportunity['status'], string> = {
         [canManage]="canManage()"
         (editRequested)="editFromDetail()"
         (deleteRequested)="deleteFromDetail()"
+        (tasksChanged)="load()"
       ></app-crm-opportunity-detail-modal>
 
       <app-confirmation-modal
@@ -481,6 +551,16 @@ const STATUS_LABELS: Record<CrmOpportunity['status'], string> = {
           </app-button>
         </div>
       </app-modal>
+
+      @if (canManageTasks()) {
+        <app-crm-task-form-modal
+          [isOpen]="taskFormOpen()"
+          (isOpenChange)="taskFormOpen.set($event)"
+          [fixedCustomer]="taskCustomer()"
+          [presetOpportunityId]="taskOpportunityId()"
+          (saved)="load()"
+        ></app-crm-task-form-modal>
+      }
     </section>
   `,
 })
@@ -488,6 +568,9 @@ export class PipelineComponent {
   private readonly crm = inject(CrmService);
   private readonly toast = inject(ToastService);
   private readonly auth = inject(AuthFacade);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly scrollDispatcher = inject(ScrollDispatcher);
+  private readonly destroyRef = inject(DestroyRef);
 
   protected readonly board = signal<CrmBoard | null>(null);
   protected readonly loading = signal(false);
@@ -505,6 +588,9 @@ export class PipelineComponent {
   private readonly detailId = signal<number | null>(null);
   protected readonly toDelete = signal<CrmOpportunity | null>(null);
   protected readonly templatesOpen = signal(false);
+  protected readonly taskFormOpen = signal(false);
+  protected readonly taskCustomer = signal<CrmPerson | null>(null);
+  protected readonly taskOpportunityId = signal<number | null>(null);
   /** True while a card is being dragged, so the trailing click opens nothing. */
   protected dragging = false;
   /** Pending lose: the card and, when dropped, the target stage and index. */
@@ -520,6 +606,9 @@ export class PipelineComponent {
   protected readonly canSeeAll = computed(() => crmCanSeeAll(this.auth));
   protected readonly canManage = computed(
     () => this.auth.isOwner() || this.auth.hasPermission('store:crm_pipeline:manage'),
+  );
+  protected readonly canManageTasks = computed(
+    () => this.auth.isOwner() || this.auth.hasPermission('store:crm_tasks:manage'),
   );
   /** Only owner/admin (see-all) with manage permission configure stage templates. */
   protected readonly canConfigure = computed(() => this.canSeeAll() && this.canManage());
@@ -601,6 +690,49 @@ export class PipelineComponent {
       this.search();
       untracked(() => void this.load());
     });
+    afterNextRender(() => {
+      this.registerPageScroller();
+      this.shieldHandlesFromPullToRefresh();
+    });
+  }
+
+  /**
+   * The admin layout scrolls a `<main>`, not the window, and CDK only
+   * auto-scrolls (and keeps drop positions right for) containers registered in
+   * the ScrollDispatcher. Register it while the board lives, without touching
+   * the shared layout.
+   */
+  private registerPageScroller(): void {
+    const element = verticalScrollParent(this.host.nativeElement);
+    if (!element) return;
+    const elementRef = new ElementRef(element);
+    const scrolled = fromEvent(element, 'scroll');
+    const scrollable = {
+      getElementRef: () => elementRef,
+      elementScrolled: () => scrolled,
+    } as unknown as CdkScrollable;
+    this.scrollDispatcher.register(scrollable);
+    this.destroyRef.onDestroy(() => this.scrollDispatcher.deregister(scrollable));
+  }
+
+  /**
+   * A touch that starts on a drag handle belongs to the drag: keep it from the
+   * layout's pull-to-refresh, which would otherwise reload the page when a card
+   * is dragged down near the top. Passive, so it never delays native scroll.
+   */
+  private shieldHandlesFromPullToRefresh(): void {
+    const host = this.host.nativeElement;
+    const listener = (event: Event) => {
+      if ((event.target as Element | null)?.closest?.('.cdk-drag-handle')) event.stopPropagation();
+    };
+    host.addEventListener('touchstart', listener, { passive: true });
+    this.destroyRef.onDestroy(() => host.removeEventListener('touchstart', listener));
+  }
+
+  openTask(card: CrmOpportunity): void {
+    this.taskCustomer.set(card.customer);
+    this.taskOpportunityId.set(card.id);
+    this.taskFormOpen.set(true);
   }
 
   onFilterChange(values: FilterValues): void {

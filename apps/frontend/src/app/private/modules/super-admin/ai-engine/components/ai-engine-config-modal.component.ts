@@ -28,7 +28,6 @@ import {
   MODEL_TYPE_LABELS,
   NOISE_REDUCTION_LABELS,
   NoiseReductionSetting,
-  REALTIME_VOICES,
   TURN_DETECTION_LABELS,
   TurnDetectionSetting,
   UpdateAIConfigDto,
@@ -273,105 +272,7 @@ import {
             </div>
           }
 
-          <!-- Audio / voz en tiempo real -->
-          @if (isAudio()) {
-            <div
-              class="space-y-4 rounded-lg border border-border p-4 bg-background-secondary"
-            >
-              <div>
-                <h4 class="text-sm font-medium text-text-primary">
-                  Voz en tiempo real
-                </h4>
-                <p class="text-xs text-text-secondary mt-1">
-                  Transporte de la sesion de voz. La persona hablada (el prompt)
-                  se edita en la aplicacion
-                  <code>vexi_realtime_voice</code>, no aqui.
-                </p>
-              </div>
-
-              <div class="space-y-1">
-                <app-selector
-                  label="Voz"
-                  placeholder="Seleccionar voz"
-                  [options]="voiceOptions"
-                  [formControl]="$any(form.get('voice'))"
-                  [disabled]="isSubmitting()"
-                ></app-selector>
-                <p class="text-xs text-text-secondary">
-                  Solo voces del Realtime API. Las de TTS
-                  (<code>nova</code>, <code>onyx</code>, <code>fable</code>) no
-                  aplican aqui.
-                </p>
-              </div>
-
-              <div class="space-y-1">
-                <app-selector
-                  label="Deteccion de turno"
-                  [options]="turnDetectionOptions"
-                  [formControl]="$any(form.get('turn_detection_type'))"
-                  [disabled]="isSubmitting()"
-                ></app-selector>
-                <p class="text-xs text-text-secondary">
-                  Define cuando el modelo considera que terminaste de hablar.
-                  «Default del proveedor» no envia el parametro.
-                </p>
-              </div>
-
-              @if (hasTurnDetection()) {
-                <div class="grid grid-cols-2 gap-4">
-                  <app-input
-                    formControlName="turn_detection_silence_ms"
-                    label="Silencio (ms)"
-                    type="number"
-                    placeholder="500"
-                    [control]="form.get('turn_detection_silence_ms')"
-                    [disabled]="isSubmitting()"
-                    helpText="Pausa antes de cerrar el turno"
-                  ></app-input>
-
-                  @if (isServerVad()) {
-                    <app-input
-                      formControlName="turn_detection_threshold"
-                      label="Umbral (0 a 1)"
-                      type="number"
-                      placeholder="0.5"
-                      [control]="form.get('turn_detection_threshold')"
-                      [disabled]="isSubmitting()"
-                      helpText="Volumen minimo para contar como voz"
-                    ></app-input>
-                  }
-                </div>
-              }
-
-              <app-selector
-                label="Reduccion de ruido"
-                [options]="noiseReductionOptions"
-                [formControl]="$any(form.get('noise_reduction'))"
-                [disabled]="isSubmitting()"
-              ></app-selector>
-
-              <div class="grid grid-cols-2 gap-4">
-                <app-input
-                  formControlName="transcription_model"
-                  label="Modelo de transcripcion"
-                  placeholder="gpt-4o-mini-transcribe"
-                  [control]="form.get('transcription_model')"
-                  [disabled]="isSubmitting()"
-                  helpText="Opcional: transcribe lo que dice el usuario"
-                ></app-input>
-
-                <app-input
-                  formControlName="client_secret_ttl_seconds"
-                  label="TTL del client secret (s)"
-                  type="number"
-                  placeholder="60"
-                  [control]="form.get('client_secret_ttl_seconds')"
-                  [disabled]="isSubmitting()"
-                  helpText="Acotado a 10-300 en el servidor"
-                ></app-input>
-              </div>
-            </div>
-          }
+          <!-- N5: la voz en tiempo real se retiro; sin ajustes de sesion realtime. -->
 
           <!-- Toggles -->
           <div class="flex items-center gap-6 pt-2 flex-wrap">
@@ -405,6 +306,18 @@ import {
                 [disabled]="isSubmitting()"
               />
               <span class="text-sm text-text-primary">Thinking Mode</span>
+            </label>
+
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                formControlName="supports_vision"
+                class="rounded border-gray-300 text-primary focus:ring-primary"
+                [disabled]="isSubmitting()"
+              />
+              <span class="text-sm text-text-primary"
+                >Este modelo acepta imágenes (visión)</span
+              >
             </label>
           </div>
           @if (isAudio()) {
@@ -476,6 +389,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
   sdkTypeOptions: SelectorOption[] = [
     { value: 'openai_compatible', label: 'OpenAI Compatible' },
     { value: 'anthropic_compatible', label: 'Anthropic Compatible' },
+    { value: 'gemini_tts', label: 'Gemini TTS (voz)' },
   ];
 
   modelTypeOptions: SelectorOption[] = MODEL_TYPES.map((value) => ({
@@ -486,11 +400,6 @@ export class AIEngineConfigModalComponent implements OnChanges {
   imageModeOptions: SelectorOption[] = IMAGE_GENERATION_MODES.map((value) => ({
     value,
     label: IMAGE_GENERATION_MODE_LABELS[value],
-  }));
-
-  voiceOptions: SelectorOption[] = REALTIME_VOICES.map((value) => ({
-    value,
-    label: value,
   }));
 
   // La opcion vacia no es "ninguno": significa no enviar el parametro y dejar
@@ -566,6 +475,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
     is_default: [false],
     is_active: [true],
     thinking: [false],
+    supports_vision: [false],
     voice: [''],
     turn_detection_type: [''],
     turn_detection_silence_ms: [null],
@@ -662,6 +572,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
         is_default: c.is_default,
         is_active: c.is_active,
         thinking: c.settings?.thinking ?? false,
+        supports_vision: c.settings?.['supports_vision'] === true,
         ...this.embeddingFormValues(c),
         ...this.audioFormValues(c),
       });
@@ -683,6 +594,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
         is_default: false,
         is_active: p.is_active,
         thinking: p.settings?.thinking ?? false,
+        supports_vision: p.settings?.['supports_vision'] === true,
         ...this.embeddingFormValues(p),
         ...this.audioFormValues(p),
       });
@@ -711,6 +623,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
       delete settings['maxTokens'];
     }
     settings['thinking'] = !!raw.thinking;
+    settings['supports_vision'] = !!raw.supports_vision;
     const modelType = (raw.model_type || 'text') as AIModelType;
     settings['model_type'] = modelType;
 
@@ -777,6 +690,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
       is_default: false,
       is_active: true,
       thinking: false,
+      supports_vision: false,
       voice: '',
       turn_detection_type: '',
       turn_detection_silence_ms: null,
