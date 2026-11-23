@@ -36,6 +36,7 @@ import {
   UserRoleAssignment,
 } from '../../roles/interfaces/role.interface';
 import { superadminRoleErrorMessage } from '../../roles/utils/superadmin-role-errors';
+import { isSuperadminAssignableRole } from '../../roles/utils/superadmin-assignable-roles';
 import { User } from '../interfaces/user.interface';
 
 /** Valor del selector de tienda que representa la asignación org-wide. */
@@ -468,7 +469,8 @@ export class UserRolesModalComponent {
   }
 
   /**
-   * Candidatos = roles de sistema + roles del tenant del usuario.
+   * Candidatos = roles de sistema + roles del tenant del usuario, sin el rol
+   * `customer`: el Super Admin no convierte a nadie en cliente final.
    *
    * Es la misma regla que aplica el backend (`ROLE_ASSIGN_001`): un rol con
    * organización sólo se asigna a usuarios de ESA organización. Se piden en dos
@@ -495,10 +497,11 @@ export class UserRolesModalComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: ([systemRoles, tenantRoles]) => {
-          this.availableRoles.set([
-            ...(systemRoles.data ?? []),
-            ...(tenantRoles.data ?? []),
-          ]);
+          this.availableRoles.set(
+            [...(systemRoles.data ?? []), ...(tenantRoles.data ?? [])].filter(
+              isSuperadminAssignableRole,
+            ),
+          );
           this.isLoadingRoles.set(false);
         },
         error: () => {
