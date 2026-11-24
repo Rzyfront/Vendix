@@ -4,12 +4,13 @@ import { PrismaModule } from '../../../../prisma/prisma.module';
 import { HousekeepingController } from './housekeeping.controller';
 import { HousekeepingService } from './housekeeping.service';
 import { HousekeepingTasksService } from './housekeeping-tasks.service';
+import { CheckoutCleanService } from './checkout-clean.service';
 import { LodgingReservationsModule } from '../reservations/reservations.module';
 
 @Module({
   // The board's "Fuera de servicio" reuses the availability of the sale.
   imports: [ResponseModule, PrismaModule, LodgingReservationsModule],
   controllers: [HousekeepingController],
-  providers: [HousekeepingService, HousekeepingTasksService],
+  providers: [HousekeepingService, HousekeepingTasksService, CheckoutCleanService],
 })
 export class HousekeepingModule {}

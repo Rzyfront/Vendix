@@ -1,3 +1,4 @@
+import { HOSPITALITY_TERMS } from '../../shared/hospitality-labels';
 import { HousekeepingStatus } from '../../rooms/interfaces/unit.interface';
 
 /** Hospitality Suite (H5.1) — guest situation of a room today. */
@@ -122,4 +123,53 @@ export type HousekeepingTaskField = 'unit_id' | 'type' | 'task_date' | 'assigned
 export interface HousekeepingTaskError {
   message: string;
   field: HousekeepingTaskField | null;
+}
+
+/**
+ * Agenda unificada (F3) — display name of the fixed cleaning role (internal
+ * key `housekeeper`), taken from the hospitality glossary so the check-out
+ * names it exactly as Configuración › Usuarios does. Renaming the role is a
+ * change of that single term.
+ */
+export const CLEANING_ROLE_LABEL: string = HOSPITALITY_TERMS.housekeeper;
+
+/** A person the check-out recommends for the clean, cleaning role first. */
+export interface CheckoutCleanStaff {
+  id: number;
+  name: string;
+  is_cleaning_role: boolean;
+  pending_tasks: number;
+}
+
+export interface CheckoutCleanRoom {
+  unit_id: number;
+  code: string;
+  floor: string | null;
+  unit_type_name: string;
+  priority: 'high' | 'normal';
+  priority_reason: string | null;
+  suggested_note: string;
+  suggested_user_id: number | null;
+  existing_task: { id: number; status: HousekeepingTaskStatus; assigned_user_id: number | null } | null;
+}
+
+export interface CheckoutCleanSuggestion {
+  reservation_id: number;
+  business_date: string;
+  rooms: CheckoutCleanRoom[];
+  staff: CheckoutCleanStaff[];
+}
+
+export interface CheckoutCleanAssignment {
+  unit_id: number;
+  assigned_user_id: number | null;
+  notes?: string;
+}
+
+export interface CheckoutCleanResultRow {
+  unit_id: number;
+  code: string;
+  task_id: number;
+  assigned_user_id: number | null;
+  outcome: 'created' | 'assigned' | 'done';
 }

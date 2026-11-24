@@ -6,6 +6,9 @@ import { environment } from '../../../../../../../environments/environment';
 import { hospitalityErrorMessage } from '../../shared/hospitality-errors';
 import { HousekeepingStatus } from '../../rooms/interfaces/unit.interface';
 import {
+  CheckoutCleanAssignment,
+  CheckoutCleanResultRow,
+  CheckoutCleanSuggestion,
   HousekeepingBoard,
   HousekeepingTask,
   HousekeepingTaskError,
@@ -95,6 +98,25 @@ export class LodgingHousekeepingService {
   completeTask(taskId: number): Observable<HousekeepingTask> {
     return this.http
       .post<ApiResponse<HousekeepingTask>>(`${this.baseUrl}/tasks/${taskId}/complete`, {})
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** Agenda unificada (F3) — the clean suggested when a reservation checks out. */
+  checkoutCleanSuggestion(reservationId: number): Observable<CheckoutCleanSuggestion> {
+    return this.http
+      .get<ApiResponse<CheckoutCleanSuggestion>>(`${this.baseUrl}/checkout-clean/${reservationId}`)
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** Accepts the suggestion: creates (or assigns) today's check-out clean. */
+  assignCheckoutClean(
+    reservationId: number,
+    assignments: CheckoutCleanAssignment[],
+  ): Observable<CheckoutCleanResultRow[]> {
+    return this.http
+      .post<ApiResponse<CheckoutCleanResultRow[]>>(`${this.baseUrl}/checkout-clean/${reservationId}`, {
+        assignments,
+      })
       .pipe(map((res) => res.data), catchError(this.handleError));
   }
 
