@@ -31,8 +31,11 @@ export const agendaAccessGuard: CanActivateFn = () => {
   const paywall = inject(PlanPaywallService);
   const fallback = () => router.parseUrl(menuFilter.firstActiveModuleRoute(menuFilter.currentMenuTree()));
 
-  // Capa plan: el paywall del módulo, como en `panelUiGuard`.
-  const planLock = menuFilter.planLockForKeys(keys);
+  // Capa plan: el paywall del módulo, como en `panelUiGuard`. Se pregunta por
+  // las keys que aplican a la tienda (sin pedidos activos, solo Reservas), para
+  // que una Reserva fuera del plan abra su paywall y no el aviso genérico.
+  const candidates = menuFilter.candidateAnyOfKeys(keys);
+  const planLock = menuFilter.planLockForKeys(candidates.length ? candidates : keys);
   if (planLock) {
     if (!paywall.show(planLock)) toast.info(paywall.notice(planLock));
     return router.navigated ? false : fallback();

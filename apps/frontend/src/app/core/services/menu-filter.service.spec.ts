@@ -1465,6 +1465,7 @@ describe('MenuFilterService — Órdenes: Agenda (agenda-unificada F1)', () => {
       hasPermission: () => false,
       hasAnyRole: () => false, hasAnyPermission: () => false,
       isOwner: () => owner, isAdmin: () => false,
+      isRestaurant: () => industries().includes('restaurant'),
     };
     TestBed.configureTestingModule({ providers: [
       MenuFilterService,
@@ -1562,4 +1563,16 @@ describe('MenuFilterService — Órdenes: Agenda (agenda-unificada F1)', () => {
     // Pedidos programados aplica su industria siempre (ENFORCED_INDUSTRY_KEYS).
     expect(service.openAnyOfKeys(['orders_reservations', 'orders_scheduled'])).toEqual(['orders_reservations']);
   });
+
+  it('N1: manufactura sola con el ajuste encendido no ve pedidos en Agenda (regla QUI-1001 del layout)', async () => {
+    setStore(['manufacturing'], { scheduled_orders: { enabled: true } });
+    expect(service.candidateAnyOfKeys(['orders_reservations', 'orders_scheduled'])).toEqual(['orders_reservations']);
+    expect(service.openAnyOfKeys(['orders_reservations', 'orders_scheduled'])).toEqual([]);
+    const routes = await childRoutes();
+    expect(routes).not.toContain('/admin/orders/agenda');
+    // Restaurante con el mismo ajuste sí.
+    setStore(['restaurant'], { scheduled_orders: { enabled: true } });
+    expect(service.openAnyOfKeys(['orders_reservations', 'orders_scheduled'])).toEqual(['orders_scheduled']);
+  });
 });
+

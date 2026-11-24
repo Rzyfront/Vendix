@@ -2023,9 +2023,11 @@ export class MenuFilterService {
   }
 
   /**
-   * `scheduled_orders.enabled`. The layout hydrates `scheduledOrdersEnabled`
-   * once it mounts; guards run before that, so they also read the setting
-   * from the session (the industry layer still applies through the gate).
+   * `scheduled_orders.enabled` with the layout's rule (QUI-1001): the entry
+   * exists only for restaurants with the setting on
+   * (`store-admin-layout.component.ts`, `enabled && isRestaurant()`). The
+   * layout hydrates `scheduledOrdersEnabled` once it mounts; guards run
+   * before that, so they apply the same rule to the session settings.
    */
   private scheduledOrdersOn(): boolean {
     if (this.scheduledOrdersEnabled()) return true;
@@ -2033,7 +2035,16 @@ export class MenuFilterService {
       | { scheduled_orders?: { enabled?: boolean } }
       | null
       | undefined;
-    return settings?.scheduled_orders?.enabled === true;
+    return settings?.scheduled_orders?.enabled === true && this.authFacade.isRestaurant();
+  }
+
+  /**
+   * Keys of a `panelUiAnyOf` entry that can apply at all (their store-setting
+   * precondition holds), before any panel/industry/plan layer. The Agenda
+   * guard asks the plan paywall about these.
+   */
+  candidateAnyOfKeys(keys: readonly string[]): string[] {
+    return this.anyOfKeysFor({ panelUiAnyOf: [...keys] } as MenuItem);
   }
 
   /**

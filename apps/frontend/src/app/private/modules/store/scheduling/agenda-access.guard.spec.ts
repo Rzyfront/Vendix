@@ -10,10 +10,12 @@ describe('Agenda unificada F1 — agendaAccessGuard', () => {
   let planLock: unknown;
   let toast: jasmine.SpyObj<ToastService>;
   let paywall: { show: jasmine.Spy; notice: jasmine.Spy };
-  let menuFilter: { openAnyOfKeys: jasmine.Spy; planLockForKeys: jasmine.Spy; firstActiveModuleRoute: jasmine.Spy; currentMenuTree: jasmine.Spy };
+  let candidates: string[];
+  let menuFilter: { openAnyOfKeys: jasmine.Spy; candidateAnyOfKeys: jasmine.Spy; planLockForKeys: jasmine.Spy; firstActiveModuleRoute: jasmine.Spy; currentMenuTree: jasmine.Spy };
 
   beforeEach(() => {
     open = [];
+    candidates = ['orders_reservations', 'orders_scheduled'];
     planLock = null;
     toast = jasmine.createSpyObj<ToastService>('ToastService', ['info']);
     paywall = { show: jasmine.createSpy('show').and.returnValue(true), notice: jasmine.createSpy('notice') };
@@ -21,6 +23,7 @@ describe('Agenda unificada F1 — agendaAccessGuard', () => {
       openAnyOfKeys: jasmine.createSpy('openAnyOfKeys').and.callFake((keys: string[]) =>
         keys.filter((k) => open.includes(k)),
       ),
+      candidateAnyOfKeys: jasmine.createSpy('candidateAnyOfKeys').and.callFake(() => candidates),
       planLockForKeys: jasmine.createSpy('planLockForKeys').and.callFake(() => planLock),
       firstActiveModuleRoute: jasmine.createSpy('firstActiveModuleRoute').and.returnValue('/admin/dashboard'),
       currentMenuTree: jasmine.createSpy('currentMenuTree').and.returnValue([]),
@@ -72,5 +75,16 @@ describe('Agenda unificada F1 — agendaAccessGuard', () => {
     expect(
       router.serializeUrl(TestBed.runInInjectionContext(() => agendaTabRedirect('programacion'))),
     ).toBe('/admin/orders/agenda?tab=programacion');
+  });
+
+  it('N3: con pedidos apagados y Reservas fuera del plan abre el paywall de Reservas', () => {
+    candidates = ['orders_reservations'];
+    menuFilter.planLockForKeys.and.callFake((keys: string[]) =>
+      keys.length === 1 && keys[0] === 'orders_reservations' ? { key: 'orders_reservations' } : null,
+    );
+    run();
+    expect(menuFilter.planLockForKeys).toHaveBeenCalledWith(['orders_reservations']);
+    expect(paywall.show).toHaveBeenCalledWith({ key: 'orders_reservations' } as any);
+    expect(toast.info).not.toHaveBeenCalled();
   });
 });

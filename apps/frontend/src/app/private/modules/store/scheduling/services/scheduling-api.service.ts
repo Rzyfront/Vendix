@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable, map } from 'rxjs';
+import { Observable, map, of } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 import { MenuFilterService } from '../../../../../core/services/menu-filter.service';
 import {
@@ -56,17 +56,24 @@ export class SchedulingApiService {
   }
 
   getEvents(query: SchedulingQuery): Observable<SchedulingListResponse> {
+    const scoped = this.withPanelTypes(query);
+    if (!scoped.types?.length) {
+      const limit = query.limit ?? 20;
+      return of({ data: [], meta: { total: 0, page: query.page ?? 1, limit, totalPages: 0 } });
+    }
     return this.http
       .get<SchedulingListResponse>(`${this.baseUrl}/events`, {
-        params: schedulingParams(this.withPanelTypes(query)),
+        params: schedulingParams(scoped),
       })
       .pipe(map((r) => ({ data: r.data ?? [], meta: r.meta })));
   }
 
   getCalendar(query: SchedulingQuery & { from: string; to: string }): Observable<SchedulingCalendarResult> {
+    const scoped = this.withPanelTypes(query);
+    if (!scoped.types?.length) return of({ data: [], truncated: false, types: [], availability: [] });
     return this.http
       .get<ApiResponse<SchedulingCalendarResult>>(`${this.baseUrl}/calendar`, {
-        params: schedulingParams(this.withPanelTypes(query)),
+        params: schedulingParams(scoped),
       })
       .pipe(map((r) => r.data));
   }
@@ -90,7 +97,11 @@ export class SchedulingApiService {
     };
   }
 
-  /** Sin filtro de tipo se piden solo los tipos abiertos en el panel. */
+  /**
+   * Sin filtro de tipo se piden solo los tipos abiertos en el panel. Si el
+   * filtro solo traía tipos cerrados queda vacío y no se pide nada: nunca se
+   * consulta sin filtro de tipo (el backend devolvería todas sus fuentes).
+   */
   private withPanelTypes<T extends SchedulingQuery>(query: T): T {
     const allowed = this.panelTypes();
     const types = query.types?.length

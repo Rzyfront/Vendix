@@ -68,4 +68,16 @@ describe('Agenda unificada F1 — cada parte solo con su key del panel', () => {
     expect(result.types.length).toBe(2);
     expect(result.staff.length).toBe(1);
   });
+
+  it('N2: un filtro de tipo que solo trae tipos cerrados no consulta sin filtro', () => {
+    open = ['orders_reservations'];
+    let list: any;
+    api.getEvents({ page: 2, limit: 10, types: ['scheduled_order'] }).subscribe((r) => (list = r));
+    let cal: any;
+    api.getCalendar({ from: '2026-11-23', to: '2026-11-29', types: ['scheduled_order'] }).subscribe((r) => (cal = r));
+    http.expectNone((r) => r.url.includes('/store/scheduling/'));
+    expect(list.data).toEqual([]);
+    expect(list.meta.total).toBe(0);
+    expect(cal.data).toEqual([]);
+  });
 });
