@@ -45,6 +45,7 @@ import { WithholdingTaxModule } from './withholding-tax/withholding-tax.module';
 import { ExogenousModule } from './exogenous/exogenous.module';
 import { ReservationsModule } from './reservations/reservations.module';
 import { ScheduledOrdersModule } from './scheduled-orders/scheduled-orders.module';
+import { SchedulingModule } from './scheduling/scheduling.module';
 import { ProductOptionsModule } from './product-options/product-options.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { AIChatModule } from './ai-chat/ai-chat.module';
@@ -149,6 +150,7 @@ import { AiAgentMemoryModule } from './ai-agent-memory/ai-agent-memory.module';
     ExogenousModule,
     ReservationsModule,
     ScheduledOrdersModule,
+    SchedulingModule,
     ProductOptionsModule,
     ReviewsModule,
     AIChatModule,
