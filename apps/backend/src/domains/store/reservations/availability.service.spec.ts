@@ -322,6 +322,62 @@ describe('AvailabilityService — provider_required never returns generic slots 
   });
 });
 
+describe('AvailabilityService — free_booking longer than the open day (multi-day tours hotfix)', () => {
+  // Travelty Go shape: Mon-Thu 09:00-19:00, tours of 600..7200 minutes.
+  function buildService(product: any) {
+    const hours = new Map(
+      [1, 2, 3, 4].map((d) => [d, [{ start_time: '09:00', end_time: '19:00' }]]),
+    );
+    const businessHoursService = {
+      loadStoreHours: jest.fn().mockResolvedValue(hours),
+      loadStoreWindows: jest.fn().mockResolvedValue(hours),
+    } as any;
+    const prisma: any = {
+      products: { findFirst: jest.fn().mockResolvedValue(product) },
+      bookings: { findMany: jest.fn().mockResolvedValue([]) },
+      store_settings: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findUnique: jest.fn().mockResolvedValue(null),
+      },
+    };
+    return new AvailabilityService(prisma, businessHoursService);
+  }
+  const tour = (minutes: number) => ({
+    id: 10,
+    store_id: 131,
+    booking_mode: 'free_booking',
+    requires_station: false,
+    service_duration_minutes: minutes,
+    buffer_minutes: 0,
+  });
+
+  it('offers ONE departure per open day at opening time for a 2880 min tour, ending start + duration', async () => {
+    const service = buildService(tour(2880));
+    // 2026-08-17 is Monday; Mon-Thu open.
+    const slots = await service.getAvailableSlots(10, '2026-08-17', '2026-08-20');
+    expect(slots).toEqual([
+      { date: '2026-08-17', start_time: '09:00', end_time: '09:00', end_date: '2026-08-19', available_providers: [], total_available: 10 },
+      { date: '2026-08-18', start_time: '09:00', end_time: '09:00', end_date: '2026-08-20', available_providers: [], total_available: 10 },
+      { date: '2026-08-19', start_time: '09:00', end_time: '09:00', end_date: '2026-08-21', available_providers: [], total_available: 10 },
+      { date: '2026-08-20', start_time: '09:00', end_time: '09:00', end_date: '2026-08-22', available_providers: [], total_available: 10 },
+    ]);
+  });
+
+  it('offers a same-day departure for a 720 min tour (09:00-21:00, no end_date)', async () => {
+    const service = buildService(tour(720));
+    const slots = await service.getAvailableSlots(10, '2026-08-17', '2026-08-17');
+    expect(slots).toEqual([
+      { date: '2026-08-17', start_time: '09:00', end_time: '21:00', available_providers: [], total_available: 10 },
+    ]);
+  });
+
+  it('keeps the regular grid for services that fit the day', async () => {
+    const service = buildService(tour(300));
+    const slots = await service.getAvailableSlots(10, '2026-08-17', '2026-08-17');
+    expect(slots.map((s) => `${s.start_time}-${s.end_time}`)).toEqual(['09:00-14:00', '14:00-19:00']);
+  });
+});
+
 describe('AvailabilityService — horarios nocturnos (S21)', () => {
   // 2026-11-13 is a Friday, 2026-11-14 a Saturday.
   const FRIDAY = '2026-11-13';

@@ -10,7 +10,12 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { RequestContextService } from '@common/context/request-context.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { booking_status_enum, booking_mode_enum, Prisma } from '@prisma/client';
-import { bookingEndDateFor, bookingMinuteSpan } from '@common/utils/schedule-window.util';
+import {
+  addDaysToDateString,
+  bookingEndDateFor,
+  bookingMinuteSpan,
+  toMinutes,
+} from '@common/utils/schedule-window.util';
 import {
   CreateBookingDto,
   RescheduleBookingDto,
@@ -224,7 +229,8 @@ export class ReservationsService {
       ? null
       : dto.end_date && dto.end_date.slice(0, 10) !== dto.date.slice(0, 10)
         ? dto.end_date.slice(0, 10)
-        : bookingEndDateFor(dto.date.slice(0, 10), dto.start_time, endTime);
+        : ((await this.freeBookingMultiDayEndDate(product, dto.product_variant_id, dto.date, dto.start_time)) ??
+          bookingEndDateFor(dto.date.slice(0, 10), dto.start_time, endTime));
 
     // Validate product_variant_id if provided
     let selectedVariant: {
@@ -727,6 +733,30 @@ export class ReservationsService {
     return quote;
   }
 
+  /**
+   * Hotfix: a `free_booking` service longer than the open day is offered as one departure at
+   * opening time ending `start + duration` (AvailabilityService.generateGenericSlots). Its
+   * `end_time` alone cannot tell D+1 from D+2+, so the end day is derived from the service
+   * duration when it lands two or more days later. Returns null otherwise (legacy rule applies).
+   */
+  private async freeBookingMultiDayEndDate(
+    product: { booking_mode: booking_mode_enum | null; service_duration_minutes: number | null },
+    variantId: number | undefined,
+    date: string,
+    startTime: string,
+  ): Promise<string | null> {
+    if (product.booking_mode !== booking_mode_enum.free_booking) return null;
+    const variant = variantId
+      ? await this.prisma.product_variants.findFirst({
+          where: { id: variantId },
+          select: { service_duration_minutes: true },
+        })
+      : null;
+    const duration = variant?.service_duration_minutes ?? product.service_duration_minutes ?? 60;
+    const days = Math.floor((toMinutes(startTime) + duration) / 1440);
+    return days >= 2 ? addDaysToDateString(date.slice(0, 10), days) : null;
+  }
+
   async hold(dto: {
     customer_id: number;
     product_id: number;
@@ -754,6 +784,7 @@ export class ReservationsService {
         requires_booking: true,
         requires_station: true,
         booking_mode: true,
+        service_duration_minutes: true,
       },
     });
 
@@ -813,7 +844,9 @@ export class ReservationsService {
       }
     }
 
-    const holdEndDate = bookingEndDateFor(dto.date.slice(0, 10), dto.start_time, dto.end_time);
+    const holdEndDate =
+      (await this.freeBookingMultiDayEndDate(product, dto.product_variant_id, dto.date, dto.start_time)) ??
+      bookingEndDateFor(dto.date.slice(0, 10), dto.start_time, dto.end_time);
     const HOLD_DURATION_MINUTES = 15;
     const expiresAt = new Date();
     expiresAt.setMinutes(expiresAt.getMinutes() + HOLD_DURATION_MINUTES);
