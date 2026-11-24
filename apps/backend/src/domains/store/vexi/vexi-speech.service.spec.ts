@@ -704,6 +704,54 @@ describe('VexiSpeechService', () => {
       expect(aiEngine.runSpeech).toHaveBeenCalledTimes(callsAfterFirst);
     });
 
+    it('reads with the agent voice, shares the streaming cache key and meters only generated audio', async () => {
+      prisma.ai_engine_applications.findUnique.mockResolvedValue({
+        metadata: {
+          speech: { voice: 'base-voice', agent_voices: { vex: { voice: 'vex-voice' } } },
+        },
+        config: { model_id: 'app-model' },
+      });
+      (prisma as any).ai_agents = { findUnique: jest.fn(async () => null) };
+      aiEngine.runSpeech.mockImplementation(
+        async (_key: string, vars: { text: string }) => ({
+          success: true,
+          audioBase64: `b64:${vars.text}`,
+          contentType: 'audio/mpeg',
+        }),
+      );
+      const text = 'Hoy vendiste bastante. Mañana revisamos el inventario.';
+
+      // Streaming turn (voice mode) with Vex's voice warms the cache.
+      const turn = await service.openTurn(Date.now(), { agentKey: 'vex' });
+      turn.push(text);
+      turn.flush();
+      for await (const _frame of turn.settleOrdered()) void _frame;
+      const streamed = aiEngine.runSpeech.mock.calls.length;
+      expect(streamed).toBeGreaterThan(0);
+      expect(aiEngine.runSpeech.mock.calls[0][2]).toEqual(
+        expect.objectContaining({ voice: 'vex-voice' }),
+      );
+
+      // «Escuchar» on the same message: same key, zero provider calls, no charge.
+      const cachedMeter = jest.fn();
+      const replay = await service.synthesizeText(text, {
+        agentKey: 'vex',
+        meter: cachedMeter,
+      });
+      expect(replay.length).toBe(streamed);
+      expect(aiEngine.runSpeech).toHaveBeenCalledTimes(streamed);
+      expect(cachedMeter).not.toHaveBeenCalled();
+
+      // New text is generated, so it is metered with positive seconds.
+      const meter = jest.fn();
+      await service.synthesizeText('Otro mensaje distinto para escuchar.', {
+        agentKey: 'vex',
+        meter,
+      });
+      expect(meter).toHaveBeenCalled();
+      for (const [seconds] of meter.mock.calls) expect(seconds).toBeGreaterThan(0);
+    });
+
     it('returns an empty array for blank text without calling the provider', async () => {
       await expect(service.synthesizeText('   ')).resolves.toEqual([]);
       expect(aiEngine.runSpeech).not.toHaveBeenCalled();

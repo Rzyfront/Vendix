@@ -217,7 +217,7 @@ interface StagedFile {
             [disabled]="
               store.is_agent_typing() || pipeline.state() === 'transcribing'
             "
-            aria-label="Mantén presionado para dictar por micrófono (solo entrada)"
+            [attr.aria-label]="copy.hold_to_dictate"
             title="Mantén presionado para dictar (solo entrada)"
             [attr.aria-pressed]="pipeline.recording()"
             (pointerdown)="voiceDown($event)"
@@ -307,7 +307,7 @@ export class VexComposerComponent {
   private readonly realtime = inject(VexiRealtimeService);
   private readonly destroyRef = inject(DestroyRef);
   readonly voiceEnabled = signal(false);
-  readonly voiceHint = signal<string | null>(null);
+  readonly voiceHint = signal<string | null>(VEX_COPY.composer.voice_hint);
   private voiceHeld = false;
   readonly statusNotice = computed(() => {
     const err = this.pipeline.errorMessage();

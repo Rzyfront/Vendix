@@ -394,12 +394,19 @@ export class VexiSpeechService {
    * index — clicking «Escuchar» on a message already spoken in voice mode (or
    * previously listened to) hits the cache for every segment with zero provider
    * calls.
+   *
+   * `options` carries the agent voice and the quota meter, exactly as a
+   * streaming turn does; without them the turn uses the shared voice and is
+   * not metered.
    */
-  async synthesizeText(rawText: string): Promise<VexiAudioFrame[]> {
+  async synthesizeText(
+    rawText: string,
+    options?: SpeechTurnOptions,
+  ): Promise<VexiAudioFrame[]> {
     const trimmed = (rawText ?? '').trim();
     if (!trimmed) return [];
 
-    const turn = await this.openTurn();
+    const turn = await this.openTurn(Date.now(), options);
     turn.push(trimmed);
     turn.flush();
 

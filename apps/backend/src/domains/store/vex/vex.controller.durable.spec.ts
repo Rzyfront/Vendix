@@ -1,5 +1,10 @@
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { VexController } from './vex.controller';
+import { RequestContextService } from '../../../common/context/request-context.service';
+import {
+  VOICE_QUOTA_EXHAUSTED_MESSAGE,
+  voiceNotInPlanMessage,
+} from '../subscriptions/services/agent-quota.service';
 
 function fixture() {
   const controller: any = Object.create(VexController.prototype);
@@ -111,7 +116,80 @@ describe('Vex durable objective aliases', () => {
 
     const result = await c.synthesizeSpeech({ text: 'Hola. Todo bien.' });
 
-    expect(c.speech.synthesizeText).toHaveBeenCalledWith('Hola. Todo bien.');
+    expect(c.speech.synthesizeText).toHaveBeenCalledWith(
+      'Hola. Todo bien.',
+      expect.objectContaining({ agentKey: 'vex' }),
+    );
     expect(result).toEqual({ segments });
+  });
+
+  describe('synthesizeSpeech voice plan and quota', () => {
+    afterEach(() => jest.restoreAllMocks());
+
+    function speechFixture(status: string) {
+      const c = fixture();
+      jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({ store_id: 7 } as any);
+      jest.spyOn(RequestContextService, 'getRequestId').mockReturnValue('req-1');
+      c.logger = { warn: jest.fn() };
+      c.agentQuota = {
+        checkAgentVoice: jest.fn(async () => ({ status })),
+        consumeAgentVoice: jest.fn(async () => undefined),
+      };
+      c.speech = {
+        synthesizeText: jest.fn(async (_text: string, options: any) => {
+          options.meter(1.25, 0);
+          return [];
+        }),
+      };
+      return c;
+    }
+
+    it('refuses with voice_quota_exhausted when the monthly quota ran out', async () => {
+      const c = speechFixture('exhausted');
+      await expect(c.synthesizeSpeech({ text: 'Hola.' })).rejects.toMatchObject({
+        errorCode: 'voice_quota_exhausted',
+        response: expect.objectContaining({
+          message: VOICE_QUOTA_EXHAUSTED_MESSAGE,
+        }),
+      });
+      expect(c.agentQuota.checkAgentVoice).toHaveBeenCalledWith(7, 'vex');
+      expect(c.speech.synthesizeText).not.toHaveBeenCalled();
+    });
+
+    it('refuses with voice_not_in_plan when the plan lacks Vex voice', async () => {
+      const c = speechFixture('disabled');
+      await expect(c.synthesizeSpeech({ text: 'Hola.' })).rejects.toMatchObject({
+        errorCode: 'voice_not_in_plan',
+        response: expect.objectContaining({
+          message: voiceNotInPlanMessage('vex'),
+        }),
+      });
+      expect(c.speech.synthesizeText).not.toHaveBeenCalled();
+    });
+
+    it('speaks with the Vex voice and meters generated seconds', async () => {
+      const c = speechFixture('ok');
+      await c.synthesizeSpeech({ text: 'Hola.' });
+      expect(c.speech.synthesizeText).toHaveBeenCalledWith(
+        'Hola.',
+        expect.objectContaining({ agentKey: 'vex', meter: expect.any(Function) }),
+      );
+      expect(c.agentQuota.consumeAgentVoice).toHaveBeenCalledWith(
+        7,
+        'vex',
+        1250,
+        'req-1:speech-tts:0',
+      );
+    });
+
+    it('fails open when the quota decision is unavailable', async () => {
+      const c = speechFixture('ok');
+      c.agentQuota.checkAgentVoice.mockRejectedValue(new Error('redis down'));
+      await expect(c.synthesizeSpeech({ text: 'Hola.' })).resolves.toEqual({
+        segments: [],
+      });
+    });
   });
 });
