@@ -10,7 +10,7 @@
  * `priceToCents` before summing.
  */
 import { localCivil } from './store-timezone.util';
-import { validateWeeklyBlocks, windowSpan } from './schedule-window.util';
+import { WeeklyBlockProblem, validateWeeklyBlocks, windowSpan } from './schedule-window.util';
 
 const DAY_MIN = 1440;
 const MINUTE_MS = 60_000;
@@ -80,9 +80,12 @@ export function quoteBlocks(input: QuoteBlocksInput): QuoteBlocksResult {
   return { cents, perBlock };
 }
 
-/** Validates a weekly set of windows: HH:MM format and no overlap (overnight allowed). */
+/**
+ * Validates a weekly set of windows: HH:MM format and no overlap (overnight allowed).
+ * Rate windows never ask for `rejectZeroLength`, so `reason` is never `zero` here.
+ */
 export function validateRateWindows(
   windows: Array<Pick<RateWindow, 'weekday' | 'start_time' | 'end_time'>>,
-): { day: number; reason: 'format' | 'overlap' } | null {
+): WeeklyBlockProblem | null {
   return validateWeeklyBlocks(windows.map((w) => ({ day: w.weekday, start_time: w.start_time, end_time: w.end_time })));
 }
