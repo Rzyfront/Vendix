@@ -325,6 +325,9 @@ export const MODULE_GATE_ROUTES: Record<string, string[]> = {
   hospitality_reservations: [
     '/admin/hospitality/front-desk',
     '/admin/hospitality/rack',
+    // Agenda F4: hotel reports (and the night audit) live in Reportes →
+    // Hotelería but answer to the hotel key, not to `reports`.
+    '/admin/reports/hospitality',
   ],
   hospitality_rooms: ['/admin/hospitality/housekeeping'],
   flows: ['/admin/workflows'],

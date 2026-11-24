@@ -893,6 +893,11 @@ jobs:
           --include='**/super-admin/ai-engine/ai-engine.component.spec.ts'
           --include='**/planillas-rutas/components/planilla-wizard/planilla-wizard.component.spec.ts'
           --include='**/planillas-rutas/components/add-notes-modal/add-notes-modal.component.spec.ts'
+          --include='**/reports/config/report-industries.spec.ts'
+          --include='**/reports/guards/report-industry.guard.spec.ts'
+          --include='**/reports/components/reports-catalog/reports-catalog.component.spec.ts'
+          --include='**/reports/hotel-night-audit-access.spec.ts'
+          --include='**/analytics/components/analytics-shell/analytics-shell.component.spec.ts'
 
   mobile:
     name: Mobile
