@@ -93,7 +93,13 @@ export class PlanillasRutasService {
       .get<any>(`${this.apiUrl}/store/dispatch-routes/${id}`)
       .pipe(
         map((r) => r.data as DispatchRoute),
-        catchError((e) => throwError(() => new Error(this.extractMessage(e)))),
+        // Conserva el status HTTP: el detalle distingue 404 (ruta inexistente o
+        // de otra tienda) de un fallo de red para su estado vacío (QUI-1058).
+        catchError((e) =>
+          throwError(() =>
+            Object.assign(new Error(this.extractMessage(e)), { status: e?.status as number | undefined }),
+          ),
+        ),
       );
   }
 

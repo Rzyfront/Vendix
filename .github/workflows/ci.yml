@@ -931,6 +931,7 @@ jobs:
           --include='**/planillas-rutas/components/add-notes-modal/add-notes-modal.component.spec.ts'
           --include='**/planillas-rutas/components/route-sheet-scanner-modal/route-sheet-scanner-modal.component.spec.ts'
           --include='**/planillas-rutas/components/stop-settle-modal/stop-settle-modal.component.spec.ts'
+          --include='**/planillas-rutas/pages/planilla-detail-page/planilla-detail-page.not-found.spec.ts'
           --include='**/reports/config/report-industries.spec.ts'
           --include='**/reports/guards/report-industry.guard.spec.ts'
           --include='**/reports/components/reports-catalog/reports-catalog.component.spec.ts'

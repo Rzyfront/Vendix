@@ -27,6 +27,7 @@ import {
   TableAction,
   ItemListCardConfig,
   DialogService,
+  EmptyStateComponent,
 } from '../../../../../../shared/components/index';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { CurrencyPipe, CurrencyFormatService } from '../../../../../../shared/pipes/currency';
@@ -85,6 +86,7 @@ type StopCollectionState = 'prepaid' | 'collected' | 'pending_cod' | 'none';
     VoidDispatchRouteModalComponent,
     StopDetailModalComponent,
     AddNotesModalComponent,
+    EmptyStateComponent,
   ],
   template: `
     <div class="w-full">
@@ -336,6 +338,26 @@ type StopCollectionState = 'prepaid' | 'collected' | 'pending_cod' | 'none';
               (rowClick)="openStopDetail($event)"
             ></app-responsive-data-view>
           </app-card>
+        } @else if (loadError() === 'not-found') {
+          <app-empty-state
+            icon="truck"
+            iconColor="warning"
+            title="Ruta no encontrada"
+            description="La ruta no existe o no pertenece a esta tienda."
+            actionButtonText="Volver a Rutas"
+            actionButtonIcon="arrow-left"
+            (actionClick)="backToList()"
+          ></app-empty-state>
+        } @else if (loadError() === 'failed') {
+          <app-empty-state
+            icon="alert-triangle"
+            iconColor="error"
+            title="No se pudo cargar la ruta"
+            description="Revisa tu conexión e inténtalo de nuevo."
+            actionButtonText="Reintentar"
+            actionButtonIcon="refresh-cw"
+            (actionClick)="load()"
+          ></app-empty-state>
         }
       </div>
     </div>
@@ -590,6 +612,11 @@ export class PlanillaDetailPageComponent {
   readonly routeId = signal<number>(0);
   readonly route = signal<DispatchRoute | null>(null);
   readonly loading = signal(false);
+  /**
+   * QUI-1058 — por qué no hay ruta que mostrar tras la primera carga:
+   * `not-found` (404 o id inválido) o `failed` (red/servidor). null = sin error.
+   */
+  readonly loadError = signal<'not-found' | 'failed' | null>(null);
   readonly actionLoading = signal(false);
   readonly downloadingPdf = signal(false);
 
@@ -1016,10 +1043,17 @@ export class PlanillaDetailPageComponent {
     // ngOnInit (not in an effect) avoids NG0950 (required input never bound)
     // and NG0100 (signal writes during the first change-detection pass).
     const id = Number(this.activatedRoute.snapshot.paramMap.get('id'));
-    if (id > 0) {
+    if (Number.isInteger(id) && id > 0) {
       this.routeId.set(id);
       this.load();
+    } else {
+      // QUI-1058 — un id no numérico (`/rutas/abc`) nunca va a existir.
+      this.loadError.set('not-found');
     }
+  }
+
+  backToList() {
+    this.router.navigate(['/admin/orders/rutas']);
   }
 
   /**
@@ -1070,6 +1104,7 @@ export class PlanillaDetailPageComponent {
 
   load() {
     this.loading.set(true);
+    this.loadError.set(null);
     this.service
       .getOne(this.routeId())
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -1081,7 +1116,15 @@ export class PlanillaDetailPageComponent {
         },
         error: (e) => {
           this.loading.set(false);
-          this.toast.error(e.message);
+          // Recarga de una ruta ya visible: se conserva la vista y se avisa.
+          if (this.route()) {
+            this.toast.error(e.message);
+            return;
+          }
+          // QUI-1058 — primera carga fallida: estado vacío en vez de página en
+          // blanco. 404 = no existe o es de otra tienda (el backend no
+          // distingue, a propósito); cualquier otro error permite reintentar.
+          this.loadError.set(e?.status === 404 ? 'not-found' : 'failed');
         },
       });
   }
