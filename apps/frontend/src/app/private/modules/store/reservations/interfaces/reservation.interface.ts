@@ -373,6 +373,11 @@ export interface ServiceProvider {
   sort_order: number;
   /** Preferred station (S10): booking with this provider tries it first. */
   default_station_id?: number | null;
+  /**
+   * true = works the store hours (read live from the store settings);
+   * false = own weekly schedule. Absent (older API) reads as true.
+   */
+  uses_store_hours?: boolean;
   employee?: { id: number; first_name: string; last_name: string; position?: string } | null;
   user?: ProviderUser | null;
   services?: ProviderServiceAssignment[];
@@ -394,6 +399,8 @@ export interface ProviderSchedule {
   start_time: string;
   end_time: string;
   is_active: boolean;
+  /** The block comes from the store hours (read-only here, edited in the store hours). */
+  inherited?: boolean;
 }
 
 export interface ProviderException {

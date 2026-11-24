@@ -421,7 +421,26 @@
 
         <!-- ═══ Tab: Horario ═══ -->
         @if (activeTab() === 'schedule') {
-          <app-weekly-schedule-editor [providerId]="p.id" (scheduleChanged)="onScheduleChanged($event)"/>
+          <div class="schedule-source" data-testid="provider-schedule-source">
+            <app-setting-toggle
+              label="Usar el horario de la tienda"
+              [description]="usesStoreHours()
+                ? 'Su horario es el de la tienda: si la tienda lo cambia, este cambia solo. Sus excepciones siguen aplicando.'
+                : 'Usa su horario propio, para quien trabaja menos horas o en otro turno.'"
+              [ngModel]="usesStoreHours()"
+              [disabled]="savingScheduleSource()"
+              (changed)="setUsesStoreHours($event)"
+            />
+            @if (usesStoreHours()) {
+              <p class="schedule-source__link">
+                <a [routerLink]="storeHoursRoute" [queryParams]="storeHoursQuery">Editar el horario de la tienda</a>
+              </p>
+            }
+          </div>
+          <app-weekly-schedule-editor
+            [providerId]="p.id"
+            [readOnly]="usesStoreHours()"
+            (scheduleChanged)="onScheduleChanged($event)"/>
         }
 
         <!-- ═══ Tab: Excepciones ═══ -->

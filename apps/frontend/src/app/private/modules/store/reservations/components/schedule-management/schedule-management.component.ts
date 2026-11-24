@@ -10,7 +10,7 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { finalize, forkJoin } from 'rxjs';
 import { ReservationsService } from '../../services/reservations.service';
 import { AvailableProviderUser, ServiceProvider } from '../../interfaces/reservation.interface';
@@ -28,6 +28,7 @@ import {
   ModalComponent,
   ScrollableTabsComponent,
   EmptyStateComponent,
+  SettingToggleComponent,
 } from '../../../../../../shared/components';
 import type {
   TableColumn,
@@ -76,6 +77,8 @@ interface BookableService {
     ResponsiveDataViewComponent,
     ScrollableTabsComponent,
     EmptyStateComponent,
+    SettingToggleComponent,
+    RouterLink,
     WeeklyScheduleEditorComponent,
     ExceptionsManagerComponent,
     DecimalPipe,
@@ -179,6 +182,13 @@ export class ScheduleManagementComponent {
       .filter((station) => this.assignedStationIds().includes(station.id))
       .map((station) => ({ value: station.id, label: station.name })),
   ]);
+
+  /** Parte 1: the provider works the store hours unless it chose its own schedule. */
+  readonly usesStoreHours = computed(() => this.selectedProvider()?.uses_store_hours !== false);
+  readonly savingScheduleSource = signal(false);
+  /** Agenda → Configuración → Horario: where the store hours are edited. */
+  readonly storeHoursRoute = '/admin/orders/agenda';
+  readonly storeHoursQuery = { tab: 'configuracion', seccion: 'horario' };
 
   // Live schedule stats (updated in real-time from editor)
   liveWeeklyHours = signal<number | null>(null);
@@ -568,6 +578,35 @@ export class ScheduleManagementComponent {
   getLiveWeeklyHours(provider: ServiceProvider): number {
     if (this.liveWeeklyHours() !== null) return this.liveWeeklyHours()!;
     return this.getWeeklyHours(provider);
+  }
+
+  /**
+   * Switches between the store hours and the provider's own schedule. Going
+   * back to the store hours keeps the saved own schedule (the API never deletes it).
+   */
+  setUsesStoreHours(value: boolean): void {
+    const provider = this.selectedProvider();
+    if (!provider || this.usesStoreHours() === value) return;
+    this.savingScheduleSource.set(true);
+    this.reservationsService
+      .updateProvider(provider.id, { uses_store_hours: value })
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.savingScheduleSource.set(false)),
+      )
+      .subscribe({
+        next: (updated) => {
+          const merged = { ...provider, ...updated, uses_store_hours: value };
+          this.selectedProvider.set(merged);
+          this.providers.set(this.providers().map((p) => (p.id === merged.id ? merged : p)));
+          this.liveActiveDays.set(null);
+          this.liveWeeklyHours.set(null);
+          this.toastService.success(
+            value ? 'Ahora usa el horario de la tienda' : 'Ahora usa su horario propio',
+          );
+        },
+        error: () => this.toastService.error('No se pudo cambiar el horario del proveedor'),
+      });
   }
 
   onScheduleChanged(stats: { activeDays: number; weeklyHours: number }): void {

@@ -2,6 +2,7 @@
   <app-spinner size="sm" [center]="true"></app-spinner>
 } @else {
   <!-- Quick actions -->
+  @if (!readOnly()) {
   <div class="quick-actions">
     <app-button variant="outline" size="xsm" (clicked)="applyPreset('weekdays-9-6')">
       <app-icon name="briefcase" [size]="13" slot="icon" /> Lun-Vie 9-6
@@ -16,6 +17,7 @@
       <app-icon name="copy" [size]="13" slot="icon" /> Copiar a todos
     </app-button>
   </div>
+  }
 
   <!-- Timeline header (hour markers) -->
   <div class="timeline-header">
@@ -43,6 +45,7 @@
       <div class="timeline-toggle">
         <app-toggle
           [checked]="day.is_active"
+          [disabled]="readOnly()"
           [ariaLabel]="day.label + ': activar o desactivar'"
           (toggled)="toggleDay(i)"
         />
@@ -69,7 +72,7 @@
                     </span>
                   }
                   <!-- Remove block button (only if > 1 block) -->
-                  @if (day.blocks.length > 1) {
+                  @if (day.blocks.length > 1 && !readOnly()) {
                     <button
                       class="bar-remove"
                       (click)="$event.stopPropagation(); removeBlock(i, bi)"
@@ -109,6 +112,7 @@
             </div>
           }
 
+          @if (!readOnly()) {
           <!-- 24 h toggle for the day -->
           <button
             type="button"
@@ -127,6 +131,7 @@
             title="Agregar bloque horario">
             <app-icon name="plus" [size]="14" />
           </button>
+          }
         } @else {
           <div class="inactive-bar">
             <span>Dia libre</span>
@@ -137,9 +142,11 @@
   }
 
   <!-- Save button -->
+  @if (!readOnly()) {
   <div class="save-row">
     <app-button variant="primary" size="sm" [loading]="saving()" (clicked)="save()">
       <app-icon name="save" [size]="15" slot="icon" /> Guardar Horario
     </app-button>
   </div>
+  }
 }

@@ -58,6 +58,11 @@ export class WeeklyScheduleEditorComponent {
   /** Whose week is edited: a specialist, or a station (S21: a station's hours may cross midnight too). */
   readonly providerId = input<number | null>(null);
   readonly stationId = input<number | null>(null);
+  /**
+   * Parte 1: the provider works the store hours. The week shown is the store
+   * hours (inherited blocks from the API) and nothing can be edited here.
+   */
+  readonly readOnly = input(false);
   readonly scheduleChanged = output<{ activeDays: number; weeklyHours: number }>();
 
   days = signal<ScheduleDay[]>([]);
@@ -76,6 +81,8 @@ export class WeeklyScheduleEditorComponent {
     effect(() => {
       const stationId = this.stationId();
       const providerId = this.providerId();
+      // Switching between store hours and own schedule reloads the week.
+      this.readOnly();
       if (stationId || providerId) {
         untracked(() => this.loadSchedule());
       }
@@ -213,6 +220,7 @@ export class WeeklyScheduleEditorComponent {
   }
 
   toggleDay(index: number): void {
+    if (this.readOnly()) return;
     const updated = [...this.days()];
     const day = { ...updated[index] };
     day.is_active = !day.is_active;
@@ -236,6 +244,7 @@ export class WeeklyScheduleEditorComponent {
   }
 
   startEditing(dayIndex: number, blockIndex: number): void {
+    if (this.readOnly()) return;
     const updated = [...this.days()];
     updated[dayIndex] = { ...updated[dayIndex], editingBlock: blockIndex };
     this.days.set(updated);
@@ -376,6 +385,7 @@ export class WeeklyScheduleEditorComponent {
   }
 
   save(): void {
+    if (this.readOnly()) return;
     // Pre-validate so the operator gets a clear message naming the day
     // instead of an API error (QUI-968).
     for (const d of this.days()) {

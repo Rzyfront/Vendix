@@ -384,3 +384,22 @@
     font-size: 14px;
   }
 }
+
+// Parte 1: selector "horario de la tienda / horario propio" above the weekly editor.
+.schedule-source {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+
+  &__link {
+    margin: 0;
+    font-size: var(--fs-xs, 0.75rem);
+
+    a {
+      color: var(--color-primary);
+      font-weight: 600;
+      text-decoration: underline;
+    }
+  }
+}
