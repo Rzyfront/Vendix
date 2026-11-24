@@ -214,7 +214,7 @@ interface StagedFile {
             [attr.aria-pressed]="pipeline.recording()"
             (pointerdown)="voiceDown($event)"
             (pointerup)="voiceUp($event)"
-            (pointercancel)="pipeline.cancelRecording()"
+            (pointercancel)="voiceCancel()"
             (keydown.space)="voiceDown($event)"
             (keyup.space)="voiceUp($event)"
             (keydown.enter)="voiceDown($event)"
@@ -398,6 +398,16 @@ export class VexComposerComponent {
       if (!this.voiceHeld && started) this.pipeline.cancelRecording();
       if (!started) this.showNotice(this.copy.mic_denied);
     });
+  }
+
+  /**
+   * The browser took the gesture away (system swipe, incoming call). Release
+   * the hold too: otherwise a recording still being prepared would start with
+   * no finger on the button and the next tap would send it.
+   */
+  voiceCancel(): void {
+    this.voiceHeld = false;
+    this.pipeline.cancelRecording();
   }
 
   voiceUp(event: Event): void {
