@@ -33,6 +33,7 @@ import { LodgingKeyHandover } from '../../interfaces/key-handover.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
 import { invoiceStateLabel } from '../../../shared/hospitality-labels';
 import { HospitalityLoadErrorComponent } from '../../../shared/load-error.component';
+import { CheckoutCleanSuggestionComponent } from '../../../housekeeping/components/checkout-clean-suggestion/checkout-clean-suggestion.component';
 
 /** Methods the desk registers by hand; gateways settle themselves. */
 const MANUAL_METHODS = ['cash', 'card', 'bank_transfer', 'voucher'];
@@ -70,6 +71,7 @@ function newRequestId(): string {
     SpinnerComponent,
     RouterLink,
     HospitalityLoadErrorComponent,
+    CheckoutCleanSuggestionComponent,
   ],
   template: `
     <app-modal
@@ -123,6 +125,8 @@ function newRequestId(): string {
           } @else {
             <p class="text-xs text-text-secondary">No se pudo consultar la factura: vuelve a intentarlo.</p>
           }
+          <!-- Agenda unificada (F3): the room's clean, suggested right at the close. -->
+          <app-checkout-clean-suggestion [reservationId]="cleanReservationId()" />
         </div>
       } @else if (folio(); as f) {
         <div class="space-y-4 text-sm">
@@ -357,6 +361,10 @@ export class CheckOutModalComponent {
   /** H8.4 (D12) — keys the guests still have: a reminder, never a block. */
   readonly keysOut = signal<LodgingKeyHandover[]>([]);
   readonly returningKeyId = signal<number | null>(null);
+  /** F3 — the clean is offered once the reservation left (never before). */
+  readonly cleanReservationId = computed(() =>
+    this.result() ? (this.reservation()?.id ?? null) : null,
+  );
   readonly allPaid = computed(() => this.split()?.accounts.every((a) => a.payment_state === 'paid') ?? true);
   protected readonly Number = Number;
   protected readonly invoiceStateLabel = invoiceStateLabel;
