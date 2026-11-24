@@ -284,6 +284,35 @@ jobs:
           src/domains/store/data-collection/template-json/template-json.contract.parity.spec.ts
           src/domains/store/data-collection/template-json/template-json.contract.spec.ts
 
+  # GUARDIA OBLIGATORIA (pedido de Rafael, 2026-11-24): el ícono dinámico de la
+  # app instalada (PWA) por tienda. Check requerido en develop y main; el job,
+  # el spec y el código que protege están bajo CODEOWNERS de Rafael. Corre en
+  # TODO PR (sin filtro de rutas): un cambio en cualquier parte que rompa el
+  # manifest o la caché de los íconos debe fallar aquí.
+  pwa-manifest-guard:
+    name: PWA Manifest Guard
+    runs-on: ubuntu-latest
+    needs: audits
+    if: needs.audits.outputs.run_ci == 'true'
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - name: Generar Prisma Client
+        working-directory: apps/backend
+        run: npx prisma generate
+      - name: Jest — ícono dinámico del manifest
+        working-directory: apps/backend
+        run: >-
+          npx jest --ci --runInBand --config jest.isolated.config.js
+          --runTestsByPath
+          src/domains/public/pwa/public-pwa.manifest-guard.spec.ts
+          src/domains/public/pwa/public-pwa.service.spec.ts
+
   # Lo que un doble en memoria no prueba del motor de Flujos: concurrencia,
   # SKIP LOCKED, idempotencia, triggers de evidencia y outbox transaccional.
   # El esquema sale de `migrate diff` y no de `migrate deploy`: las migraciones
@@ -765,6 +794,7 @@ jobs:
           --include='**/price-tiers/utils/price-tier-rule.util.spec.ts'
           --include='**/price-tier-form-page/price-tier-form-page.component.spec.ts'
           --include='**/customers/components/customer-modal/customer-modal.component.spec.ts'
+          --include='**/customers/components/customer-list/crm-filters.util.spec.ts'
           --include='**/pos/utils/customer-tier-prompt.util.spec.ts'
           --include='**/pos/components/pos-customer-tier-modal.component.spec.ts'
           --include='**/orders/utils/order-customer-tier-prompt.util.spec.ts'
@@ -872,6 +902,8 @@ jobs:
           --include='**/pop/utils/receipt-uom-block.util.spec.ts'
           --include='**/shared/utils/compact-money.util.spec.ts'
           --include='**/shared/pipes/currency/currency.pipe.spec.ts'
+          --include='**/housekeeping/components/checkout-clean-suggestion/checkout-clean-suggestion.component.spec.ts'
+          --include='**/reservations/components/check-out-modal/check-out-modal.component.spec.ts'
           --include='**/data-collection/utils/template-json.contract.spec.ts'
           --include='**/data-collection/utils/template-editor.util.spec.ts'
           --include='**/data-collection/utils/template-json-import.util.spec.ts'
@@ -882,13 +914,25 @@ jobs:
           --include='**/shared/utils/customer-establishment-rows.util.spec.ts'
           --include='**/pos/components/pos-customer-selector/pos-customer-selector.component.spec.ts'
           --include='**/pos/components/pos-customer-modal.component.spec.ts'
+          --include='**/hospitality/reservations/pages/front-desk-page/front-desk-page.component.spec.ts'
           --include='**/core/utils/backend-availability.util.spec.ts'
+          --include='**/store/scheduling/utils/scheduling-calendar.util.spec.ts'
+          --include='**/store/scheduling/pages/scheduling-pages.component.spec.ts'
+          --include='**/store/scheduling/pages/agenda-shell/agenda-shell.component.spec.ts'
+          --include='**/store/scheduling/agenda-access.guard.spec.ts'
+          --include='**/store/scheduling/services/scheduling-api.service.spec.ts'
+          --include='**/shared/components/date-range-filter/date-range-filter.component.spec.ts'
           --include='**/app/app-init-boot.spec.ts'
           --include='**/super-admin/ai-engine/ai-engine.component.spec.ts'
           --include='**/planillas-rutas/components/planilla-wizard/planilla-wizard.component.spec.ts'
           --include='**/planillas-rutas/components/add-notes-modal/add-notes-modal.component.spec.ts'
           --include='**/planillas-rutas/components/route-sheet-scanner-modal/route-sheet-scanner-modal.component.spec.ts'
           --include='**/planillas-rutas/components/stop-settle-modal/stop-settle-modal.component.spec.ts'
+          --include='**/reports/config/report-industries.spec.ts'
+          --include='**/reports/guards/report-industry.guard.spec.ts'
+          --include='**/reports/components/reports-catalog/reports-catalog.component.spec.ts'
+          --include='**/reports/hotel-night-audit-access.spec.ts'
+          --include='**/analytics/components/analytics-shell/analytics-shell.component.spec.ts'
 
   mobile:
     name: Mobile

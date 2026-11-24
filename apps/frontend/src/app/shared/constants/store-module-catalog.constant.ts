@@ -144,7 +144,7 @@ export const MODULE_ROUTES: Record<string, string> = {
   // Hotelería
   hospitality: '/admin/hospitality/rooms',
   hospitality_rooms: '/admin/hospitality/rooms',
-  hospitality_reservations: '/admin/hospitality/reservations',
+  hospitality_reservations: '/admin/hospitality/front-desk',
   hospitality_rates: '/admin/hospitality/rates',
 
   // Administración (flujos-documental S1). P5.7: one key per sidebar child.
@@ -293,6 +293,10 @@ export const MODULE_GATE_ROUTES: Record<string, string[]> = {
   consultations: ['/admin/consultations'],
   products: ['/admin/products'],
   orders: ['/admin/orders'],
+  // Agenda unificada F1: Órdenes → Agenda reúne Reservas y Pedidos
+  // programados; la gobiernan las dos keys (OR en `applyAccessGate`).
+  orders_reservations: ['/admin/orders/agenda'],
+  orders_scheduled: ['/admin/orders/agenda'],
   inventory: ['/admin/inventory'],
   customers: ['/admin/customers'],
   marketing: ['/admin/marketing'],
@@ -321,6 +325,9 @@ export const MODULE_GATE_ROUTES: Record<string, string[]> = {
   hospitality_reservations: [
     '/admin/hospitality/front-desk',
     '/admin/hospitality/rack',
+    // Agenda F4: hotel reports (and the night audit) live in Reportes →
+    // Hotelería but answer to the hotel key, not to `reports`.
+    '/admin/reports/hospitality',
   ],
   hospitality_rooms: ['/admin/hospitality/housekeeping'],
   flows: ['/admin/workflows'],

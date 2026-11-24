@@ -1,0 +1,8 @@
+# Cambios en estas rutas requieren la aprobación de Rafael (@Rzyfront).
+# Guardia del ícono dinámico de la app instalada (PWA), pedido 2026-11-24.
+/apps/backend/src/domains/public/pwa/ @Rzyfront
+/apps/backend/src/common/services/pwa-cache.service.ts @Rzyfront
+/apps/backend/src/common/config/pwa-cache-keys.ts @Rzyfront
+/apps/frontend/src/index.html @Rzyfront
+/.github/workflows/ci.yml @Rzyfront
+/.github/CODEOWNERS @Rzyfront

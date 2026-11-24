@@ -11,6 +11,7 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
+import { buildCrmFilterConfigs, mergeFilterValues, toCrmFilterId } from './crm-filters.util';
 import { firstValueFrom } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
@@ -166,6 +167,15 @@ export class CustomerListComponent {
   readonly pageChange = output<number>();
   /** Department/city filter, as the names stored on `addresses`. */
   readonly locationFilter = output<CustomerLocationFilter>();
+  /** Segment/tag filter. Solo se emite lo que el usuario elige. */
+  readonly crmFilter = output<{ tag_id?: number; segment_id?: number }>();
+
+  /**
+   * Valores vivos de la tienda. Si una lista viene vacia, su filtro no se
+   * pinta: nunca hay selectores sin opciones.
+   */
+  readonly segments = input<Array<{ id: number; name: string }>>([]);
+  readonly tags = input<Array<{ id: number; name: string }>>([]);
 
   // ── Department / city filter (DANE catalog) ─────────────────────────────
   private readonly destroyRef = inject(DestroyRef);
@@ -192,8 +202,11 @@ export class CustomerListComponent {
         disabled: !hasDepartment,
         options: this.municipalities().map((m) => ({ value: m.code, label: m.name })),
       },
+      // Filtros dinamicos: solo aparecen si la tienda tiene valores.
+      ...buildCrmFilterConfigs(this.segments(), this.tags()),
     ];
   });
+
 
   get totalPages(): number {
     return Math.ceil(this.totalItems() / this.limit());
@@ -382,20 +395,31 @@ export class CustomerListComponent {
   }
 
   onFilterChange(values: FilterValues): void {
-    const department = (values['department'] as string | null) || null;
-    const departmentChanged = department !== this.filterValues()['department'];
-    // A new department invalidates the city chosen for the previous one.
-    const city = departmentChanged ? null : (values['city'] as string | null) || null;
+    const previous = this.filterValues();
+    const { department, city, merged } = mergeFilterValues(values, previous);
 
-    this.filterValues.set({ department, city });
-    if (departmentChanged) this.loadMunicipalities(department);
-    this.emitLocationFilter();
+    // Se guarda el objeto COMPLETO: el panel compara el numero de claves y
+    // pisaria el valor elegido si aqui se perdieran `segment`/`tag`.
+    this.filterValues.set(merged);
+    if (department !== previous['department']) this.loadMunicipalities(department);
+
+    const locationChanged =
+      department !== previous['department'] || city !== (previous['city'] ?? null);
+    if (locationChanged) this.emitLocationFilter();
+
+    const segmentId = toCrmFilterId(values['segment']);
+    const tagId = toCrmFilterId(values['tag']);
+    const crmChanged =
+      segmentId !== toCrmFilterId(previous['segment']) ||
+      tagId !== toCrmFilterId(previous['tag']);
+    if (crmChanged) this.crmFilter.emit({ segment_id: segmentId, tag_id: tagId });
   }
 
   clearFilters(): void {
-    this.filterValues.set({ department: null, city: null });
+    this.filterValues.set({});
     this.municipalities.set([]);
     this.emitLocationFilter();
+    this.crmFilter.emit({});
   }
 
   private loadMunicipalities(departmentCode: string | null): void {
@@ -445,4 +469,5 @@ export class CustomerListComponent {
   formatCurrency(value: number): string {
     return this.currencyService.format(value);
   }
+
 }

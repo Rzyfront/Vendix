@@ -473,6 +473,61 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
     );
   });
 
+  it('g2) un evento post-commit que lanza no rompe el settleStop manual: la parada queda liquidada y los demás eventos salen', async () => {
+    prismaMock.dispatch_routes.findFirst.mockResolvedValue(buildRoute());
+    prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(buildStop());
+    cashSettlementMock.emitPaymentReceived.mockRejectedValueOnce(
+      new Error('listener de contabilidad caído'),
+    );
+    const loggerError = jest
+      .spyOn((service as any).logger, 'error')
+      .mockImplementation(() => undefined);
+
+    await expect(
+      service.settleStop(ROUTE_ID, STOP_ID, {
+        result: 'delivered',
+        collected_amount: 200,
+        payment_method: 'cash',
+      } as any),
+    ).resolves.toBeDefined();
+
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(cashSettlementMock.emitPaymentReceived).toHaveBeenCalledTimes(1);
+    // The failing payment event does not skip the inventory event.
+    expect(eventEmitterMock.emit).toHaveBeenCalledWith(
+      'dispatch_note.delivered',
+      expect.objectContaining({ dispatch_note_id: 900 }),
+    );
+    expect(loggerError).toHaveBeenCalledWith(
+      expect.stringContaining("falló el evento post-commit 'payment.received'"),
+      expect.any(String),
+    );
+  });
+
+  it('g3) un listener síncrono de dispatch_note.delivered que lanza tampoco rompe el settleStop manual', async () => {
+    prismaMock.dispatch_routes.findFirst.mockResolvedValue(buildRoute());
+    prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(buildStop());
+    eventEmitterMock.emit.mockImplementationOnce(() => {
+      throw new Error('listener de inventario caído');
+    });
+    const loggerError = jest
+      .spyOn((service as any).logger, 'error')
+      .mockImplementation(() => undefined);
+
+    await expect(
+      service.settleStop(ROUTE_ID, STOP_ID, {
+        result: 'delivered',
+        collected_amount: 200,
+        payment_method: 'cash',
+      } as any),
+    ).resolves.toBeDefined();
+
+    expect(loggerError).toHaveBeenCalledWith(
+      expect.stringContaining("'dispatch_note.delivered'"),
+      expect.any(String),
+    );
+  });
+
   // ── h) PARTIAL → rejected, never delivers the remisión ─────────────
   it("h) result 'partial' is rejected: does NOT transition the remisión to delivered nor emit the event", async () => {
     prismaMock.dispatch_routes.findFirst.mockResolvedValue(buildRoute());

@@ -189,4 +189,28 @@ describe('RouteSheetScannerModalComponent — entrega separada del cobro', () =>
     const dto = confirmAndCapture();
     expect(dto.stops.map((s) => s.stop_id)).toEqual([1]);
   });
+
+  it('fila pendiente o ya liquidada a la misma parada: no se envía, así que no muestra aviso', () => {
+    load(
+      match({ stop_id: 1, collected: 200 }),
+      match({ stop_id: 1, collected: 200 }),
+      match({ stop_id: 1, delivered: false }),
+      match({ stop_id: 1, collected: 200 }),
+    );
+    component.editableStops.update((rows) =>
+      rows.map((r, i) => (i === 3 ? { ...r, already_settled: true } : r)),
+    );
+
+    expect(component.editableStops()[2].outcome).toBe('pending');
+    expect(component.duplicatedStopIds().has(1)).toBeTrue();
+    expect(component.isDuplicatedRow(0)).toBeTrue();
+    expect(component.isDuplicatedRow(1)).toBeTrue();
+    expect(component.isDuplicatedRow(2)).toBeFalse();
+    expect(component.isDuplicatedRow(3)).toBeFalse();
+
+    component.toggleDiscard(1);
+    expect(component.duplicatedStopIds().size).toBe(0);
+    expect(component.isDuplicatedRow(2)).toBeFalse();
+    expect(component.isDuplicatedRow(3)).toBeFalse();
+  });
 });

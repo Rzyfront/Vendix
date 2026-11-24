@@ -1,4 +1,4 @@
-import { Module, OnModuleInit } from '@nestjs/common';
+import { forwardRef, Module, OnModuleInit } from '@nestjs/common';
 import { AuditService } from '../../../../common/audit/audit.service';
 import { AIToolRegistry } from '../../../../ai-engine/tools/ai-tool-registry';
 import { createCrmCustomerTools } from '../../../../ai-engine/tools/domains/crm-customers.tools';
@@ -47,7 +47,9 @@ import { CrmUnsubscribeService } from './campaigns/crm-unsubscribe.service';
 @Module({
   imports: [
     ResponseModule,
-    CustomersModule,
+    // Ciclo explicito: CustomersModule importa este modulo por
+    // `CrmSegmentQueryService` (filtro por segmento del listado).
+    forwardRef(() => CustomersModule),
     NotificationsModule,
     S3Module,
     DataCollectionModule,
@@ -84,7 +86,9 @@ import { CrmUnsubscribeService } from './campaigns/crm-unsubscribe.service';
   ],
   // Flujos (bloque 13): la acción `vendix.crm_task.create` crea tareas por aquí.
   // CustomerCrmService: the Flujos action "asignar etiqueta" uses setTags.
-  exports: [CrmTasksService, CustomerCrmService],
+  // CrmSegmentQueryService: el listado de clientes (CustomersController) filtra
+  // por segmento con la MISMA evaluacion de reglas que campanas y segmentos.
+  exports: [CrmTasksService, CustomerCrmService, CrmSegmentQueryService],
 })
 export class CustomerCrmModule implements OnModuleInit {
   constructor(

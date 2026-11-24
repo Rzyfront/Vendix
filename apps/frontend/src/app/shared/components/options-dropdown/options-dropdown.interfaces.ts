@@ -79,6 +79,11 @@ export interface FilterConfig {
   presetKey?: string;
   /** Muestra el selector de presets (Hoy, Este Mes...). Default: `true`. */
   showPresets?: boolean;
+  /**
+   * Fin de «Esta semana / Este mes / Este año»: `'toDate'` (hoy, default de
+   * reportes) o `'fullPeriod'` (cierre del periodo, para agendas con futuro).
+   */
+  presetRange?: 'toDate' | 'fullPeriod';
 }
 
 /**

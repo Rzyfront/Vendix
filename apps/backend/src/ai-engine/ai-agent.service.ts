@@ -482,6 +482,38 @@ const CODE_MODE_ROUTING_RULE = [
 ].join(' ');
 
 /**
+ * Vex: a goal that needs 2+ writes is proposed as ONE batch (one approval),
+ * from the first answer. Static text (no store, tool or user data), injected
+ * only when `propose_write_batch` is in the turn's authority, so every other
+ * turn stays byte-identical. The stored prompt said «de a una» (migration
+ * 20261002150000, older than the batch circuit F5); 20261228110000 aligns it
+ * with this rule, which still overrides it where that migration is pending.
+ * It only changes HOW writes are proposed: the card, its role gate and the
+ * explicit approval stay exactly as they are.
+ */
+export const WRITE_BATCH_ROUTING_RULE = [
+  'Cambios múltiples: cuando cumplir lo que pide la persona requiere 2 o más escrituras (subir el precio de varios productos, crear varios clientes, ajustar varias existencias), NO las propongas una por una: desde tu primera respuesta arma UN solo lote con propose_write_batch, con todos los cambios necesarios, para que la persona lo apruebe una sola vez.',
+  'Esta regla prevalece sobre cualquier indicación anterior de proponer los cambios «de a una» o «un cambio a la vez»: eso solo aplica cuando el objetivo necesita una única escritura.',
+  'Antes de proponer, reúne con lecturas todo lo que falte (identificadores, precios o existencias actuales) sin pedir permiso por cada lectura, y calcula los valores nuevos.',
+  'Pregunta solo por un dato que no puedas leer ni inferir, y entonces haz UNA sola pregunta que agrupe todo lo que falta.',
+  'propose_write_batch está en el índice: llámala por su nombre exacto con {goal, steps:[{tool, arguments, label}]}, un paso por cada cambio, con el nombre exacto de la herramienta de escritura y sus argumentos exactos.',
+  'Envía todos los cambios en una sola llamada (máximo 100 pasos; el sistema arma tarjetas de hasta 25). Si son más de 100, propón lotes de 100, nunca cambios sueltos.',
+  'Lo irreversible (anular, eliminar, pagos, DIAN, envíos) no entra al lote: va solo, con su propia confirmación.',
+  'Nada se aplica hasta que la persona aprueba la tarjeta con su botón; un mensaje dictado o escrito no aprueba cambios, y nunca digas que algo se aplicó antes de esa aprobación.',
+].join(' ');
+
+/**
+ * What the model reads when a second loose write lands in a Vex turn that
+ * already proposed one. With the batch circuit on offer it is sent to ONE
+ * batch for everything that is left, instead of another card per write.
+ */
+export function deferredWriteMessage(batchOffered: boolean): string {
+  return batchOffered
+    ? 'No se propuso ni se ejecutó: un turno solo admite una escritura suelta. Cuando la persona apruebe la anterior, junta TODAS las escrituras que falten en UNA sola llamada a propose_write_batch (una sola aprobación); no las propongas una por una.'
+    : 'Pendiente: esta escritura se propondrá tras la aprobación de la anterior. No se ejecutó; vuelve a proponerla en el siguiente turno.';
+}
+
+/**
  * Removes the rendered `data.block` from a show-in-chat tool result, keeping
  * the reference (`block_id`, `kind`, `version`) and the instruction the model
  * reads. Non-JSON or block-less results pass through untouched.
@@ -2123,6 +2155,16 @@ export class AIAgentService {
       )
     )
       messages.push({ role: 'system', content: CODE_MODE_ROUTING_RULE });
+
+    // Vex: 2+ writes of one goal go in ONE batch with one approval. Only when
+    // the batch tool is in this turn's authority; otherwise nothing is added.
+    const writeBatchOffered =
+      isVex &&
+      (routingSession ? routingAuthority : filteredTools).some(
+        (d) => d.function.name === 'propose_write_batch',
+      );
+    if (writeBatchOffered)
+      messages.push({ role: 'system', content: WRITE_BATCH_ROUTING_RULE });
 
     // Procedural/playbook instructions name only the tools this turn offers
     // (routed: authority ∩ session-backed core; otherwise the offered list).
@@ -4414,8 +4456,7 @@ export class AIAgentService {
                       role: 'tool',
                       content: JSON.stringify({
                         deferred: true,
-                        message:
-                          'Pendiente: esta escritura se propondrá tras la aprobación de la anterior. No se ejecutó; vuelve a proponerla en el siguiente turno.',
+                        message: deferredWriteMessage(writeBatchOffered),
                       }),
                       tool_call_id: toolCall.id,
                     });

@@ -51,6 +51,13 @@ export interface MenuItem {
    */
   panelUiKey?: string;
   /**
+   * Entrada que reúne varios módulos (agenda-unificada F1: Programación y
+   * Agenda juntan Reservas y Pedidos programados). Se ve si AL MENOS UNA de
+   * estas keys pasa, cada una por separado, todas las capas (panel_ui,
+   * industria, plan y su precondición de ajustes). Gana sobre `panelUiKey`.
+   */
+  panelUiAnyOf?: string[];
+  /**
    * Restricts this menu item to organizations operating under the given scope.
    * - 'STORE': only visible when the org operates per-store.
    * - 'ORGANIZATION': only visible when the org operates consolidated at org level.

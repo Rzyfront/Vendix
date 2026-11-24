@@ -7,8 +7,10 @@ import {
   OnInit,
   signal,
 } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
+import { ActivatedRoute, Router } from '@angular/router';
+import { map } from 'rxjs';
 import {
   ButtonComponent,
   CardComponent,
@@ -32,6 +34,7 @@ import {
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { ReservationDetailModalComponent } from '../../components/reservation-detail-modal/reservation-detail-modal.component';
 import { ReservationFormModalComponent } from '../../components/reservation-form-modal/reservation-form-modal.component';
+import { HospitalityReservationsListComponent } from '../../components/reservations-list/reservations-list.component';
 import { UnitType } from '../../../rooms/interfaces/unit-type.interface';
 import { UnitTypesService } from '../../../rooms/services/unit-types.service';
 import {
@@ -49,7 +52,23 @@ import {
 } from '../../../shared/hospitality-status';
 import { HospitalityLoadErrorComponent } from '../../../shared/load-error.component';
 
-type FrontDeskTab = 'arrivals' | 'departures' | 'in_house';
+/**
+ * Agenda F2 — "Reservas" (the former "Reservas de hotel" module) is the main
+ * tab and the default; the day board tabs follow. The tab lives in `?tab=`.
+ */
+export type FrontDeskTab = 'reservations' | 'arrivals' | 'departures' | 'in_house';
+/** Tabs served by the day board (`GET /store/hospitality/front-desk`). */
+type BoardTab = Exclude<FrontDeskTab, 'reservations'>;
+
+const FRONT_DESK_TABS: readonly FrontDeskTab[] = ['reservations', 'arrivals', 'departures', 'in_house'];
+export const DEFAULT_FRONT_DESK_TAB: FrontDeskTab = 'reservations';
+
+/** Unknown or missing `?tab=` falls back to Reservas. */
+export function toFrontDeskTab(value: string | null | undefined): FrontDeskTab {
+  return FRONT_DESK_TABS.includes(value as FrontDeskTab)
+    ? (value as FrontDeskTab)
+    : DEFAULT_FRONT_DESK_TAB;
+}
 type DetailStep = 'check_in' | 'check_out' | 'account' | null;
 
 /** R-LIST-08 — "Pérez" matches "perez": lower case without accents. */
@@ -93,13 +112,13 @@ const STATUS_BADGE = statusBadgeConfig(RESERVATION_STATUS_CHIPS);
 const statusLabel = (value: LodgingReservationStatus): string =>
   RESERVATION_STATUS_LABELS[value] ?? value;
 
-const TAB_TITLES: Record<FrontDeskTab, string> = {
+const TAB_TITLES: Record<BoardTab, string> = {
   arrivals: 'Llegadas',
   departures: 'Salidas',
   in_house: 'En casa',
 };
 
-const EMPTY_TEXT: Record<FrontDeskTab, { icon: string; title: string; description: string }> = {
+const EMPTY_TEXT: Record<BoardTab, { icon: string; title: string; description: string }> = {
   arrivals: {
     icon: 'log-in',
     title: 'Sin llegadas pendientes',
@@ -118,8 +137,11 @@ const EMPTY_TEXT: Record<FrontDeskTab, { icon: string; title: string; descriptio
 };
 
 /**
- * Hospitality Suite — Recepción (H3.3). Today's arrivals, departures and
- * guests in house of the store business day, each row with its quick action.
+ * Hospitality Suite — Recepción (H3.3). Agenda F2: the first tab, "Reservas",
+ * is the full hotel reservations list (search, filters, create, detail,
+ * cancel), the former "Reservas de hotel" module; it keeps its own stats.
+ * The next tabs are today's arrivals, departures and guests in house of the
+ * store business day, each row with its quick action.
  * Check-in runs right here; when it needs the desk (room to pick, holder to
  * register, dirty room to confirm) the reservation detail opens instead.
  *
@@ -146,6 +168,7 @@ const EMPTY_TEXT: Record<FrontDeskTab, { icon: string; title: string; descriptio
     IconComponent,
     ReservationDetailModalComponent,
     ReservationFormModalComponent,
+    HospitalityReservationsListComponent,
   ],
   // R-ROW-02 — card actions are 44 px touch targets on mobile.
   styles: [
@@ -160,7 +183,7 @@ const EMPTY_TEXT: Record<FrontDeskTab, { icon: string; title: string; descriptio
     <div class="w-full md:space-y-4">
       <app-sticky-header
         title="Recepción"
-        subtitle="Llegadas, salidas y huéspedes en casa"
+        subtitle="Reservas, llegadas, salidas y huéspedes en casa"
         icon="concierge-bell"
         tabsAriaLabel="Recepción"
         [tabs]="tabs()"
@@ -168,170 +191,179 @@ const EMPTY_TEXT: Record<FrontDeskTab, { icon: string; title: string; descriptio
         (tabChanged)="onTab($event)"
       />
 
-      <!-- Stats: sticky on mobile, static on desktop -->
-      <div
-        class="stats-container sticky top-header-tabs z-20 bg-background md:static md:bg-transparent"
-      >
-        <app-stats
-          title="Llegadas hoy"
-          [value]="loadError() ? '—' : board()?.arrivals?.length ?? 0"
-          smallText="reservas por hacer check-in"
-          iconName="log-in"
-          iconBgColor="bg-blue-100"
-          iconColor="text-blue-500"
-          [loading]="board() === null && !loadError()"
-        />
-        <app-stats
-          title="Salidas hoy"
-          [value]="loadError() ? '—' : board()?.departures?.length ?? 0"
-          smallText="huéspedes por hacer check-out"
-          iconName="log-out"
-          iconBgColor="bg-amber-100"
-          iconColor="text-amber-500"
-          [loading]="board() === null && !loadError()"
-        />
-        <app-stats
-          title="En casa"
-          [value]="loadError() ? '—' : board()?.in_house?.length ?? 0"
-          smallText="estadías alojadas"
-          iconName="bed-double"
-          iconBgColor="bg-purple-100"
-          iconColor="text-purple-500"
-          [loading]="board() === null && !loadError()"
-        />
-        <app-stats
-          title="Saldo por cobrar"
-          [value]="loadError() ? '—' : pendingBalance()"
-          [smallText]="loadError() ? '' : pendingBalanceText()"
-          iconName="wallet"
-          iconBgColor="bg-emerald-100"
-          iconColor="text-emerald-500"
-          [loading]="board() === null && !loadError()"
-        />
-      </div>
-
-      <app-card [responsive]="true" [padding]="false" overflow="visible">
-        <!-- Sticky search header -->
-        <div
-          class="sticky top-header-tabs-search z-10 bg-background px-2 py-1.5 -mt-[5px]
-                 md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
-        >
+      @if (tab() === 'reservations') {
+        <!-- Agenda F2: the former "Reservas de hotel" module, with its own stats. -->
+        <div role="tabpanel" aria-label="Reservas" data-testid="front-desk-reservations-tab">
+          <app-hospitality-reservations-list (changed)="load()" />
+        </div>
+      } @else {
+        <div role="tabpanel" [attr.aria-label]="tabTitle()" class="md:space-y-4">
+          <!-- Stats: sticky on mobile, static on desktop -->
           <div
-            class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+            class="stats-container sticky top-header-tabs z-20 bg-background md:static md:bg-transparent"
           >
-            <h2
-              class="text-[13px] font-bold text-gray-600 tracking-wide
-                     md:text-lg md:font-semibold md:text-text-primary"
-            >
-              {{ tabTitle() }}
-              <span class="text-text-secondary font-normal">({{ rows().length }})</span>
-              @if (businessDate()) {
-                <span class="text-text-secondary font-normal"> · {{ businessDate() }}</span>
-              }
-            </h2>
-
-            <div class="flex items-center gap-2 w-full md:w-auto">
-              <app-inputsearch
-                class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-                size="sm"
-                placeholder="Buscar por reserva, huésped o habitación…"
-                [debounceTime]="300"
-                [ngModel]="search()"
-                (ngModelChange)="onSearch($event)"
-              />
-              <app-button
-                variant="primary"
-                size="md"
-                [iconOnlyMobile]="true"
-                customClasses="!h-11 !w-11 !px-0 md:!w-auto md:!px-4 !rounded-[10px]"
-                class="shrink-0"
-                ariaLabel="Nueva reserva"
-                (clicked)="openForm(false)"
-                data-testid="front-desk-new-reservation"
-              >
-                <app-icon slot="icon" name="plus" [size]="18" />
-                Nueva reserva
-              </app-button>
-              <app-button
-                variant="outline"
-                size="md"
-                [iconOnlyMobile]="true"
-                customClasses="!h-11 !w-11 !px-0 md:!w-auto md:!px-4 bg-surface !rounded-[10px]"
-                class="shrink-0"
-                ariaLabel="Llegada sin reserva"
-                (clicked)="openForm(true)"
-                data-testid="front-desk-walk-in"
-              >
-                <app-icon slot="icon" name="user-plus" [size]="18" />
-                Llegada sin reserva
-              </app-button>
-              <app-options-dropdown
-                class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-                [filters]="filterConfigs()"
-                [filterValues]="filterValues()"
-                [actions]="dropdownActions"
-                [isLoading]="board() === null && loadError() === null"
-                (filterChange)="filterValues.set($event)"
-                (clearAllFilters)="filterValues.set({})"
-                (actionClick)="onActionClick($event)"
-              />
-            </div>
+            <app-stats
+              title="Llegadas hoy"
+              [value]="loadError() ? '—' : board()?.arrivals?.length ?? 0"
+              smallText="reservas por hacer check-in"
+              iconName="log-in"
+              iconBgColor="bg-blue-100"
+              iconColor="text-blue-500"
+              [loading]="board() === null && !loadError()"
+            />
+            <app-stats
+              title="Salidas hoy"
+              [value]="loadError() ? '—' : board()?.departures?.length ?? 0"
+              smallText="huéspedes por hacer check-out"
+              iconName="log-out"
+              iconBgColor="bg-amber-100"
+              iconColor="text-amber-500"
+              [loading]="board() === null && !loadError()"
+            />
+            <app-stats
+              title="En casa"
+              [value]="loadError() ? '—' : board()?.in_house?.length ?? 0"
+              smallText="estadías alojadas"
+              iconName="bed-double"
+              iconBgColor="bg-purple-100"
+              iconColor="text-purple-500"
+              [loading]="board() === null && !loadError()"
+            />
+            <app-stats
+              title="Saldo por cobrar"
+              [value]="loadError() ? '—' : pendingBalance()"
+              [smallText]="loadError() ? '' : pendingBalanceText()"
+              iconName="wallet"
+              iconBgColor="bg-emerald-100"
+              iconColor="text-emerald-500"
+              [loading]="board() === null && !loadError()"
+            />
           </div>
-        </div>
 
-        <div class="px-2 pb-2 pt-3 md:p-4">
-          @if (loadError() !== null) {
-            <app-hospitality-load-error
-              what="la recepción"
-              [message]="loadError()"
-              (retry)="load()"
-            />
-          } @else if (board() === null) {
-            <div class="p-4 md:p-6">
-              <app-spinner [center]="true" text="Cargando recepción…" />
-            </div>
-          } @else if (rows().length === 0 && hasFilters()) {
-            <app-empty-state
-              icon="search"
-              title="Sin resultados"
-              description="Ninguna estadía coincide con la búsqueda o los filtros."
-              actionButtonText="Limpiar filtros"
-              [showActionButton]="true"
-              (actionClick)="clearFilters()"
-            />
-          } @else if (rows().length === 0) {
-            <app-empty-state
-              [icon]="emptyText().icon"
-              [title]="emptyText().title"
-              [description]="emptyText().description"
-              [showActionButton]="false"
-            />
-          } @else {
-            @if (reloading()) {
-              <p class="sr-only" role="status">Actualizando recepción…</p>
-            }
-            <!-- R-FB-04: a reload dims the board instead of emptying it. -->
+          <app-card [responsive]="true" [padding]="false" overflow="visible">
+            <!-- Sticky search header -->
             <div
-              class="transition-opacity"
-              [class.opacity-50]="reloading()"
-              [attr.aria-busy]="reloading()"
+              class="sticky top-header-tabs-search z-10 bg-background px-2 py-1.5 -mt-[5px]
+                     md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
             >
-              <app-responsive-data-view
-                [data]="rows()"
-                [columns]="columns()"
-                [cardConfig]="cardConfig()"
-                [actions]="actions"
-                [mobileActions]="actions"
-                [striped]="true"
-                [hoverable]="true"
-                emptyMessage="No hay estadías con ese criterio"
-                emptyIcon="search"
-                (rowClick)="openDetail($event)"
-              />
+              <div
+                class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+              >
+                <h2
+                  class="text-[13px] font-bold text-gray-600 tracking-wide
+                         md:text-lg md:font-semibold md:text-text-primary"
+                >
+                  {{ tabTitle() }}
+                  <span class="text-text-secondary font-normal">({{ rows().length }})</span>
+                  @if (businessDate()) {
+                    <span class="text-text-secondary font-normal"> · {{ businessDate() }}</span>
+                  }
+                </h2>
+
+                <div class="flex items-center gap-2 w-full md:w-auto">
+                  <app-inputsearch
+                    class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                    size="sm"
+                    placeholder="Buscar por reserva, huésped o habitación…"
+                    [debounceTime]="300"
+                    [ngModel]="search()"
+                    (ngModelChange)="onSearch($event)"
+                  />
+                  <app-button
+                    variant="primary"
+                    size="md"
+                    [iconOnlyMobile]="true"
+                    customClasses="!h-11 !w-11 !px-0 md:!w-auto md:!px-4 !rounded-[10px]"
+                    class="shrink-0"
+                    ariaLabel="Nueva reserva"
+                    (clicked)="openForm(false)"
+                    data-testid="front-desk-new-reservation"
+                  >
+                    <app-icon slot="icon" name="plus" [size]="18" />
+                    Nueva reserva
+                  </app-button>
+                  <app-button
+                    variant="outline"
+                    size="md"
+                    [iconOnlyMobile]="true"
+                    customClasses="!h-11 !w-11 !px-0 md:!w-auto md:!px-4 bg-surface !rounded-[10px]"
+                    class="shrink-0"
+                    ariaLabel="Llegada sin reserva"
+                    (clicked)="openForm(true)"
+                    data-testid="front-desk-walk-in"
+                  >
+                    <app-icon slot="icon" name="user-plus" [size]="18" />
+                    Llegada sin reserva
+                  </app-button>
+                  <app-options-dropdown
+                    class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                    [filters]="filterConfigs()"
+                    [filterValues]="filterValues()"
+                    [actions]="dropdownActions"
+                    [isLoading]="board() === null && loadError() === null"
+                    (filterChange)="filterValues.set($event)"
+                    (clearAllFilters)="filterValues.set({})"
+                    (actionClick)="onActionClick($event)"
+                  />
+                </div>
+              </div>
             </div>
-          }
+
+            <div class="px-2 pb-2 pt-3 md:p-4">
+              @if (loadError() !== null) {
+                <app-hospitality-load-error
+                  what="la recepción"
+                  [message]="loadError()"
+                  (retry)="load()"
+                />
+              } @else if (board() === null) {
+                <div class="p-4 md:p-6">
+                  <app-spinner [center]="true" text="Cargando recepción…" />
+                </div>
+              } @else if (rows().length === 0 && hasFilters()) {
+                <app-empty-state
+                  icon="search"
+                  title="Sin resultados"
+                  description="Ninguna estadía coincide con la búsqueda o los filtros."
+                  actionButtonText="Limpiar filtros"
+                  [showActionButton]="true"
+                  (actionClick)="clearFilters()"
+                />
+              } @else if (rows().length === 0) {
+                <app-empty-state
+                  [icon]="emptyText().icon"
+                  [title]="emptyText().title"
+                  [description]="emptyText().description"
+                  [showActionButton]="false"
+                />
+              } @else {
+                @if (reloading()) {
+                  <p class="sr-only" role="status">Actualizando recepción…</p>
+                }
+                <!-- R-FB-04: a reload dims the board instead of emptying it. -->
+                <div
+                  class="transition-opacity"
+                  [class.opacity-50]="reloading()"
+                  [attr.aria-busy]="reloading()"
+                >
+                  <app-responsive-data-view
+                    [data]="rows()"
+                    [columns]="columns()"
+                    [cardConfig]="cardConfig()"
+                    [actions]="actions"
+                    [mobileActions]="actions"
+                    [striped]="true"
+                    [hoverable]="true"
+                    emptyMessage="No hay estadías con ese criterio"
+                    emptyIcon="search"
+                    (rowClick)="openDetail($event)"
+                  />
+                </div>
+              }
+            </div>
+          </app-card>
         </div>
-      </app-card>
+      }
 
       <app-reservation-form-modal
         [isOpen]="formOpen()"
@@ -355,13 +387,26 @@ export class HospitalityFrontDeskPageComponent implements OnInit {
   private readonly toastService = inject(ToastService);
   private readonly unitTypesService = inject(UnitTypesService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
 
   readonly board = signal<FrontDeskBoard | null>(null);
   /** R-FB-04 — a reload of a board already shown. */
   readonly reloading = signal(false);
   /** R-FB-02 — reason of the last failed load; null = loaded or loading. */
   readonly loadError = signal<string | null>(null);
-  readonly tab = signal<FrontDeskTab>('arrivals');
+  // Read from the router (not a local signal) so back/forward, shared links
+  // and the old `/admin/hospitality/reservations` URL (which redirects here
+  // with `?tab=reservations`) switch the tab too.
+  readonly tab = toSignal(
+    this.route.queryParamMap.pipe(map((params) => toFrontDeskTab(params.get('tab')))),
+    { initialValue: toFrontDeskTab(this.route.snapshot.queryParamMap.get('tab')) },
+  );
+  /** Board tab the list, columns and filters describe ("Reservas" has its own). */
+  private readonly boardTab = computed<BoardTab>(() => {
+    const tab = this.tab();
+    return tab === 'reservations' ? 'arrivals' : tab;
+  });
   readonly detailId = signal<number | null>(null);
   /** Step the detail opens on: the check-in room picker or the check-out. */
   readonly detailStep = signal<DetailStep>(null);
@@ -380,7 +425,7 @@ export class HospitalityFrontDeskPageComponent implements OnInit {
     return date ? `Hoy, ${shortDate(date)}` : '';
   });
 
-  readonly tabTitle = computed(() => TAB_TITLES[this.tab()]);
+  readonly tabTitle = computed(() => TAB_TITLES[this.boardTab()]);
 
   /** Arrivals have no folio yet: the balance filter only applies after check-in. */
   readonly filterConfigs = computed<FilterConfig[]>(() => [
@@ -388,7 +433,7 @@ export class HospitalityFrontDeskPageComponent implements OnInit {
       key: 'balance',
       label: 'Saldo de la cuenta',
       type: 'select',
-      disabled: this.tab() === 'arrivals',
+      disabled: this.boardTab() === 'arrivals',
       options: [
         { value: '', label: 'Todos' },
         { value: 'pending', label: 'Con saldo pendiente' },
@@ -403,7 +448,7 @@ export class HospitalityFrontDeskPageComponent implements OnInit {
 
   private readonly balanceFilter = computed(() => {
     const value = this.filterValues()['balance'];
-    return this.tab() !== 'arrivals' && typeof value === 'string' ? value : '';
+    return this.boardTab() !== 'arrivals' && typeof value === 'string' ? value : '';
   });
 
   readonly hasFilters = computed(() => !!(this.search() || this.balanceFilter()));
@@ -428,18 +473,19 @@ export class HospitalityFrontDeskPageComponent implements OnInit {
   readonly tabs = computed<StickyHeaderTab[]>(() => {
     const board = this.board();
     return [
+      { id: 'reservations', label: 'Reservas', icon: 'calendar-check' },
       { id: 'arrivals', label: `Llegadas (${board?.arrivals.length ?? 0})`, icon: 'log-in' },
       { id: 'departures', label: `Salidas (${board?.departures.length ?? 0})`, icon: 'log-out' },
       { id: 'in_house', label: `En casa (${board?.in_house.length ?? 0})`, icon: 'bed-double' },
     ];
   });
 
-  readonly emptyText = computed(() => EMPTY_TEXT[this.tab()]);
+  readonly emptyText = computed(() => EMPTY_TEXT[this.boardTab()]);
 
   readonly rows = computed<BoardRow[]>(() => {
     const term = normalize(this.search());
     const balance = this.balanceFilter();
-    const list = (this.board()?.[this.tab()] ?? []).filter((row) => {
+    const list = (this.board()?.[this.boardTab()] ?? []).filter((row) => {
       if (
         term &&
         ![row.reservation_number, row.guest_name, row.rooms].some((value) =>
@@ -471,7 +517,7 @@ export class HospitalityFrontDeskPageComponent implements OnInit {
       { key: 'stay', label: 'Llegada → Salida' },
       { key: 'guests', label: 'Huéspedes', align: 'center' },
     ];
-    if (this.tab() === 'arrivals') {
+    if (this.boardTab() === 'arrivals') {
       columns.push({ key: 'precheckin_label', label: 'Pre-registro', align: 'center' });
     } else {
       columns.push({ key: 'keys_label', label: 'Llaves', align: 'center' });
@@ -496,11 +542,11 @@ export class HospitalityFrontDeskPageComponent implements OnInit {
     detailKeys: [
       { key: 'rooms', label: 'Habitación' },
       { key: 'stay', label: 'Estadía' },
-      this.tab() === 'arrivals'
+      this.boardTab() === 'arrivals'
         ? { key: 'precheckin_label', label: 'Pre-registro' }
         : { key: 'keys_label', label: 'Llaves' },
     ],
-    ...(this.tab() !== 'arrivals' ? { footerKey: 'balance_label', footerLabel: 'Saldo' } : {}),
+    ...(this.boardTab() !== 'arrivals' ? { footerKey: 'balance_label', footerLabel: 'Saldo' } : {}),
   }));
 
   /**
@@ -534,6 +580,14 @@ export class HospitalityFrontDeskPageComponent implements OnInit {
       action: (row: BoardRow) => this.openDetail(row, 'check_out'),
     },
   ];
+
+  constructor() {
+    // The menu entry opens the bare URL: write the default (or a corrected
+    // unknown) tab into it without adding a history entry.
+    if (this.route.snapshot.queryParamMap.get('tab') !== this.tab()) {
+      this.selectTab(this.tab(), true);
+    }
+  }
 
   ngOnInit(): void {
     this.load();
@@ -584,7 +638,18 @@ export class HospitalityFrontDeskPageComponent implements OnInit {
   }
 
   onTab(id: string): void {
-    this.tab.set(id as FrontDeskTab);
+    const tab = toFrontDeskTab(id);
+    if (tab === this.tab()) return;
+    this.selectTab(tab, false);
+  }
+
+  private selectTab(tab: FrontDeskTab, replaceUrl: boolean): void {
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { tab },
+      queryParamsHandling: 'merge',
+      replaceUrl,
+    });
   }
 
   onSearch(term: string | null): void {

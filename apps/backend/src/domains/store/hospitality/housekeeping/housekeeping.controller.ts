@@ -8,6 +8,8 @@ import { ChangeHousekeepingStatusDto } from './change-housekeeping-status.dto';
 import { HousekeepingTasksService } from './housekeeping-tasks.service';
 import { AssignHousekeepingTaskDto } from './assign-housekeeping-task.dto';
 import { CreateHousekeepingTaskDto } from './create-housekeeping-task.dto';
+import { CheckoutCleanService } from './checkout-clean.service';
+import { AssignCheckoutCleanDto } from './assign-checkout-clean.dto';
 
 /** Hospitality Suite — room status board (H5.1) and tasks per housekeeper (H5.2). */
 @Controller('store/hospitality/housekeeping')
@@ -17,7 +19,31 @@ export class HousekeepingController {
     private readonly housekeepingService: HousekeepingService,
     private readonly tasksService: HousekeepingTasksService,
     private readonly responseService: ResponseService,
+    private readonly checkoutCleanService: CheckoutCleanService,
   ) {}
+
+  /**
+   * Agenda unificada (F3) — the desk that closes the check-out may assign the
+   * room's clean right there (front desk OR housekeeping assign permission).
+   */
+  @ApiOperation({ summary: 'Limpieza sugerida al cerrar el check-out de una reserva' })
+  @Get('checkout-clean/:reservationId')
+  @Permissions('store:lodging:housekeeping:assign', 'store:lodging:front_desk:operate')
+  async checkoutCleanSuggestion(@Param('reservationId', ParseIntPipe) reservationId: number) {
+    const result = await this.checkoutCleanService.suggestion(reservationId);
+    return this.responseService.success(result);
+  }
+
+  @ApiOperation({ summary: 'Asignar la limpieza de salida sugerida en el check-out' })
+  @Post('checkout-clean/:reservationId')
+  @Permissions('store:lodging:housekeeping:assign', 'store:lodging:front_desk:operate')
+  async assignCheckoutClean(
+    @Param('reservationId', ParseIntPipe) reservationId: number,
+    @Body() dto: AssignCheckoutCleanDto,
+  ) {
+    const result = await this.checkoutCleanService.assign(reservationId, dto.assignments);
+    return this.responseService.created(result, 'Limpieza asignada');
+  }
 
   @ApiOperation({ summary: 'Tablero de estado de las habitaciones' })
   @Get()

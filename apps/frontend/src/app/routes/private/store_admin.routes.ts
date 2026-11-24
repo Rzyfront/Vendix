@@ -11,6 +11,10 @@ import { aiAgentsSettingsGuard } from '../../core/guards/vexi-settings.guard';
 import { vexAccessGuard } from '../../core/guards/vex-access.guard';
 import { storeDashboardGuard } from '../../core/guards/store-dashboard.guard'; // QUI-418
 import { HomePanelService } from '../../private/modules/store/dashboard/home-panels/home-panel.service';
+import {
+  agendaAccessGuard,
+  agendaTabRedirect,
+} from '../../private/modules/store/scheduling/agenda-access.guard';
 import { appKindGuard } from '../../private/modules/store/apps/utils/app-routes.util';
 import {
   panelUiGuard,
@@ -25,6 +29,10 @@ import { storeUsersReducer } from '../../private/modules/store/settings/users/st
 import { StoreUsersEffects } from '../../private/modules/store/settings/users/state/effects/store-users.effects';
 import { layawayReducer } from '../../private/modules/store/layaway/state/reducers/layaway.reducer';
 import { LayawayEffects } from '../../private/modules/store/layaway/state/effects/layaway.effects';
+import {
+  hospitalityLegacyTabRedirect,
+  hospitalityReportsLegacyRedirect,
+} from '../../private/modules/store/reports/hospitality-legacy-redirect';
 
 /** `admin/vex` y `admin/vex/c/:id`: misma ruta, el id llega como parámetro. */
 export function vexRouteMatcher(segments: UrlSegment[]): UrlMatchResult | null {
@@ -496,6 +504,22 @@ export const storeAdminRoutes: Routes = [
                 (c) => c.OrdersBulkPageComponent,
               ),
           },
+          // Agenda unificada F1: un solo módulo «Agenda» (Calendario |
+          // Programación | Configuración en `?tab=`). Antes de `:id`.
+          {
+            path: 'scheduling',
+            pathMatch: 'full',
+            redirectTo: () => agendaTabRedirect('programacion'),
+          },
+          {
+            path: 'agenda',
+            // Abre si Reservas o Pedidos programados pasan todas las capas.
+            canActivate: [agendaAccessGuard],
+            loadChildren: () =>
+              import('../../private/modules/store/scheduling/scheduling.routes').then(
+                (r) => r.SCHEDULING_AGENDA_ROUTES,
+              ),
+          },
           {
             path: ':id',
             // El detalle de orden reutiliza `vendix-invoice-detail` (el modal
@@ -520,41 +544,33 @@ export const storeAdminRoutes: Routes = [
       {
         path: 'reservations',
         children: [
+          // Agenda unificada F1: Reservas vive en Órdenes → Agenda. Las URLs
+          // viejas abren la pestaña que les corresponde; la configuración de
+          // disponibilidad, su sección en Configuración.
           {
             path: '',
             pathMatch: 'full',
-            loadComponent: () =>
-              import('../../private/modules/store/reservations/reservations.component').then(
-                (c) => c.ReservationsComponent,
-              ),
+            redirectTo: () => agendaTabRedirect('calendario'),
           },
           {
             path: 'schedules',
-            loadComponent: () =>
-              import('../../private/modules/store/reservations/components/schedule-management/schedule-management.component').then(
-                (c) => c.ScheduleManagementComponent,
-              ),
+            pathMatch: 'full',
+            redirectTo: () => agendaTabRedirect('configuracion', 'equipo'),
           },
           {
             path: 'availability',
-            loadComponent: () =>
-              import(
-                '../../private/modules/store/reservations/components/provider-availability/provider-availability.component'
-              ).then((c) => c.ProviderAvailabilityComponent),
+            pathMatch: 'full',
+            redirectTo: () => agendaTabRedirect('configuracion', 'disponibilidad'),
           },
           {
             path: 'queue',
-            loadComponent: () =>
-              import(
-                '../../private/modules/store/reservations/components/appointment-queue-panel/appointment-queue-panel.component'
-              ).then((c) => c.AppointmentQueuePanelComponent),
+            pathMatch: 'full',
+            redirectTo: () => agendaTabRedirect('configuracion', 'cola'),
           },
           {
             path: 'business-hours',
-            loadComponent: () =>
-              import(
-                '../../private/modules/store/reservations/components/business-hours/business-hours.component'
-              ).then((c) => c.BusinessHoursComponent),
+            pathMatch: 'full',
+            redirectTo: () => agendaTabRedirect('configuracion', 'horario'),
           },
           {
             path: 'reminders',
@@ -1243,13 +1259,11 @@ export const storeAdminRoutes: Routes = [
             children: [],
           },
           {
-            // R4 — "Reportes de hotel": the four hotel reports as tabs (?tab=);
-            // same panel_ui key as Reservas.
+            // Agenda F4 — hotel reports moved to Reportes → Hotelería; the old
+            // URL (and its ?tab=) opens the matching report there.
             path: 'reports',
-            loadComponent: () =>
-              import(
-                '../../private/modules/store/hospitality/reports/pages/reports-page/reports-page.component'
-              ).then((c) => c.HospitalityReportsPageComponent),
+            pathMatch: 'full',
+            redirectTo: hospitalityReportsLegacyRedirect,
           },
           {
             // H4.1/H4.2 — "Cumplimiento": TRA and SIRE (foreign guests) as tabs.
@@ -1313,38 +1327,26 @@ export const storeAdminRoutes: Routes = [
                 fragment: 'section-ical',
               }),
           },
-          // R4 — the loose report URLs open their tab in Reportes de hotel.
+          // R4 / agenda F4 — the loose report URLs open their report in Reportes → Hotelería.
           {
             path: 'night-audit',
             pathMatch: 'full',
-            redirectTo: () =>
-              inject(Router).createUrlTree(['/admin/hospitality/reports'], {
-                queryParams: { tab: 'night-audit' },
-              }),
+            redirectTo: hospitalityLegacyTabRedirect('night-audit'),
           },
           {
             path: 'performance',
             pathMatch: 'full',
-            redirectTo: () =>
-              inject(Router).createUrlTree(['/admin/hospitality/reports'], {
-                queryParams: { tab: 'performance' },
-              }),
+            redirectTo: hospitalityLegacyTabRedirect('performance'),
           },
           {
             path: 'pickup',
             pathMatch: 'full',
-            redirectTo: () =>
-              inject(Router).createUrlTree(['/admin/hospitality/reports'], {
-                queryParams: { tab: 'pickup' },
-              }),
+            redirectTo: hospitalityLegacyTabRedirect('pickup'),
           },
           {
             path: 'cancellations',
             pathMatch: 'full',
-            redirectTo: () =>
-              inject(Router).createUrlTree(['/admin/hospitality/reports'], {
-                queryParams: { tab: 'cancellations' },
-              }),
+            redirectTo: hospitalityLegacyTabRedirect('cancellations'),
           },
           {
             // R3 — "Servicios exentos" lives in Configuración → General → Facturación.

@@ -5,6 +5,7 @@ import {
   DestroyRef,
   inject,
   OnInit,
+  output,
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -81,13 +82,19 @@ type ListResult =
  * today's stats, search by guest/number, status and dates, and the detail
  * with history, cancellation and no-show.
  *
- * Standard admin list module: four stats, one card with the sticky search,
- * the visible "Nueva reserva" button, the filters dropdown (status and stay
+ * Agenda F2: no longer a page of its own. It is the main tab of Recepción
+ * (`/admin/hospitality/front-desk?tab=reservations`), mounted under the
+ * Recepción sticky header, so its sticky stats and search use the
+ * header-with-tabs offsets. The old `/admin/hospitality/reservations` URL
+ * redirects there.
+ *
+ * Standard admin list: four stats, one card with the sticky search, the
+ * visible "Nueva reserva" button, the filters dropdown (status and stay
  * range) and the responsive data view with "Ver" and "Cancelar" per row.
  * Search and filters are server-side (paginated).
  */
 @Component({
-  selector: 'app-hospitality-reservations-page',
+  selector: 'app-hospitality-reservations-list',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
@@ -124,7 +131,7 @@ type ListResult =
     <div class="w-full md:space-y-4">
       <!-- Stats: sticky on mobile, static on desktop -->
       <div
-        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+        class="stats-container sticky top-header-tabs z-20 bg-background md:static md:bg-transparent"
       >
         <app-stats
           title="Llegadas de hoy"
@@ -167,7 +174,7 @@ type ListResult =
       <app-card [responsive]="true" [padding]="false" overflow="visible">
         <!-- Sticky search header -->
         <div
-          class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+          class="sticky top-header-tabs-search z-10 bg-background px-2 py-1.5 -mt-[5px]
                  md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
         >
           <div
@@ -177,7 +184,7 @@ type ListResult =
               class="text-[13px] font-bold text-gray-600 tracking-wide
                      md:text-lg md:font-semibold md:text-text-primary"
             >
-              Reservas de hotel
+              Reservas
               <span class="text-text-secondary font-normal">({{ total() }})</span>
             </h2>
 
@@ -306,18 +313,18 @@ type ListResult =
         [isOpen]="isFormOpen()"
         [unitTypes]="unitTypes()"
         (isOpenChange)="isFormOpen.set($event)"
-        (saved)="refresh()"
+        (saved)="onChanged()"
       />
       <app-reservation-detail-modal
         [reservationId]="detailId()"
         [startWith]="detailStep()"
         (closed)="closeDetail()"
-        (changed)="refresh()"
+        (changed)="onChanged()"
       />
     </div>
   `,
 })
-export class HospitalityReservationsPageComponent implements OnInit {
+export class HospitalityReservationsListComponent implements OnInit {
   private readonly reservationsService = inject(LodgingReservationsService);
   private readonly unitTypesService = inject(UnitTypesService);
   private readonly currency = inject(CurrencyFormatService);
@@ -332,6 +339,12 @@ export class HospitalityReservationsPageComponent implements OnInit {
       this.authFacade.ownerFlag() ||
       this.authFacade.hasPermission('store:lodging:reservations:write'),
   );
+  /**
+   * A reservation was created, changed, cancelled or checked in/out from this
+   * tab: Recepción refreshes its board (the tab counts) with it.
+   */
+  readonly changed = output<void>();
+
   /** RV3 — each list request cancels the one still in flight. */
   private readonly listRequests = new Subject<void>();
 
@@ -533,6 +546,11 @@ export class HospitalityReservationsPageComponent implements OnInit {
     this.statsError.set(null);
     this.loadReservations();
     this.loadStats();
+  }
+
+  onChanged(): void {
+    this.refresh();
+    this.changed.emit();
   }
 
   openDetail(row: ReservationRow, step: DetailStartStep = null): void {

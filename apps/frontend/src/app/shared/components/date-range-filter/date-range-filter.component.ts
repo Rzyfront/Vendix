@@ -10,6 +10,9 @@ import {
 
 export type { DateRangeFilter, DatePreset };
 
+/** Fin de los presets del periodo actual: hasta hoy o hasta el cierre del periodo. */
+export type DatePresetRange = 'toDate' | 'fullPeriod';
+
 @Component({
   selector: 'vendix-date-range-filter',
   standalone: true,
@@ -95,6 +98,14 @@ export class DateRangeFilterComponent {
    * panel es demasiado estrecho para la fila horizontal del header.
    */
   stacked = input<boolean>(false);
+
+  /**
+   * Hasta dónde llegan «Esta semana», «Este mes» y «Este año».
+   * - `'toDate'` (default, reportes): terminan hoy; no hay datos futuros.
+   * - `'fullPeriod'` (agendas): terminan el último día del periodo, para no
+   *   dejar por fuera citas y pedidos programados después de hoy.
+   */
+  presetRange = input<DatePresetRange>('toDate');
 
   valueChange = output<DateRangeFilter>();
 
@@ -231,6 +242,7 @@ export class DateRangeFilterComponent {
   private getDateRange(preset: DatePreset): DateRangeFilter | null {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const fullPeriod = this.presetRange() === 'fullPeriod';
     let start: Date;
     let end: Date;
 
@@ -251,7 +263,7 @@ export class DateRangeFilterComponent {
       case 'thisWeek':
         start = new Date(today);
         start.setDate(start.getDate() - start.getDay());
-        end = today;
+        end = fullPeriod ? new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6) : today;
         break;
       case 'lastWeek':
         start = new Date(today);
@@ -261,7 +273,7 @@ export class DateRangeFilterComponent {
         break;
       case 'thisMonth':
         start = new Date(today.getFullYear(), today.getMonth(), 1);
-        end = today;
+        end = fullPeriod ? new Date(today.getFullYear(), today.getMonth() + 1, 0) : today;
         break;
       case 'lastMonth':
         start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
@@ -269,7 +281,7 @@ export class DateRangeFilterComponent {
         break;
       case 'thisYear':
         start = new Date(today.getFullYear(), 0, 1);
-        end = today;
+        end = fullPeriod ? new Date(today.getFullYear(), 11, 31) : today;
         break;
       case 'lastYear':
         start = new Date(today.getFullYear() - 1, 0, 1);

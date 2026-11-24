@@ -5,6 +5,7 @@ import { reportsReducer } from './state/reports.reducer';
 import { ReportsEffects } from './state/reports.effects';
 import { accountingReducer } from '../accounting/state/reducers/accounting.reducer';
 import { AccountingEffects } from '../accounting/state/effects/accounting.effects';
+import { reportIndustryGuard } from './guards/report-industry.guard';
 
 /**
  * Reports route tree.
@@ -72,7 +73,7 @@ export const reportsRoutes: Routes = [
           { path: 'sales-by-payment',      data: { reportId: 'sales-by-payment' },      loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           { path: 'sales-by-channel',      data: { reportId: 'sales-by-channel' },      loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           { path: 'sales-by-user',         data: { reportId: 'sales-by-user' },         loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
-          { path: 'sales-tips-by-waiter',  data: { reportId: 'sales-tips-by-waiter' },  loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'sales-tips-by-waiter',  data: { reportId: 'sales-tips-by-waiter' },  canActivate: [reportIndustryGuard], loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           { path: 'sales-trends',          data: { reportId: 'sales-trends' },          loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           // Ventas por proveedor/marca — reusan SalesByDimensionComponent de
           // página propia de Reportes (tabla + filtro por entidad + vistas +
@@ -112,7 +113,7 @@ export const reportsRoutes: Routes = [
           { path: 'inventory-valuation',           data: { reportId: 'inventory-valuation' },           loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           { path: 'inventory-movements',           data: { reportId: 'inventory-movements' },           loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           { path: 'inventory-movement-analysis',   data: { reportId: 'inventory-movement-analysis' },   loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
-          { path: 'inventory-ingredient-consumption', data: { reportId: 'inventory-ingredient-consumption' }, loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'inventory-ingredient-consumption', data: { reportId: 'inventory-ingredient-consumption' }, canActivate: [reportIndustryGuard], loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           { path: 'inventory-by-supplier',         data: { reportId: 'inventory-by-supplier' },         loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
         ],
       },
@@ -188,6 +189,7 @@ export const reportsRoutes: Routes = [
         path: 'dispatch',
         loadComponent: () => import('./components/reports-shell/reports-shell.component').then(c => c.ReportsShellComponent),
         data: { categoryId: 'dispatch' },
+        canActivate: [reportIndustryGuard],
         children: [
           {
             path: '',
@@ -257,6 +259,29 @@ export const reportsRoutes: Routes = [
           { path: 'payroll-summary', loadComponent: () => import('./pages/payroll/payroll-summary-report/payroll-summary-report.component').then(c => c.PayrollSummaryReportComponent) },
           { path: 'payroll-by-employee', loadComponent: () => import('./pages/payroll/payroll-by-employee-report/payroll-by-employee-report.component').then(c => c.PayrollByEmployeeReportComponent) },
           { path: 'payroll-provisions', loadComponent: () => import('./pages/payroll/payroll-provisions-report/payroll-provisions-report.component').then(c => c.PayrollProvisionsReportComponent) },
+        ],
+      },
+      // Agenda unificada F4 — reportes de hotel, antes en Hotelería → «Reportes
+      // de hotel» (pestañas `?tab=`). Cada página se monta tal cual (sus cuatro
+      // stats, búsqueda fija, filtros y exportación). Solo tiendas con la
+      // industria `hospitality`; el backend ya los protege con
+      // `@IndustryModule('hospitality_reservations')`.
+      {
+        path: 'hospitality',
+        loadComponent: () => import('./components/reports-shell/reports-shell.component').then(c => c.ReportsShellComponent),
+        data: { categoryId: 'hospitality' },
+        canActivate: [reportIndustryGuard],
+        children: [
+          {
+            path: '',
+            loadComponent: () => import('./pages/category-reports-catalog/category-reports-catalog.component').then(c => c.CategoryReportsCatalogComponent),
+            data: { categoryId: 'hospitality' },
+          },
+          { path: 'hotel-night-audit',   loadComponent: () => import('../hospitality/reservations/pages/night-audit-page/night-audit-page.component').then(c => c.HospitalityNightAuditPageComponent) },
+          { path: 'hotel-performance',   loadComponent: () => import('../hospitality/reservations/pages/performance-page/performance-page.component').then(c => c.HospitalityPerformancePageComponent) },
+          { path: 'hotel-pickup',        loadComponent: () => import('../hospitality/reservations/pages/pickup-page/pickup-page.component').then(c => c.HospitalityPickupPageComponent) },
+          { path: 'hotel-cancellations', loadComponent: () => import('../hospitality/reservations/pages/cancellations-page/cancellations-page.component').then(c => c.HospitalityCancellationsPageComponent) },
+          { path: 'hotel-fontur',        loadComponent: () => import('../hospitality/reservations/pages/fontur-page/fontur-page.component').then(c => c.HospitalityFonturPageComponent) },
         ],
       },
     ],

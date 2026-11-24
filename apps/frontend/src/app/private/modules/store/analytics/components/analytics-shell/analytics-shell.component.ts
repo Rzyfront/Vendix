@@ -16,6 +16,8 @@ import { dateRangeToQueryParams } from '../../../shared/utils/date-range-params.
 import { AnalyticsService } from '../../services/analytics.service';
 import { AnalyticsRefreshService, Refreshable } from '../../../shared/services/analytics-refresh.service';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import { isAnalyticsViewVisibleForIndustries } from '../../config/analytics-industries';
 
 @Component({
   selector: 'app-analytics-shell',
@@ -31,6 +33,7 @@ export class AnalyticsShellComponent {
   private readonly analyticsService = inject(AnalyticsService);
   private readonly analyticsRefresh = inject(AnalyticsRefreshService);
   private readonly toast = inject(ToastService);
+  private readonly authFacade = inject(AuthFacade);
   private activeChildComponent: any = null;
 
   // `initialValue` evita el "no initial value" warning del audit script zoneless
@@ -57,7 +60,11 @@ export class AnalyticsShellComponent {
   readonly headerTabs = computed<StickyHeaderTab[]>(() => {
     const categoryId = this.categoryId();
     if (!categoryId) return [];
-    return getViewsByCategory(categoryId).map((view) => ({
+    const industries = this.authFacade.storeIndustries();
+    return getViewsByCategory(categoryId)
+      // Agenda unificada F4: solo las vistas de las industrias de la tienda.
+      .filter((view) => isAnalyticsViewVisibleForIndustries(view, industries))
+      .map((view) => ({
       id: view.key,
       label: view.title,
       icon: view.icon,

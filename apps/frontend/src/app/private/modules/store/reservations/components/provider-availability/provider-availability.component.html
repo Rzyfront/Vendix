@@ -1,12 +1,14 @@
 <div class="provider-availability">
   <!-- Page header (Vendix sticky-header pattern) -->
-  <app-sticky-header
-    title="Disponibilidad de Proveedores"
-    subtitle="Capacidad y ocupación por proveedor en el rango seleccionado."
-    iconName="calendar-clock"
-    [actions]="headerActions"
-    (actionClicked)="onHeaderAction($event)"
-  />
+  @if (!embedded()) {
+    <app-sticky-header
+      title="Disponibilidad de Proveedores"
+      subtitle="Capacidad y ocupación por proveedor en el rango seleccionado."
+      iconName="calendar-clock"
+      [actions]="headerActions"
+      (actionClicked)="onHeaderAction($event)"
+    />
+  }
 
   <!-- Stats cards (design system: stats-container + app-stats) -->
   @if (totals(); as t) {

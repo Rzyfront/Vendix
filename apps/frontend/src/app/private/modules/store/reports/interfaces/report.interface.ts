@@ -10,7 +10,8 @@ export type ReportCategoryId =
   | 'accounting'
   | 'payroll'
   | 'payments'
-  | 'dispatch';
+  | 'dispatch'
+  | 'hospitality';
 
 export type ReportType = 'summary' | 'list' | 'nested';
 

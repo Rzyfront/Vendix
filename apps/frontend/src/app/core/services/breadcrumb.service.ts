@@ -1011,6 +1011,13 @@ export class BreadcrumbService {
       parent: 'Órdenes',
       icon: 'clipboard',
     },
+    // Agenda unificada F1 (antes de `:id`).
+    {
+      path: '/admin/orders/agenda',
+      title: 'Agenda',
+      parent: 'Órdenes',
+      icon: 'calendar-days',
+    },
     {
       path: '/admin/orders/:id',
       title: 'Detalles del Pedido',
@@ -1089,12 +1096,6 @@ export class BreadcrumbService {
       icon: 'bed-double',
     },
     {
-      path: '/admin/hospitality/reservations',
-      title: 'Reservas de hotel',
-      parent: 'Hotelería',
-      icon: 'calendar-check',
-    },
-    {
       path: '/admin/hospitality/rack',
       title: 'Rack',
       parent: 'Hotelería',
@@ -1117,12 +1118,6 @@ export class BreadcrumbService {
       title: 'Limpieza',
       parent: 'Hotelería',
       icon: 'sparkles',
-    },
-    {
-      path: '/admin/hospitality/reports',
-      title: 'Reportes de hotel',
-      parent: 'Hotelería',
-      icon: 'chart-line',
     },
     {
       path: '/admin/hospitality/compliance',

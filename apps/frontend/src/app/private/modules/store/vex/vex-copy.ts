@@ -209,6 +209,9 @@ export const VEX_COPY = {
   },
   composer: {
     brand: 'Vex',
+    stop: 'Detener',
+    stop_aria: 'Detener respuesta',
+    notice_close: 'Cerrar aviso',
     context_label: (percent: number) => `Contexto ${percent} %`,
     context_title: (used: number, window: number) =>
       `Contexto estimado: ${used.toLocaleString('es-CO')} de ${window.toLocaleString('es-CO')} tokens`,

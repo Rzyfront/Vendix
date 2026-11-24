@@ -112,7 +112,9 @@ export const STORE_ADMIN_MENU_ITEMS: readonly MenuItem[] = [
     // hospitality_rooms). R1: only daily operation, in front-desk order;
     // settings left the group: iCal → Configuración → General → Hotelería
     // (R2), VAT-exempt services → Configuración → General → Facturación (R3);
-    // the loose reports stay reachable by URL until R4.
+    // hotel reports live in Reportes → Hotelería (agenda F4).
+    // Agenda F2: hotel reservations are the main tab of Recepción
+    // (?tab=reservations); the old "Reservas de hotel" entry left the menu.
     label: 'Hotelería',
     icon: 'hotel',
     children: [
@@ -128,14 +130,6 @@ export const STORE_ADMIN_MENU_ITEMS: readonly MenuItem[] = [
         label: 'Rack',
         icon: 'layout-grid',
         route: '/admin/hospitality/rack',
-        panelUiKey: 'hospitality_reservations',
-      },
-      {
-        // "Reservas" is the appointments module (`orders_reservations`);
-        // the hotel entry carries its own name and key so both can coexist.
-        label: 'Reservas de hotel',
-        icon: 'calendar-check',
-        route: '/admin/hospitality/reservations',
         panelUiKey: 'hospitality_reservations',
       },
       {
@@ -159,10 +153,13 @@ export const STORE_ADMIN_MENU_ITEMS: readonly MenuItem[] = [
         panelUiKey: 'hospitality_rooms',
       },
       {
-        // R4 — one entry for the four hotel reports, shown as tabs.
-        label: 'Reportes de hotel',
-        icon: 'chart-line',
-        route: '/admin/hospitality/reports',
+        // Agenda F4 — the hotel reports moved to Reportes → Hotelería, but the
+        // night audit is daily operation (close the day, no-shows) that the
+        // receptionist runs without the `reports` key: it keeps its entry
+        // here, on the hotel key, and opens the report in its new home.
+        label: 'Cierre del día',
+        icon: 'moon',
+        route: '/admin/reports/hospitality/hotel-night-audit',
         panelUiKey: 'hospitality_reservations',
       },
       {
@@ -335,28 +332,21 @@ export const STORE_ADMIN_MENU_ITEMS: readonly MenuItem[] = [
         route: '/admin/orders/layaway',
       },
       {
-        label: 'Reservas',
-        icon: 'calendar-clock',
-        route: '/admin/reservations',
+        // Agenda unificada F1: UN módulo con Calendario | Programación |
+        // Configuración. Reemplaza «Reservas», «Pedidos programados» y
+        // «Equipo de Servicio» (sus URLs redirigen a la pestaña que les
+        // corresponde). Se ve si la tienda tiene cualquiera de los dos módulos.
+        label: 'Agenda',
+        icon: 'calendar-days',
+        route: '/admin/orders/agenda',
+        panelUiAnyOf: ['orders_reservations', 'orders_scheduled'],
       },
       {
-        // Same panel_ui module as "Reservas": the payment requests belong to its flow.
+        // Same panel_ui module as reservations (`orders_reservations`): the payment requests belong to its flow.
         label: 'Solicitudes de pago',
         icon: 'receipt',
         route: '/admin/reservations/payment-requests',
         panelUiKey: 'orders_reservations',
-      },
-      {
-        // Same panel_ui module as "Reservas": providers are who attends the bookings.
-        label: 'Equipo de Servicio',
-        icon: 'user-cog',
-        route: '/admin/reservations/schedules',
-        panelUiKey: 'orders_reservations',
-      },
-      {
-        label: 'Pedidos programados',
-        icon: 'calendar-clock',
-        route: '/admin/scheduled-orders',
       },
       {
         label: 'Estaciones de Servicio',
@@ -711,6 +701,16 @@ export const STORE_ADMIN_MENU_ITEMS: readonly MenuItem[] = [
         // this explicit panelUiKey disambiguates it in
         // filterItemsRecursive's Case 2 (menu-filter.service.ts).
         panelUiKey: 'reports_dispatch',
+      },
+      {
+        // Agenda F4 — hotel reports (left the Hotelería group). Same key as
+        // Recepción: hidden outside the `hospitality` industry and for roles
+        // without hotel reservations; the label "Hotelería" alone would map
+        // to the parent `hospitality` key, so the explicit key wins.
+        label: 'Hotelería',
+        icon: 'hotel',
+        route: '/admin/reports/hospitality',
+        panelUiKey: 'hospitality_reservations',
       },
     ],
   },
