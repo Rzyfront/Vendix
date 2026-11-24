@@ -17,6 +17,12 @@ describe('AppointmentQueueService', () => {
         update,
       },
       $transaction: options.transactions === false ? jest.fn() : transaction,
+      store_settings: {
+        findFirst: jest.fn().mockResolvedValue({
+          settings: {},
+          stores: { timezone: 'America/Bogota' },
+        }),
+      },
     } as any;
     const notifications = {
       createAndBroadcast: jest.fn().mockResolvedValue({}),
@@ -45,6 +51,18 @@ describe('AppointmentQueueService', () => {
     );
   });
 
+  it('filters by the real bookings columns (date + start_time), never the missing starts_at', async () => {
+    const { service, findMany } = buildService([]);
+    await service.computeQueueForStore(1, '2026-07-18');
+    const args = findMany.mock.calls[0][0];
+    expect(args.where.date).toEqual(new Date('2026-07-18T00:00:00.000Z'));
+    expect(args.where).not.toHaveProperty('starts_at');
+    expect(args.select).not.toHaveProperty('starts_at');
+    expect(args.select).toEqual(
+      expect.objectContaining({ date: true, start_time: true, end_time: true, end_date: true }),
+    );
+  });
+
   it('ranks bookings by ABS(starts_at - arrival_at) with priority and created_at tiebreakers', async () => {
     const candidates = [
       {
@@ -52,7 +70,11 @@ describe('AppointmentQueueService', () => {
         booking_number: 'BKG-1',
         customer_id: 100,
         provider_id: 1,
-        starts_at: new Date('2026-07-18T10:00:00Z'),
+        // 05:00 Bogota (UTC-5) = 10:00Z
+        date: new Date('2026-07-18T00:00:00Z'),
+        end_date: null,
+        start_time: '05:00',
+        end_time: '06:00',
         arrival_at: new Date('2026-07-18T09:55:00Z'),
         priority: 0,
       },
@@ -61,7 +83,11 @@ describe('AppointmentQueueService', () => {
         booking_number: 'BKG-2',
         customer_id: 101,
         provider_id: 1,
-        starts_at: new Date('2026-07-18T10:00:00Z'),
+        // 05:00 Bogota (UTC-5) = 10:00Z
+        date: new Date('2026-07-18T00:00:00Z'),
+        end_date: null,
+        start_time: '05:00',
+        end_time: '06:00',
         arrival_at: new Date('2026-07-18T09:30:00Z'),
         priority: 0,
       },
@@ -73,6 +99,7 @@ describe('AppointmentQueueService', () => {
     expect(ranked[1].booking_id).toBe(11);
     // Score for BKG-1: |10:00 - 09:55| = 5 min.
     expect(ranked[0].score).toBe(5 * 60_000);
+    expect(ranked[0].starts_at).toEqual(new Date('2026-07-18T10:00:00Z'));
   });
 
   it('persists queue_position in a transaction and notifies the top of the queue', async () => {
@@ -82,7 +109,11 @@ describe('AppointmentQueueService', () => {
         booking_number: 'BKG-1',
         customer_id: 100,
         provider_id: null,
-        starts_at: new Date('2026-07-18T10:00:00Z'),
+        // 05:00 Bogota (UTC-5) = 10:00Z
+        date: new Date('2026-07-18T00:00:00Z'),
+        end_date: null,
+        start_time: '05:00',
+        end_time: '06:00',
         arrival_at: new Date('2026-07-18T09:55:00Z'),
         priority: 0,
       },
@@ -91,7 +122,11 @@ describe('AppointmentQueueService', () => {
         booking_number: 'BKG-2',
         customer_id: 101,
         provider_id: null,
-        starts_at: new Date('2026-07-18T10:00:00Z'),
+        // 05:00 Bogota (UTC-5) = 10:00Z
+        date: new Date('2026-07-18T00:00:00Z'),
+        end_date: null,
+        start_time: '05:00',
+        end_time: '06:00',
         arrival_at: new Date('2026-07-18T09:30:00Z'),
         priority: 0,
       },
@@ -136,7 +171,11 @@ describe('AppointmentQueueService', () => {
         booking_number: 'BKG-1',
         customer_id: 100,
         provider_id: null,
-        starts_at: new Date('2026-07-18T10:00:00Z'),
+        // 05:00 Bogota (UTC-5) = 10:00Z
+        date: new Date('2026-07-18T00:00:00Z'),
+        end_date: null,
+        start_time: '05:00',
+        end_time: '06:00',
         arrival_at: new Date('2026-07-18T09:55:00Z'),
         priority: 0,
       },

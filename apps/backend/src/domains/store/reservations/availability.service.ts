@@ -1145,23 +1145,32 @@ export class AvailabilityService {
         ? dayWindows
         : [{ start_time: '08:00', end_time: '18:00' }];
 
-      for (const block of blocks) {
-        for (const slot of this.generateSlotSpans(windowSpan(block), duration, buffer)) {
-          const expanded = this.expandSlot(dateStr, slot);
-          if (expanded.date < date_from || expanded.date > date_to) continue;
-          const bookedCount = existingBookings.filter(
-            (b) =>
-              this.formatDate(new Date(b.date)) === expanded.date &&
-              b.start_time === expanded.start_time &&
-              b.end_time === expanded.end_time,
-          ).length;
+      const daySpans = blocks.flatMap((block) =>
+        this.generateSlotSpans(windowSpan(block), duration, buffer),
+      );
+      // Hotfix: a service longer than every open window of the day (multi-day tours)
+      // never fits the grid. Offer ONE departure per open day at opening time, ending
+      // `start + duration` (expandSlot sets `end_date`).
+      if (daySpans.length === 0 && duration > 0) {
+        const openMin = Math.min(...blocks.map((block) => windowSpan(block).startMin));
+        daySpans.push({ startMin: openMin, endMin: openMin + duration });
+      }
 
-          slots.push({
-            ...expanded,
-            available_providers: [],
-            total_available: Math.max(10 - bookedCount, 0),
-          });
-        }
+      for (const slot of daySpans) {
+        const expanded = this.expandSlot(dateStr, slot);
+        if (expanded.date < date_from || expanded.date > date_to) continue;
+        const bookedCount = existingBookings.filter(
+          (b) =>
+            this.formatDate(new Date(b.date)) === expanded.date &&
+            b.start_time === expanded.start_time &&
+            b.end_time === expanded.end_time,
+        ).length;
+
+        slots.push({
+          ...expanded,
+          available_providers: [],
+          total_available: Math.max(10 - bookedCount, 0),
+        });
       }
     }
 
@@ -1470,11 +1479,22 @@ export class AvailabilityService {
 
     // free_booking
     if (productFull.booking_mode === 'free_booking') {
-      const total = storeCoverage.reduce(
+      let total = storeCoverage.reduce(
         (sum, span) =>
           sum + this.countTimeSlots(span, duration, buffer, minStartTime),
         0,
       );
+      // Hotfix: same rule as generateGenericSlots — a service longer than every
+      // open window gets ONE departure at opening time (if it has not passed yet).
+      if (
+        total === 0 &&
+        duration > 0 &&
+        storeCoverage.length > 0 &&
+        storeCoverage.every((span) => span.endMin - span.startMin < duration)
+      ) {
+        const openMin = Math.min(...storeCoverage.map((span) => span.startMin));
+        if (!minStartTime || toMinutes(minStartTime) <= openMin) total = 1;
+      }
       if (total === 0) return 0;
       if (!isToday) return total;
       return await this.countFreeBookingToday(
