@@ -825,7 +825,8 @@ describe('LodgingReservationsService', () => {
     });
 
     it('no-show manual solo desde el día de llegada (zona de la tienda)', async () => {
-      jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick'] });
+      // Fixed clock before the 10-nov arrival so the sale is accepted on any real date.
+      jest.useFakeTimers({ now: new Date('2026-11-09T15:00:00Z'), doNotFake: ['setImmediate', 'nextTick'] });
       try {
         const { service, reservations } = build(1);
         await service.create(sale(stay));

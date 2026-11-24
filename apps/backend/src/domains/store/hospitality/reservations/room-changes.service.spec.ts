@@ -535,11 +535,17 @@ describe('LodgingRoomChangesService', () => {
     });
 
     it('moving the arrival to a day closed to arrival is rejected', async () => {
-      const { service } = createFake({
-        restrictions: [{ date: '2026-11-11', closed_to_arrival: true }],
-      });
-      const error = await rejection(service.apply(5, { arrival_date: '2026-11-11' }));
-      expect(messageOf(error)).toBe('No se admiten llegadas el 11-nov');
+      // Fixed clock before 11-nov so the business-day check does not fire first.
+      jest.useFakeTimers({ now: new Date('2026-11-09T15:00:00Z'), doNotFake: ['setImmediate', 'nextTick'] });
+      try {
+        const { service } = createFake({
+          restrictions: [{ date: '2026-11-11', closed_to_arrival: true }],
+        });
+        const error = await rejection(service.apply(5, { arrival_date: '2026-11-11' }));
+        expect(messageOf(error)).toBe('No se admiten llegadas el 11-nov');
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     it('an in-house guest shortening the stay is not held to the arrival-day minimum stay', async () => {
