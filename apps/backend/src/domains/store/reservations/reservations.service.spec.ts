@@ -43,6 +43,14 @@ describe('ReservationsService — state machine (appointments redesign)', () => 
           Object.assign(target, data);
           return Promise.resolve({ ...target });
         }),
+        // QUI-1060: transitions are claimed with a conditional update on the status.
+        updateMany: jest.fn(({ where, data }: any) => {
+          const target = bookings.find((b) => b.id === where.id && b.status === where.status);
+          if (!target) return Promise.resolve({ count: 0 });
+          Object.assign(target, data);
+          return Promise.resolve({ count: 1 });
+        }),
+        findUniqueOrThrow: jest.fn(({ where }: any) => Promise.resolve({ ...bookings.find((b) => b.id === where.id) })),
         create: jest.fn(),
       },
       products: {
@@ -969,6 +977,13 @@ describe('ReservationsService — station deposits', () => {
           Object.assign(row, data);
           return Promise.resolve({ ...row });
         }),
+        // QUI-1060: state-machine transitions claim the status with a conditional update.
+        updateMany: jest.fn(({ where, data }: any) => {
+          if (where.status !== undefined && where.status !== row.status) return Promise.resolve({ count: 0 });
+          Object.assign(row, data);
+          return Promise.resolve({ count: 1 });
+        }),
+        findUniqueOrThrow: jest.fn(() => Promise.resolve({ ...row })),
       },
       service_allocations: {
         findFirst: jest.fn().mockResolvedValue(null),
@@ -1314,7 +1329,7 @@ describe('ReservationsService — station deposits', () => {
     const result = await service.cancel(77);
     expect(deposits.cancelWithDeposit).toHaveBeenCalledWith(77, {}, 'staff');
     expect(result.status).toBe('cancelled');
-    expect(prisma.bookings.update).toHaveBeenCalledWith(
+    expect(prisma.bookings.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'cancelled' }) }),
     );
     expect(emits.map((e) => e.name)).toContain('booking.cancelled');
@@ -1329,7 +1344,7 @@ describe('ReservationsService — station deposits', () => {
     const result = await service.cancel(77, { leftover_action: 'refund' });
     expect(deposits.cancelWithDeposit).toHaveBeenCalledWith(77, { leftover_action: 'refund' }, 'staff');
     expect(result.status).toBe('cancelled');
-    expect(prisma.bookings.update).not.toHaveBeenCalled();
+    expect(prisma.bookings.updateMany).not.toHaveBeenCalled();
     expect(emits.map((e) => e.name)).toContain('booking.cancelled');
   });
 
@@ -1361,7 +1376,7 @@ describe('ReservationsService — station deposits', () => {
     deposits.deferNoShowIfDeposit.mockResolvedValue(true);
     const result: any = await service.noShow(77);
     expect(result.status).toBe('confirmed');
-    expect(prisma.bookings.update).not.toHaveBeenCalled();
+    expect(prisma.bookings.updateMany).not.toHaveBeenCalled();
     expect(emits.find((e) => e.name === 'booking.no_show')).toBeUndefined();
   });
 
@@ -1376,7 +1391,7 @@ describe('ReservationsService — station deposits', () => {
     const deferred = build({ booking: { status: 'confirmed' } });
     deferred.deposits.deferNoShowIfDeposit.mockResolvedValue(true);
     await expect(deferred.service.archiveToNoShow(77)).resolves.toBe('deferred');
-    expect(deferred.prisma.bookings.update).not.toHaveBeenCalled();
+    expect(deferred.prisma.bookings.updateMany).not.toHaveBeenCalled();
 
     const plain = build({ booking: { status: 'confirmed' } });
     await expect(plain.service.archiveToNoShow(77)).resolves.toBe('archived');
@@ -1580,6 +1595,14 @@ describe('ReservationsService — planes de varios días (QUI-1060)', () => {
         Object.assign(target, data);
         return Promise.resolve({ ...target });
       }),
+      // Conditional status claim, as Postgres re-checks the WHERE under a row lock.
+      updateMany: jest.fn(({ where, data }: any) => {
+        const target = bookings.find((b) => b.id === where.id && b.status === where.status);
+        if (!target) return Promise.resolve({ count: 0 });
+        Object.assign(target, data);
+        return Promise.resolve({ count: 1 });
+      }),
+      findUniqueOrThrow: jest.fn(({ where }: any) => Promise.resolve({ ...bookings.find((b) => b.id === where.id) })),
       delete: jest.fn(({ where }: any) => {
         bookings.splice(bookings.findIndex((b) => b.id === where.id), 1);
         return Promise.resolve({});
@@ -1726,6 +1749,60 @@ describe('ReservationsService — planes de varios días (QUI-1060)', () => {
 
     expect(executeRaw.mock.calls[0].slice(1)).toEqual([4, 2, 1]);
     expect(bookings).toHaveLength(0);
+  });
+
+  it('cancelar dos veces a la vez la misma reserva de plan devuelve sus cupos una sola vez', async () => {
+    const { service, bookings, executeRaw } = build();
+    bookings.push({ id: 11, store_id: 1, product_id: 200, status: 'confirmed', departure_id: 2, pax_adults: 2, pax_children: 0, product: {} });
+    // Both requests read "confirmed" before either commits.
+    const results = await Promise.allSettled([service.cancel(11), service.cancel(11)]);
+
+    expect(results.map((r) => r.status).sort()).toEqual(['fulfilled', 'rejected']);
+    expect(results.find((r) => r.status === 'rejected')).toMatchObject({ reason: expect.any(ConflictException) });
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(bookings[0].status).toBe('cancelled');
+  });
+
+  it('una reserva ya cancelada no se vuelve a cancelar ni devuelve cupos', async () => {
+    const { service, bookings, executeRaw } = build();
+    bookings.push({ id: 12, store_id: 1, product_id: 200, status: 'cancelled', departure_id: 2, pax_adults: 2, pax_children: 0, product: {} });
+    await expect(service.cancel(12)).rejects.toBeInstanceOf(BadRequestException);
+    expect(executeRaw).not.toHaveBeenCalled();
+  });
+
+  it('eliminar una reserva que otra petición acaba de cancelar no devuelve cupos', async () => {
+    const { service, bookings, executeRaw, prisma } = build();
+    bookings.push({ id: 13, store_id: 1, product_id: 200, status: 'pending', departure_id: 2, pax_adults: 2, pax_children: 0, product: {} });
+    // The delete reads "pending", then a concurrent cancel commits before its transaction.
+    prisma.$transaction.mockImplementationOnce(async (cb: any) => {
+      bookings[0].status = 'cancelled';
+      return cb(prisma);
+    });
+    await expect(service.deleteBooking(13)).rejects.toBeInstanceOf(BadRequestException);
+    expect(executeRaw).not.toHaveBeenCalled();
+    expect(bookings).toHaveLength(1);
+  });
+
+  it('F1: un plan no se aparta desde el POS o la tienda online (hold)', async () => {
+    const { service, bookings } = build();
+    await expect(
+      service.hold({ customer_id: 1, product_id: 200, date: '2099-02-10', start_time: '08:00', end_time: '18:00' }),
+    ).rejects.toMatchObject({ errorCode: 'SERVICE_PLAN_018' });
+    expect(bookings).toHaveLength(0);
+  });
+
+  it('F1: un plan con orden ajena (POS o checkout) se rechaza antes de tomar cupos', async () => {
+    const { service, bookings, servicePlans } = build();
+    await expect(service.create({ ...planDto, order_id: 321 })).rejects.toMatchObject({ errorCode: 'SERVICE_PLAN_018' });
+    await expect(service.create({ ...planDto, skip_order_creation: true })).rejects.toMatchObject({ errorCode: 'SERVICE_PLAN_018' });
+    expect(servicePlans.resolveBooking).not.toHaveBeenCalled();
+    expect(bookings).toHaveLength(0);
+  });
+
+  it('regresión: un servicio por horas sigue apartándose con hold', async () => {
+    const { service, bookings } = build();
+    await service.hold({ customer_id: 1, product_id: 100, date: '2099-02-10', start_time: '10:00', end_time: '11:00' });
+    expect(bookings).toHaveLength(1);
   });
 
   it('una reserva de plan no se reagenda', async () => {

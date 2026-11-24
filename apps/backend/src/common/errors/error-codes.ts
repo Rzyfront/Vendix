@@ -6676,6 +6676,7 @@ export const ErrorCodes = {
   SERVICE_PLAN_015: { code: 'SERVICE_PLAN_015', httpStatus: 400, devMessage: 'La fecha de regreso del plan se calcula con su duración y no coincide con la enviada.' },
   SERVICE_PLAN_016: { code: 'SERVICE_PLAN_016', httpStatus: 400, devMessage: 'Las reservas de un plan no se reagendan: cancélala y reserva otra salida o fecha.' },
   SERVICE_PLAN_017: { code: 'SERVICE_PLAN_017', httpStatus: 400, devMessage: 'Las noches del plan no pueden superar sus días.' },
+  SERVICE_PLAN_018: { code: 'SERVICE_PLAN_018', httpStatus: 400, devMessage: 'Este plan se reserva desde el panel de reservas.' },
   SERVICE_BOOKING_END_DATE_001: { code: 'SERVICE_BOOKING_END_DATE_001', httpStatus: 400, devMessage: 'La fecha de fin no puede ser anterior a la fecha de inicio.' },
   STATION_BOOKING_010: { code: 'STATION_BOOKING_010', httpStatus: 409, devMessage: 'Esta estación cobra anticipo: reserva desde el flujo de reservas, no desde el carrito.' },
   STATION_BOOKING_011: { code: 'STATION_BOOKING_011', httpStatus: 400, devMessage: 'Una serie recurrente no se permite en estaciones con cobro para reservar o anticipo obligatorio.' },

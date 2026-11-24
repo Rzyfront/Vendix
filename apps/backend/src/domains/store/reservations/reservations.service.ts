@@ -235,6 +235,12 @@ export class ReservationsService {
     }
     // QUI-1060 modo Plan: package service with days. Return date, departure, group and
     // price come from the plan; any other service keeps the flow below untouched.
+    // F1 sells plans only from the reservations panel, which prices the order with the
+    // package. An order built elsewhere (POS, online checkout) would charge the catalog
+    // price and skip the seats, so those callers are rejected.
+    if (isPlanProduct(product) && (dto.order_id || dto.skip_order_creation)) {
+      throw new VendixHttpException(ErrorCodes.SERVICE_PLAN_018);
+    }
     const planBooking = isPlanProduct(product) ? await this.resolvePlanBooking(product, dto) : null;
 
     // S21: bookings can cross midnight (`end_time <= start_time` ends on D+1) and, on
@@ -886,6 +892,8 @@ export class ReservationsService {
         requires_station: true,
         booking_mode: true,
         service_duration_minutes: true,
+        service_pricing_type: true,
+        plan_duration_days: true,
       },
     });
 
@@ -897,6 +905,10 @@ export class ReservationsService {
       throw new BadRequestException(
         'Este producto/servicio no requiere reserva',
       );
+    }
+    // QUI-1060 F1: a hold (POS/online cart) neither takes plan seats nor prices the package.
+    if (isPlanProduct(product)) {
+      throw new VendixHttpException(ErrorCodes.SERVICE_PLAN_018);
     }
     if (product.requires_station && !this.allocationCoordinator) {
       throw new VendixHttpException(ErrorCodes.STATION_012, 'No se pudo validar la asignación requerida para este servicio.');
@@ -2310,7 +2322,16 @@ export class ReservationsService {
       throw new VendixHttpException(ErrorCodes.STATION_012);
     }
     return this.prisma.$transaction(async (tx) => {
-      // QUI-1060: a cancelled plan booking gives its seats back to the departure.
+      // QUI-1060: claim the transition with a conditional update on the status read
+      // above. A concurrent change (another cancel, the confirmation link, the
+      // auto-cancel job) makes this a no-op, so plan seats are given back only once.
+      const claim = await tx.bookings.updateMany({
+        where: { id, status: booking.status as booking_status_enum },
+        data: { status: targetStatus as booking_status_enum, updated_at: new Date() },
+      });
+      if (claim.count !== 1) {
+        throw new ConflictException('La reserva cambió de estado mientras se procesaba. Recarga e intenta de nuevo.');
+      }
       if (targetStatus === 'cancelled') {
         await releasePlanSeatsForBookingInTx(tx, id);
       }
@@ -2336,9 +2357,8 @@ export class ReservationsService {
           });
         }
       }
-      return this.mapBooking(await tx.bookings.update({
+      return this.mapBooking(await tx.bookings.findUniqueOrThrow({
         where: { id },
-        data: { status: targetStatus as booking_status_enum, updated_at: new Date() },
         include: this.BOOKING_INCLUDE,
       }));
     });
@@ -2350,9 +2370,15 @@ export class ReservationsService {
     const product = await this.prisma.products.findFirst({ where: { id: booking.product_id }, select: { requires_station: true } });
     if (product?.requires_station && !this.allocationCoordinator) throw new VendixHttpException(ErrorCodes.STATION_012);
     await this.prisma.$transaction(async (tx) => {
+      // QUI-1060: only the transaction that still finds the booking pending removes it
+      // and gives its plan seats back; a concurrent cancel or delete changes nothing.
+      const claim = await tx.bookings.updateMany({
+        where: { id, status: booking_status_enum.pending },
+        data: { status: booking_status_enum.cancelled, expires_at: null, updated_at: new Date() },
+      });
+      if (claim.count !== 1) throw new BadRequestException('Solo se pueden eliminar reservas en estado pendiente');
       if (product?.requires_station) {
         await this.allocationCoordinator!.releaseBooking(tx, booking.store_id, id, 'cancelled');
-        await tx.bookings.update({ where: { id }, data: { status: booking_status_enum.cancelled, expires_at: null, updated_at: new Date() } });
       } else {
         // QUI-1060: the seats go back before the row (and its departure link) disappears.
         await releasePlanSeatsForBookingInTx(tx, id);
