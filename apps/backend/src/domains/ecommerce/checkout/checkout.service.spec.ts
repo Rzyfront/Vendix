@@ -1155,6 +1155,45 @@ describe('CheckoutService - promotions and coupons', () => {
       expect(Number(data.tax_amount)).toBe(0);
     });
 
+    it('QUI-1060 F1: a multi-day plan in the cart is rejected before any order or booking', async () => {
+      mockServiceProducts();
+      const baseImpl = prisma.products.findUnique.getMockImplementation();
+      prisma.products.findUnique.mockImplementation((args: any) =>
+        args.where.id === OPEN_SERVICE_ID
+          ? baseImpl!(args).then((product: any) => ({ ...product, service_pricing_type: 'package', plan_duration_days: 3 }))
+          : baseImpl!(args),
+      );
+      const { reservations } = mockBookingLinking();
+      mockOrderCreate(1800000);
+
+      await expect(
+        service.checkout({
+          payment_method_id: 7,
+          items: [{ product_id: OPEN_SERVICE_ID, quantity: 1 }],
+          bookings: [{ product_id: OPEN_SERVICE_ID, date: '2026-11-02', start_time: '08:00', end_time: '18:00' }],
+        } as any),
+      ).rejects.toMatchObject({ errorCode: 'SERVICE_PLAN_018' });
+      expect(reservations.create).not.toHaveBeenCalled();
+      expect(prisma.orders.create).not.toHaveBeenCalled();
+    });
+
+    it('regresión: un paquete sin días (no es plan) sigue pasando la guarda del checkout', async () => {
+      mockServiceProducts();
+      const baseImpl = prisma.products.findUnique.getMockImplementation();
+      prisma.products.findUnique.mockImplementation((args: any) =>
+        args.where.id === OPEN_SERVICE_ID
+          ? baseImpl!(args).then((product: any) => ({ ...product, service_pricing_type: 'package', plan_duration_days: null }))
+          : baseImpl!(args),
+      );
+      mockBookingLinking();
+      mockOrderCreate(10000);
+
+      await service
+        .checkout({ payment_method_id: 7, items: [{ product_id: OPEN_SERVICE_ID, quantity: 1 }] } as any)
+        .catch((error: any) => expect(error?.errorCode).not.toBe('SERVICE_PLAN_018'));
+      expect(prisma.orders.create).toHaveBeenCalled();
+    });
+
     it('M-1: a station_rate line with quantity > 1 is rejected before anything is created', async () => {
       mockStationRateProduct();
       const { reservations } = mockBookingLinking();

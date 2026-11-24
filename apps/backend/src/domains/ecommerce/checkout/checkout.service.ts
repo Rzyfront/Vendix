@@ -95,6 +95,7 @@ import { assertCanChargeVat } from '@common/helpers/vat-responsibility.helper';
 import { CheckoutIdempotencyService } from './checkout-idempotency.service';
 import { ShippingTaxService } from '../../store/shipping/services/shipping-tax.service';
 import { ShippingDistanceService } from '../../store/shipping/services/shipping-distance.service';
+import { isPlanProduct } from '../../store/reservations/service-plans/service-plan-pricing.util';
 import {
   ShippingCalculatorService,
   type AddressScope,
@@ -1907,6 +1908,12 @@ export class CheckoutService {
 
     if (cart_items.length === 0) {
       throw new VendixHttpException(ErrorCodes.ECOM_CART_001);
+    }
+
+    // QUI-1060 F1: multi-day plans are sold only from the reservations panel; online
+    // the cart would charge the catalog price and the booking would skip the seats.
+    if (cart_items.some((item) => isPlanProduct(item.product))) {
+      throw new VendixHttpException(ErrorCodes.SERVICE_PLAN_018);
     }
 
     // A station-required service is a scheduled sale: every cart unit needs
