@@ -734,7 +734,9 @@ export class FinancialAnalyticsService {
     // ~19% on exclusive-tax lines. Old v4 entries would keep serving the
     // inflated figures on financial cards — bump the key for visibility, no
     // calculation logic changes.
-    const cacheKey = `analytics:financial:profit-loss:v5:${storeId}:${query.date_preset ?? '_'}:${query.date_from ?? '_'}:${query.date_to ?? '_'}`;
+    // `v6` (QUI-1056): COGS is now net of restocked refunds — same shape plus
+    // `restocked_cogs`; bumped so cached v5 figures stop serving the old COGS.
+    const cacheKey = `analytics:financial:profit-loss:v6:${storeId}:${query.date_preset ?? '_'}:${query.date_from ?? '_'}:${query.date_to ?? '_'}`;
     const cached =
       await this.cache.get<
         Awaited<ReturnType<FinancialAnalyticsService['computeProfitLossSummary']>>
@@ -747,7 +749,7 @@ export class FinancialAnalyticsService {
   }
 
   /**
-   * Bug 5/11 — Invalida todas las entradas del cache `profit-loss:v5:*` para
+   * Bug 5/11 — Invalida todas las entradas del cache `profit-loss:v6:*` para
    * un store. Usado por `FinancialAnalyticsCacheInvalidationListener` cuando
    * llega `expense.state_changed`, `payment.received` o `refund.completed`.
    *
@@ -758,7 +760,7 @@ export class FinancialAnalyticsService {
    * `reset()` (cache-manager v5). El catch final evita bloquear el flujo.
    */
   async invalidateCache(storeId: number, prefix = 'profit-loss'): Promise<void> {
-    const keyPrefix = `analytics:financial:${prefix}:v5:${storeId}:`;
+    const keyPrefix = `analytics:financial:${prefix}:v6:${storeId}:`;
     const pattern = `${keyPrefix}*`;
     try {
       const store: any = (this.cache as any).store;
@@ -1133,6 +1135,72 @@ export class FinancialAnalyticsService {
   }
 
   /**
+   * COGS RETURNED TO STOCK by the window's refunds (QUI-1056).
+   *
+   * A refund line flagged `inventory_action = 'restock'` puts the goods back on
+   * the shelf, so the cost of that sale was never really consumed and must leave
+   * the period's cost of goods sold. `write_off` (merma) and `no_return` are NOT
+   * reversed on purpose: that merchandise is lost and its cost stays a cost.
+   *
+   * The reversal is the refunded FRACTION of the sold line's own COGS
+   * (`lineCogsSql` × `refund_items.quantity / order_items.quantity`, capped at 1),
+   * so it uses the exact cost snapshot and stock-unit rule the sale charged —
+   * weight lines (QUI-1017) and presentations included — and legacy refunds
+   * without `refund_items.stock_units_consumed` still reverse in full.
+   *
+   * Bucketed like the refund that drives it: the refund instant and states the
+   * caller passes, so revenue and cost are netted in the same period. Only
+   * orders whose COGS was counted ({@link REVENUE_STATES}) and non-cancelled
+   * lines are considered, mirroring `aggregateCogs`.
+   *
+   * `startDate = null` removes the lower bound (accumulated position).
+   */
+  private async aggregateRestockedCogs(
+    storeId: number,
+    startDate: Date | null,
+    endDate: Date,
+    basis: 'accrual' | 'cash',
+  ): Promise<number> {
+    const orderStates = sqlStateList(REVENUE_STATES);
+    const refundStates = sqlStateList(
+      basis === 'cash'
+        ? [...REFUND_CASH_OUT_STATES]
+        : [...REFUND_RECOGNIZED_STATES],
+    );
+    // Accrual mirrors the P&L refund aggregate (`refunds.created_at`); cash
+    // mirrors `aggregateRefundCashOut` (the disbursement instant).
+    const instant =
+      basis === 'cash'
+        ? Prisma.sql`COALESCE(r.processed_at, r.requested_at, r.created_at)`
+        : Prisma.sql`r.created_at`;
+    const lowerBound = startDate
+      ? Prisma.sql`AND ${instant} >= ${startDate}`
+      : Prisma.empty;
+
+    const rows = await (this.prisma.withoutScope() as any).$queryRaw<
+      Array<{ restocked_cogs: unknown }>
+    >`
+      SELECT
+        COALESCE(SUM(
+          ${lineCogsSql()}
+            * LEAST(ri.quantity::numeric / NULLIF(oi.quantity, 0), 1)
+        ), 0) AS restocked_cogs
+      FROM refund_items ri
+      INNER JOIN refunds r ON r.id = ri.refund_id
+      INNER JOIN order_items oi ON oi.id = ri.order_item_id
+      INNER JOIN orders o ON o.id = r.order_id
+      WHERE o.store_id = ${storeId}
+        AND o.state IN (${orderStates})
+        AND r.state IN (${refundStates})
+        AND ri.inventory_action = 'restock'
+        AND oi.cancelled_at IS NULL
+        ${lowerBound}
+        AND ${instant} <= ${endDate}
+    `;
+    return Number(rows?.[0]?.restocked_cogs ?? 0);
+  }
+
+  /**
    * Freight TAX contained in the period's refunded shipping.
    *
    * `refunds.shipping_refund` is GROSS (the shipping rate's tax is always
@@ -1199,6 +1267,7 @@ export class FinancialAnalyticsService {
       previousRefundAggregates,
       refundShippingTax,
       previousRefundShippingTax,
+      restockedCogs,
     ] = await Promise.all([
       this.aggregateRevenueOrders(startDate, endDate),
       this.aggregateCogs(storeId, startDate, endDate),
@@ -1243,6 +1312,7 @@ export class FinancialAnalyticsService {
         previousStartDate,
         previousEndDate,
       ),
+      this.aggregateRestockedCogs(storeId, startDate, endDate, 'accrual'),
     ]);
 
     // ── CASH BASIS ────────────────────────────────────────────────────────────
@@ -1262,6 +1332,8 @@ export class FinancialAnalyticsService {
       cashAccumulated,
       refundCashAccumulated,
       expenseCashAccumulated,
+      restockedCogsCash,
+      previousRestockedCogsCash,
     ] = await Promise.all([
       this.aggregateCashIncome(storeId, startDate, endDate),
       this.aggregateRefundCashOut(storeId, startDate, endDate),
@@ -1275,6 +1347,13 @@ export class FinancialAnalyticsService {
       this.aggregateCashIncome(storeId, null, endDate),
       this.aggregateRefundCashOut(storeId, null, endDate),
       this.aggregateExpenseCashOut(null, endDate),
+      this.aggregateRestockedCogs(storeId, startDate, endDate, 'cash'),
+      this.aggregateRestockedCogs(
+        storeId,
+        previousStartDate,
+        previousEndDate,
+        'cash',
+      ),
     ]);
 
     // INGRESOS — every peso that came in during the day, GROSS. Includes
@@ -1284,7 +1363,8 @@ export class FinancialAnalyticsService {
     // The passthrough tax (IVA + INC) inside that money is never the merchant's.
     const cashTax = cashCurrent.passthroughTax;
     const cashIncomeWithoutTax = cashIncome - cashTax;
-    const cashCogs = cashCurrent.cogs;
+    // QUI-1056: merchandise a refund put back on the shelf is not a cost.
+    const cashCogs = cashCurrent.cogs - restockedCogsCash;
     // Refunds are netted OUT of profit (money handed back is not earnings) but
     // their own tax portion went back too, so only the net-of-tax part reduces it.
     const refundNetOfTax = refundCashCurrent.amount - refundCashCurrent.tax;
@@ -1316,7 +1396,7 @@ export class FinancialAnalyticsService {
     const previousCashProfit =
       cashPrevious.income -
       cashPrevious.passthroughTax -
-      cashPrevious.cogs -
+      (cashPrevious.cogs - previousRestockedCogsCash) -
       previousRefundNetOfTax;
     const previousCashBalance =
       cashPrevious.income - refundCashPrevious.amount - expenseCashPrevious;
@@ -1346,7 +1426,11 @@ export class FinancialAnalyticsService {
       tax: taxCollected,
     });
 
-    const totalCOGS = cogsResult.cogs;
+    // QUI-1056: COGS is NET of the cost a refund returned to stock (restock
+    // only — write_off / no_return stay a cost), in the same period the refund
+    // nets the revenue, so a sold + refunded + restocked order closes to zero.
+    const grossCOGS = cogsResult.cogs;
+    const totalCOGS = grossCOGS - restockedCogs;
     const refundAmount = Number(refundAggregates._sum.amount || 0);
     const refundSubtotal = Number(refundAggregates._sum.subtotal_refund || 0);
     const refundTax = Number(refundAggregates._sum.tax_refund || 0);
@@ -1450,8 +1534,10 @@ export class FinancialAnalyticsService {
         income_without_tax: this.round2(cashIncomeWithoutTax),
         /** Passthrough tax (iva + inc) prorated over the money recognized. */
         passthrough_tax: this.round2(cashTax),
-        /** COGS prorated over the money recognized. */
+        /** COGS prorated over the money recognized, net of restocked refunds. */
         cost_of_goods_sold: this.round2(cashCogs),
+        /** Cost returned to stock by the window's `restock` refunds. */
+        restocked_cogs: this.round2(restockedCogsCash),
         /** Auditability of that COGS — fractional units, see `aggregateCashIncome`. */
         cost_coverage: cashCurrent.coverage,
         /** GANANCIAS card: income − tax − COGS − refunds(net of tax). */
@@ -1512,7 +1598,12 @@ export class FinancialAnalyticsService {
         tax_collected: this.round2(taxCollected),
       },
       costs: {
+        /** Net of {@link restocked_cogs} (QUI-1056). */
         cost_of_goods_sold: this.round2(totalCOGS),
+        /** COGS of the period's sales before any refund reversal. */
+        gross_cost_of_goods_sold: this.round2(grossCOGS),
+        /** Cost returned to stock by the period's `restock` refunds. */
+        restocked_cogs: this.round2(restockedCogs),
         gross_profit: this.round2(grossProfit),
         gross_margin: this.round2(grossMargin),
         /** Auditability of the COGS above — see `CostCoverage`. */
