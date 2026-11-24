@@ -385,6 +385,13 @@ interface EditableStopDecision {
                     </div>
                   </div>
 
+                  @if (isDuplicatedRow(i)) {
+                    <p class="text-xs text-red-700 font-medium">
+                      Otra fila apunta a esta misma parada. Descarta una de las dos:
+                      cada parada se liquida una sola vez.
+                    </p>
+                  }
+
                   @if (stop.stop_id === null) {
                     <p class="text-xs text-red-700">
                       No se pudo emparejar esta fila con una parada real; se omitirá.
@@ -797,12 +804,39 @@ export class RouteSheetScannerModalComponent {
     ),
   );
 
-  /** Confirm enabled only when there is something to settle, no under-collection and every reason. */
+  /**
+   * Stop ids that more than one KEPT row would settle (the AI read the same
+   * remisión twice, or two rows fell back to the same sequence). Sending both
+   * would settle the stop twice: the operator must discard one row.
+   */
+  readonly duplicatedStopIds = computed(() => {
+    const seen = new Set<number>();
+    const dup = new Set<number>();
+    for (const s of this.keptStops()) {
+      if (s.stop_id === null || s.already_settled || s.outcome === 'pending') continue;
+      if (seen.has(s.stop_id)) dup.add(s.stop_id);
+      seen.add(s.stop_id);
+    }
+    return dup;
+  });
+
+  isDuplicatedRow(index: number): boolean {
+    const stop = this.editableStops()[index];
+    return (
+      !!stop &&
+      stop.stop_id !== null &&
+      !this.isDiscarded(index) &&
+      this.duplicatedStopIds().has(stop.stop_id)
+    );
+  }
+
+  /** Confirm enabled only when there is something to settle, no under-collection, every reason and no repeated stop. */
   readonly canConfirm = computed(
     () =>
       this.confirmableCount() > 0 &&
       !this.hasUndercollectedDelivery() &&
-      !this.hasMissingReason(),
+      !this.hasMissingReason() &&
+      this.duplicatedStopIds().size === 0,
   );
 
   readonly wizardSteps = [
@@ -1145,6 +1179,13 @@ export class RouteSheetScannerModalComponent {
 
     if (this.hasMissingReason()) {
       this.toast.error('Indica el motivo de cada parada rechazada o liberada.');
+      return;
+    }
+
+    if (this.duplicatedStopIds().size > 0) {
+      this.toast.error(
+        'Hay filas que apuntan a la misma parada. Descarta las repetidas: cada parada se liquida una sola vez.',
+      );
       return;
     }
 

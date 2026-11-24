@@ -698,5 +698,19 @@ describe('RouteSheetScannerService', () => {
       expect(s3Mock.uploadFile).not.toHaveBeenCalled();
       expect(routeFlowMock.settleStopsAtomically).not.toHaveBeenCalled();
     });
+    it('stop_id repetido → 400 sin subir ni liquidar (evita el doble cobro)', async () => {
+      prismaMock.dispatch_route_stops.findMany.mockResolvedValue([pendingStop(51, 200)]);
+      const dto: any = {
+        stops: [
+          { stop_id: 51, result: 'delivered', collected_amount: 200 },
+          { stop_id: 51, result: 'delivered', collected_amount: 200 },
+        ],
+      };
+      await expect(
+        service.confirmAndSettle(ROUTE_ID, file(), dto),
+      ).rejects.toMatchObject({ errorCode: 'RTSCAN_CONFIRM_INVALID' });
+      expect(s3Mock.uploadFile).not.toHaveBeenCalled();
+      expect(routeFlowMock.settleStopsAtomically).not.toHaveBeenCalled();
+    });
   });
 });

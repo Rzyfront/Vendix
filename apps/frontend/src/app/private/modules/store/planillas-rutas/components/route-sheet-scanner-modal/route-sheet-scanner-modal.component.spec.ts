@@ -170,4 +170,23 @@ describe('RouteSheetScannerModalComponent — entrega separada del cobro', () =>
       }),
     ]);
   });
+  it('dos filas a la misma parada: bloquea el confirm hasta descartar una', () => {
+    load(match({ stop_id: 1, collected: 200 }), match({ stop_id: 1, collected: 200 }));
+
+    expect(component.duplicatedStopIds().has(1)).toBeTrue();
+    expect(component.isDuplicatedRow(0)).toBeTrue();
+    expect(component.canConfirm()).toBeFalse();
+
+    component.selectedFile.set(new File(['x'], 'planilla.jpg', { type: 'image/jpeg' }));
+    component.aiAck.set(true);
+    component.onConfirm();
+    expect(service.confirmScan).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalled();
+
+    component.toggleDiscard(1);
+    expect(component.duplicatedStopIds().size).toBe(0);
+    expect(component.canConfirm()).toBeTrue();
+    const dto = confirmAndCapture();
+    expect(dto.stops.map((s) => s.stop_id)).toEqual([1]);
+  });
 });
