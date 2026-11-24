@@ -5,10 +5,12 @@ import {
   IsDateString,
   IsIn,
   IsInt,
+  IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
   Max,
+  Matches,
   MaxLength,
   Min,
   ValidateNested,
@@ -105,4 +107,106 @@ export class PlanQueryDto {
   @Transform(({ obj }) => obj.include_past === true || obj.include_past === 'true')
   @IsBoolean()
   include_past?: boolean;
+}
+
+// -----------------------------------------------------------------------------
+// QUI-1060 F2 · Itinerario del plan
+// -----------------------------------------------------------------------------
+
+const trimOrNull = ({ value }: { value: unknown }) =>
+  typeof value === 'string' ? (value.trim() === '' ? null : value.trim()) : value;
+
+/** Campos comunes del alta y la edición de una actividad del itinerario. */
+class PlanActivityFieldsDto {
+  @IsOptional()
+  @Transform(trimOrNull)
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: 'La hora de la actividad debe tener formato HH:mm' })
+  start_time?: string | null;
+
+  @IsOptional()
+  @Transform(trimOrNull)
+  @IsString()
+  @MaxLength(2000)
+  description?: string | null;
+
+  /** Responsable interno (prestador de la tienda). Excluye a `supplier_*`. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'El responsable no es válido' })
+  @Min(1)
+  provider_id?: number | null;
+
+  /** Tercero que presta la actividad. Excluye a `provider_id`. */
+  @IsOptional()
+  @Transform(trimOrNull)
+  @IsString()
+  @MaxLength(200)
+  supplier_name?: string | null;
+
+  @IsOptional()
+  @Transform(trimOrNull)
+  @IsString()
+  @MaxLength(200)
+  supplier_contact?: string | null;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 }, { message: 'El costo debe tener máximo 2 decimales' })
+  @Min(0, { message: 'El costo no puede ser negativo' })
+  @Max(9_999_999_999.99)
+  cost?: number | null;
+
+  @IsOptional()
+  @IsBoolean()
+  creates_task?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  is_public?: boolean;
+}
+
+export class CreatePlanActivityDto extends PlanActivityFieldsDto {
+  @Type(() => Number)
+  @IsInt({ message: 'El día de la actividad debe ser un número entero' })
+  @Min(1, { message: 'El día de la actividad es mínimo 1' })
+  @Max(365)
+  day_number: number;
+
+  @Transform(trimOrNull)
+  @IsString({ message: 'El título de la actividad es obligatorio' })
+  @IsNotEmpty({ message: 'El título de la actividad es obligatorio' })
+  @MaxLength(200)
+  title: string;
+}
+
+export class UpdatePlanActivityDto extends PlanActivityFieldsDto {
+  /** Cambiar de día la manda al final del nuevo día. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'El día de la actividad debe ser un número entero' })
+  @Min(1, { message: 'El día de la actividad es mínimo 1' })
+  @Max(365)
+  day_number?: number;
+
+  @IsOptional()
+  @Transform(trimOrNull)
+  @IsString({ message: 'El título de la actividad es obligatorio' })
+  @IsNotEmpty({ message: 'El título de la actividad es obligatorio' })
+  @MaxLength(200)
+  title?: string;
+}
+
+/** Nuevo orden de las actividades de un día: exactamente las del día, en orden. */
+export class ReorderPlanActivitiesDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(365)
+  day_number: number;
+
+  @IsArray()
+  @ArrayMaxSize(200)
+  @IsInt({ each: true })
+  @Type(() => Number)
+  activity_ids: number[];
 }

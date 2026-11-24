@@ -1,12 +1,15 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { ResponseService } from '@common/responses/response.service';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { ServicePlansService } from './service-plans.service';
 import {
+  CreatePlanActivityDto,
   CreatePlanDepartureDto,
   PlanQueryDto,
+  ReorderPlanActivitiesDto,
   ReplacePlanPaxPricesDto,
+  UpdatePlanActivityDto,
   UpdatePlanDepartureDto,
 } from './dto/service-plan.dto';
 
@@ -22,6 +25,14 @@ export class ServicePlansController {
     private readonly servicePlans: ServicePlansService,
     private readonly responseService: ResponseService,
   ) {}
+
+  /** Comprobante: evento, ida y regreso, grupo e itinerario público de una reserva de plan (null si no es plan). */
+  @Get('bookings/:bookingId/itinerary')
+  @Permissions('store:reservations:read')
+  async getBookingItinerary(@Param('bookingId', ParseIntPipe) bookingId: number) {
+    const itinerary = await this.servicePlans.getBookingItinerary(bookingId);
+    return this.responseService.success(itinerary, 'Itinerario de la reserva obtenido');
+  }
 
   @Get(':productId')
   @Permissions('store:products:read', 'store:reservations:read')
@@ -59,5 +70,49 @@ export class ServicePlansController {
   ) {
     const departure = await this.servicePlans.updateDeparture(productId, departureId, dto);
     return this.responseService.success(departure, 'Evento actualizado');
+  }
+
+  // ---- Itinerario (QUI-1060 F2) ----
+
+  @Post(':productId/activities')
+  @Permissions('store:products:update')
+  async createActivity(
+    @Param('productId', ParseIntPipe) productId: number,
+    @Body() dto: CreatePlanActivityDto,
+  ) {
+    const activity = await this.servicePlans.createActivity(productId, dto);
+    return this.responseService.success(activity, 'Actividad agregada');
+  }
+
+  // Antes de `:activityId`: la ruta estática gana.
+  @Put(':productId/activities/reorder')
+  @Permissions('store:products:update')
+  async reorderActivities(
+    @Param('productId', ParseIntPipe) productId: number,
+    @Body() dto: ReorderPlanActivitiesDto,
+  ) {
+    const activities = await this.servicePlans.reorderActivities(productId, dto.day_number, dto.activity_ids);
+    return this.responseService.success(activities, 'Orden del día guardado');
+  }
+
+  @Patch(':productId/activities/:activityId')
+  @Permissions('store:products:update')
+  async updateActivity(
+    @Param('productId', ParseIntPipe) productId: number,
+    @Param('activityId', ParseIntPipe) activityId: number,
+    @Body() dto: UpdatePlanActivityDto,
+  ) {
+    const activity = await this.servicePlans.updateActivity(productId, activityId, dto);
+    return this.responseService.success(activity, 'Actividad actualizada');
+  }
+
+  @Delete(':productId/activities/:activityId')
+  @Permissions('store:products:update')
+  async deleteActivity(
+    @Param('productId', ParseIntPipe) productId: number,
+    @Param('activityId', ParseIntPipe) activityId: number,
+  ) {
+    const result = await this.servicePlans.deleteActivity(productId, activityId);
+    return this.responseService.success(result, 'Actividad eliminada');
   }
 }

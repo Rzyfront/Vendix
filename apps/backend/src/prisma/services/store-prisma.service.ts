@@ -105,6 +105,7 @@ export class StorePrismaService extends BasePrismaService {
     // QUI-1060 modo Plan: salidas y tramos de precio llevan `store_id` propio.
     'service_plan_departures',
     'service_plan_pax_prices',
+    'service_plan_activities',
     'service_progress_events',
     'service_session_tokens',
     'service_subjects',
@@ -1736,6 +1737,7 @@ export class StorePrismaService extends BasePrismaService {
   get booking_series() { return this.scoped_client.booking_series; }
   get service_plan_departures() { return this.scoped_client.service_plan_departures; }
   get service_plan_pax_prices() { return this.scoped_client.service_plan_pax_prices; }
+  get service_plan_activities() { return this.scoped_client.service_plan_activities; }
   get service_change_proposals() { return this.scoped_client.service_change_proposals; }
   get service_proposal_decisions() { return this.scoped_client.service_proposal_decisions; }
   get service_contact_attempts() { return this.scoped_client.service_contact_attempts; }

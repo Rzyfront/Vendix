@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { CatalogController } from './catalog.controller';
 import { CatalogService } from './catalog.service';
+import { ServicePlanPublicService } from './service-plan-public.service';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { ProductsModule } from '../../store/products/products.module';
 import { PromotionsModule } from '../../store/promotions/promotions.module';
@@ -21,7 +22,7 @@ import { SettingsModule } from '../../store/settings/settings.module';
     SettingsModule,
   ],
   controllers: [CatalogController],
-  providers: [CatalogService],
+  providers: [CatalogService, ServicePlanPublicService],
   exports: [CatalogService],
 })
 export class CatalogModule {}
