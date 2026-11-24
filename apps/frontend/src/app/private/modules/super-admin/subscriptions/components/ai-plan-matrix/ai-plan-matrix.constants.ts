@@ -9,8 +9,6 @@
  */
 export const AI_CAPABILITIES_NOT_YET_ENFORCED: Readonly<Record<string, string>> = {
   'vex.files': 'llega con la fase 6',
-  'vex.code_analysis': 'llega con la fase 9',
-  'vex.code_mode': 'llega con la fase 10',
   'vex.advanced_model': 'llega cuando exista quien lo consuma',
 };
 
