@@ -2,6 +2,7 @@ import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { CustomersBulkService } from './customers-bulk.service';
 import { BulkCustomerUploadDto } from './dto/bulk-customer.dto';
+import { BulkCustomersJobDto } from './dto/bulk-customers-job.dto';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from '@common/errors/vendix-http.exception';
 import { ErrorCodes } from '@common/errors/error-codes';
@@ -132,13 +133,13 @@ describe('CustomersBulkService — ubicaciones por cliente', () => {
     create.mockRejectedValueOnce(
       new VendixHttpException(ErrorCodes.SYS_CONFLICT_001, 'dup', {
         kind: 'document',
-        value: '1',
+        value: '1023456',
         type: 'CC',
         existing_customer_id: 77,
       }),
     );
     const result = await upload([
-      { first_name: 'Ana', document_number: '1', document_type: 'CC', row_number: 2, ...addr() },
+      { first_name: 'Ana', document_number: '1023456', document_type: 'CC', row_number: 2, ...addr() },
     ]);
     expect(addCustomerLocation).toHaveBeenCalledWith(77, expect.anything());
     expect(result.results[0].status).toBe('location_added');
@@ -176,7 +177,7 @@ describe('CustomersBulkService — ubicaciones por cliente', () => {
 
   it('maps JURIDICA rows to person_type, legal_name and verification_digit', async () => {
     await upload([
-      { person_type: 'JURIDICA', legal_name: ' Acme S.A.S ', verification_digit: '7', document_number: '900123456', row_number: 2 },
+      { person_type: 'JURIDICA', legal_name: ' Acme S.A.S ', verification_digit: '7', document_type: 'NIT', document_number: '900123456', row_number: 2 },
     ]);
     expect(create).toHaveBeenCalledWith(
       1,
@@ -192,7 +193,7 @@ describe('CustomersBulkService — ubicaciones por cliente', () => {
 
   it('rejects a JURIDICA row without legal_name', async () => {
     const result = await upload([
-      { person_type: 'JURIDICA', document_number: '900123456', row_number: 2 },
+      { person_type: 'JURIDICA', document_type: 'NIT', document_number: '900123456', row_number: 2 },
     ]);
     expect(create).not.toHaveBeenCalled();
     expect(result.results[0].row_error?.code).toBe('missing_legal_name');
@@ -200,13 +201,13 @@ describe('CustomersBulkService — ubicaciones por cliente', () => {
 
   it('behaves exactly as before for old-template rows (no new columns)', async () => {
     const result = await upload([
-      { email: 'a@mail.com', first_name: 'Ana', last_name: 'G', document_number: '1', document_type: 'CC', phone: '300', row_number: 2 },
+      { email: 'a@mail.com', first_name: 'Ana', last_name: 'G', document_number: '1023456', document_type: 'CC', phone: '300', row_number: 2 },
     ]);
     expect(create).toHaveBeenCalledWith(1, {
       email: 'a@mail.com',
       first_name: 'Ana',
       last_name: 'G',
-      document_number: '1',
+      document_number: '1023456',
       document_type: 'CC',
       phone: '300',
     });
@@ -214,5 +215,117 @@ describe('CustomersBulkService — ubicaciones por cliente', () => {
     expect(findByDocumentInOrganization).not.toHaveBeenCalled();
     expect(result).toMatchObject({ successful: 1, failed: 0 });
     expect(result.results[0].status).toBe('success');
+  });
+});
+
+describe('CustomersBulkService — QUI-1047 filas inválidas no rechazan el archivo', () => {
+  const create = jest.fn();
+  let service: CustomersBulkService;
+
+  beforeEach(() => {
+    create.mockReset();
+    create.mockImplementation(async (_s, d) => {
+      if (d.email === 'existe@mail.com') {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_CONFLICT_001,
+          'Ya existe un cliente con este correo',
+          { kind: 'email', value: d.email } as any,
+        );
+      }
+      return { id: 1, ...d };
+    });
+    service = new CustomersBulkService({} as any, { create } as any, {} as any);
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ store_id: 1 } as any);
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('el DTO del trabajo acepta el archivo aunque una fila tenga correo inválido', async () => {
+    const errors = await validate(
+      plainToInstance(BulkCustomersJobDto, {
+        file_name: 'clientes.xlsx',
+        customers: [
+          { first_name: 'Ana', email: 'ana@mail.com', row_number: 2 },
+          { first_name: 'Alejandra', email: 'alejandra.rios@', row_number: 6 },
+        ],
+      }),
+      { whitelist: true, forbidNonWhitelisted: true },
+    );
+    expect(errors).toHaveLength(0);
+  });
+
+  it('crea las válidas y marca la de correo inválido y la duplicada con fila, columna y sugerencia', async () => {
+    const result = await service.uploadCustomers({
+      customers: [
+        { first_name: 'Ana', email: 'ana@mail.com', row_number: 2 },
+        { first_name: 'Beto', email: 'beto@mail.com', row_number: 3 },
+        { first_name: 'Alejandra', email: 'alejandra.rios@', row_number: 6 },
+        { first_name: 'Carla', email: 'existe@mail.com', row_number: 7 },
+      ],
+    } as any);
+
+    expect(result.successful).toBe(2);
+    expect(result.failed).toBe(2);
+    expect(create).toHaveBeenCalledTimes(3);
+    expect(create).not.toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ email: 'alejandra.rios@' }),
+    );
+
+    const invalid = result.results.find((r) => r.row_number === 6)!;
+    expect(invalid.status).toBe('error');
+    expect(invalid.error).toBe('validation');
+    expect(invalid.message).toContain('Fila 6, Correo:');
+    expect(invalid.row_error).toMatchObject({
+      row: 6,
+      column: 'Correo',
+      field: 'email',
+      value: 'alejandra.rios@',
+      code: 'validation',
+      suggestion: expect.stringContaining('usuario@dominio.com'),
+    });
+
+    const duplicate = result.results.find((r) => r.row_number === 7)!;
+    expect(duplicate.status).toBe('error');
+    expect(duplicate.row_error).toMatchObject({ row: 7, code: 'duplicate_email' });
+    expect(result.results.map((r) => r.row_number)).toEqual([2, 3, 6, 7]);
+  });
+
+  it('marca como fallida la fila con un campo que no es de la plantilla (store_id)', async () => {
+    const result = await service.uploadCustomers({
+      customers: [
+        { first_name: 'Ana', row_number: 2 },
+        { first_name: 'Intruso', store_id: 99, row_number: 3 },
+      ],
+    } as any);
+
+    expect(result.successful).toBe(1);
+    expect(result.failed).toBe(1);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(create).toHaveBeenCalledWith(
+      1,
+      expect.not.objectContaining({ store_id: 99 }),
+    );
+    expect(result.results[1].row_error).toMatchObject({
+      row: 3,
+      field: 'store_id',
+      code: 'validation',
+      message: expect.stringContaining('store_id'),
+    });
+  });
+
+  it('todas válidas: sin cambios (todas creadas, sin fallidas)', async () => {
+    const result = await service.uploadCustomers({
+      customers: [
+        { first_name: 'Ana', email: 'ana@mail.com', row_number: 2 },
+        { first_name: 'Beto', email: '', document_type: 'CC', document_number: '12345678', row_number: 3 },
+      ],
+    } as any);
+
+    expect(result.successful).toBe(2);
+    expect(result.failed).toBe(0);
+    expect(result.results.every((r) => r.status === 'success')).toBe(true);
   });
 });

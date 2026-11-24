@@ -21,6 +21,7 @@ import type { ReportColumn } from '@common/reports/report-column.types';
 import {
   FIELD_TO_COLUMN,
   getFieldAndColumnForCode,
+  validateBulkRow,
 } from '@common/validators/bulk-validation.util';
 
 /**
@@ -400,13 +401,21 @@ export class CustomersBulkService {
       throw new VendixHttpException(ErrorCodes.CUST_BULK_004);
     }
 
+    // QUI-1047: cada fila se valida aquí contra su DTO (el endpoint de trabajos
+    // ya no valida las filas en el pipe global). Una fila inválida queda
+    // fallida con su `BulkRowError`; las demás siguen.
+    const checked = await Promise.all(
+      customers.map((row) => validateBulkRow(BulkCustomerItemDto, row)),
+    );
+
     // Pre-calculamos duplicados DENTRO del archivo y los marcamos por fila
     // (no rompemos el lote entero). Cada fila duplicada se reporta con su
     // propio `BulkRowError`.
     const seenDocs = new Set<string>();
     const emailToFirstRow = new Map<string, number>();
     const duplicateEmailsByRow = new Map<number, string>(); // row -> email
-    for (const customer of customers) {
+    for (const { item: customer, errors } of checked) {
+      if (errors.length > 0) continue;
       // Una fila adicional del mismo documento con dirección es otra ubicación
       // del mismo cliente: repite el correo legítimamente.
       const docKey = this.documentKey(customer);
@@ -432,7 +441,22 @@ export class CustomersBulkService {
     // Clientes creados/resueltos en este envío, por documento.
     const customerIdByDoc = new Map<string, number>();
 
-    for (const customerData of customers) {
+    for (const { item: customerData, row, errors: rowErrors } of checked) {
+      if (rowErrors.length > 0) {
+        const [first] = rowErrors;
+        results.push({
+          customer: null,
+          status: 'error',
+          message: rowErrors
+            .map((e) => `Fila ${row || '?'}, ${e.column}: ${e.message}`)
+            .join('; '),
+          error: first.code,
+          row_number: row,
+          row_error: first,
+        });
+        failed++;
+        continue;
+      }
       const rowNum = customerData.row_number ?? 0;
       const pushError = (rowError: BulkRowError) => {
         const fieldCol =
