@@ -4,7 +4,11 @@ import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import { SettingsService } from '../settings/settings.service';
 import { VexiSpeechCache, CachedAudio } from './vexi-speech.cache';
 import { VexiSpeechSegmenter, hasWordCharacter } from './vexi-speech.segmenter';
-import { VexiSpeechTurn, type VoiceMeter } from './vexi-speech.pipeline';
+import {
+  VexiSpeechTurn,
+  type VexiAudioFrame,
+  type VoiceMeter,
+} from './vexi-speech.pipeline';
 import type { SpeechCacheParams } from './vexi-speech.cache';
 import { estimateSpeechSeconds } from './vexi-speech.duration';
 import { agentVoiceFromSpeechMetadata } from '../../../ai-engine/agent-runtime-config.service';
@@ -380,6 +384,37 @@ export class VexiSpeechService {
         params.speed,
       ),
     };
+  }
+
+  /**
+   * Synthesizes a full message on demand into ordered audio segments, reusing
+   * the exact same segmenter and synthesis cache as streaming voice turns.
+   *
+   * Because `VexiSpeechCache` keys on `(spokenText, params)` — never on turn
+   * index — clicking «Escuchar» on a message already spoken in voice mode (or
+   * previously listened to) hits the cache for every segment with zero provider
+   * calls.
+   *
+   * `options` carries the agent voice and the quota meter, exactly as a
+   * streaming turn does; without them the turn uses the shared voice and is
+   * not metered.
+   */
+  async synthesizeText(
+    rawText: string,
+    options?: SpeechTurnOptions,
+  ): Promise<VexiAudioFrame[]> {
+    const trimmed = (rawText ?? '').trim();
+    if (!trimmed) return [];
+
+    const turn = await this.openTurn(Date.now(), options);
+    turn.push(trimmed);
+    turn.flush();
+
+    const frames: VexiAudioFrame[] = [];
+    for await (const frame of turn.settleOrdered()) {
+      frames.push(frame);
+    }
+    return frames;
   }
 
   /**

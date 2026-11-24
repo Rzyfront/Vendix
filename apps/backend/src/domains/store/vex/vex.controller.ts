@@ -9,6 +9,7 @@ import {
   Controller,
   Get,
   Logger,
+  Optional,
   Param,
   ParseUUIDPipe,
   Post,
@@ -20,7 +21,11 @@ import { AiAttachmentUpload } from '../vexi/ai-attachment-upload.decorator';
 import { randomUUID } from 'node:crypto';
 import { ResponseService } from '../../../common/responses/response.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
-import { VendixHttpException, ErrorCodes } from '../../../common/errors';
+import {
+  VendixHttpException,
+  ErrorCodes,
+  ErrorCodeEntry,
+} from '../../../common/errors';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { UserRole } from '../../auth/enums/user-role.enum';
@@ -36,10 +41,18 @@ import { VexiAttachmentsService } from '../vexi/vexi-attachments.service';
 import { VexiConfirmationService } from '../vexi/vexi-confirmation.service';
 import { VexiPlanStateService } from '../vexi/vexi-plan-state.service';
 import { VexiActivityService } from '../vexi/vexi-activity.service';
+import { VexiSpeechService } from '../vexi/vexi-speech.service';
+import { VoiceMeter } from '../vexi/vexi-speech.pipeline';
+import {
+  AgentQuotaService,
+  VOICE_QUOTA_EXHAUSTED_MESSAGE,
+  voiceNotInPlanMessage,
+} from '../subscriptions/services/agent-quota.service';
 import { VexEnabledGuard } from './guards/vex-enabled.guard';
 import { ApprovePlanDto } from './dto/approve-plan.dto';
 import { ApplyVexStepDto, PlanConversationDto } from './dto/plan-lifecycle.dto';
 import { BlockInteractionDto } from './dto/block-interaction.dto';
+import { SynthesizeVexSpeechDto } from './dto/synthesize-speech.dto';
 import {
   PLAN_TOKEN_TTL_SECONDS,
   PlanApprovalService,
@@ -72,6 +85,21 @@ import { PlaybookService } from '../../../ai-engine/playbooks/playbook.service';
  */
 const CONFIRMATION_TOKEN_TTL_SECONDS = 300;
 
+/**
+ * «Escuchar» refusals. Same codes and copy as the streaming `voice_notice`
+ * frame, so the client handles both paths with one mapping.
+ */
+const VOICE_QUOTA_EXHAUSTED_ENTRY: ErrorCodeEntry = {
+  code: 'voice_quota_exhausted',
+  httpStatus: 429,
+  devMessage: VOICE_QUOTA_EXHAUSTED_MESSAGE,
+};
+const VOICE_NOT_IN_PLAN_ENTRY: ErrorCodeEntry = {
+  code: 'voice_not_in_plan',
+  httpStatus: 403,
+  devMessage: voiceNotInPlanMessage('vex'),
+};
+
 @Controller('store/vex')
 @UseGuards(RolesGuard, VexEnabledGuard)
 @Roles(UserRole.OWNER, UserRole.ADMIN)
@@ -94,6 +122,10 @@ export class VexController {
     private readonly writeBatchExecutor: WriteBatchExecutorService,
     private readonly writeBatchCompensation: WriteBatchCompensationService,
     private readonly playbooks: PlaybookService,
+    @Optional() private readonly speech?: VexiSpeechService,
+    // Per-agent voice plan and quota for «Escuchar». Optional and last for the
+    // positional constructions: without it the endpoint fails open.
+    @Optional() private readonly agentQuota?: AgentQuotaService,
   ) {}
 
   /**
@@ -693,6 +725,79 @@ export class VexController {
       { url, mime_type: meta.mime_type, original_name: meta.original_name },
       'Documento adjunto',
     );
+  }
+
+  /**
+   * Synthesizes a Vex message on demand when the user clicks «Escuchar».
+   *
+   * Never pre-generated: runs only on explicit click and reuses `VexiSpeechCache`
+   * segment-for-segment with streaming voice turns so repeated listens cost zero
+   * provider calls. Gated on `realtime_voice` (same feature bucket as
+   * `vexi_voice_tts`) and behind `VexEnabledGuard` (independent from Vexi).
+   */
+  @Post('speech')
+  @UseGuards(AiAccessGuard)
+  @RequireAIFeature('realtime_voice')
+  async synthesizeSpeech(@Body() dto: SynthesizeVexSpeechDto) {
+    if (!this.speech) {
+      throw new VendixHttpException(
+        ErrorCodes.AI_PROVIDER_002,
+        'La síntesis de voz no está disponible en este momento.',
+      );
+    }
+    const storeId = RequestContextService.getContext()?.store_id;
+    await this.assertVexVoiceAllowed(storeId);
+    const segments = await this.speech.synthesizeText(dto.text, {
+      agentKey: 'vex',
+      meter: this.speechMeter(storeId),
+    });
+    return this.responseService.success({ segments }, 'Audio generado');
+  }
+
+  /**
+   * Same plan and quota gate as a streaming voice turn: a plan without Vex's
+   * voice or an exhausted monthly quota refuses the synthesis. Fails open when
+   * the decision is unavailable, like the Vexi acknowledgement.
+   */
+  private async assertVexVoiceAllowed(storeId?: number): Promise<void> {
+    if (!this.agentQuota || !storeId) return;
+    let status: string;
+    try {
+      status = (await this.agentQuota.checkAgentVoice(storeId, 'vex')).status;
+    } catch (err) {
+      this.logger.warn(
+        `AGENT_VOICE_CHECK failed (speech) store=${storeId}: ${(err as Error).message}`,
+      );
+      return;
+    }
+    if (status === 'exhausted')
+      throw new VendixHttpException(VOICE_QUOTA_EXHAUSTED_ENTRY);
+    if (status === 'disabled')
+      throw new VendixHttpException(VOICE_NOT_IN_PLAN_ENTRY);
+  }
+
+  /** Meters generated audio only; the pipeline never calls it on cache hits. */
+  private speechMeter(storeId?: number): VoiceMeter | undefined {
+    if (!this.agentQuota || !storeId) return undefined;
+    const quota = this.agentQuota;
+    // The dedupe id must not be derivable from the request: `X-Request-Id` is
+    // caller-supplied, so reusing it would let an owner replay distinct texts
+    // under one id and never add a second to the counter.
+    const base = `speech-${randomUUID()}:speech-tts`;
+    return (seconds, index) => {
+      void quota
+        .consumeAgentVoice(
+          storeId,
+          'vex',
+          Math.round(seconds * 1000),
+          `${base}:${index}`,
+        )
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `AGENT_VOICE_METER failed (speech) store=${storeId}: ${(err as Error).message}`,
+          ),
+        );
+    };
   }
 
   // ── internals ─────────────────────────────────────────────────────────

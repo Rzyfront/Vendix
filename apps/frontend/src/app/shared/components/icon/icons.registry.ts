@@ -356,11 +356,13 @@ import {
   // Un nombre no registrado no rompe el build ni la consola — degrada en
   // silencio a un icono equivocado, que es por qué sobrevivió al deploy.
   Mic,
+  AudioLines,
+  Volume2,
+  VolumeX,
   Video,
   Clapperboard,
   Hotel,
   BedDouble,
-  Volume2,
   BellOff,
 } from 'lucide-angular';
 
@@ -444,8 +446,11 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   // UI elements
   circle: Circle,
 
-  // Modo voz de Vexi
+  // Modo voz de Vexi / Vex
   mic: Mic,
+  'audio-lines': AudioLines,
+  'volume-2': Volume2,
+  'volume-x': VolumeX,
 
   // User action icons
   'user-plus': UserPlus,
@@ -809,8 +814,7 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'panel-right-close': PanelRightClose,
   'panel-right-open': PanelRightOpen,
 
-  // Vex: presence badge (speaking) and «No sugerir en este chat».
-  'volume-2': Volume2,
+  // Vex: «No sugerir en este chat» (volume-2 is registered above).
   'bell-off': BellOff,
 } as const;
 

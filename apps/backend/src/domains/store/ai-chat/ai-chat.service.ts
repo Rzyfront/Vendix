@@ -1129,7 +1129,13 @@ export class AIChatService {
         yield chunk;
         // Whatever finished synthesizing while the model was producing this
         // chunk. Non-blocking on purpose: a caption must never wait on audio.
-        if (voice) for (const frame of voice.drain()) yield frame;
+        if (voice) {
+          const drained =
+            typeof voice.drainOrdered === 'function'
+              ? voice.drainOrdered()
+              : voice.drain();
+          for (const frame of drained) yield frame;
+        }
         step = await agentStream.next();
       }
 
@@ -1239,17 +1245,27 @@ export class AIChatService {
           continue;
         }
         yield chunk;
-        if (voice) for (const frame of voice.drain()) yield frame;
+        if (voice) {
+          const drained =
+            typeof voice.drainOrdered === 'function'
+              ? voice.drainOrdered()
+              : voice.drain();
+          for (const frame of drained) yield frame;
+        }
       }
     }
 
     if (voice) {
       // The answer is complete, so the tail can be cut even without a closing
-      // period, and there is nothing left to overlap with — this is the one place
-      // where waiting on the remaining audio is correct.
+      // period. Stream each segment in strict playback order as soon as it
+      // settles instead of bursting the whole answer after the last segment.
       voice.flush();
-      await voice.settle();
-      for (const frame of voice.drain()) yield frame;
+      if (typeof voice.settleOrdered === 'function') {
+        for await (const frame of voice.settleOrdered()) yield frame;
+      } else {
+        await voice.settle();
+        for (const frame of voice.drain()) yield frame;
+      }
       // Emitted last so the client can attach them to a turn it has fully
       // received. They are diagnostics, not content: nothing renders from them.
       for (const frame of voice.timings()) yield frame;

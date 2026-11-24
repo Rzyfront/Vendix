@@ -363,6 +363,8 @@ describe('VexChatStore', () => {
   describe('message read aloud (T6)', () => {
     it('points at the answer of the spoken turn, even after a newer written one', async () => {
       await open('1');
+      // The mic is input only: the answer is spoken because voice mode (waves) is on.
+      store.toggleVoiceMode();
       store.sendVoiceMessage('¿Cómo cerró la caja?');
       await settle();
       expect(spoken_streams.length).toBe(1);
@@ -373,6 +375,8 @@ describe('VexChatStore', () => {
       api.streams.at(-1)!.next({ type: 'done' } as VexStreamChunk);
       api.streams.at(-1)!.complete();
       await settle();
+      // Voice mode off: the next turn is written only.
+      store.toggleVoiceMode();
       store.sendMessage('Gracias');
       await settle();
 
