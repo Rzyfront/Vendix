@@ -2,7 +2,9 @@ import {
   Component,
   DestroyRef,
   computed,
+  effect,
   inject,
+  input,
   signal,
   viewChild,
 } from '@angular/core';
@@ -28,6 +30,8 @@ import {
 } from '../../../../../../shared/components/index';
 import type { StickyHeaderActionButton } from '../../../../../../shared/components/sticky-header/sticky-header.component';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import { ModuleShellActionsService } from '../../../../../../shared/components/module-tabs-shell/module-shell-actions.service';
+import { agendaUrl } from '../../scheduling-tabs';
 import { ReportExportModalComponent } from '../../../reservations/components/report-export-modal/report-export-modal.component';
 import { RESCHEDULABLE_STATUSES } from '../../../scheduled-orders/interfaces/scheduled-order.interface';
 import { dayMonth, weekdayShort } from '../../../scheduled-orders/utils/ymd.util';
@@ -70,18 +74,23 @@ import {
   ],
   template: `
     <div class="w-full overflow-x-hidden">
-      <app-sticky-header
-        title="Programación"
-        subtitle="Reservas de servicio y pedidos programados en una sola lista"
-        icon="calendar-clock"
-        variant="glass"
-        [actions]="headerActions()"
-        (actionClicked)="onAction($event)"
-      />
+      <!-- Dentro de Agenda (pestaña Programación) la cabecera es la del módulo
+           y los botones se publican en ella. -->
+      @if (!embedded()) {
+        <app-sticky-header
+          title="Programación"
+          subtitle="Reservas de servicio y pedidos programados en una sola lista"
+          icon="calendar-clock"
+          variant="glass"
+          [actions]="headerActions()"
+          (actionClicked)="onAction($event)"
+        />
+      }
 
       <app-card [responsive]="true" [padding]="false" overflow="visible">
         <div
-          class="sticky top-[52px] z-10 bg-background px-2 py-1.5 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+          [class.sticky]="!embedded()"
+          class="top-[52px] z-10 bg-background px-2 py-1.5 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
         >
           <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-4">
             <h2 class="text-sm font-bold text-text-primary md:text-lg md:font-semibold">
@@ -172,6 +181,10 @@ export class SchedulingListPageComponent {
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly host = viewChild.required(SchedulingRecordHostComponent);
+  private readonly shellActions = inject(ModuleShellActionsService);
+
+  /** Montada como pestaña de Agenda: sin cabecera propia. */
+  readonly embedded = input(false);
 
   readonly limit = 20;
   readonly sources = signal<SchedulingSources | null>(null);
@@ -214,7 +227,14 @@ export class SchedulingListPageComponent {
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
     ...PROVIDER_CONFIG_HEADER_ACTIONS.map((a) => ({ ...a, visible: this.hasBookings() })),
-    { id: 'agenda', label: 'Ver agenda', icon: 'calendar-days', variant: 'outline' },
+    {
+      id: 'agenda',
+      label: 'Ver calendario',
+      icon: 'calendar-days',
+      variant: 'outline',
+      // En Agenda el calendario es otra pestaña.
+      visible: !this.embedded(),
+    },
     {
       id: 'create-booking',
       label: 'Nueva reserva',
@@ -316,6 +336,16 @@ export class SchedulingListPageComponent {
   ];
 
   constructor() {
+    // Pestaña de Agenda: los botones van a la cabecera del módulo.
+    effect(() => {
+      if (!this.embedded()) return;
+      this.shellActions.set(
+        this.headerActions().map((action) => ({ ...action, run: () => this.onAction(action.id) })),
+      );
+    });
+    this.destroyRef.onDestroy(() => {
+      if (this.embedded()) this.shellActions.clear();
+    });
     this.api
       .getSources()
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -409,7 +439,7 @@ export class SchedulingListPageComponent {
 
   onAction(action: string): void {
     if (action === 'refresh') return this.load();
-    if (action === 'agenda') return void this.router.navigate(['/admin/orders/agenda']);
+    if (action === 'agenda') return void this.router.navigateByUrl(agendaUrl('calendario'));
     if (action === 'create-booking') return this.host().createBooking();
     if (action === 'export-bookings') return this.exportOpen.set(true);
     if (action.startsWith('/')) void this.router.navigateByUrl(action);

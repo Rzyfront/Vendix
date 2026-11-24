@@ -11,6 +11,19 @@ import { aiAgentsSettingsGuard } from '../../core/guards/vexi-settings.guard';
 import { vexAccessGuard } from '../../core/guards/vex-access.guard';
 import { storeDashboardGuard } from '../../core/guards/store-dashboard.guard'; // QUI-418
 import { HomePanelService } from '../../private/modules/store/dashboard/home-panels/home-panel.service';
+import {
+  AGENDA_ROUTE,
+  agendaQueryParams,
+  type AgendaTab,
+  type ConfigSection,
+} from '../../private/modules/store/scheduling/scheduling-tabs';
+
+/** Redirección de una URL vieja a su pestaña de Órdenes → Agenda (F1). */
+export function agendaTabRedirect(tab: AgendaTab, section?: ConfigSection) {
+  return inject(Router).createUrlTree([AGENDA_ROUTE], {
+    queryParams: agendaQueryParams(tab, section),
+  });
+}
 import { appKindGuard } from '../../private/modules/store/apps/utils/app-routes.util';
 import {
   panelUiGuard,
@@ -496,14 +509,12 @@ export const storeAdminRoutes: Routes = [
                 (c) => c.OrdersBulkPageComponent,
               ),
           },
-          // Agenda unificada F1: Programación (tabla) y Agenda (calendario) de
-          // reservas de servicio y pedidos programados. Antes de `:id`.
+          // Agenda unificada F1: un solo módulo «Agenda» (Calendario |
+          // Programación | Configuración en `?tab=`). Antes de `:id`.
           {
             path: 'scheduling',
-            loadChildren: () =>
-              import('../../private/modules/store/scheduling/scheduling.routes').then(
-                (r) => r.SCHEDULING_LIST_ROUTES,
-              ),
+            pathMatch: 'full',
+            redirectTo: () => agendaTabRedirect('programacion'),
           },
           {
             path: 'agenda',
@@ -536,41 +547,33 @@ export const storeAdminRoutes: Routes = [
       {
         path: 'reservations',
         children: [
+          // Agenda unificada F1: Reservas vive en Órdenes → Agenda. Las URLs
+          // viejas abren la pestaña que les corresponde; la configuración de
+          // disponibilidad, su sección en Configuración.
           {
-            // Agenda unificada F1: «Reservas» ya no es entrada de menú; sus
-            // reservas viven en Órdenes → Programación (tabla) y Agenda
-            // (calendario). Los enlaces viejos llegan a Programación.
             path: '',
             pathMatch: 'full',
-            redirectTo: '/admin/orders/scheduling',
+            redirectTo: () => agendaTabRedirect('calendario'),
           },
           {
             path: 'schedules',
-            loadComponent: () =>
-              import('../../private/modules/store/reservations/components/schedule-management/schedule-management.component').then(
-                (c) => c.ScheduleManagementComponent,
-              ),
+            pathMatch: 'full',
+            redirectTo: () => agendaTabRedirect('configuracion', 'equipo'),
           },
           {
             path: 'availability',
-            loadComponent: () =>
-              import(
-                '../../private/modules/store/reservations/components/provider-availability/provider-availability.component'
-              ).then((c) => c.ProviderAvailabilityComponent),
+            pathMatch: 'full',
+            redirectTo: () => agendaTabRedirect('configuracion', 'disponibilidad'),
           },
           {
             path: 'queue',
-            loadComponent: () =>
-              import(
-                '../../private/modules/store/reservations/components/appointment-queue-panel/appointment-queue-panel.component'
-              ).then((c) => c.AppointmentQueuePanelComponent),
+            pathMatch: 'full',
+            redirectTo: () => agendaTabRedirect('configuracion', 'cola'),
           },
           {
             path: 'business-hours',
-            loadComponent: () =>
-              import(
-                '../../private/modules/store/reservations/components/business-hours/business-hours.component'
-              ).then((c) => c.BusinessHoursComponent),
+            pathMatch: 'full',
+            redirectTo: () => agendaTabRedirect('configuracion', 'horario'),
           },
           {
             path: 'reminders',

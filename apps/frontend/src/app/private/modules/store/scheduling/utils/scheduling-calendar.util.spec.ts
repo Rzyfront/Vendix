@@ -127,8 +127,8 @@ describe('Agenda unificada F1 — cálculo del calendario', () => {
       '/admin/scheduled-orders/production',
     ]);
     const service = schedulingConfigActions({ bookings: true, scheduled: false, service: true });
-    expect(service.map((a) => a.action)).toContain('/admin/reservations/schedules');
-    expect(service.map((a) => a.action)).toContain('/admin/reservations/queue');
+    expect(service.map((a) => a.action)).toContain('/admin/orders/agenda?tab=configuracion&seccion=equipo');
+    expect(service.map((a) => a.action)).toContain('/admin/orders/agenda?tab=configuracion&seccion=cola');
     expect(service.map((a) => a.action)).toContain('/admin/services/stations');
   });
 

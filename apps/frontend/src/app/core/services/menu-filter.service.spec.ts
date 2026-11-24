@@ -1412,7 +1412,7 @@ describe('MenuFilterService — hijos de Flujos y Documentos (P5.7)', () => {
   });
 });
 
-describe('MenuFilterService — Órdenes: Programación y Agenda (agenda-unificada F1)', () => {
+describe('MenuFilterService — Órdenes: Agenda (agenda-unificada F1)', () => {
   let service: MenuFilterService;
   let panelUiState: WritableSignal<Record<string, boolean>>;
   let panelUi$: BehaviorSubject<Record<string, boolean>>;
@@ -1422,7 +1422,7 @@ describe('MenuFilterService — Órdenes: Programación y Agenda (agenda-unifica
   let visibleModules$: BehaviorSubject<string[]>;
   let owner: boolean;
 
-  const NEW_ROUTES = ['/admin/orders/scheduling', '/admin/orders/agenda'];
+  const NEW_ROUTES = ['/admin/orders/agenda'];
   const ordersTree = (): MenuItem[] =>
     STORE_ADMIN_MENU_ITEMS.filter((item) => item.label === 'Órdenes').map((item) => ({
       ...item,
@@ -1475,21 +1475,19 @@ describe('MenuFilterService — Órdenes: Programación y Agenda (agenda-unifica
     service = TestBed.inject(MenuFilterService);
   });
 
-  it('el Sidebar real reemplaza «Reservas» y «Pedidos programados» por Programación y Agenda', () => {
+  it('el Sidebar real tiene una sola entrada «Agenda» en lugar de Reservas, Pedidos programados, Programación y Equipo de Servicio', () => {
     const orders = STORE_ADMIN_MENU_ITEMS.find((item) => item.label === 'Órdenes')!;
     const labels = orders.children!.map((c) => c.label);
-    expect(labels).not.toContain('Reservas');
-    expect(labels).not.toContain('Pedidos programados');
-    for (const route of NEW_ROUTES) {
-      const entry = orders.children!.find((c) => c.route === route)!;
-      expect(entry).withContext(route).toBeDefined();
-      expect(entry.panelUiAnyOf).withContext(route).toEqual(['orders_reservations', 'orders_scheduled']);
+    for (const gone of ['Reservas', 'Pedidos programados', 'Programación', 'Equipo de Servicio']) {
+      expect(labels).withContext(gone).not.toContain(gone);
     }
-    // Los accesos de configuración de reservas siguen en el menú.
-    expect(orders.children!.map((c) => c.route)).toContain('/admin/reservations/schedules');
+    const entry = orders.children!.find((c) => c.route === '/admin/orders/agenda')!;
+    expect(entry.label).toBe('Agenda');
+    expect(entry.panelUiAnyOf).toEqual(['orders_reservations', 'orders_scheduled']);
+    expect(orders.children!.map((c) => c.route)).not.toContain('/admin/reservations/schedules');
   });
 
-  it('una tienda de servicios ve Programación y Agenda por las reservas', async () => {
+  it('una tienda de servicios ve Agenda por las reservas', async () => {
     setStore(['service']);
     const routes = await childRoutes();
     for (const route of NEW_ROUTES) expect(routes).withContext(route).toContain(route);
@@ -1522,7 +1520,7 @@ describe('MenuFilterService — Órdenes: Programación y Agenda (agenda-unifica
     for (const route of NEW_ROUTES) expect(routes).withContext(route).not.toContain(route);
   });
 
-  it('las rutas nuevas no quedan gobernadas por una sola de las dos keys en la URL', () => {
+  it('la ruta de Agenda no queda gobernada por una sola de las dos keys en la URL', () => {
     for (const route of NEW_ROUTES) {
       expect(service.resolveKeysForRoute(route)).withContext(route).toEqual([]);
       expect(service.resolveGateKeysForRoute(route)).withContext(route).toEqual(['orders']);

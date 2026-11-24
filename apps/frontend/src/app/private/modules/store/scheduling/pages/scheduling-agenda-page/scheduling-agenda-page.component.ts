@@ -2,7 +2,9 @@ import {
   Component,
   DestroyRef,
   computed,
+  effect,
   inject,
+  input,
   signal,
   viewChild,
 } from '@angular/core';
@@ -51,6 +53,8 @@ import {
 } from '../../utils/scheduling-ui.util';
 import type { DropdownAction } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import { ModuleShellActionsService } from '../../../../../../shared/components/module-tabs-shell/module-shell-actions.service';
+import { agendaUrl } from '../../scheduling-tabs';
 
 const MONTHS = new Intl.DateTimeFormat('es-CO', { timeZone: 'UTC', month: 'long', year: 'numeric' });
 const DAY_MONTH = new Intl.DateTimeFormat('es-CO', { timeZone: 'UTC', day: 'numeric', month: 'short' });
@@ -84,14 +88,16 @@ function utc(ymd: string): Date {
   ],
   template: `
     <div class="w-full overflow-x-hidden">
-      <app-sticky-header
-        title="Agenda"
-        subtitle="Reservas y pedidos programados en un solo calendario"
-        icon="calendar-days"
-        variant="glass"
-        [actions]="headerActions()"
-        (actionClicked)="onAction($event)"
-      />
+      @if (!embedded()) {
+        <app-sticky-header
+          title="Agenda"
+          subtitle="Reservas y pedidos programados en un solo calendario"
+          icon="calendar-days"
+          variant="glass"
+          [actions]="headerActions()"
+          (actionClicked)="onAction($event)"
+        />
+      }
 
       <app-card [responsive]="true" [padding]="false" overflow="visible">
         <div class="flex flex-col gap-2 px-2 py-2 md:px-4 md:py-3 md:border-b md:border-border">
@@ -190,6 +196,10 @@ export class SchedulingAgendaPageComponent {
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
   readonly host = viewChild.required(SchedulingRecordHostComponent);
+  private readonly shellActions = inject(ModuleShellActionsService);
+
+  /** Montada como pestaña Calendario de Agenda: sin cabecera propia. */
+  readonly embedded = input(false);
 
   readonly sources = signal<SchedulingSources | null>(null);
   readonly sourcesLoaded = signal(false);
@@ -231,7 +241,14 @@ export class SchedulingAgendaPageComponent {
   );
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
     ...PROVIDER_CONFIG_HEADER_ACTIONS.map((a) => ({ ...a, visible: this.hasBookings() })),
-    { id: 'list', label: 'Ver programación', icon: 'list', variant: 'outline' },
+    {
+      id: 'list',
+      label: 'Ver programación',
+      icon: 'list',
+      variant: 'outline',
+      // En Agenda la tabla es otra pestaña.
+      visible: !this.embedded(),
+    },
     {
       id: 'create-booking',
       label: 'Nueva reserva',
@@ -250,6 +267,15 @@ export class SchedulingAgendaPageComponent {
   });
 
   constructor() {
+    effect(() => {
+      if (!this.embedded()) return;
+      this.shellActions.set(
+        this.headerActions().map((action) => ({ ...action, run: () => this.onAction(action.id) })),
+      );
+    });
+    this.destroyRef.onDestroy(() => {
+      if (this.embedded()) this.shellActions.clear();
+    });
     if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
       const media = window.matchMedia('(max-width: 767px)');
       this.isMobile.set(media.matches);
@@ -347,7 +373,7 @@ export class SchedulingAgendaPageComponent {
   }
 
   onAction(action: string): void {
-    if (action === 'list') return void this.router.navigate(['/admin/orders/scheduling']);
+    if (action === 'list') return void this.router.navigateByUrl(agendaUrl('programacion'));
     if (action === 'create-booking') return this.host().createBooking();
     if (action.startsWith('/')) void this.router.navigateByUrl(action);
   }

@@ -21,28 +21,31 @@ Rutas: FE = `apps/frontend/src/app/`, BE = `apps/backend/src/`, PRISMA = `apps/b
 - **D8 — Reportes de hotel: ¿tarjetas que enlazan o componentes dentro de Reportes (F4)?** Los 5 reportes son componentes a medida con endpoints propios (`store/hospitality/reports/*`, permiso `store:lodging:reports:read`) y no encajan en `GenericReportPageComponent`. Propuesta barata: tarjetas de categoría «Hotelería» que enlazan a `/admin/hospitality/reports?tab=…`. ¿O se migran a Reportes y se retira esa página?
 - **D9 — Stats de Recepción por pestaña (F2).** Recepción y la vieja Reservas tienen 4 KPIs distintos y layouts sticky distintos (`sticky top-0` vs. `top-header-tabs`). ¿Se muestran los de la pestaña activa o se unifican?
 
-## F1 — Programación + Agenda en Órdenes (implementada en este PR)
+## F1 — Órdenes → Agenda (Calendario | Programación | Configuración) — implementada en este PR
+
+> Estructura de Rafael 2026-11-23 20:30 (`CAMBIO-ESTRUCTURA-2026-11-23-2030.md`): no hay entrada «Programación» separada; **un solo módulo Agenda** en Órdenes con tres pestañas en `?tab=`: **Calendario** (por defecto), **Programación** (la tabla) y **Configuración** (prestadores, equipo de servicio, horarios, bloqueos/excepciones, disponibilidad de proveedores, cola). Reemplaza la estructura anterior de dos entradas.
 
 ### Historia de usuario
-Como dueño o administrador de una tienda de servicios o de un restaurante en el panel (escritorio o celular), quiero ver en Órdenes → Programación una sola tabla con mis reservas de servicio y mis pedidos programados, y en Órdenes → Agenda un solo calendario con ambos, con los mismos filtros (tipo, personal/prestador, estado, fecha, búsqueda), para saber qué tengo que atender sin saltar entre «Reservas» y «Pedidos programados», y seguir configurando a mis prestadores y su disponibilidad desde ahí.
+Como dueño o administrador de una tienda de servicios o de un restaurante en el panel (escritorio o celular), quiero abrir Órdenes → Agenda y tener en un solo módulo el calendario de mis reservas de servicio y pedidos programados, la tabla con los mismos registros y filtros (tipo, personal/prestador, estado, fecha, búsqueda) y la configuración de mis prestadores y su disponibilidad, para atender y organizar todo lo programado sin saltar entre «Reservas», «Pedidos programados» y «Equipo de Servicio».
 
 **Pasos para probar (humanos, en pantalla):**
-1. Inicia sesión como `owner@techsolutions.co` en una tienda con industria servicio (y restaurante, con Configuración → Pedidos programados activo) en `https://vendix.com`.
-2. Abre Órdenes. Ves «Programación» y «Agenda»; ya no ves «Reservas» ni «Pedidos programados».
-3. En Programación ves reservas y pedidos desde hoy, en orden de hora. Filtra por Tipo, Estado, Personal y Fecha en «Opciones»; busca por número o cliente; cambia de página.
-4. Toca una reserva: se abre su detalle de siempre (confirmar, check-in, iniciar, completar, re-agendar, notas, anticipo). Toca un pedido: se abre su detalle (enviar a cocina, ver orden). «Reprogramar» de un pedido ofrece solo franjas con cupo.
-5. En la cabecera toca «Equipo de servicio» o «Disponibilidad»: llegas a las pantallas de siempre de Reservas.
-6. Abre Agenda: semana actual (celular: día). Cambia a Mes y toca un día: abre ese día. En «Opciones» filtra Personal = un prestador: lo que queda fuera de su horario aparece sombreado, y un día con excepción dice «No disponible: <motivo>».
-7. Entra por un enlace viejo `/admin/reservations` o `/admin/scheduled-orders`: llegas a Programación.
+1. Inicia sesión como `owner@techsolutions.co` en una tienda con industria servicio (y restaurante, con Pedidos programados activo) en `https://vendix.com`.
+2. Abre Órdenes. Ves una sola entrada «Agenda»; ya no ves «Reservas», «Pedidos programados», «Programación» ni «Equipo de Servicio». «Solicitudes de pago» y «Estaciones de Servicio» siguen.
+3. Agenda abre en **Calendario** (`?tab=calendario`): semana actual (celular: día); Mes → tocar un día abre ese día. En «Opciones» filtra Personal = un prestador: lo que queda fuera de su horario aparece sombreado y un día con excepción dice «No disponible: <motivo>».
+4. Pestaña **Programación** (`?tab=programacion`): reservas y pedidos desde hoy en orden de hora; filtros, búsqueda y paginación. Clic en una reserva abre su detalle de siempre; en un pedido, su detalle; «Reprogramar» de un pedido ofrece solo franjas con cupo.
+5. Pestaña **Configuración** (`?tab=configuracion`): secciones Equipo de servicio | Disponibilidad | Cola de atención | Horario del negocio (`?seccion=`), con las pantallas de siempre; abajo, enlaces a Solicitudes de reagenda, Solicitudes de pago, Ajustes de reservas, Recordatorios, Estaciones, Producción e Insumos del día y Franjas de pedidos.
+6. Los botones «Equipo de servicio» y «Disponibilidad» de la cabecera (Calendario y Programación) abren su sección de Configuración.
+7. Entra por URLs viejas: `/admin/reservations` y `/admin/scheduled-orders` → Calendario; `/admin/orders/scheduling` → Programación; `/admin/reservations/schedules|availability|queue|business-hours` → Configuración en su sección.
 
 **Criterios de aceptación:**
-- [x] Una tabla con ambas fuentes, clasificadas por tipo, paginada en servidor, con filtros múltiples (tipo, personal, estado, rango de fechas, búsqueda).
-- [x] Un calendario mes/semana/día con ambas fuentes y los mismos filtros, en la zona horaria de la tienda.
-- [x] Las acciones de cada fila abren el flujo propio de su módulo; no se reimplementa ninguna regla de negocio.
-- [x] Una fuente aparece solo si su industria, su permiso de lectura y (pedidos) el ajuste de la tienda la habilitan. Una tienda retail no ve las entradas.
-- [x] La configuración de prestadores y de Reservas sigue alcanzable desde Programación y Agenda (lista ruta por ruta abajo).
-- [x] Con filtro de prestador, la Agenda respeta su disponibilidad: horario, bloqueos y excepciones.
-- [x] No quedan calendarios duplicados en el menú: el de Reservas y la agenda de pedidos solo se alcanzan por redirect a Programación.
+- [x] Una sola entrada de menú «Agenda» con tres pestañas; Calendario por defecto; `?tab=` abre la pestaña pedida (una desconocida cae en Calendario).
+- [x] Programación: una tabla con ambas fuentes, clasificadas por tipo, paginada en servidor, con filtros múltiples.
+- [x] Calendario mes/semana/día con ambas fuentes y los mismos filtros, en la zona horaria de la tienda.
+- [x] Las acciones abren el flujo propio de cada módulo; no se reimplementa ninguna regla de negocio.
+- [x] Una fuente aparece solo si su industria, su permiso de lectura y (pedidos) el ajuste de la tienda la habilitan. Una tienda retail no ve Agenda.
+- [x] La disponibilidad del prestador gobierna Calendario y Programación (filtro por prestador; horario, bloqueos y excepciones).
+- [x] Configuración da acceso a cada pantalla de configuración; ninguna configuración de Reservas se pierde (lista ruta por ruta abajo).
+- [x] Sin entradas de menú duplicadas; las URLs viejas redirigen a su pestaña.
 
 ### Specs
 **Contexto:** Reservas (`bookings`) y Pedidos programados (`order_fulfillment_schedules`) tenían cada uno su entrada de menú, su calendario hecho a mano, su leyenda y su cálculo de fechas (análisis §2.2).
@@ -59,35 +62,44 @@ Como dueño o administrador de una tienda de servicios o de un restaurante en el
 - `scheduling.controller.ts` — `@Permissions('store:reservations:read','store:scheduled_orders:read')` (cualquiera); sin `@IndustryModule` porque la industria se evalúa por fuente.
 - `BE/domains/store/store.module.ts:48,153` — registra `SchedulingModule`.
 
-**Frontend (nuevo, `FE/private/modules/store/scheduling/`):** `pages/scheduling-list-page` (tabla `app-responsive-data-view` + `app-options-dropdown` + `app-pagination`), `pages/scheduling-agenda-page`, `components/event-calendar` (rejilla propia mes/semana/día; sin librerías), `components/scheduling-record-host` (abre `booking-detail-modal`, `reservation-form-modal`, `schedule-detail-modal`), `components/scheduled-order-reschedule-modal` (franjas de `/scheduled-orders/availability`), `utils/` (cálculo del calendario, filtros, accesos).
+**Frontend (nuevo, `FE/private/modules/store/scheduling/`):**
+- `scheduling-tabs.ts` — pestañas `calendario|programacion|configuracion` (`?tab=`), secciones `equipo|disponibilidad|cola|horario` (`?seccion=`), `agendaUrl()`.
+- `pages/agenda-shell` — el módulo: `app-sticky-header` con las tres pestañas (capa 3) y los botones de la pestaña activa (`ModuleShellActionsService`, el mismo canal que `ModuleTabsShellComponent`).
+- `pages/scheduling-agenda-page` (Calendario) y `pages/scheduling-list-page` (Programación) — las pantallas ya construidas con `embedded` (sin cabecera propia; publican sus botones en la del módulo).
+- `components/scheduling-config-tab` (Configuración) — `app-scrollable-tabs` (capa 4) que monta `ScheduleManagementComponent`, `ProviderAvailabilityComponent` (ambos con `embedded` nuevo que oculta su cabecera), `AppointmentQueuePanelComponent` y `BusinessHoursComponent` sin cambiar su lógica; enlaces a las demás pantallas.
+- `components/event-calendar`, `components/scheduling-record-host`, `components/scheduled-order-reschedule-modal`, `utils/` — sin cambios de lógica.
+- `FE/private/modules/store/reservations/components/schedule-management/*` y `provider-availability/*` — input `embedded`; «volver» y «ver horarios» apuntan a Agenda.
 
 **Menú, permisos, módulos e industrias:**
-- `FE/private/layouts/store-admin/store-admin-menu-items.ts` (Órdenes) — quita «Reservas» y «Pedidos programados»; agrega «Programación» y «Agenda» con `panelUiAnyOf: ['orders_reservations','orders_scheduled']`. «Solicitudes de pago», «Equipo de Servicio» y «Estaciones de Servicio» siguen.
-- `FE/shared/components/sidebar/sidebar.component.ts` — campo nuevo `panelUiAnyOf`.
-- `FE/core/services/menu-filter.service.ts` — caso 1b: la entrada se ve si al menos una key pasa sola todas las capas (panel usuario/tienda, industria, plan) y `orders_scheduled` exige `scheduledOrdersEnabled`. **No hay key nueva:** se habilita con las de siempre (`orders_reservations` = servicio; `orders_scheduled` = restaurante/manufactura + ajuste), así que planes, roles y `MODULE_INDUSTRIES` (BE y FE) no cambian.
-- `FE/routes/private/store_admin.routes.ts` — `orders/scheduling` y `orders/agenda` (antes de `orders/:id`); `reservations` `''` → redirect `/admin/orders/scheduling`. `FE/private/modules/store/scheduled-orders/scheduled-orders.routes.ts` — `''` → mismo redirect. Subrutas intactas.
-- `FE/core/services/breadcrumb.service.ts` — migas de las dos rutas.
+- `FE/private/layouts/store-admin/store-admin-menu-items.ts` (Órdenes) — fuera «Reservas», «Pedidos programados», «Programación» y «Equipo de Servicio»; una entrada «Agenda» (`/admin/orders/agenda`) con `panelUiAnyOf: ['orders_reservations','orders_scheduled']`. «Solicitudes de pago» y «Estaciones de Servicio» siguen.
+- `FE/shared/components/sidebar/sidebar.component.ts` — campo `panelUiAnyOf`.
+- `FE/core/services/menu-filter.service.ts` — caso 1b: la entrada se ve si al menos una key pasa sola todas las capas (panel usuario/tienda, industria, plan) y `orders_scheduled` exige `scheduledOrdersEnabled`. **No hay key nueva:** planes, roles y `MODULE_INDUSTRIES` (BE y FE) no cambian.
+- `FE/routes/private/store_admin.routes.ts` — `orders/agenda` (antes de `orders/:id`); redirects con `agendaTabRedirect()`: `orders/scheduling` → programacion; `reservations` → calendario; `reservations/schedules|availability|queue|business-hours` → configuracion + sección. `scheduled-orders.routes.ts` `''` → calendario. Las demás subrutas de Reservas y Pedidos siguen igual.
+- `FE/core/services/breadcrumb.service.ts` — miga de Agenda.
 
 ### Lista de verificación: configuración de Reservas que sigue alcanzable (ruta por ruta)
 
-| Pantalla / acción de Reservas | Ruta | Cómo se llega ahora |
+| Pantalla / acción | Ruta de antes | Destino ahora |
 |---|---|---|
-| Equipo de servicio (prestadores, horarios semanales, excepciones/bloqueos, servicios por prestador) | `/admin/reservations/schedules` | Menú Órdenes → Equipo de Servicio; botón de cabecera en Programación y Agenda; Opciones |
-| Disponibilidad de proveedores | `/admin/reservations/availability` | Botón de cabecera en Programación y Agenda; Opciones |
-| Cola de atención | `/admin/reservations/queue` | Opciones en Programación y Agenda (antes solo por URL) |
-| Solicitudes de reagenda | `/admin/reservations/reschedule-requests` | Opciones en Programación y Agenda |
-| Solicitudes de pago | `/admin/reservations/payment-requests` | Menú Órdenes (sin cambio); Opciones |
-| Horario del negocio | `/admin/reservations/business-hours` | Opciones (antes solo por URL) |
-| Recordatorios de servicio | `/admin/reservations/reminders` | Opciones (industria servicio) |
-| Estaciones de servicio / sesión | `/admin/services/stations` | Menú Órdenes (sin cambio); Opciones (industria servicio) |
-| Exportar reporte de reservas | modal `report-export-modal` | Opciones → «Exportar reservas» en Programación |
-| Nueva reserva / Llegada sin reserva | modal `reservation-form-modal` | Botón «Nueva reserva» en Programación y Agenda |
-| Bloquear horario | `/admin/reservations/schedules` | Igual que Equipo de servicio |
-| Detalle: confirmar, cancelar, no asistió, check-in, llegando/atendiendo, iniciar, completar, re-agendar, notas, anticipo, cobro para reservar, atender consulta | modal `booking-detail-modal` | Clic en la fila o en el evento |
-| Pedidos: producción del día / insumos | `/admin/scheduled-orders/day`, `/production` | Opciones (pedidos activos) |
-| Pedido: detalle, enviar a cocina, ver orden | modal `schedule-detail-modal` | Clic en la fila o en el evento; «Ver orden» |
-| Pedido: reprogramar | `PATCH /store/scheduled-orders/:id/reschedule` | «Reprogramar» (solo franjas con cupo) |
-| Enlaces viejos | `/admin/reservations`, `/admin/scheduled-orders` | Redirect a Programación |
+| Calendario de Reservas | `/admin/reservations` | Agenda → Calendario (`?tab=calendario`, redirect) |
+| Agenda de pedidos programados | `/admin/scheduled-orders` | Agenda → Calendario (redirect) |
+| Tabla (F1 previa) | `/admin/orders/scheduling` | Agenda → Programación (`?tab=programacion`, redirect) |
+| Equipo de servicio (prestadores, horarios semanales, bloqueos/excepciones, servicios por prestador) | `/admin/reservations/schedules` (antes también en el menú) | Agenda → Configuración → Equipo de servicio (`?tab=configuracion&seccion=equipo`, redirect); botón de cabecera en Calendario y Programación; Opciones |
+| Disponibilidad de proveedores | `/admin/reservations/availability` | Configuración → Disponibilidad (`seccion=disponibilidad`, redirect); botón de cabecera; Opciones |
+| Cola de atención | `/admin/reservations/queue` | Configuración → Cola de atención (`seccion=cola`, redirect); Opciones |
+| Horario del negocio | `/admin/reservations/business-hours` | Configuración → Horario del negocio (`seccion=horario`, redirect); Opciones |
+| Bloquear horario | `/admin/reservations/schedules` | Configuración → Equipo de servicio |
+| Solicitudes de reagenda | `/admin/reservations/reschedule-requests` | Sin cambio de ruta; enlace en Configuración y en Opciones |
+| Solicitudes de pago | `/admin/reservations/payment-requests` | Sin cambio; menú Órdenes; enlace en Configuración; Opciones |
+| Ajustes de reservas | `/admin/settings/general/reservas` | Sin cambio; enlace en Configuración |
+| Recordatorios de servicio | `/admin/reservations/reminders` | Sin cambio; enlace en Configuración y Opciones (servicio) |
+| Estaciones de servicio / sesión | `/admin/services/stations` | Sin cambio; menú Órdenes; enlace en Configuración y Opciones (servicio) |
+| Exportar reporte de reservas | modal `report-export-modal` | Programación → Opciones → «Exportar reservas» |
+| Nueva reserva / llegada sin reserva | modal `reservation-form-modal` | Botón «Nueva reserva» en Calendario y Programación |
+| Detalle: confirmar, cancelar, no asistió, check-in, llegando/atendiendo, iniciar, completar, re-agendar, notas, anticipo, cobro para reservar, atender consulta | modal `booking-detail-modal` | Clic en la fila o el evento |
+| Producción del día / insumos | `/admin/scheduled-orders/day`, `/production` | Sin cambio; enlace en Configuración y Opciones (pedidos) |
+| Franjas y cupos de pedidos | `/admin/settings/general/venta` | Sin cambio; enlace en Configuración (pedidos) |
+| Pedido: detalle, enviar a cocina, ver orden, reprogramar | modal / `PATCH .../reschedule` | Clic en fila o evento; «Ver orden»; «Reprogramar» |
 
 Lo que no pasó (ver D3/D4): tarjetas de KPIs y panel «Reservas de hoy» de la pantalla vieja; arrastrar para reprogramar.
 
@@ -96,9 +108,10 @@ Lo que no pasó (ver D3/D4): tarjetas de KPIs y panel «Reservas de hoy» de la 
 - [x] T2 — Disponibilidad del prestador · Verify: `provider-availability.spec.ts`, `scheduling.service.spec.ts` (filtro por prestador)
 - [x] T3 — Pantallas Programación y Agenda + calendario · Verify: `scheduling-calendar.util.spec.ts`, `scheduling-pages.component.spec.ts`
 - [x] T4 — Menú, filtro por industria, redirects · Verify: `menu-filter.service.spec.ts`, `store-admin-menu-items.spec.ts`, `route-gate-coverage.spec.ts`, `store-admin-rutas-routes.spec.ts`
+- [x] T4b — Estructura de Rafael 20:30: módulo Agenda con pestañas, Configuración, redirects a `?tab=`, menú sin duplicados · Verify: `agenda-shell.component.spec.ts`, `scheduling-pages.component.spec.ts`, `store-admin-menu-items.spec.ts`, `menu-filter.service.spec.ts`
 - [ ] T5 — QA visual con Playwright contra el vhost (escritorio y 375 px) · pendiente: no corrí docker ni el vhost en esta sesión.
 
-**Riesgos:** (1) La tabla mezcla fuentes en memoria hasta 5 000 filas por página pedida: si alguien navega muy lejos sin fechas recibe 422 con un mensaje; (2) el estado de los pedidos se deriva en lectura, así que el filtro de estado de pedidos se aplica en memoria sobre el rango (tope 2 000, se avisa con `truncated`); (3) quien tenía la pantalla Reservas como inicio pierde KPIs (D3); (4) `/store/scheduling` no lleva `@IndustryModule`: el aislamiento por industria lo hace el servicio por fuente (cubierto por specs); los datos siempre van por el Prisma de tienda.
+**Riesgos:** (1) La tabla mezcla fuentes en memoria hasta 5 000 filas por página pedida: si alguien navega muy lejos sin fechas recibe 422 con un mensaje; (2) el estado de los pedidos se deriva en lectura, así que el filtro de estado de pedidos se aplica en memoria sobre el rango (tope 2 000, se avisa con `truncated`); (3) quien tenía la pantalla Reservas como inicio pierde KPIs (D3); (4) `/store/scheduling` no lleva `@IndustryModule`: el aislamiento por industria lo hace el servicio por fuente (cubierto por specs); los datos siempre van por el Prisma de tienda; (5) Equipo de servicio, Disponibilidad, Cola y Horario ya no tienen URL propia gobernada por `orders_reservations` en el guard de URL: Configuración solo las monta si la fuente de reservas está habilitada (industria + permiso) y sus endpoints siguen exigiendo sus permisos; (6) `ScheduleManagementComponent` y `ProviderAvailabilityComponent` mantienen sus barras sticky internas pensadas para su página propia: revisar en QA visual que no se monten bajo la cabecera del módulo.
 
 ## F2 — Recepción con «Reservas» principal + «Llegadas» segunda; sale el módulo Reservas de hotel
 
@@ -132,6 +145,7 @@ Lo que no pasó (ver D3/D4): tarjetas de KPIs y panel «Reservas de hoy» de la 
 - **Riesgos:** (1) permisos `store:lodging:reports:read` vs. `store:reports:read`: los endpoints conservan los suyos y el catálogo debe respetarlos; (2) dos catálogos paralelos (Reportes y Analíticas): decidir dónde vive hotelería (D8); (3) tocar `module-industries.ts` sin copiar el espejo rompe la spec de paridad; (4) los reportes con componente propio no entran en el visor genérico sin adaptarlos.
 
 ## Log
+- 2026-11-23 20:30 — Cambio de estructura de Rafael: un solo módulo Agenda con pestañas Calendario | Programación | Configuración; Programación y Equipo de Servicio salen del menú; URLs viejas redirigen a su pestaña. Sin BD.
 - 2026-11-23 — Plan escrito sobre la decisión de Rafael; F1 se ejecuta sin esperar OK (decidida). Commits F1: 69c3543d8 (endpoint), fb85b2371 (pantallas), ab8808a02 (menú y redirects), 9311c5bbd (disponibilidad del prestador y accesos visibles).
 - 2026-11-23 — Tests F1 corridos de a uno (ver PR): backend 5 specs, frontend 6 specs, todos en verde. Typecheck backend filtrado a `scheduling/` y `store.module.ts`: sin errores.
 - 2026-11-23 — F2–F4 afinadas con las líneas verificadas contra el código actual (pestañas de Recepción en estado local, board sin paginar, tareas de limpieza perezosas, rol `housekeeper` de sistema, catálogo de reportes que no filtra por industria). Nuevas decisiones abiertas D6–D9.

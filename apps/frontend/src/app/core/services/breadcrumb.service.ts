@@ -1013,12 +1013,6 @@ export class BreadcrumbService {
     },
     // Agenda unificada F1 (antes de `:id`).
     {
-      path: '/admin/orders/scheduling',
-      title: 'Programación',
-      parent: 'Órdenes',
-      icon: 'calendar-clock',
-    },
-    {
       path: '/admin/orders/agenda',
       title: 'Agenda',
       parent: 'Órdenes',

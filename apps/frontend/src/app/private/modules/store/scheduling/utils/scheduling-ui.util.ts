@@ -8,6 +8,7 @@ import type {
   DropdownAction,
   FilterConfig,
 } from '../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+import { agendaUrl } from '../scheduling-tabs';
 import type {
   SchedulingSources,
   SchedulingStatusGroup,
@@ -89,12 +90,13 @@ export function schedulingConfigActions(flags: {
   const actions: DropdownAction[] = [];
   if (flags.bookings) {
     actions.push(
-      { label: 'Equipo de servicio', icon: 'user-cog', action: '/admin/reservations/schedules' },
-      { label: 'Disponibilidad', icon: 'calendar-clock', action: '/admin/reservations/availability' },
-      { label: 'Cola de atención', icon: 'users', action: '/admin/reservations/queue' },
+      // Configuración de disponibilidad: pestaña Configuración de Agenda.
+      { label: 'Equipo de servicio', icon: 'user-cog', action: agendaUrl('configuracion', 'equipo') },
+      { label: 'Disponibilidad', icon: 'calendar-clock', action: agendaUrl('configuracion', 'disponibilidad') },
+      { label: 'Cola de atención', icon: 'users', action: agendaUrl('configuracion', 'cola') },
+      { label: 'Horario del negocio', icon: 'clock', action: agendaUrl('configuracion', 'horario') },
       { label: 'Solicitudes de reagenda', icon: 'inbox', action: '/admin/reservations/reschedule-requests' },
       { label: 'Solicitudes de pago', icon: 'receipt', action: '/admin/reservations/payment-requests' },
-      { label: 'Horario del negocio', icon: 'clock', action: '/admin/reservations/business-hours' },
       { label: 'Exportar reservas', icon: 'download', action: 'export-bookings' },
     );
     if (flags.service) {
@@ -118,6 +120,39 @@ export function schedulingConfigActions(flags: {
  * Programación y Agenda: el `id` es la ruta (mismas pantallas de Reservas).
  */
 export const PROVIDER_CONFIG_HEADER_ACTIONS: StickyHeaderActionButton[] = [
-  { id: '/admin/reservations/schedules', label: 'Equipo de servicio', icon: 'user-cog', variant: 'outline' },
-  { id: '/admin/reservations/availability', label: 'Disponibilidad', icon: 'calendar-clock', variant: 'outline' },
+  { id: agendaUrl('configuracion', 'equipo'), label: 'Equipo de servicio', icon: 'user-cog', variant: 'outline' },
+  { id: agendaUrl('configuracion', 'disponibilidad'), label: 'Disponibilidad', icon: 'calendar-clock', variant: 'outline' },
 ];
+
+/**
+ * Otras pantallas de Reservas y Pedidos que no son configuración de
+ * disponibilidad: se enlazan desde la pestaña Configuración.
+ */
+export function schedulingRelatedLinks(flags: {
+  bookings: boolean;
+  scheduled: boolean;
+  service: boolean;
+}): { label: string; icon: string; route: string; description: string }[] {
+  const links: { label: string; icon: string; route: string; description: string }[] = [];
+  if (flags.bookings) {
+    links.push(
+      { label: 'Solicitudes de reagenda', icon: 'inbox', route: '/admin/reservations/reschedule-requests', description: 'Cambios de hora que piden los clientes' },
+      { label: 'Solicitudes de pago', icon: 'receipt', route: '/admin/reservations/payment-requests', description: 'Comprobantes de anticipos por confirmar' },
+      { label: 'Ajustes de reservas', icon: 'settings', route: '/admin/settings/general/reservas', description: 'Reglas de reserva, anticipos y confirmaciones' },
+    );
+    if (flags.service) {
+      links.push(
+        { label: 'Recordatorios', icon: 'bell', route: '/admin/reservations/reminders', description: 'Próximos servicios por recordar' },
+        { label: 'Estaciones', icon: 'warehouse', route: '/admin/services/stations', description: 'Estaciones, sus horarios y excepciones' },
+      );
+    }
+  }
+  if (flags.scheduled) {
+    links.push(
+      { label: 'Producción del día', icon: 'chef-hat', route: '/admin/scheduled-orders/day', description: 'Pedidos programados por preparar' },
+      { label: 'Insumos del día', icon: 'package', route: '/admin/scheduled-orders/production', description: 'Insumos consolidados para producir' },
+      { label: 'Franjas y cupos de pedidos', icon: 'clock', route: '/admin/settings/general/venta', description: 'Horario, franjas y excepciones de pedidos programados' },
+    );
+  }
+  return links;
+}

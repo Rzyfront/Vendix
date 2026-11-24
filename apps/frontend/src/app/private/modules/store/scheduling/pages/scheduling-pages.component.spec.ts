@@ -11,6 +11,8 @@ import { SchedulingRecordHostComponent } from '../components/scheduling-record-h
 import { SchedulingListPageComponent } from './scheduling-list-page/scheduling-list-page.component';
 import { SchedulingAgendaPageComponent } from './scheduling-agenda-page/scheduling-agenda-page.component';
 import type { SchedulingEvent, SchedulingSources } from '../interfaces/scheduling.interface';
+import { agendaUrl } from '../scheduling-tabs';
+import { ModuleShellActionsService } from '../../../../../shared/components/module-tabs-shell/module-shell-actions.service';
 
 /** Sustituye los modales de las fuentes: aquí solo importa la pantalla. */
 @Component({ selector: 'app-scheduling-record-host', standalone: true, template: '' })
@@ -23,12 +25,12 @@ class RecordHostStub {
 
 /** Configuración de Reservas que debe seguir alcanzable (requisito de prestadores). */
 const CONFIG_ROUTES = [
-  '/admin/reservations/schedules',
-  '/admin/reservations/availability',
-  '/admin/reservations/queue',
+  agendaUrl('configuracion', 'equipo'),
+  agendaUrl('configuracion', 'disponibilidad'),
+  agendaUrl('configuracion', 'cola'),
+  agendaUrl('configuracion', 'horario'),
   '/admin/reservations/reschedule-requests',
   '/admin/reservations/payment-requests',
-  '/admin/reservations/business-hours',
   '/admin/reservations/reminders',
   '/admin/services/stations',
 ];
@@ -139,8 +141,8 @@ describe('Agenda unificada F1 — Programación', () => {
     setup();
     const page = TestBed.createComponent(SchedulingListPageComponent).componentInstance;
     const actions = page.dropdownActions().map((a) => a.action);
-    expect(actions).toContain('/admin/reservations/schedules');
-    expect(actions).toContain('/admin/reservations/availability');
+    expect(actions).toContain(agendaUrl('configuracion', 'equipo'));
+    expect(actions).toContain(agendaUrl('configuracion', 'disponibilidad'));
     expect(actions).toContain('/admin/scheduled-orders/day');
   });
 
@@ -148,8 +150,8 @@ describe('Agenda unificada F1 — Programación', () => {
     setup();
     const page = TestBed.createComponent(SchedulingListPageComponent).componentInstance;
     const visible = page.headerActions().filter((a) => a.visible !== false).map((a) => a.id);
-    expect(visible).toContain('/admin/reservations/schedules');
-    expect(visible).toContain('/admin/reservations/availability');
+    expect(visible).toContain(agendaUrl('configuracion', 'equipo'));
+    expect(visible).toContain(agendaUrl('configuracion', 'disponibilidad'));
     const actions = page.dropdownActions().map((a) => a.action);
     for (const route of CONFIG_ROUTES) expect(actions).withContext(route).toContain(route);
   });
@@ -158,8 +160,8 @@ describe('Agenda unificada F1 — Programación', () => {
     setup({ ...SOURCES, types: [{ value: 'scheduled_order', label: 'Pedido programado' }], staff: [] });
     const page = TestBed.createComponent(SchedulingListPageComponent).componentInstance;
     const visible = page.headerActions().filter((a) => a.visible !== false).map((a) => a.id);
-    expect(visible).not.toContain('/admin/reservations/schedules');
-    expect(page.dropdownActions().map((a) => a.action)).not.toContain('/admin/reservations/schedules');
+    expect(visible).not.toContain(agendaUrl('configuracion', 'equipo'));
+    expect(page.dropdownActions().map((a) => a.action)).not.toContain(agendaUrl('configuracion', 'equipo'));
   });
 
   it('sin fuentes habilitadas explica por qué y no pide eventos', () => {
@@ -220,8 +222,8 @@ describe('Agenda unificada F1 — Agenda', () => {
     setup();
     const page = TestBed.createComponent(SchedulingAgendaPageComponent).componentInstance;
     const visible = page.headerActions().filter((a) => a.visible !== false).map((a) => a.id);
-    expect(visible).toContain('/admin/reservations/schedules');
-    expect(visible).toContain('/admin/reservations/availability');
+    expect(visible).toContain(agendaUrl('configuracion', 'equipo'));
+    expect(visible).toContain(agendaUrl('configuracion', 'disponibilidad'));
     const actions = page.dropdownActions().map((a) => a.action);
     for (const route of CONFIG_ROUTES) expect(actions).withContext(route).toContain(route);
   });
@@ -244,5 +246,32 @@ describe('Agenda unificada F1 — Agenda', () => {
     expect(labels).toContain('No disponible: Vacaciones');
     // Los días sin bloques para el prestador quedan como «Sin horario».
     expect(labels).toContain('Sin horario');
+  });
+});
+
+describe('Agenda unificada F1 — pestañas embebidas', () => {
+  it('dentro de Agenda no pintan cabecera propia y publican sus botones en la del módulo', () => {
+    setup();
+    const shell = TestBed.inject(ModuleShellActionsService);
+    const list = TestBed.createComponent(SchedulingListPageComponent);
+    list.componentRef.setInput('embedded', true);
+    list.detectChanges();
+    TestBed.flushEffects();
+    expect(list.nativeElement.querySelector('app-sticky-header')).toBeNull();
+    const ids = shell.buttons().filter((b) => b.visible !== false).map((b) => b.id);
+    expect(ids).toContain(agendaUrl('configuracion', 'equipo'));
+    expect(ids).toContain('create-booking');
+    // «Ver calendario» sobra: el calendario es otra pestaña.
+    expect(ids).not.toContain('agenda');
+    list.destroy();
+    expect(shell.buttons()).toEqual([]);
+
+    const cal = TestBed.createComponent(SchedulingAgendaPageComponent);
+    cal.componentRef.setInput('embedded', true);
+    cal.componentInstance.isMobile.set(false);
+    cal.detectChanges();
+    TestBed.flushEffects();
+    expect(cal.nativeElement.querySelector('app-sticky-header')).toBeNull();
+    expect(shell.buttons().filter((b) => b.visible !== false).map((b) => b.id)).not.toContain('list');
   });
 });

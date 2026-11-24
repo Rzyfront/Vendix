@@ -1,12 +1,14 @@
 <div class="w-full">
   <!-- Sticky Header -->
-  <app-sticky-header
-    title="Equipo de Servicio"
-    subtitle="Gestiona proveedores, horarios y servicios"
-    icon="users"
-    [showBackButton]="true"
-    backRoute="/admin/reservations"
-  />
+  @if (!embedded()) {
+    <app-sticky-header
+      title="Equipo de Servicio"
+      subtitle="Gestiona proveedores, horarios y servicios"
+      icon="users"
+      [showBackButton]="true"
+      backRoute="/admin/orders/agenda"
+    />
+  }
 
   <!-- Provider List -->
   <div class="md:space-y-4">
