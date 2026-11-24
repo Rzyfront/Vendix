@@ -5,6 +5,7 @@ import { Observable, of, throwError } from 'rxjs';
 import {
   CustomerBulkUploadModalComponent,
   detectCustomerRowIssues,
+  diagnoseEmptyCustomerFile,
 } from './bulk-upload-modal.component';
 import { CustomersService } from '../../services/customers.service';
 import { BulkUploadLogService } from '../../../bulk-uploads/services/bulk-upload-log.service';
@@ -479,5 +480,94 @@ describe('CustomerBulkUploadModalComponent — Verificar marca filas problemáti
     ]);
     expect(component.rowIssues()).toEqual([]);
     expect(component.validCustomerCount()).toBe(2);
+  });
+});
+
+describe('diagnoseEmptyCustomerFile (QUI-1049 P1)', () => {
+  it('sin columnas clave dice cuáles faltan, qué encabezados reconoció y cuáles no, y un ejemplo', () => {
+    const msgs = diagnoseEmptyCustomerFile(['Correo', 'Cliente', 'Teléfono'], {
+      0: 'email',
+      2: 'phone',
+    });
+    expect(msgs).toEqual([
+      'Faltan las columnas que identifican al cliente: Nombre, Razón Social, Documento (se necesita al menos una).',
+      'Encabezados reconocidos: Correo, Teléfono.',
+      'Encabezados no reconocidos: Cliente.',
+      'Ejemplo de encabezado correcto: Correo | Nombre | Apellido | Documento | Tipo Documento | Teléfono. Descarga la plantilla para ver todas las columnas.',
+    ]);
+  });
+
+  it('sin ningún encabezado reconocido lo dice explícitamente', () => {
+    const msgs = diagnoseEmptyCustomerFile(['Cliente', 'Mail'], {});
+    expect(msgs[1]).toBe('Ningún encabezado del archivo coincide con los de la plantilla.');
+    expect(msgs[2]).toBe('Encabezados no reconocidos: Cliente, Mail.');
+  });
+
+  it('con columnas clave pero sin datos dice que el archivo no tiene filas con datos', () => {
+    const msgs = diagnoseEmptyCustomerFile(['Nombre', 'Correo'], { 0: 'first_name', 1: 'email' });
+    expect(msgs).toEqual([
+      'El archivo no tiene filas con datos: todas las filas debajo del encabezado están vacías.',
+      'Completa al menos una de estas columnas en cada cliente: Nombre, Razón Social, Documento.',
+    ]);
+  });
+});
+
+describe('CustomerBulkUploadModalComponent — archivo sin clientes útiles (QUI-1049 P1)', () => {
+  let component: CustomerBulkUploadModalComponent;
+  let toast: jasmine.SpyObj<ToastService>;
+
+  beforeEach(async () => {
+    const jobs = jasmine.createSpyObj<BulkUploadJobService>('BulkUploadJobService', ['findResumable']);
+    jobs.findResumable.and.returnValue(of(null));
+    const log = jasmine.createSpyObj<BulkUploadLogService>('BulkUploadLogService', ['fingerprint']);
+    log.fingerprint.and.resolveTo(null);
+    toast = jasmine.createSpyObj<ToastService>('ToastService', ['success', 'warning', 'error', 'info']);
+    await TestBed.configureTestingModule({
+      imports: [CustomerBulkUploadModalComponent],
+      providers: [
+        { provide: CustomersService, useValue: {} },
+        { provide: BulkUploadLogService, useValue: log },
+        { provide: BulkUploadJobService, useValue: jobs },
+        { provide: DialogService, useValue: {} },
+        { provide: ToastService, useValue: toast },
+      ],
+    })
+      .overrideComponent(CustomerBulkUploadModalComponent, { set: { template: '', imports: [] } })
+      .compileComponents();
+    component = TestBed.createComponent(CustomerBulkUploadModalComponent).componentInstance;
+  });
+
+  const load = async (csv: string) => {
+    component.processFile(new File([csv], 'clientes.csv', { type: 'text/csv' }));
+    for (let i = 0; i < 200 && component.isProcessingFile(); i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(component.isProcessingFile()).toBeFalse();
+  };
+
+  it('columnas incorrectas: el detalle queda en el modal (uploadError), no en el toast genérico', async () => {
+    await load('Cliente,Correo\nAna,ana@x.co\n');
+    const err = component.uploadError() as string[];
+    expect(Array.isArray(err)).toBeTrue();
+    expect(err[0]).toContain('Faltan las columnas que identifican al cliente');
+    expect(err).toContain('Encabezados reconocidos: Correo.');
+    expect(err).toContain('Encabezados no reconocidos: Cliente.');
+    expect(toast.warning).not.toHaveBeenCalled();
+    expect(component.currentStep()).toBe(0);
+    expect(component.parsedData()).toBeNull();
+  });
+
+  it('columnas correctas sin filas con datos: mensaje distinto', async () => {
+    await load('Nombre,Correo\n');
+    const err = component.uploadError() as string[];
+    expect(err[0]).toBe('El archivo no tiene filas con datos: todas las filas debajo del encabezado están vacías.');
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it('un archivo válido sigue avanzando a Verificar sin error', async () => {
+    await load('Nombre,Correo\nAna,ana@x.co\n');
+    expect(component.uploadError()).toBeNull();
+    expect(component.currentStep()).toBe(1);
+    expect(component.parsedData()?.length).toBe(1);
   });
 });

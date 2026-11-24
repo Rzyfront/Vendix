@@ -55,6 +55,66 @@ interface CustomerGroup {
   locations: CustomerGroupLocation[];
 }
 
+/**
+ * Columnas que identifican al cliente: cada fila necesita al menos una para
+ * ser útil. Los nombres son los encabezados de la plantilla descargable.
+ */
+const CUSTOMER_KEY_COLUMNS: ReadonlyArray<{ key: string; header: string }> = [
+  { key: 'first_name', header: 'Nombre' },
+  { key: 'legal_name', header: 'Razón Social' },
+  { key: 'document_number', header: 'Documento' },
+];
+
+/** Encabezado de ejemplo (orden de la plantilla) para el mensaje de error. */
+const CUSTOMER_HEADER_EXAMPLE = 'Correo | Nombre | Apellido | Documento | Tipo Documento | Teléfono';
+
+/**
+ * QUI-1049 P1 — explica por qué un archivo no dejó ningún cliente útil en vez
+ * del genérico «No se encontraron clientes válidos». Distingue dos casos:
+ *  - faltan las columnas que identifican al cliente: dice cuáles faltan, qué
+ *    encabezados sí se reconocieron (y cuáles no) y un ejemplo correcto;
+ *  - las columnas están pero ninguna fila tiene datos en ellas.
+ *
+ * `headerMap` es el mapa índice → clave del DTO que arma `processFile`.
+ */
+export function diagnoseEmptyCustomerFile(
+  rawHeaders: unknown[],
+  headerMap: Record<number, string>,
+): string[] {
+  const recognizedKeys = new Set(Object.values(headerMap));
+  const recognized: string[] = [];
+  const unrecognized: string[] = [];
+  rawHeaders.forEach((h, index) => {
+    const text = h === undefined || h === null ? '' : String(h).trim();
+    if (!text) return;
+    (headerMap[index] ? recognized : unrecognized).push(text);
+  });
+
+  const hasKeyColumn = CUSTOMER_KEY_COLUMNS.some((c) => recognizedKeys.has(c.key));
+  const keyHeaders = CUSTOMER_KEY_COLUMNS.map((c) => c.header).join(', ');
+
+  if (hasKeyColumn) {
+    return [
+      'El archivo no tiene filas con datos: todas las filas debajo del encabezado están vacías.',
+      `Completa al menos una de estas columnas en cada cliente: ${keyHeaders}.`,
+    ];
+  }
+
+  const messages = [
+    `Faltan las columnas que identifican al cliente: ${keyHeaders} (se necesita al menos una).`,
+    recognized.length
+      ? `Encabezados reconocidos: ${recognized.join(', ')}.`
+      : 'Ningún encabezado del archivo coincide con los de la plantilla.',
+  ];
+  if (unrecognized.length) {
+    messages.push(`Encabezados no reconocidos: ${unrecognized.join(', ')}.`);
+  }
+  messages.push(
+    `Ejemplo de encabezado correcto: ${CUSTOMER_HEADER_EXAMPLE}. Descarga la plantilla para ver todas las columnas.`,
+  );
+  return messages;
+}
+
 /** Clave de agrupación por documento (NIT sin DV pegado); `null` si no hay documento. */
 function customerDocKey(row: Record<string, any>): string | null {
   const raw = String(row['document_number'] ?? '').trim();
@@ -933,8 +993,11 @@ export class CustomerBulkUploadModalComponent {
 
         const rawData = xlsx.utils.sheet_to_json(ws, { header: 1 }) as any[][];
 
-        if (!rawData || rawData.length < 2) {
-          this.toastService.error('El archivo debe contener al menos una fila de encabezados y una fila de datos');
+        // QUI-1049 P1: sin fila de encabezados el archivo está vacío; con solo
+        // el encabezado sigue al diagnóstico de abajo, que dice si faltan
+        // columnas o si faltan filas con datos.
+        if (!rawData || rawData.length === 0) {
+          this.uploadError.set('El archivo está vacío: no tiene encabezados ni filas con datos.');
           this.isProcessingFile.set(false);
           return;
         }
@@ -1006,7 +1069,8 @@ export class CustomerBulkUploadModalComponent {
         this.isProcessingFile.set(false);
 
         if (customers.length === 0) {
-          this.toastService.warning('No se encontraron clientes válidos en el archivo');
+          // QUI-1049 P1: el detalle queda en el modal, no en un toast efímero.
+          this.uploadError.set(diagnoseEmptyCustomerFile(rawHeaders, headerMap));
           return;
         }
 

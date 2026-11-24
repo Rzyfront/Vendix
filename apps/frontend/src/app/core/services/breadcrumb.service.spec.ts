@@ -125,6 +125,24 @@ describe('BreadcrumbService', () => {
     });
   });
 
+  describe('settings de tienda (QUI-1049 P2)', () => {
+    it('resolves /admin/settings/bulk-uploads → "Configuración / Historial de cargas" instead of the default', () => {
+      const url = '/admin/settings/bulk-uploads';
+      routerEvents$.next(new NavigationEnd(1, url, url));
+      const crumb = service.breadcrumb();
+      expect(crumb.current.label).toBe('Historial de cargas');
+      expect(crumb.parent?.label).toBe('Configuración');
+    });
+
+    it('keeps /admin/settings/users → "Configuración / Usuarios"', () => {
+      const url = '/admin/settings/users';
+      routerEvents$.next(new NavigationEnd(1, url, url));
+      const crumb = service.breadcrumb();
+      expect(crumb.current.label).toBe('Usuarios');
+      expect(crumb.parent?.label).toBe('Configuración');
+    });
+  });
+
   describe('Flujos children', () => {
     it('resolves /admin/workflows/insights → "Flujos / Analítica IA"', () => {
       routerEvents$.next(

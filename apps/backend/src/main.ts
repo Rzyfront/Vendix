@@ -43,6 +43,7 @@ import {
   isBulkValidationError,
 } from '@common/validators/bulk-validation.util';
 import { json, urlencoded } from 'express';
+import { requestIdMiddleware } from '@common/middleware/request-id.middleware';
 import * as v8 from 'v8';
 import { Server } from 'http';
 
@@ -212,6 +213,12 @@ async function bootstrapApi(role: VendixProcessRole) {
   // Sin `X-Powered-By: Express` (SEO-TECH-22): revela el framework a quien
   // escanee la API y no aporta nada al cliente.
   app.getHttpAdapter().getInstance().disable('x-powered-by');
+
+  // QUI-1049 P3 / QUI-1019: id de correlación por petición, ANTES de todo lo
+  // demás (parsers, guards, pipes), para que cualquier error — incluso uno del
+  // body-parser o de un guard — devuelva su propio `request_id` y la cabecera
+  // `X-Request-Id` coincidente.
+  app.use(requestIdMiddleware);
 
   // Increase payload limit for base64 images
   // Public reception webhooks authenticate the exact raw byte sequence before
