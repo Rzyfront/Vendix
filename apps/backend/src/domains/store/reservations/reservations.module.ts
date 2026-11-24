@@ -37,6 +37,8 @@ import { ServiceDepositPaidListener } from './listeners/service-deposit-paid.lis
 import { ServiceDepositHoldExpiryJob } from './jobs/service-deposit-hold-expiry.job';
 import { BookingSeriesController } from './recurrence/booking-series.controller';
 import { BookingSeriesService } from './recurrence/booking-series.service';
+import { ServicePlansController } from './service-plans/service-plans.controller';
+import { ServicePlansService } from './service-plans/service-plans.service';
 
 @Module({
   imports: [
@@ -60,6 +62,7 @@ import { BookingSeriesService } from './recurrence/booking-series.service';
     ReservationsController,
     StationAvailabilityController,
     BusinessHoursController,
+    ServicePlansController,
   ],
   providers: [
     ReservationsService,
@@ -78,6 +81,7 @@ import { BookingSeriesService } from './recurrence/booking-series.service';
     RentalPrepayService,
     RentalPrepayPaidListener,
     RentalPrepayHoldExpiryJob,
+    ServicePlansService,
   ],
   exports: [
     ReservationsService,
@@ -90,6 +94,7 @@ import { BookingSeriesService } from './recurrence/booking-series.service';
     BusinessHoursService,
     ProvidersService,
     ProviderAvailabilityService,
+    ServicePlansService,
   ],
 })
 export class ReservationsModule implements OnModuleInit {
