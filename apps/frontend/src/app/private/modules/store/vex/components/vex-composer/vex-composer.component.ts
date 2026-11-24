@@ -5,8 +5,10 @@ import {
   DestroyRef,
   ElementRef,
   computed,
+  effect,
   inject,
   signal,
+  untracked,
   viewChild,
 } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
@@ -27,6 +29,10 @@ import { VEX_COPY } from '../../vex-copy';
 import { VexPresenceComponent } from '../vex-presence/vex-presence.component';
 
 const MAX_LINES = 8;
+/** How long the floating notice above the box stays up. */
+const NOTICE_MS = 4500;
+/** A press shorter than this is a tap, not «hold to dictate». */
+const SHORT_TAP_MS = 400;
 const MAX_FILES = AI_ATTACHMENT_MAX_FILES;
 const MAX_FILE_BYTES = AI_ATTACHMENT_MAX_BYTES;
 /** Same accept list as the server; drops and pastes bypass the input's `accept`. */
@@ -125,44 +131,28 @@ interface StagedFile {
           }
         </div>
       }
-      @if (store.voice_mode()) {
+      <!-- Voice mode needs no extra banner: the waves button is filled and the
+           box gets the primary ring; «Vex hablando» + «Detener» live in the
+           presence chip above. Nothing below the box appears or hides, so the
+           buttons never move under the finger. -->
+      <div class="relative">
+      @if (notice(); as message) {
         <div
-          class="mb-2 flex items-center justify-between gap-2 rounded-2xl border border-[rgba(var(--color-primary-rgb),0.45)] bg-[rgba(var(--color-primary-rgb),0.1)] px-3 py-1.5 text-xs font-medium text-[var(--color-primary)]"
+          class="absolute bottom-full left-2 right-2 mb-2 z-20 flex items-start gap-2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-lg px-3 py-2 text-xs text-[var(--color-text-primary)]"
           role="status"
           aria-live="polite"
+          data-testid="vex-composer-notice"
         >
-          <span class="flex items-center gap-2 min-w-0">
-            <span
-              class="w-2 h-2 shrink-0 rounded-full bg-[var(--color-primary)] animate-pulse"
-              aria-hidden="true"
-            ></span>
-            <app-icon name="audio-lines" [size]="14"></app-icon>
-            <span class="truncate">
-              {{
-                pipeline.speaking()
-                  ? 'Modo voz activo · Reproduciendo respuesta…'
-                  : 'Modo voz activo · Respuestas automáticas con audio'
-              }}
-            </span>
-          </span>
-          <div class="flex items-center gap-2 shrink-0">
-            @if (pipeline.speaking()) {
-              <button
-                type="button"
-                class="rounded-full border border-[rgba(var(--color-primary-rgb),0.5)] px-2.5 py-0.5 text-xs font-semibold hover:bg-[rgba(var(--color-primary-rgb),0.15)]"
-                (click)="store.stopAudio()"
-              >
-                Detener audio
-              </button>
-            }
-            <button
-              type="button"
-              class="underline underline-offset-2 text-xs font-semibold hover:opacity-80"
-              (click)="toggleVoiceMode()"
-            >
-              Desactivar
-            </button>
-          </div>
+          <app-icon name="info" [size]="14" class="shrink-0 mt-px text-[var(--color-text-secondary)]" />
+          <span class="flex-1 min-w-0">{{ message }}</span>
+          <button
+            type="button"
+            class="shrink-0 -m-1 p-1 rounded-full text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+            [attr.aria-label]="copy.notice_close"
+            (click)="dismissNotice()"
+          >
+            <app-icon name="x" [size]="14" />
+          </button>
         </div>
       }
       <div
@@ -183,11 +173,11 @@ interface StagedFile {
         />
         <button
           type="button"
-          class="w-10 h-10 shrink-0 rounded-full flex items-center justify-center text-text-secondary hover:text-text-primary transition-colors disabled:opacity-40"
           [attr.aria-label]="copy.attach"
           [attr.title]="copy.attach_title"
           [disabled]="store.is_agent_typing()"
           (click)="file_input.click()"
+          class="w-10 h-10 shrink-0 rounded-full flex items-center justify-center text-text-secondary hover:text-text-primary transition-colors disabled:opacity-40 select-none [-webkit-touch-callout:none] [-webkit-tap-highlight-color:transparent]"
         >
           <app-icon name="plus" [size]="20"></app-icon>
         </button>
@@ -211,9 +201,11 @@ interface StagedFile {
             type="button"
             [class]="
               pipeline.recording()
-                ? 'touch-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary w-10 h-10 shrink-0 rounded-full flex items-center justify-center transition-colors disabled:opacity-40 bg-[var(--color-error)] text-white animate-pulse'
-                : 'touch-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary w-10 h-10 shrink-0 rounded-full flex items-center justify-center transition-colors disabled:opacity-40 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+                ? 'touch-none select-none [-webkit-touch-callout:none] [-webkit-tap-highlight-color:transparent] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary w-10 h-10 shrink-0 rounded-full flex items-center justify-center transition-colors disabled:opacity-40 bg-[var(--color-error)] text-white animate-pulse'
+                : 'touch-none select-none [-webkit-touch-callout:none] [-webkit-tap-highlight-color:transparent] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary w-10 h-10 shrink-0 rounded-full flex items-center justify-center transition-colors disabled:opacity-40 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
             "
+            (contextmenu)="$event.preventDefault()"
+            (selectstart)="$event.preventDefault()"
             [disabled]="
               store.is_agent_typing() || pipeline.state() === 'transcribing'
             "
@@ -256,9 +248,10 @@ interface StagedFile {
           type="button"
           [class]="
             store.voice_mode()
-              ? 'touch-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary w-10 h-10 shrink-0 rounded-full flex items-center justify-center transition-all bg-[var(--color-primary)] text-[var(--color-text-on-primary)] shadow-sm'
-              : 'touch-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary w-10 h-10 shrink-0 rounded-full flex items-center justify-center transition-all text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[rgba(var(--color-primary-rgb),0.08)]'
+              ? 'touch-none select-none [-webkit-touch-callout:none] [-webkit-tap-highlight-color:transparent] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary w-10 h-10 shrink-0 rounded-full flex items-center justify-center transition-all bg-[var(--color-primary)] text-[var(--color-text-on-primary)] shadow-sm'
+              : 'touch-none select-none [-webkit-touch-callout:none] [-webkit-tap-highlight-color:transparent] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary w-10 h-10 shrink-0 rounded-full flex items-center justify-center transition-all text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[rgba(var(--color-primary-rgb),0.08)]'
           "
+          (contextmenu)="$event.preventDefault()"
           [attr.aria-pressed]="store.voice_mode()"
           [attr.aria-label]="
             store.voice_mode()
@@ -275,10 +268,23 @@ interface StagedFile {
           <app-icon name="audio-lines" [size]="19" />
         </button>
 
-        @if (can_send()) {
+        @if (store.is_agent_typing()) {
+          <!-- The ONLY «Detener» for a running answer (the thread no longer
+               repeats it): it takes the send button's place. -->
           <button
             type="button"
-            class="w-10 h-10 shrink-0 rounded-full flex items-center justify-center bg-primary text-on-primary transition-opacity hover:opacity-90"
+            class="w-10 h-10 shrink-0 rounded-full flex items-center justify-center bg-text-primary text-background transition-opacity hover:opacity-90 select-none [-webkit-touch-callout:none] [-webkit-tap-highlight-color:transparent]"
+            [attr.aria-label]="copy.stop_aria"
+            [attr.title]="copy.stop"
+            data-testid="vex-composer-stop"
+            (click)="store.stopStream()"
+          >
+            <app-icon name="square" [size]="14"></app-icon>
+          </button>
+        } @else if (can_send()) {
+          <button
+            type="button"
+            class="w-10 h-10 shrink-0 rounded-full flex items-center justify-center bg-primary text-on-primary transition-opacity hover:opacity-90 select-none [-webkit-touch-callout:none] [-webkit-tap-highlight-color:transparent]"
             [attr.aria-label]="copy.send"
             (click)="send()"
           >
@@ -286,14 +292,7 @@ interface StagedFile {
           </button>
         }
       </div>
-      @if (statusNotice()) {
-        <p
-          class="mt-1.5 px-2 text-xs text-[var(--color-text-secondary)]"
-          role="status"
-        >
-          {{ statusNotice() }}
-        </p>
-      }
+      </div>
       <p class="mt-2 text-center text-xs text-text-secondary">
         {{ copy.disclaimer }}
       </p>
@@ -307,28 +306,42 @@ export class VexComposerComponent {
   private readonly realtime = inject(VexiRealtimeService);
   private readonly destroyRef = inject(DestroyRef);
   readonly voiceEnabled = signal(false);
-  readonly voiceHint = signal<string | null>(VEX_COPY.composer.voice_hint);
   private voiceHeld = false;
-  readonly statusNotice = computed(() => {
-    const err = this.pipeline.errorMessage();
-    if (err) return err;
-    if (this.pipeline.recording()) {
-      return 'Grabando… suelta el micrófono para transcribir y enviar.';
-    }
-    if (this.pipeline.state() === 'transcribing') {
-      return 'Transcribiendo tu voz…';
-    }
-    return this.voiceHint();
-  });
+  private voiceDownAt = 0;
+  /**
+   * Floating notice above the box (mic denied, dictation errors, «hold to
+   * dictate»). It overlays instead of taking a row under the input, so it
+   * never shifts the buttons; it hides by itself after a few seconds.
+   * Recording and transcribing are already shown by the presence chip.
+   */
+  readonly notice = signal<string | null>(null);
+  private notice_timer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     void this.realtime
       .voiceConsentEnabled()
       .then((enabled) => this.voiceEnabled.set(enabled));
+    effect(() => {
+      const err = this.pipeline.errorMessage();
+      if (err) untracked(() => this.showNotice(err));
+    });
     this.destroyRef.onDestroy(() => {
       this.voiceHeld = false;
       this.pipeline.cancelRecording();
+      if (this.notice_timer) clearTimeout(this.notice_timer);
     });
+  }
+
+  showNotice(message: string): void {
+    if (this.notice_timer) clearTimeout(this.notice_timer);
+    this.notice.set(message);
+    this.notice_timer = setTimeout(() => this.dismissNotice(), NOTICE_MS);
+  }
+
+  dismissNotice(): void {
+    if (this.notice_timer) clearTimeout(this.notice_timer);
+    this.notice_timer = null;
+    this.notice.set(null);
   }
 
   /** Tooltip with the estimated tokens; empty until the first answer. */
@@ -349,7 +362,7 @@ export class VexComposerComponent {
   }
 
   toggleVoiceMode(): void {
-    this.voiceHint.set(null);
+    this.dismissNotice();
     this.store.toggleVoiceMode();
   }
 
@@ -362,7 +375,8 @@ export class VexComposerComponent {
       this.pipeline.state() === 'transcribing'
     )
       return;
-    this.voiceHint.set(null);
+    this.dismissNotice();
+    this.voiceDownAt = Date.now();
     if (this.store.voice_mode()) this.pipeline.primeAudio();
     this.voiceHeld = true;
     const pointer = event as PointerEvent;
@@ -382,14 +396,20 @@ export class VexComposerComponent {
         agent_key: 'vex',
       });
       if (!this.voiceHeld && started) this.pipeline.cancelRecording();
-      if (!started)
-        this.voiceHint.set(this.copy.mic_denied);
+      if (!started) this.showNotice(this.copy.mic_denied);
     });
   }
 
   voiceUp(event: Event): void {
     event.preventDefault();
+    if (!this.voiceHeld) return;
     this.voiceHeld = false;
+    // A quick tap does not record: explain the gesture once, as a popup.
+    if (
+      !this.pipeline.recording() &&
+      Date.now() - this.voiceDownAt < SHORT_TAP_MS
+    )
+      this.showNotice(this.copy.voice_hint);
     if (this.store.voice_mode()) this.pipeline.primeAudio();
     const conversation = this.store.active_id();
     void this.pipeline.stopRecording().then((text) => {
