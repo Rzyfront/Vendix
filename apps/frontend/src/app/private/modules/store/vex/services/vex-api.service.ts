@@ -272,6 +272,13 @@ export interface VexAttachment {
   size_bytes: number;
 }
 
+/** One synthesized audio segment returned on demand by `POST /store/vex/speech`. */
+export interface VexSpeechSegment {
+  index: number;
+  audio_base64: string;
+  content_type: string;
+}
+
 /** `POST /store/vex/plans/:id/approve` response (`ApprovePlanResult`). */
 export interface VexApprovePlanResult {
   plan_id: string;
@@ -643,6 +650,18 @@ export class VexApiService {
     return this.http
       .post<{ data: VexAttachment }>(`${this.vexBase}/attachments`, form)
       .pipe(map((res) => res.data));
+  }
+
+  /**
+   * Synthesizes a Vex message on demand when the user clicks «Escuchar».
+   * Server-side `VexiSpeechCache` serves cached segments without provider calls.
+   */
+  synthesizeSpeech(text: string): Observable<VexSpeechSegment[]> {
+    return this.http
+      .post<{ data: { segments: VexSpeechSegment[] } }>(`${this.vexBase}/speech`, {
+        text,
+      })
+      .pipe(map((res) => (Array.isArray(res.data?.segments) ? res.data.segments : [])));
   }
 
   /**

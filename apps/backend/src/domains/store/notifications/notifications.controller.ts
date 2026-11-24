@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Patch,
+  Post,
   Body,
   Param,
   Query,
@@ -15,6 +16,7 @@ import { Observable, interval, map, merge, filter } from 'rxjs';
 import { NotificationsService } from './notifications.service';
 import { NotificationsSseService } from './notifications-sse.service';
 import { NotificationsPushService } from './notifications-push.service';
+import { MyNotificationsService } from './my-notifications.service';
 import { ResponseService } from '../../../common/responses/response.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
@@ -31,6 +33,7 @@ export class NotificationsController {
     private readonly notifications_service: NotificationsService,
     private readonly sse_service: NotificationsSseService,
     private readonly push_service: NotificationsPushService,
+    private readonly my_notifications: MyNotificationsService,
     private readonly response_service: ResponseService,
   ) {}
 
@@ -73,6 +76,44 @@ export class NotificationsController {
     const result =
       await this.notifications_service.initDefaultSubscriptions(user_id);
     return this.response_service.success(result);
+  }
+
+  /**
+   * "Mis notificaciones": el catálogo de tipos agrupado por módulo con el
+   * valor efectivo por canal (Dispositivo / Correo) del usuario actual en la
+   * tienda actual — su fila guardada o el default del tipo —, más el maestro
+   * de correo de la tienda y su correo enmascarado. Solo lectura: no crea
+   * filas (a diferencia de `GET subscriptions`, que se mantiene igual). Sin
+   * permisos de configuración: cualquier persona del panel ve las suyas.
+   */
+  @Get('preferences')
+  async getPreferences() {
+    const { user_id, store_id } = this.requireUserAndStore();
+    return this.response_service.success(
+      await this.my_notifications.getView(store_id, user_id),
+    );
+  }
+
+  /**
+   * "Enviarme una prueba": aviso al propio usuario por los canales que tenga
+   * encendidos. Una prueba cada 30 s por usuario y tienda (429).
+   */
+  @Post('preferences/test')
+  async sendTest() {
+    const { user_id, store_id } = this.requireUserAndStore();
+    return this.response_service.success(
+      await this.my_notifications.sendTest(store_id, user_id),
+      'Prueba enviada',
+    );
+  }
+
+  private requireUserAndStore(): { user_id: number; store_id: number } {
+    const context = RequestContextService.getContext();
+    const user_id = context?.user_id;
+    const store_id = context?.store_id;
+    if (!user_id || !store_id)
+      throw new ForbiddenException('User and store context required');
+    return { user_id, store_id };
   }
 
   @Patch('subscriptions')

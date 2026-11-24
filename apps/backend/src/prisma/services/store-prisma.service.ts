@@ -40,6 +40,9 @@ export class StorePrismaService extends BasePrismaService {
     'notifications',
     'notification_subscriptions',
     'push_subscriptions',
+    // Recordatorios y notificaciones (plan §3.1): `store_id` propio NOT NULL.
+    'notification_deliveries',
+    'scheduled_reminders',
     'invoices',
     // QUI — perfiles de facturación. `store_id` propio y NO nullable: el
     // invariante «un solo predeterminado por (store_id, operation_type)» se
@@ -1366,6 +1369,14 @@ export class StorePrismaService extends BasePrismaService {
 
   get push_subscriptions() {
     return this.scoped_client.push_subscriptions;
+  }
+
+  get notification_deliveries() {
+    return this.scoped_client.notification_deliveries;
+  }
+
+  get scheduled_reminders() {
+    return this.scoped_client.scheduled_reminders;
   }
 
   // Invoicing models

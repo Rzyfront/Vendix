@@ -299,6 +299,25 @@ export class NotificationsSettingsDto {
   @Min(0)
   @Max(30)
   ap_due_soon_days?: number;
+
+  /**
+   * Minutos antes del vencimiento de una tarea CRM en que se avisa "Tarea por
+   * vencer" al responsable y a los apoyos (D2: 60).
+   */
+  @ApiProperty({ example: 60, required: false, minimum: 5, maximum: 1440 })
+  @IsOptional()
+  @IsInt()
+  @Min(5)
+  @Max(1440)
+  task_due_soon_minutes?: number;
+
+  /** Hora local de la tienda (0-23) del correo con las tareas que vencen ese día. */
+  @ApiProperty({ example: 7, required: false, minimum: 0, maximum: 23 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(23)
+  daily_digest_hour?: number;
 }
 
 export class ScaleDeviceConfigDto {

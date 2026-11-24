@@ -123,8 +123,13 @@ export class VexiSpeechTurn {
   private readonly active = new Map<number, Promise<void>>();
   /** Synthesized, waiting for the text loop to pass by and pick them up. */
   private readonly ready: VexiAudioFrame[] = [];
+  /** Synthesized frames keyed by cut index, for strictly ordered emission. */
+  private readonly orderedReady = new Map<number, VexiAudioFrame>();
+  /** Indices whose synthesis returned null/threw so ordered emission never stalls. */
+  private readonly skipped = new Set<number>();
 
   private nextIndex = 0;
+  private nextOrderedIndex = 0;
   private aborted = false;
   private fillerPhrase: string | null = null;
   private readonly marks = new Map<TimingMark, number>();
@@ -172,7 +177,9 @@ export class VexiSpeechTurn {
     if (!audio) return null;
 
     this.fillerPhrase = phrase;
-    return this.frame(this.nextIndex++, audio, true);
+    const index = this.nextIndex++;
+    this.nextOrderedIndex = this.nextIndex;
+    return this.frame(index, audio, true);
   }
 
   /** The filler actually used, so the next turn can avoid repeating it. */
@@ -209,6 +216,29 @@ export class VexiSpeechTurn {
     return this.ready.splice(0, this.ready.length);
   }
 
+  /**
+   * Hands over every contiguous ready frame starting at `nextOrderedIndex`,
+   * advancing past segments whose synthesis failed or cleaned down to empty.
+   * Non-blocking: holds later indices until earlier ones settle so the wire
+   * always delivers segments in playback order.
+   */
+  drainOrdered(): VexiAudioFrame[] {
+    const out: VexiAudioFrame[] = [];
+    while (true) {
+      if (this.skipped.has(this.nextOrderedIndex)) {
+        this.skipped.delete(this.nextOrderedIndex);
+        this.nextOrderedIndex++;
+        continue;
+      }
+      const frame = this.orderedReady.get(this.nextOrderedIndex);
+      if (!frame) break;
+      this.orderedReady.delete(this.nextOrderedIndex);
+      this.nextOrderedIndex++;
+      out.push(frame);
+    }
+    return out;
+  }
+
   /** Waits for the queue and everything in flight, so `drain()` returns it all. */
   async settle(): Promise<void> {
     while (this.active.size || (!this.aborted && this.queue.length)) {
@@ -216,6 +246,36 @@ export class VexiSpeechTurn {
       // Aborted with a queue that will never start: nothing left to await.
       if (!this.active.size) break;
       await Promise.race(this.active.values());
+    }
+  }
+
+  /**
+   * Yields every remaining frame in strict ascending index order as jobs
+   * complete, instead of holding the whole answer until the last segment
+   * finishes and bursting them out of order.
+   */
+  async *settleOrdered(): AsyncGenerator<VexiAudioFrame> {
+    for (const frame of this.drainOrdered()) yield frame;
+
+    while (this.active.size || (!this.aborted && this.queue.length)) {
+      this.pump();
+      if (!this.active.size) break;
+      await Promise.race(this.active.values());
+      for (const frame of this.drainOrdered()) yield frame;
+    }
+
+    if (this.aborted) return;
+
+    // Defensive tail flush: if anything remains in orderedReady after all jobs
+    // finished, emit in ascending index order so no segment is ever stranded.
+    if (this.orderedReady.size) {
+      const remaining = [...this.orderedReady.keys()].sort((a, b) => a - b);
+      for (const index of remaining) {
+        const frame = this.orderedReady.get(index);
+        this.orderedReady.delete(index);
+        if (frame) yield frame;
+      }
+      this.nextOrderedIndex = this.nextIndex;
     }
   }
 
@@ -230,6 +290,8 @@ export class VexiSpeechTurn {
   abort(): void {
     this.aborted = true;
     this.queue.length = 0;
+    this.orderedReady.clear();
+    this.skipped.clear();
   }
 
   /** The marks observed on this turn, in the order they were reached. */
@@ -280,7 +342,10 @@ export class VexiSpeechTurn {
       // No audio means the provider failed or the segment cleaned down to
       // nothing. Either way the turn degrades to text-only — captions and
       // history are unaffected, which is the correct direction to fail.
-      if (!audio) return;
+      if (!audio) {
+        this.skipped.add(job.index);
+        return;
+      }
 
       // Metered before the abort check: audio the provider already generated
       // was paid for even when nobody is listening any more.
@@ -293,12 +358,18 @@ export class VexiSpeechTurn {
           );
         }
       }
-      if (this.aborted) return;
+      if (this.aborted) {
+        this.skipped.add(job.index);
+        return;
+      }
 
       this.mark('first_audio');
       this.marks.set('last_audio', this.since());
-      this.ready.push(this.frame(job.index, audio, false));
+      const frame = this.frame(job.index, audio, false);
+      this.ready.push(frame);
+      this.orderedReady.set(job.index, frame);
     } catch (error) {
+      this.skipped.add(job.index);
       // `synthesize` is documented not to throw, but a throw here would reach
       // `settle()` as an unhandled rejection and take the whole SSE turn down
       // over a piece of audio.

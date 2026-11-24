@@ -171,6 +171,22 @@ function isDesktop(): boolean {
           >
             <app-icon slot="icon" name="help-circle" [size]="20"></app-icon>
           </app-button>
+          @if (store.voice_mode()) {
+            <button
+              type="button"
+              class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[rgba(var(--color-primary-rgb),0.14)] border border-[rgba(var(--color-primary-rgb),0.45)] text-[var(--color-primary)] text-xs font-semibold shrink-0 transition-colors hover:bg-[rgba(var(--color-primary-rgb),0.2)]"
+              aria-label="Modo voz activo, clic para desactivar"
+              title="Modo voz activo (respuestas con audio)"
+              (click)="store.toggleVoiceMode()"
+            >
+              <span
+                class="w-2 h-2 rounded-full bg-[var(--color-primary)] animate-pulse"
+                aria-hidden="true"
+              ></span>
+              <app-icon name="audio-lines" [size]="14"></app-icon>
+              <span>Modo voz</span>
+            </button>
+          }
           <button
             type="button"
             class="relative lg:hidden w-10 h-10 rounded-full flex items-center justify-center text-text-secondary hover:text-text-primary"
@@ -195,42 +211,41 @@ function isDesktop(): boolean {
           </button>
         </header>
 
-        @if (store.active_conversation()) {
-          <div class="relative z-10 flex-1 min-h-0">
-            <vendix-vex-thread />
-          </div>
+        <!-- Single composer instance across welcome <-> thread so switching or
+             creating a conversation never destroys recording/playback state.
+             Empty state: on a phone the welcome scrolls and the composer stays
+             at the bottom; on desktop the block stays centered. -->
+        <div
+          class="relative z-10 flex-1 min-h-0 flex flex-col"
+          [class.lg:justify-center]="!store.active_conversation()"
+        >
+          @if (store.active_conversation()) {
+            <div class="flex-1 min-h-0">
+              <vendix-vex-thread />
+            </div>
+          } @else {
+            <div
+              class="max-lg:flex-1 min-h-0 overflow-y-auto overscroll-contain"
+              data-testid="vex-welcome-scroll"
+            >
+              <div
+                class="min-h-full max-w-3xl mx-auto w-full px-4 flex flex-col justify-center"
+              >
+                <div class="pt-2 pb-6 md:pb-8">
+                  <vendix-vex-welcome (helpRequested)="help_open.set(true)" />
+                </div>
+              </div>
+            </div>
+          }
           <div
-            class="relative z-10 shrink-0 max-w-3xl mx-auto w-full px-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
+            class="shrink-0 max-w-3xl mx-auto w-full px-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
+            [class.pt-3]="!store.active_conversation()"
+            [class.lg:pb-16]="!store.active_conversation()"
             data-tour="vex-composer"
           >
             <vendix-vex-composer />
           </div>
-        } @else {
-          <!--
-            Empty state: the welcome (greeting, questions, tasks) scrolls and
-            the composer sticks to the bottom, so on a phone the field to
-            write or talk is always on screen. When everything fits (desktop)
-            the block stays centered as before.
-          -->
-          <div
-            class="relative z-10 flex-1 min-h-0 overflow-y-auto overscroll-contain"
-            data-testid="vex-welcome-scroll"
-          >
-            <div
-              class="min-h-full max-w-3xl mx-auto w-full px-4 flex flex-col justify-center"
-            >
-              <div class="pt-2 pb-6 md:pb-8">
-                <vendix-vex-welcome (helpRequested)="help_open.set(true)" />
-              </div>
-              <div
-                class="sticky bottom-0 w-full pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] lg:pb-16 max-lg:bg-gradient-to-t max-lg:from-background max-lg:from-90% max-lg:to-transparent"
-                data-tour="vex-composer"
-              >
-                <vendix-vex-composer />
-              </div>
-            </div>
-          </div>
-        }
+        </div>
       </main>
 
       <div

@@ -35,7 +35,11 @@ function setup(seed: Record<string, any>[]) {
     ]),
     user_roles: fakeTable([roleWith(10, ['store:products:read']), roleWith(11, [])]),
   });
-  const notifications = { sendToUser: jest.fn(async (..._args: unknown[]): Promise<unknown> => ({ id: 1 })) };
+  const notifications = {
+    sendToUserDetailed: jest.fn(
+      async (..._args: unknown[]): Promise<unknown> => ({ status: 'delivered', notification: { id: 1 } }),
+    ),
+  };
   const email = {
     sendEmail: jest.fn(async (..._args: unknown[]) => ({ success: true }) as { success: boolean; error?: string }),
   };
@@ -51,7 +55,7 @@ describe('UserReminderDueJob (QUI-580)', () => {
       { id: 3, store_id: 2, user_id: 20, title: 'Carla', remind_at: new Date('2026-11-14T20:00:00Z') },
     ]);
     expect(await job.notifyDue(NOW)).toBe(3);
-    const calls = notifications.sendToUser.mock.calls.map((c) => c.slice(0, 5));
+    const calls = notifications.sendToUserDetailed.mock.calls.map((c) => c.slice(0, 5));
     expect(calls).toEqual(
       expect.arrayContaining([
         [1, 10, 'reminder_due', 'Recordatorio', 'Ana'],
@@ -59,7 +63,7 @@ describe('UserReminderDueJob (QUI-580)', () => {
         [2, 20, 'reminder_due', 'Recordatorio', 'Carla'],
       ]),
     );
-    expect(notifications.sendToUser.mock.calls[0][5]).toMatchObject({
+    expect(notifications.sendToUserDetailed.mock.calls[0][5]).toMatchObject({
       kind: 'user_reminder',
       url: BITACORA,
     });
@@ -71,7 +75,7 @@ describe('UserReminderDueJob (QUI-580)', () => {
     ]);
     await job.notifyDue(NOW);
     expect(await job.notifyDue(new Date(NOW.getTime() + 60_000))).toBe(0);
-    expect(notifications.sendToUser).toHaveBeenCalledTimes(1);
+    expect(notifications.sendToUserDetailed).toHaveBeenCalledTimes(1);
     expect(prisma.rows[0].notified_at).toEqual(NOW);
   });
 
@@ -83,7 +87,7 @@ describe('UserReminderDueJob (QUI-580)', () => {
       { id: 4, store_id: 1, user_id: 10, title: 'viejo', remind_at: new Date(NOW.getTime() - REMINDER_DUE_LOOKBACK_MS - 1) },
     ]);
     expect(await job.notifyDue(NOW)).toBe(0);
-    expect(notifications.sendToUser).not.toHaveBeenCalled();
+    expect(notifications.sendToUserDetailed).not.toHaveBeenCalled();
     expect(email.sendEmail).not.toHaveBeenCalled();
   });
 
@@ -93,7 +97,7 @@ describe('UserReminderDueJob (QUI-580)', () => {
     ]);
     prisma.user_reminders.updateMany.mockResolvedValueOnce({ count: 0 });
     expect(await job.notifyDue(NOW)).toBe(0);
-    expect(notifications.sendToUser).not.toHaveBeenCalled();
+    expect(notifications.sendToUserDetailed).not.toHaveBeenCalled();
     expect(email.sendEmail).not.toHaveBeenCalled();
   });
 
@@ -101,7 +105,7 @@ describe('UserReminderDueJob (QUI-580)', () => {
     const { job, prisma, notifications, email } = setup([
       { id: 1, store_id: 1, user_id: 10, title: 'Ana', remind_at: new Date('2026-11-14T21:00:00Z') },
     ]);
-    notifications.sendToUser.mockResolvedValueOnce(null);
+    notifications.sendToUserDetailed.mockResolvedValueOnce(null);
     expect(await job.notifyDue(NOW)).toBe(0);
     expect(prisma.rows[0].notified_at).toBeNull();
     expect(email.sendEmail).not.toHaveBeenCalled();
@@ -109,10 +113,39 @@ describe('UserReminderDueJob (QUI-580)', () => {
     const next = new Date(NOW.getTime() + 60_000);
     expect(await job.notifyDue(next)).toBe(1);
     expect(await job.notifyDue(new Date(next.getTime() + 60_000))).toBe(0);
-    expect(notifications.sendToUser).toHaveBeenCalledTimes(2);
-    expect(notifications.sendToUser.mock.calls[1].slice(0, 2)).toEqual([1, 10]);
+    expect(notifications.sendToUserDetailed).toHaveBeenCalledTimes(2);
+    expect(notifications.sendToUserDetailed.mock.calls[1].slice(0, 2)).toEqual([1, 10]);
     expect(prisma.rows[0].notified_at).toEqual(next);
     expect(email.sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failed dispatch (status failed) also releases the claim', async () => {
+    const { job, prisma, notifications, email } = setup([
+      { id: 1, store_id: 1, user_id: 10, title: 'Ana', remind_at: new Date('2026-11-14T21:00:00Z') },
+    ]);
+    notifications.sendToUserDetailed.mockResolvedValueOnce({ status: 'failed', reason: 'error', notification: null });
+    expect(await job.notifyDue(NOW)).toBe(0);
+    expect(prisma.rows[0].notified_at).toBeNull();
+    expect(email.sendEmail).not.toHaveBeenCalled();
+  });
+
+  it('an owner who is no longer a store member is skipped once: no retry, no e-mail', async () => {
+    const { job, prisma, notifications, email } = setup([
+      { id: 1, store_id: 1, user_id: 10, title: 'Ana', remind_at: new Date('2026-11-14T21:00:00Z') },
+    ]);
+    notifications.sendToUserDetailed.mockResolvedValue({
+      user_id: 10,
+      status: 'skipped',
+      reason: 'not_store_member',
+      notification: null,
+      push: false,
+      email: null,
+    });
+    expect(await job.notifyDue(NOW)).toBe(0);
+    expect(prisma.rows[0].notified_at).toEqual(NOW);
+    expect(await job.notifyDue(new Date(NOW.getTime() + 60_000))).toBe(0);
+    expect(notifications.sendToUserDetailed).toHaveBeenCalledTimes(1);
+    expect(email.sendEmail).not.toHaveBeenCalled();
   });
 
   describe('e-mail and destination of the notice (QUI-580 a)', () => {
@@ -134,7 +167,7 @@ describe('UserReminderDueJob (QUI-580)', () => {
       expect(await job.notifyDue(NOW)).toBe(1);
       expect(await job.notifyDue(new Date(NOW.getTime() + 60_000))).toBe(0);
 
-      expect(notifications.sendToUser.mock.calls[0][5]).toMatchObject({
+      expect(notifications.sendToUserDetailed.mock.calls[0][5]).toMatchObject({
         kind: 'user_reminder',
         reminder_id: 1,
         url: '/admin/products/501',
@@ -162,7 +195,7 @@ describe('UserReminderDueJob (QUI-580)', () => {
 
       expect(await job.notifyDue(NOW)).toBe(3);
 
-      const urls = notifications.sendToUser.mock.calls.map((c) => [c[4], (c[5] as { url: string }).url]);
+      const urls = notifications.sendToUserDetailed.mock.calls.map((c) => [c[4], (c[5] as { url: string }).url]);
       expect(urls).toEqual([
         ['Sin vínculo', BITACORA],
         ['Sin permiso · Coca-Cola 1.5L', BITACORA],
@@ -185,7 +218,7 @@ describe('UserReminderDueJob (QUI-580)', () => {
       expect(await job.notifyDue(NOW)).toBe(1);
       expect(await job.notifyDue(new Date(NOW.getTime() + 60_000))).toBe(0);
 
-      expect(notifications.sendToUser).toHaveBeenCalledTimes(1);
+      expect(notifications.sendToUserDetailed).toHaveBeenCalledTimes(1);
       expect(email.sendEmail).toHaveBeenCalledTimes(1);
       expect(prisma.rows[0].notified_at).toEqual(NOW);
     });
@@ -195,7 +228,7 @@ describe('UserReminderDueJob (QUI-580)', () => {
         { id: 1, store_id: 2, user_id: 20, title: 'Carla', remind_at: new Date('2026-11-14T21:00:00Z') },
       ]);
       expect(await job.notifyDue(NOW)).toBe(1);
-      expect(notifications.sendToUser).toHaveBeenCalledTimes(1);
+      expect(notifications.sendToUserDetailed).toHaveBeenCalledTimes(1);
       expect(email.sendEmail).not.toHaveBeenCalled();
     });
   });

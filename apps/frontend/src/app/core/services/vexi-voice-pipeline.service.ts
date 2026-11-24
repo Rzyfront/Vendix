@@ -64,10 +64,15 @@ const CHUNK_INTERVAL_MS = 1000;
  * How long playback waits for a missing index before skipping it.
  *
  * A gap is normal: one failed segment degrades to text-only and its index never
- * arrives. Jobs start in index order, so a lower index is never *delayed* behind
- * a higher one by more than its own synthesis time — past this, it is not coming.
+ * arrives. A 400-char synthesis call to MiniMax/OpenAI regularly takes 2-4 s, so
+ * 1.5 s skipped segments that were still on their way. 8 s comfortably clears
+ * normal provider latency while still recovering from a genuinely lost frame.
  */
-const HOLE_TOLERANCE_MS = 1500;
+const HOLE_TOLERANCE_MS = 8000;
+
+/** Minimal valid silent WAV used to unlock HTMLAudioElement inside a user gesture. */
+const SILENT_WAV_DATA_URI =
+  'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
 
 /** Containers to try, best first. Safari only has the last one. */
 const PREFERRED_MIME_TYPES = [
@@ -144,6 +149,9 @@ export class VexiVoicePipelineService {
 
   readonly recording = computed(() => this.state() === 'recording');
   readonly speaking = computed(() => this.state() === 'speaking');
+  /** Stream or message turn id currently active for playback, or null when idle. */
+  readonly activeTurnId = signal<string | null>(null);
+
   /**
    * Loudness of the microphone while recording, 0 (quiet) to 1 (loud). `null`
    * when nothing is being captured or the browser cannot measure it; whoever
@@ -187,9 +195,51 @@ export class VexiVoicePipelineService {
   private readonly pending = new Map<number, QueuedAudio>();
   private nextIndex = 0;
   private playing = false;
-  private audio: HTMLAudioElement | null = null;
+  /**
+   * Single persistent audio element reused across every segment of a turn.
+   *
+   * Constructing `new Audio(url)` per segment breaks after ~1 second on Safari,
+   * iOS and strict-autoplay Chrome: the initial filler plays while transient
+   * user activation is still open, then the LLM runs for several seconds,
+   * activation expires, and every subsequent `new Audio().play()` rejects with
+   * `NotAllowedError` — silently dropping the entire answer. Unlocking ONE
+   * element inside the user's click/pointer gesture via `primeAudio()` keeps
+   * playback authorised for every segment that follows.
+   */
+  private player: HTMLAudioElement | null = null;
+  private currentUrl: string | null = null;
+  private cleanupListeners: (() => void) | null = null;
   private holeTimer: ReturnType<typeof setTimeout> | null = null;
   private turnFinished = false;
+
+  /**
+   * Unlocks the reusable `HTMLAudioElement` synchronously inside a user
+   * gesture (click / pointerup / keydown) so delayed multi-segment TTS frames
+   * are never blocked by browser autoplay policy.
+   */
+  primeAudio(): void {
+    if (this.playing || typeof Audio === 'undefined') return;
+    const player = this.ensurePlayer();
+    if (!player) return;
+
+    player.muted = true;
+    player.src = SILENT_WAV_DATA_URI;
+    const attempt = player.play();
+    if (attempt && typeof attempt.then === 'function') {
+      void attempt
+        .then(() => {
+          if (!this.playing) {
+            player.pause();
+            player.muted = false;
+          }
+        })
+        .catch(() => {
+          if (!this.playing) player.muted = false;
+        });
+    } else if (!this.playing) {
+      player.muted = false;
+    }
+  }
 
   /**
    * Synthesizes the filler bank so the first turn does not pay for it.
@@ -351,6 +401,7 @@ export class VexiVoicePipelineService {
   startTurn(streamId: string): void {
     this.resetPlayback();
     this.acceptingStreamId = streamId;
+    this.activeTurnId.set(streamId);
     this.turnFinished = false;
     this.generation++;
   }
@@ -383,6 +434,13 @@ export class VexiVoicePipelineService {
   finishTurn(streamId: string): void {
     if (streamId !== this.acceptingStreamId) return;
     this.turnFinished = true;
+    this.clearHoleTimer();
+    if (!this.playing && !this.pending.size) {
+      this.acceptingStreamId = null;
+      this.activeTurnId.set(null);
+      if (this.state() === 'speaking') this.state.set('idle');
+      return;
+    }
     this.pump();
   }
 
@@ -400,6 +458,7 @@ export class VexiVoicePipelineService {
   /** Stops playback and drops everything queued. */
   interrupt(): void {
     this.acceptingStreamId = null;
+    this.activeTurnId.set(null);
     this.resetPlayback();
     if (this.state() === 'speaking') this.state.set('idle');
   }
@@ -563,10 +622,21 @@ export class VexiVoicePipelineService {
 
   private play(item: QueuedAudio): void {
     const generation = this.generation;
-    const audio = new Audio(item.url);
+    const audio = this.ensurePlayer();
+    if (!audio) {
+      URL.revokeObjectURL(item.url);
+      return;
+    }
+
+    this.detachListeners();
+    if (this.currentUrl) {
+      URL.revokeObjectURL(this.currentUrl);
+    }
 
     this.playing = true;
-    this.audio = audio;
+    this.currentUrl = item.url;
+    audio.muted = false;
+    audio.src = item.url;
     this.state.set('speaking');
 
     if (this.marks().perceivedMs === undefined && this.releasedAt) {
@@ -580,30 +650,58 @@ export class VexiVoicePipelineService {
       this.mark({ contentMs: Date.now() - this.releasedAt });
     }
 
+    let settled = false;
     const finish = () => {
+      if (settled) return;
+      settled = true;
+      this.detachListeners();
+      if (this.currentUrl === item.url) {
+        this.currentUrl = null;
+      }
       URL.revokeObjectURL(item.url);
       // A turn that was interrupted while this segment played must not resume
       // into the next one — that queue belongs to an answer nobody is waiting on.
       if (generation !== this.generation) return;
 
       this.playing = false;
-      this.audio = null;
 
       if (this.pending.size) {
         this.pump();
       } else if (this.turnFinished) {
+        this.acceptingStreamId = null;
+        this.activeTurnId.set(null);
         this.state.set('idle');
       }
     };
 
-    audio.addEventListener('ended', finish, { once: true });
-    audio.addEventListener('error', finish, { once: true });
+    audio.addEventListener('ended', finish);
+    audio.addEventListener('error', finish);
+    this.cleanupListeners = () => {
+      audio.removeEventListener('ended', finish);
+      audio.removeEventListener('error', finish);
+    };
 
-    void audio.play().catch(() => {
-      // Autoplay refused, or the format is not decodable here. Skipping keeps
-      // the rest of the answer audible instead of stalling the queue on it.
-      finish();
-    });
+    const playResult = audio.play();
+    if (playResult && typeof playResult.catch === 'function') {
+      void playResult.catch(() => {
+        // Autoplay refused, or the format is not decodable here. Skipping keeps
+        // the rest of the answer audible instead of stalling the queue on it.
+        finish();
+      });
+    }
+  }
+
+  private ensurePlayer(): HTMLAudioElement | null {
+    if (this.player) return this.player;
+    if (typeof Audio === 'undefined') return null;
+    this.player = new Audio();
+    return this.player;
+  }
+
+  private detachListeners(): void {
+    if (!this.cleanupListeners) return;
+    this.cleanupListeners();
+    this.cleanupListeners = null;
   }
 
   private armHoleTimer(): void {
@@ -626,10 +724,16 @@ export class VexiVoicePipelineService {
   private resetPlayback(): void {
     this.generation++;
     this.clearHoleTimer();
+    this.detachListeners();
 
-    if (this.audio) {
-      this.audio.pause();
-      this.audio = null;
+    if (this.player) {
+      this.player.pause();
+      this.player.removeAttribute('src');
+      this.player.load();
+    }
+    if (this.currentUrl) {
+      URL.revokeObjectURL(this.currentUrl);
+      this.currentUrl = null;
     }
     for (const item of this.pending.values()) URL.revokeObjectURL(item.url);
     this.pending.clear();

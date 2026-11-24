@@ -21,7 +21,8 @@ import { CrmTagsController } from './tags/crm-tags.controller';
 import { CrmTagsService } from './tags/crm-tags.service';
 import { CrmTasksController } from './tasks/crm-tasks.controller';
 import { CrmTasksService } from './tasks/crm-tasks.service';
-import { CrmTaskDueJob } from './tasks/crm-task-due.job';
+import { CrmTaskReminderSource } from './tasks/crm-task-reminders.source';
+import { ReminderSourceRegistry } from '../../notifications/reminders/reminder-source.registry';
 import { CrmPipelineController } from './pipeline/crm-pipeline.controller';
 import { CrmPipelineService } from './pipeline/crm-pipeline.service';
 import { CrmStageTemplatesService } from './pipeline/crm-stage-templates.service';
@@ -66,7 +67,9 @@ import { CrmUnsubscribeService } from './campaigns/crm-unsubscribe.service';
     CustomerCrmService,
     CrmTagsService,
     CrmTasksService,
-    CrmTaskDueJob,
+    // Recordatorios de tareas (por vencer, vencida, escalamiento, resumen):
+    // los dispara el motor común `ScheduledRemindersJob`.
+    CrmTaskReminderSource,
     CrmPipelineService,
     CrmStageTemplatesService,
     CustomerDataSheetService,
@@ -96,6 +99,8 @@ export class CustomerCrmModule implements OnModuleInit {
     private readonly segmentQueryService: CrmSegmentQueryService,
     private readonly segmentMembersService: CrmSegmentMembersService,
     private readonly crmCampaignsService: CrmCampaignsService,
+    private readonly reminderSources: ReminderSourceRegistry,
+    private readonly crmTaskReminderSource: CrmTaskReminderSource,
   ) {}
 
   /**
@@ -106,6 +111,7 @@ export class CustomerCrmModule implements OnModuleInit {
    * module edge is created (same pattern as `CustomersModule`).
    */
   onModuleInit(): void {
+    this.reminderSources.register(this.crmTaskReminderSource);
     const { auditService, customersService } = this;
     this.toolRegistry.registerMany([
       ...createCrmCustomerTools({

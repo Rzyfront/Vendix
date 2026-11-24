@@ -576,27 +576,26 @@ export class S3Service {
 
   /**
    * Signs a URL for a given S3 key, optionally targeting a thumbnail.
-   * If the URL is already an absolute HTTP(S) URL, returns it as is.
+   * If the URL is already an external HTTP(S) URL (not our bucket), returns it as is.
    */
   async signUrl(
     keyOrUrl: string | null | undefined,
     useThumbnail = false,
+    expiresIn = 24 * 60 * 60,
   ): Promise<string | undefined> {
     if (!keyOrUrl) {
       return undefined;
     }
 
-    const EXPIRATION_TIME = 24 * 60 * 60; // 24 hours
-
-    // If it's an HTTP URL, check if it's an S3 URL that needs re-signing
+    // If it's an HTTP URL, check if it's an S3 URL targeting our bucket
     let targetKey = keyOrUrl;
-    if (keyOrUrl.startsWith('http')) {
-      const extractedKey = extractS3KeyFromUrl(keyOrUrl);
+    if (keyOrUrl.startsWith('http://') || keyOrUrl.startsWith('https://')) {
+      const extractedKey = extractS3KeyFromUrl(keyOrUrl, this.bucketName);
       if (!extractedKey || extractedKey === keyOrUrl) {
-        // External URL (not S3) — return as-is
+        // External URL (not our S3 bucket) — return as-is
         return keyOrUrl;
       }
-      // It was an S3 URL (signed or unsigned) — use the extracted key
+      // It was an S3 URL for our bucket (signed or unsigned) — use the extracted key
       targetKey = extractedKey;
     }
 
@@ -606,14 +605,14 @@ export class S3Service {
       const thumbKey = [...pathParts, `thumb_${fileName}`].join('/');
 
       try {
-        return await this.getPresignedUrl(thumbKey, EXPIRATION_TIME);
+        return await this.getPresignedUrl(thumbKey, expiresIn);
       } catch {
         // Return original key signature as fallback
-        return this.getPresignedUrl(targetKey, EXPIRATION_TIME);
+        return this.getPresignedUrl(targetKey, expiresIn);
       }
     }
 
-    return this.getPresignedUrl(targetKey, EXPIRATION_TIME);
+    return this.getPresignedUrl(targetKey, expiresIn);
   }
 
   /**
@@ -887,11 +886,57 @@ export class S3Service {
   }
 
   /**
-   * Sanitizes markdown content for storage by replacing signed S3 URLs with S3 keys.
-   * Finds all markdown image patterns ![alt](url) and extracts the S3 key from each URL.
+   * Splits a markdown image destination into its URL/key and optional trailing title
+   * (e.g. `global/a.webp "Step 1"` or `<global/a.webp>`).
+   */
+  private parseMarkdownImageTarget(rawTarget: string): {
+    url: string;
+    wrapped: boolean;
+    suffix: string;
+  } {
+    const trimmed = rawTarget.trim();
+    if (trimmed.startsWith('<')) {
+      const closeIndex = trimmed.indexOf('>');
+      if (closeIndex > 1) {
+        return {
+          url: trimmed.slice(1, closeIndex).trim(),
+          wrapped: true,
+          suffix: trimmed.slice(closeIndex + 1),
+        };
+      }
+    }
+
+    const titleMatch = /^(\S+)(\s+["'][\s\S]*["'])$/.exec(trimmed);
+    if (titleMatch) {
+      return {
+        url: titleMatch[1],
+        wrapped: false,
+        suffix: titleMatch[2],
+      };
+    }
+
+    return { url: trimmed, wrapped: false, suffix: '' };
+  }
+
+  /**
+   * Returns true only for safe, relative S3 object keys (excludes HTTP(S) URLs,
+   * other URI schemes like `data:` / `javascript:`, root/protocol-relative paths,
+   * and traversal patterns).
+   */
+  private isSignableMarkdownS3Key(value: string): boolean {
+    if (!isS3Key(value)) return false;
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.startsWith('/')) return false;
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)) return false;
+    return isSafeS3Key(trimmed);
+  }
+
+  /**
+   * Sanitizes markdown content for storage by replacing own-bucket S3 URLs with S3 keys.
+   * External URLs (including foreign S3 buckets) are preserved untouched.
    *
    * @param content - Markdown content potentially containing signed S3 URLs
-   * @returns Content with signed URLs replaced by S3 keys
+   * @returns Content with own-bucket URLs replaced by S3 keys
    */
   sanitizeMarkdownContent(content: string): string {
     if (!content) {
@@ -900,25 +945,34 @@ export class S3Service {
 
     const markdownImageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
 
-    return content.replace(markdownImageRegex, (match, alt, url) => {
-      const key = extractS3KeyFromUrl(url);
-      return `![${alt}](${key || url})`;
+    return content.replace(markdownImageRegex, (match, alt, rawTarget) => {
+      const { url, wrapped, suffix } = this.parseMarkdownImageTarget(rawTarget);
+      if (!url) return match;
+      const key = extractS3KeyFromUrl(url, this.bucketName);
+      if (!key || key === url) return match;
+      const destination = wrapped ? `<${key}>` : key;
+      return `![${alt}](${destination}${suffix})`;
     });
   }
 
   /**
-   * Signs markdown content by replacing S3 keys with fresh presigned URLs.
-   * Finds all markdown image patterns ![alt](url) and signs each S3 key.
+   * Signs markdown content by replacing S3 keys (and expired/unsigned URLs of
+   * our bucket) with fresh presigned URLs. External URLs and unsafe keys are
+   * preserved without throwing.
    *
-   * @param content - Markdown content potentially containing S3 keys
+   * @param content - Markdown content potentially containing S3 keys or S3 URLs
+   * @param expiresIn - Optional presigned URL TTL in seconds (defaults to 24h)
    * @returns Content with S3 keys replaced by fresh signed URLs
    */
-  async signMarkdownContent(content: string): Promise<string> {
+  async signMarkdownContent(
+    content: string,
+    expiresIn?: number,
+  ): Promise<string> {
     if (!content) {
       return content;
     }
 
-    // First, sanitize: replace any signed/expired S3 URLs with their S3 keys
+    // First, sanitize: replace any signed/expired own-bucket S3 URLs with their S3 keys
     const sanitized = this.sanitizeMarkdownContent(content);
 
     const markdownImageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
@@ -928,20 +982,52 @@ export class S3Service {
       return sanitized;
     }
 
-    let result = sanitized;
+    // Deduplicate signing per unique S3 key in this document
+    const signedByKey = new Map<string, Promise<string | undefined>>();
+    const signKey = (key: string): Promise<string | undefined> => {
+      let pending = signedByKey.get(key);
+      if (!pending) {
+        pending = (
+          expiresIn !== undefined
+            ? this.getPresignedUrl(key, expiresIn)
+            : this.signUrl(key)
+        ).catch((error) => {
+          this.logger?.warn?.(
+            `Could not sign markdown image key "${key}": ${this.describeError(error)}`,
+          );
+          return undefined;
+        });
+        signedByKey.set(key, pending);
+      }
+      return pending;
+    };
+
+    const parts: string[] = [];
+    let cursor = 0;
 
     for (const match of matches) {
-      const [fullMatch, alt, url] = match;
+      const index = match.index ?? 0;
+      const [fullMatch, alt, rawTarget] = match;
+      parts.push(sanitized.slice(cursor, index));
 
-      if (isS3Key(url)) {
-        const signedUrl = await this.signUrl(url);
+      const { url, wrapped, suffix } = this.parseMarkdownImageTarget(rawTarget);
+      if (this.isSignableMarkdownS3Key(url)) {
+        const signedUrl = await signKey(url);
         if (signedUrl) {
-          result = result.replace(fullMatch, `![${alt}](${signedUrl})`);
+          const destination = wrapped ? `<${signedUrl}>` : signedUrl;
+          parts.push(`![${alt}](${destination}${suffix})`);
+        } else {
+          parts.push(fullMatch);
         }
+      } else {
+        parts.push(fullMatch);
       }
+
+      cursor = index + fullMatch.length;
     }
 
-    return result;
+    parts.push(sanitized.slice(cursor));
+    return parts.join('');
   }
 
   /**
@@ -960,7 +1046,7 @@ export class S3Service {
    * await prisma.products.update({ data: { image_url: keyToStore } });
    */
   sanitizeForStorage(urlOrKey: string | null | undefined): string | null {
-    return extractS3KeyFromUrl(urlOrKey);
+    return extractS3KeyFromUrl(urlOrKey, this.bucketName);
   }
 
   /**

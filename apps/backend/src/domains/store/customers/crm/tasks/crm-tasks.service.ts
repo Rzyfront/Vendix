@@ -7,7 +7,8 @@ import {
   resolveStoreTimezone,
   zonedWallClockToUtc,
 } from '../../../../../common/utils/store-timezone.util';
-import { NotificationsService } from '../../../notifications/notifications.service';
+import { NotificationDispatcher } from '../../../notifications/notification-dispatcher.service';
+import { ReminderScheduler } from '../../../notifications/reminders/reminder-scheduler.service';
 import {
   CrmPipelineService,
   CrmTaskOpportunityMove,
@@ -27,11 +28,24 @@ import {
   CrmTasksQueryDto,
   UpdateCrmTaskDto,
 } from './dto/crm-tasks.dto';
+import {
+  CRM_TASK_ASSIGNED_NOTIFICATION,
+  CRM_TASK_CLOSED_NOTIFICATION,
+  CRM_TASK_REASSIGNED_NOTIFICATION,
+  CRM_TASK_REMINDER_SOURCE,
+  crmTaskCustomerSuffix,
+  crmTaskData,
+  crmTaskReminderRecipients,
+  formatCrmTaskDueAt,
+} from './crm-task-notifications';
+
+export {
+  CRM_TASK_ASSIGNED_NOTIFICATION,
+  CRM_TASK_DUE_NOTIFICATION,
+  CRM_TASKS_ROUTE,
+} from './crm-task-notifications';
 
 export const CRM_TASKS_PERMISSION = 'store:crm_tasks:manage';
-export const CRM_TASK_ASSIGNED_NOTIFICATION = 'crm_task_assigned';
-export const CRM_TASK_DUE_NOTIFICATION = 'crm_task_due';
-export const CRM_TASKS_ROUTE = '/admin/customers/tasks';
 /** People the support picker lists per search. */
 export const CRM_TASK_STAFF_LIMIT = 20;
 
@@ -68,9 +82,16 @@ interface DayWindow {
  * CRM tasks (PLAN-CRM §4.6). A seller or cashier only sees the tasks assigned
  * to them, created by them or where they are support, and can only assign to
  * themselves (they can add support people); owner/admin (see-all) see and
- * assign everything. Assigning someone else, or adding them as support, sends
- * them a notification through the existing notifications system; the due
- * reminder is `CrmTaskDueJob` and only goes to the assignee.
+ * assign everything.
+ *
+ * Notifications (odd/tasks/recordatorios-notificaciones.md §2.1) go through
+ * `NotificationDispatcher` (store staff only, each person's device/e-mail
+ * preferences) and never to whoever did the action: assigned / added as
+ * support, reassigned (the previous assignee is told too), rescheduled by
+ * someone else, and completed or cancelled by someone else (to the creator).
+ * Every write re-syncs the task's reminders in `scheduled_reminders`
+ * (`ReminderScheduler`): due soon, due and still overdue after 24 h, fired by
+ * `ScheduledRemindersJob` through `CrmTaskReminderSource`.
  *
  * A task linked to an opportunity can "move" it: when the task is completed
  * the opportunity goes to `move_to_stage_id` through the pipeline service.
@@ -86,8 +107,9 @@ export class CrmTasksService {
 
   constructor(
     private readonly prisma: StorePrismaService,
-    private readonly notifications: NotificationsService,
+    private readonly dispatcher: NotificationDispatcher,
     private readonly pipeline: CrmPipelineService,
+    private readonly reminders: ReminderScheduler,
   ) {}
 
   async list(query: CrmTasksQueryDto) {
@@ -278,6 +300,7 @@ export class CrmTasksService {
     });
     await this.notifyAssigned(viewer, created);
     await this.notifySupporters(viewer, created, supporters);
+    await this.syncReminders(created);
     return this.toTask(created, new Date());
   }
 
@@ -342,6 +365,7 @@ export class CrmTasksService {
     // on the row, so of two simultaneous completions only one moves the
     // opportunity; the other fields of the same request are saved anyway.
     let completed = false;
+    let cancelled = false;
     if (
       Object.keys(data).length ||
       Object.keys(state).length ||
@@ -365,6 +389,7 @@ export class CrmTasksService {
             data: state,
           });
           completed = completing && count === 1;
+          cancelled = state.status === 'cancelled' && count === 1;
         }
         if (support.removed.length) {
           await tx.crm_task_assignees.deleteMany({
@@ -392,8 +417,18 @@ export class CrmTasksService {
       include: TASK_INCLUDE,
     });
     if (!updated) throw new VendixHttpException(ErrorCodes.CRM_TASK_001);
-    if (reassigned) await this.notifyAssigned(viewer, updated);
+    if (reassigned) {
+      await this.notifyAssigned(viewer, updated);
+      await this.notifyReassignedAway(viewer, updated, current.assigned_user_id);
+    }
     await this.notifySupporters(viewer, updated, support.added);
+    if (!reassigned && this.dueChanged(current.due_at, updated.due_at)) {
+      await this.notifyRescheduled(viewer, updated);
+    }
+    if (completed || cancelled) {
+      await this.notifyClosed(viewer, updated, completed ? 'done' : 'cancelled');
+    }
+    await this.syncReminders(updated);
     const task = this.toTask(updated, new Date());
     // Reopening never moves it back; only the step to `done` moves it, and
     // only for the request that took that step.
@@ -744,18 +779,101 @@ export class CrmTasksService {
     }
   }
 
+  /**
+   * One personal notice through the dispatcher: store staff only, with the
+   * person's device/e-mail preferences. Never throws (the dispatcher logs).
+   */
+  private async notify(
+    viewer: CrmViewer,
+    userId: number,
+    type: string,
+    title: string,
+    body: string,
+    data: Record<string, unknown>,
+  ): Promise<void> {
+    await this.dispatcher.notify({
+      store_id: viewer.store_id,
+      user_ids: [userId],
+      type,
+      title,
+      body,
+      data,
+    });
+  }
+
   /** Never notifies the actor about their own assignment. */
   private async notifyAssigned(viewer: CrmViewer, task: TaskRow) {
     if (!task.assigned_user_id || task.assigned_user_id === viewer.user_id) {
       return;
     }
-    await this.notifications.sendToUser(
-      viewer.store_id,
+    await this.notify(
+      viewer,
       task.assigned_user_id,
       CRM_TASK_ASSIGNED_NOTIFICATION,
       'Nueva tarea asignada',
       `${task.title}${this.customerSuffix(task)}`,
-      { kind: 'crm_task', task_id: task.id, url: CRM_TASKS_ROUTE },
+      crmTaskData(task.id),
+    );
+  }
+
+  /** The previous assignee learns the task is no longer theirs. */
+  private async notifyReassignedAway(
+    viewer: CrmViewer,
+    task: TaskRow,
+    previousAssignee: number | null,
+  ) {
+    if (!previousAssignee || previousAssignee === viewer.user_id) return;
+    if (previousAssignee === task.assigned_user_id) return;
+    await this.notify(
+      viewer,
+      previousAssignee,
+      CRM_TASK_REASSIGNED_NOTIFICATION,
+      'Tarea reasignada',
+      `Ya no está a tu cargo: ${task.title}${this.customerSuffix(task)}`,
+      crmTaskData(task.id, { role: 'previous_assignee' }),
+    );
+  }
+
+  /**
+   * Someone else moved (or cleared) the due date of a pending task: its
+   * assignee (the creator when unassigned) is told. Same preference as a
+   * reassignment ("Tarea reasignada o reprogramada").
+   */
+  private async notifyRescheduled(viewer: CrmViewer, task: TaskRow) {
+    if (task.status !== 'pending') return;
+    const owner = task.assigned_user_id ?? task.created_by_user_id;
+    if (!owner || owner === viewer.user_id) return;
+    const when = task.due_at
+      ? `nueva fecha: ${formatCrmTaskDueAt(
+          task.due_at,
+          await resolveStoreTimezone(this.prisma, viewer.store_id),
+        )}`
+      : 'ya no tiene fecha';
+    await this.notify(
+      viewer,
+      owner,
+      CRM_TASK_REASSIGNED_NOTIFICATION,
+      'Tarea reprogramada',
+      `${task.title}${this.customerSuffix(task)} · ${when}`,
+      crmTaskData(task.id, { role: 'rescheduled' }),
+    );
+  }
+
+  /** Completed or cancelled by someone else: the creator is told. */
+  private async notifyClosed(
+    viewer: CrmViewer,
+    task: TaskRow,
+    status: 'done' | 'cancelled',
+  ) {
+    const creator = task.created_by_user_id;
+    if (!creator || creator === viewer.user_id) return;
+    await this.notify(
+      viewer,
+      creator,
+      CRM_TASK_CLOSED_NOTIFICATION,
+      status === 'done' ? 'Tarea completada' : 'Tarea cancelada',
+      `${task.title}${this.customerSuffix(task)}`,
+      crmTaskData(task.id, { status }),
     );
   }
 
@@ -767,26 +885,52 @@ export class CrmTasksService {
   ) {
     for (const userId of added) {
       if (userId === viewer.user_id) continue;
-      await this.notifications.sendToUser(
-        viewer.store_id,
+      await this.notify(
+        viewer,
         userId,
         CRM_TASK_ASSIGNED_NOTIFICATION,
         'Te sumaron como apoyo',
         `Te sumaron como apoyo en: ${task.title}${this.customerSuffix(task)}`,
-        {
-          kind: 'crm_task',
-          task_id: task.id,
-          url: CRM_TASKS_ROUTE,
-          role: 'support',
-        },
+        crmTaskData(task.id, { role: 'support' }),
+      );
+    }
+  }
+
+  private dueChanged(before: Date | null, after: Date | null): boolean {
+    return (before?.getTime() ?? null) !== (after?.getTime() ?? null);
+  }
+
+  /**
+   * Re-plans the task reminders after every write (idempotent): a pending
+   * task with a date gets due soon / due / escalation; done, cancelled or
+   * without a date cancels them. A failure never undoes the write.
+   */
+  private async syncReminders(task: TaskRow): Promise<void> {
+    try {
+      await this.reminders.sync({
+        source_type: CRM_TASK_REMINDER_SOURCE,
+        source_id: task.id,
+        store_id: task.store_id,
+        due_at: task.due_at,
+        status: task.status,
+        recipients: crmTaskReminderRecipients({
+          assigned_user_id: task.assigned_user_id,
+          created_by_user_id: task.created_by_user_id,
+          supporter_ids: task.supporters.map((row) => row.user.id),
+        }),
+        digest: true,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Task ${task.id}: reminders not synced: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       );
     }
   }
 
   private customerSuffix(task: TaskRow): string {
-    return task.customer
-      ? ` · ${[task.customer.first_name, task.customer.last_name].filter(Boolean).join(' ')}`
-      : '';
+    return crmTaskCustomerSuffix(task.customer);
   }
 
   private async dayWindow(storeId: number): Promise<DayWindow> {
