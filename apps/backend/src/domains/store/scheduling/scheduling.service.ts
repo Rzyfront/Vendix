@@ -10,6 +10,7 @@ import {
 } from '../../../common/utils/store-timezone.util';
 import { BookingSchedulingSource } from './sources/booking-scheduling.source';
 import { ScheduledOrderSchedulingSource } from './sources/scheduled-order-scheduling.source';
+import { loadProviderAvailability } from './sources/provider-availability';
 import {
   SCHEDULING_SOURCES,
   SCHEDULING_STATUS_GROUPS,
@@ -187,12 +188,20 @@ export class SchedulingService {
         this.sources[type].fetch(ctx, { ...filters, order: 'asc' }, SCHEDULING_CALENDAR_CAP),
       ),
     );
+    // Requisito de prestadores: con el filtro de personal, la Agenda pinta el
+    // horario de cada prestador, sus bloqueos y excepciones (mismas reglas que
+    // Reservas). Solo si las reservas están habilitadas para la tienda.
+    const availability =
+      filters.staff_ids?.length && access.types.includes('booking')
+        ? await loadProviderAvailability(this.prisma, filters.staff_ids, filters.from, filters.to)
+        : [];
     return {
       data: pages
         .flatMap((p) => p.events)
         .sort((a, b) => compareSchedulingEvents(a, b, 'asc')),
       truncated: pages.some((p) => p.truncated || p.total > p.events.length),
       types: access.types,
+      availability,
     };
   }
 

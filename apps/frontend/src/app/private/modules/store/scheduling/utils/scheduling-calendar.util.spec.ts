@@ -1,4 +1,6 @@
 import {
+  availabilityByDay,
+  offHourBands,
   filterValuesToQuery,
   hourRangeFor,
   layoutDay,
@@ -128,5 +130,30 @@ describe('Agenda unificada F1 — cálculo del calendario', () => {
     expect(service.map((a) => a.action)).toContain('/admin/reservations/schedules');
     expect(service.map((a) => a.action)).toContain('/admin/reservations/queue');
     expect(service.map((a) => a.action)).toContain('/admin/services/stations');
+  });
+
+  it('une la disponibilidad de los prestadores y sombrea lo que queda fuera', () => {
+    const days = availabilityByDay([
+      { staff_id: 3, date: '2026-11-23', windows: [{ start: '08:00', end: '12:00' }, { start: '14:00', end: '18:00' }], unavailable: false, reason: null },
+      { staff_id: 4, date: '2026-11-23', windows: [{ start: '11:00', end: '15:00' }], unavailable: false, reason: null },
+      { staff_id: 3, date: '2026-11-24', windows: [], unavailable: true, reason: 'Vacaciones' },
+      { staff_id: 4, date: '2026-11-24', windows: [], unavailable: true, reason: 'Incapacidad' },
+    ]);
+    expect(days.get('2026-11-23')).toEqual({
+      windows: [{ start: 480, end: 1080 }],
+      blocked: false,
+      reasons: [],
+    });
+    expect(days.get('2026-11-24')).toEqual({ windows: [], blocked: true, reasons: ['Vacaciones', 'Incapacidad'] });
+
+    const range = { start: 420, end: 1260 }; // 07:00–21:00
+    const bands = offHourBands(days.get('2026-11-23'), range);
+    expect(bands.length).toBe(2);
+    expect(bands[0].top).toBeCloseTo(0, 5);
+    expect(bands[0].height).toBeCloseTo((60 / 840) * 100, 5);
+    expect(bands[1].top).toBeCloseTo((660 / 840) * 100, 5);
+    // Día bloqueado: todo sombreado. Sin datos de disponibilidad: nada.
+    expect(offHourBands(days.get('2026-11-24'), range)).toEqual([{ top: 0, height: 100 }]);
+    expect(offHourBands(undefined, range)).toEqual([]);
   });
 });

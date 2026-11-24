@@ -77,10 +77,21 @@ export interface SchedulingListResponse {
   };
 }
 
+/** Disponibilidad de un prestador en un día (horario, bloqueos, excepciones). */
+export interface ProviderDayAvailability {
+  staff_id: number;
+  date: string;
+  windows: { start: string; end: string }[];
+  unavailable: boolean;
+  reason: string | null;
+}
+
 export interface SchedulingCalendarResult {
   data: SchedulingEvent[];
   truncated: boolean;
   types: SchedulingEventType[];
+  /** Solo con filtro de personal: disponibilidad de cada prestador por día. */
+  availability?: ProviderDayAvailability[];
 }
 
 /** Variante de `<app-badge>` por grupo de estado. */

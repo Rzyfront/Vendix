@@ -2,12 +2,15 @@ import { ChangeDetectionStrategy, Component, computed, input, output } from '@an
 import { IconComponent } from '../../../../../../shared/components';
 import { dayMonth, fullDate, weekdayShort } from '../../../scheduled-orders/utils/ymd.util';
 import {
+  ProviderDayAvailability,
   SchedulingEvent,
   SchedulingStatusGroup,
 } from '../../interfaces/scheduling.interface';
 import {
   AgendaView,
+  availabilityByDay,
   eventsByDay,
+  offHourBands,
   hourRangeFor,
   layoutDay,
   monthGrid,
@@ -61,6 +64,17 @@ const MONTH_CELL_LIMIT = 3;
         right: 0;
         border-top: 1px solid var(--color-border);
       }
+      .off-hours {
+        position: absolute;
+        left: 0;
+        right: 0;
+        pointer-events: none;
+        background: repeating-linear-gradient(
+          135deg,
+          color-mix(in srgb, var(--color-text-muted) 10%, transparent) 0 0.25rem,
+          transparent 0.25rem 0.5rem
+        );
+      }
       .ev-block {
         position: absolute;
         overflow: hidden;
@@ -91,6 +105,14 @@ const MONTH_CELL_LIMIT = 3;
                 >
                   {{ dayNumber(day) }}
                 </button>
+                @if (availabilityLabel(day); as label) {
+                  <span
+                    class="mb-1 block truncate rounded-md bg-muted/10 px-1 text-xs text-text-secondary"
+                    [attr.title]="label"
+                    data-testid="day-unavailable"
+                    >{{ label }}</span
+                  >
+                }
                 @if (byDay().get(day); as list) {
                   <!-- Celular: solo el conteo; tocar el día abre la vista Día. -->
                   <button
@@ -164,6 +186,19 @@ const MONTH_CELL_LIMIT = 3;
                 @for (h of hours(); track h; let i = $index) {
                   <div class="hour-line" [style.top.%]="(i / hours().length) * 100"></div>
                 }
+                <!-- Disponibilidad del prestador filtrado: fuera de horario,
+                     bloqueos y excepciones quedan sombreados. -->
+                @for (band of offBands().get(day) ?? []; track band.top) {
+                  <div class="off-hours" data-testid="off-hours" [style.top.%]="band.top" [style.height.%]="band.height"></div>
+                }
+                @if (availabilityLabel(day); as label) {
+                  <div
+                    class="absolute inset-x-1 top-1 z-10 truncate rounded-md bg-muted/10 px-1.5 py-0.5 text-xs font-semibold text-text-secondary"
+                    data-testid="day-unavailable"
+                  >
+                    {{ label }}
+                  </div>
+                }
                 @for (p of placed().get(day) ?? []; track p.event.id) {
                   <button
                     type="button"
@@ -202,6 +237,8 @@ export class EventCalendarComponent {
   readonly anchor = input.required<string>();
   readonly today = input<string>('');
   readonly events = input<readonly SchedulingEvent[]>([]);
+  /** Disponibilidad de los prestadores filtrados (vacío = no se pinta). */
+  readonly availability = input<readonly ProviderDayAvailability[]>([]);
 
   readonly eventClick = output<SchedulingEvent>();
   readonly dayClick = output<string>();
@@ -218,7 +255,24 @@ export class EventCalendarComponent {
     const days = new Set(this.days());
     return this.events().filter((ev) => days.has(ev.date));
   });
-  readonly range = computed(() => hourRangeFor(this.visibleEvents()));
+  readonly availabilityDays = computed(() => availabilityByDay(this.availability()));
+  readonly range = computed(() => {
+    const days = this.availabilityDays();
+    const windows = this.days().flatMap((day) =>
+      (days.get(day)?.windows ?? []).map((w) => ({
+        start: `${String(Math.floor(w.start / 60)).padStart(2, '0')}:${String(w.start % 60).padStart(2, '0')}`,
+        end: w.end >= 1440 ? '00:00' : `${String(Math.floor(w.end / 60)).padStart(2, '0')}:${String(w.end % 60).padStart(2, '0')}`,
+      })),
+    );
+    return hourRangeFor(this.visibleEvents(), windows);
+  });
+  readonly offBands = computed(() => {
+    const range = this.range();
+    const days = this.availabilityDays();
+    const map = new Map<string, ReturnType<typeof offHourBands>>();
+    for (const day of this.days()) map.set(day, offHourBands(days.get(day), range));
+    return map;
+  });
   readonly hours = computed(() => {
     const { start, end } = this.range();
     const out: string[] = [];
@@ -232,6 +286,17 @@ export class EventCalendarComponent {
     for (const day of this.days()) map.set(day, layoutDay(byDay.get(day) ?? [], range));
     return map;
   });
+
+  /** «No disponible: motivo» o «Sin horario» para el día del prestador. */
+  availabilityLabel(day: string): string | null {
+    const info = this.availabilityDays().get(day);
+    if (!info) return null;
+    if (info.blocked) {
+      return info.reasons.length ? `No disponible: ${info.reasons.join(', ')}` : 'No disponible';
+    }
+    if (!info.windows.length) return 'Sin horario';
+    return null;
+  }
 
   inMonth(day: string): boolean {
     return day.slice(0, 7) === this.anchor().slice(0, 7);

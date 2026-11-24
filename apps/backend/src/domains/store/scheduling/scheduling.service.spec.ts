@@ -67,6 +67,8 @@ describe('SchedulingService (agenda-unificada F1)', () => {
     prisma = {
       store_settings: { findFirst: jest.fn() },
       service_providers: { findMany: jest.fn().mockResolvedValue([]) },
+      provider_schedules: { findMany: jest.fn().mockResolvedValue([]) },
+      provider_exceptions: { findMany: jest.fn().mockResolvedValue([]) },
     };
     bookings = fakeSource('booking', [
       event('booking', 1, '2026-11-23T14:00:00.000Z'),
@@ -201,5 +203,57 @@ describe('SchedulingService (agenda-unificada F1)', () => {
       { id: 4, name: 'Luis Pérez' },
     ]);
     expect(svc.timezone).toBe('America/Bogota');
+  });
+
+  it('filtro por prestador: llega a las fuentes y trae su disponibilidad en el rango', async () => {
+    setContext(ALL);
+    setStore(['service', 'restaurant']);
+    prisma.service_providers.findMany.mockResolvedValue([{ id: 3 }]);
+    prisma.provider_schedules.findMany.mockResolvedValue([
+      { provider_id: 3, day_of_week: 1, block_order: 0, start_time: '08:00', end_time: '12:00' },
+    ]);
+    prisma.provider_exceptions.findMany.mockResolvedValue([
+      {
+        provider_id: 3,
+        date: new Date('2026-11-24T00:00:00.000Z'),
+        is_unavailable: true,
+        custom_start_time: null,
+        custom_end_time: null,
+        reason: 'Vacaciones',
+      },
+    ]);
+    const result = await service.calendar({
+      order: 'asc',
+      from: '2026-11-23',
+      to: '2026-11-24',
+      staff_ids: [3],
+    });
+    for (const source of [bookings, orders]) {
+      expect(source.fetch).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ staff_ids: [3] }),
+        expect.any(Number),
+      );
+    }
+    expect(result.availability).toEqual([
+      expect.objectContaining({ staff_id: 3, date: '2026-11-23', windows: [{ start: '08:00', end: '12:00' }] }),
+      expect.objectContaining({ staff_id: 3, date: '2026-11-24', unavailable: true, reason: 'Vacaciones' }),
+    ]);
+  });
+
+  it('sin filtro de prestador, o sin reservas habilitadas, no calcula disponibilidad', async () => {
+    setContext(ALL);
+    setStore(['service']);
+    const plain = await service.calendar({ order: 'asc', from: '2026-11-23', to: '2026-11-24' });
+    expect(plain.availability).toEqual([]);
+    setStore(['restaurant']);
+    const noBookings = await service.calendar({
+      order: 'asc',
+      from: '2026-11-23',
+      to: '2026-11-24',
+      staff_ids: [3],
+    });
+    expect(noBookings.availability).toEqual([]);
+    expect(prisma.provider_schedules.findMany).not.toHaveBeenCalled();
   });
 });

@@ -8,6 +8,7 @@
 import type { FilterValues } from '../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import { addDays, mondayOf } from '../../scheduled-orders/utils/ymd.util';
 import type {
+  ProviderDayAvailability,
   SchedulingEvent,
   SchedulingEventType,
   SchedulingQuery,
@@ -100,9 +101,18 @@ export interface HourRange {
 export const DEFAULT_HOUR_RANGE: HourRange = { start: 7 * 60, end: 21 * 60 };
 
 /** Franja horaria visible: la de por defecto, ampliada para que quepa todo. */
-export function hourRangeFor(events: readonly SchedulingEvent[]): HourRange {
+export function hourRangeFor(
+  events: readonly SchedulingEvent[],
+  windows: readonly { start: string; end: string }[] = [],
+): HourRange {
   let start = DEFAULT_HOUR_RANGE.start;
   let end = DEFAULT_HOUR_RANGE.end;
+  for (const w of windows) {
+    const s = minutesOf(w.start);
+    const e = minutesOf(w.end) > s ? minutesOf(w.end) : 24 * 60;
+    start = Math.min(start, Math.floor(s / 60) * 60);
+    end = Math.max(end, Math.ceil(e / 60) * 60);
+  }
   for (const event of events) {
     const s = minutesOf(event.local_start);
     const e = event.end_date > event.date ? 24 * 60 : Math.max(minutesOf(event.local_end), s + 30);
@@ -194,4 +204,74 @@ export function filterValuesToQuery(values: FilterValues): SchedulingQuery {
     ...(from && { from }),
     ...(to && { to }),
   };
+}
+
+/** Disponibilidad combinada de los prestadores filtrados en un día. */
+export interface DayAvailability {
+  /** Franjas donde al menos un prestador filtrado atiende (unidas, en minutos). */
+  windows: { start: number; end: number }[];
+  /** Todos los prestadores filtrados tienen el día bloqueado por excepción. */
+  blocked: boolean;
+  /** Motivos de las excepciones del día (sin repetir). */
+  reasons: string[];
+}
+
+/**
+ * Une la disponibilidad de los prestadores filtrados por día. Un día sin
+ * franjas y sin bloqueo es un día en que no trabajan.
+ */
+export function availabilityByDay(
+  rows: readonly ProviderDayAvailability[],
+): Map<string, DayAvailability> {
+  const grouped = new Map<string, ProviderDayAvailability[]>();
+  for (const row of rows) {
+    const list = grouped.get(row.date) ?? [];
+    list.push(row);
+    grouped.set(row.date, list);
+  }
+  const out = new Map<string, DayAvailability>();
+  for (const [date, list] of grouped) {
+    const spans = list
+      .flatMap((r) => r.windows)
+      .map((w) => {
+        const start = minutesOf(w.start);
+        const end = minutesOf(w.end);
+        return { start, end: end > start ? end : 24 * 60 };
+      })
+      .sort((a, b) => a.start - b.start);
+    const merged: { start: number; end: number }[] = [];
+    for (const span of spans) {
+      const last = merged[merged.length - 1];
+      if (last && span.start <= last.end) last.end = Math.max(last.end, span.end);
+      else merged.push({ ...span });
+    }
+    out.set(date, {
+      windows: merged,
+      blocked: list.every((r) => r.unavailable),
+      reasons: [...new Set(list.map((r) => r.reason).filter((r): r is string => !!r))],
+    });
+  }
+  return out;
+}
+
+/** Tramos fuera de la disponibilidad dentro de la franja visible, en %. */
+export function offHourBands(
+  day: DayAvailability | undefined,
+  range: HourRange,
+): { top: number; height: number }[] {
+  if (!day) return [];
+  const span = range.end - range.start;
+  const bands: { top: number; height: number }[] = [];
+  let cursor = range.start;
+  for (const w of day.windows) {
+    const start = Math.max(w.start, range.start);
+    const end = Math.min(w.end, range.end);
+    if (end <= start) continue;
+    if (start > cursor) bands.push({ top: ((cursor - range.start) / span) * 100, height: ((start - cursor) / span) * 100 });
+    cursor = Math.max(cursor, end);
+  }
+  if (cursor < range.end) {
+    bands.push({ top: ((cursor - range.start) / span) * 100, height: ((range.end - cursor) / span) * 100 });
+  }
+  return bands;
 }

@@ -40,7 +40,12 @@ import {
 } from '../../interfaces/scheduling.interface';
 import { SchedulingApiService } from '../../services/scheduling-api.service';
 import { filterValuesToQuery } from '../../utils/scheduling-calendar.util';
-import { buildSchedulingFilters, schedulingConfigActions, STATUS_GROUP_COLOR } from '../../utils/scheduling-ui.util';
+import {
+  PROVIDER_CONFIG_HEADER_ACTIONS,
+  STATUS_GROUP_COLOR,
+  buildSchedulingFilters,
+  schedulingConfigActions,
+} from '../../utils/scheduling-ui.util';
 
 /**
  * Órdenes → Programación (agenda-unificada F1). Una tabla con las reservas de
@@ -208,6 +213,7 @@ export class SchedulingListPageComponent {
   ]);
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
+    ...PROVIDER_CONFIG_HEADER_ACTIONS.map((a) => ({ ...a, visible: this.hasBookings() })),
     { id: 'agenda', label: 'Ver agenda', icon: 'calendar-days', variant: 'outline' },
     {
       id: 'create-booking',

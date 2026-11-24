@@ -3,6 +3,7 @@
  * filtros del dropdown, accesos a la configuración de cada módulo y colores
  * por estado.
  */
+import type { StickyHeaderActionButton } from '../../../../../shared/components/sticky-header/sticky-header.component';
 import type {
   DropdownAction,
   FilterConfig,
@@ -111,3 +112,12 @@ export function schedulingConfigActions(flags: {
   }
   return actions;
 }
+
+/**
+ * Acceso directo y visible a la configuración de prestadores desde
+ * Programación y Agenda: el `id` es la ruta (mismas pantallas de Reservas).
+ */
+export const PROVIDER_CONFIG_HEADER_ACTIONS: StickyHeaderActionButton[] = [
+  { id: '/admin/reservations/schedules', label: 'Equipo de servicio', icon: 'user-cog', variant: 'outline' },
+  { id: '/admin/reservations/availability', label: 'Disponibilidad', icon: 'calendar-clock', variant: 'outline' },
+];

@@ -32,6 +32,7 @@ import { fullDate } from '../../../scheduled-orders/utils/ymd.util';
 import { EventCalendarComponent } from '../../components/event-calendar/event-calendar.component';
 import { SchedulingRecordHostComponent } from '../../components/scheduling-record-host/scheduling-record-host.component';
 import {
+  ProviderDayAvailability,
   SchedulingEvent,
   SchedulingSources,
 } from '../../interfaces/scheduling.interface';
@@ -43,7 +44,13 @@ import {
   shiftAnchor,
   weekDays,
 } from '../../utils/scheduling-calendar.util';
-import { buildSchedulingFilters } from '../../utils/scheduling-ui.util';
+import {
+  PROVIDER_CONFIG_HEADER_ACTIONS,
+  buildSchedulingFilters,
+  schedulingConfigActions,
+} from '../../utils/scheduling-ui.util';
+import type { DropdownAction } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 
 const MONTHS = new Intl.DateTimeFormat('es-CO', { timeZone: 'UTC', month: 'long', year: 'numeric' });
 const DAY_MONTH = new Intl.DateTimeFormat('es-CO', { timeZone: 'UTC', day: 'numeric', month: 'short' });
@@ -119,14 +126,24 @@ function utc(ymd: string): Date {
               (ngModelChange)="onSearch($event)"
             />
             <app-options-dropdown
-              triggerLabel="Filtros"
               [filters]="filterConfigs()"
               [filterValues]="filterValues()"
+              [actions]="dropdownActions()"
               [isLoading]="loading()"
               (filterChange)="onFilterChange($event)"
               (clearAllFilters)="clearFilters()"
+              (actionClick)="onAction($event)"
             />
           </div>
+          @if (availability().length) {
+            <p class="text-xs text-text-secondary" data-testid="availability-hint">
+              Lo sombreado está fuera del horario del prestador (horario, bloqueos y excepciones de Equipo de servicio).
+            </p>
+          } @else if (hasBookings()) {
+            <p class="text-xs text-text-secondary">
+              Filtra por personal para ver el horario disponible de cada prestador.
+            </p>
+          }
           @if (truncated()) {
             <p class="text-xs text-warning">
               Hay más eventos de los que caben en este rango: usa la vista Semana o Día, o filtra.
@@ -153,6 +170,7 @@ function utc(ymd: string): Date {
               [anchor]="anchor()"
               [today]="today()"
               [events]="events()"
+              [availability]="availability()"
               (eventClick)="host().open($event)"
               (dayClick)="openDay($event)"
             />
@@ -167,6 +185,7 @@ function utc(ymd: string): Date {
 export class SchedulingAgendaPageComponent {
   private readonly api = inject(SchedulingApiService);
   private readonly settings = inject(StoreSettingsFacade);
+  private readonly auth = inject(AuthFacade);
   private readonly router = inject(Router);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
@@ -175,6 +194,7 @@ export class SchedulingAgendaPageComponent {
   readonly sources = signal<SchedulingSources | null>(null);
   readonly sourcesLoaded = signal(false);
   readonly events = signal<SchedulingEvent[]>([]);
+  readonly availability = signal<ProviderDayAvailability[]>([]);
   readonly loading = signal(false);
   readonly truncated = signal(false);
   readonly search = signal('');
@@ -198,7 +218,19 @@ export class SchedulingAgendaPageComponent {
   readonly filterConfigs = computed<FilterConfig[]>(() =>
     buildSchedulingFilters(this.sources(), { withDateRange: false, withShow: false }),
   );
+  readonly hasScheduled = computed(
+    () => !!this.sources()?.types.some((t) => t.value === 'scheduled_order'),
+  );
+  /** Configuración de prestadores y de cada módulo, igual que en Programación. */
+  readonly dropdownActions = computed<DropdownAction[]>(() =>
+    schedulingConfigActions({
+      bookings: this.hasBookings(),
+      scheduled: this.hasScheduled(),
+      service: this.auth.isServiceIndustry(),
+    }).filter((a) => a.action !== 'export-bookings'),
+  );
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
+    ...PROVIDER_CONFIG_HEADER_ACTIONS.map((a) => ({ ...a, visible: this.hasBookings() })),
     { id: 'list', label: 'Ver programación', icon: 'list', variant: 'outline' },
     {
       id: 'create-booking',
@@ -269,6 +301,7 @@ export class SchedulingAgendaPageComponent {
       .subscribe({
         next: (res) => {
           this.events.set(res.data);
+          this.availability.set(res.availability ?? []);
           this.truncated.set(res.truncated);
         },
         error: () => this.toast.error('No se pudo cargar la agenda'),
@@ -314,7 +347,8 @@ export class SchedulingAgendaPageComponent {
   }
 
   onAction(action: string): void {
-    if (action === 'list') void this.router.navigate(['/admin/orders/scheduling']);
-    if (action === 'create-booking') this.host().createBooking();
+    if (action === 'list') return void this.router.navigate(['/admin/orders/scheduling']);
+    if (action === 'create-booking') return this.host().createBooking();
+    if (action.startsWith('/')) void this.router.navigateByUrl(action);
   }
 }

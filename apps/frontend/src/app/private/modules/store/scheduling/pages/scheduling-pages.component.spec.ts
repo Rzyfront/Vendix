@@ -21,6 +21,18 @@ class RecordHostStub {
   rescheduleScheduledOrder = jasmine.createSpy('rescheduleScheduledOrder');
 }
 
+/** Configuración de Reservas que debe seguir alcanzable (requisito de prestadores). */
+const CONFIG_ROUTES = [
+  '/admin/reservations/schedules',
+  '/admin/reservations/availability',
+  '/admin/reservations/queue',
+  '/admin/reservations/reschedule-requests',
+  '/admin/reservations/payment-requests',
+  '/admin/reservations/business-hours',
+  '/admin/reservations/reminders',
+  '/admin/services/stations',
+];
+
 const SOURCES: SchedulingSources = {
   timezone: 'America/Bogota',
   today: '2026-11-25',
@@ -60,9 +72,20 @@ function setup(sources: SchedulingSources = SOURCES) {
     getEvents: jasmine
       .createSpy('getEvents')
       .and.returnValue(of({ data: [EVENT], meta: { total: 1, page: 1, limit: 20, totalPages: 1 } })),
-    getCalendar: jasmine
-      .createSpy('getCalendar')
-      .and.returnValue(of({ data: [EVENT], truncated: false, types: ['booking'] })),
+    getCalendar: jasmine.createSpy('getCalendar').and.callFake((q: { staff_ids?: number[] }) =>
+      of({
+        data: [EVENT],
+        truncated: false,
+        types: ['booking'],
+        availability: q.staff_ids?.length
+          ? [
+              { staff_id: 3, date: '2026-11-23', windows: [{ start: '09:00', end: '13:00' }], unavailable: false, reason: null },
+              { staff_id: 3, date: '2026-11-24', windows: [], unavailable: true, reason: 'Vacaciones' },
+              { staff_id: 3, date: '2026-11-25', windows: [], unavailable: false, reason: null },
+            ]
+          : [],
+      }),
+    ),
   };
   TestBed.configureTestingModule({
     providers: [
@@ -121,6 +144,24 @@ describe('Agenda unificada F1 — Programación', () => {
     expect(actions).toContain('/admin/scheduled-orders/day');
   });
 
+  it('muestra acceso directo a Equipo de servicio y Disponibilidad, y toda la configuración en Opciones', () => {
+    setup();
+    const page = TestBed.createComponent(SchedulingListPageComponent).componentInstance;
+    const visible = page.headerActions().filter((a) => a.visible !== false).map((a) => a.id);
+    expect(visible).toContain('/admin/reservations/schedules');
+    expect(visible).toContain('/admin/reservations/availability');
+    const actions = page.dropdownActions().map((a) => a.action);
+    for (const route of CONFIG_ROUTES) expect(actions).withContext(route).toContain(route);
+  });
+
+  it('sin reservas habilitadas no ofrece la configuración de prestadores', () => {
+    setup({ ...SOURCES, types: [{ value: 'scheduled_order', label: 'Pedido programado' }], staff: [] });
+    const page = TestBed.createComponent(SchedulingListPageComponent).componentInstance;
+    const visible = page.headerActions().filter((a) => a.visible !== false).map((a) => a.id);
+    expect(visible).not.toContain('/admin/reservations/schedules');
+    expect(page.dropdownActions().map((a) => a.action)).not.toContain('/admin/reservations/schedules');
+  });
+
   it('sin fuentes habilitadas explica por qué y no pide eventos', () => {
     const api = setup({ ...SOURCES, types: [], staff: [] });
     const fixture = TestBed.createComponent(SchedulingListPageComponent);
@@ -173,5 +214,35 @@ describe('Agenda unificada F1 — Agenda', () => {
     const query = api.getCalendar.calls.mostRecent().args[0];
     expect(query.staff_ids).toEqual([3]);
     expect(query.from).toBe('2026-11-23');
+  });
+
+  it('ofrece la configuración de prestadores también desde la Agenda', () => {
+    setup();
+    const page = TestBed.createComponent(SchedulingAgendaPageComponent).componentInstance;
+    const visible = page.headerActions().filter((a) => a.visible !== false).map((a) => a.id);
+    expect(visible).toContain('/admin/reservations/schedules');
+    expect(visible).toContain('/admin/reservations/availability');
+    const actions = page.dropdownActions().map((a) => a.action);
+    for (const route of CONFIG_ROUTES) expect(actions).withContext(route).toContain(route);
+  });
+
+  it('con un prestador filtrado sombrea fuera de su horario y marca sus excepciones', () => {
+    setup();
+    const fixture = TestBed.createComponent(SchedulingAgendaPageComponent);
+    const page = fixture.componentInstance;
+    page.isMobile.set(false);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelectorAll('[data-testid="off-hours"]').length).toBe(0);
+
+    page.onFilterChange({ staff_ids: ['3'] });
+    fixture.detectChanges();
+    const el: HTMLElement = fixture.nativeElement;
+    expect(page.availability().length).toBe(3);
+    expect(el.querySelector('[data-testid="availability-hint"]')).not.toBeNull();
+    expect(el.querySelectorAll('[data-testid="off-hours"]').length).toBeGreaterThan(0);
+    const labels = Array.from(el.querySelectorAll('[data-testid="day-unavailable"]')).map((n) => n.textContent?.trim());
+    expect(labels).toContain('No disponible: Vacaciones');
+    // Los días sin bloques para el prestador quedan como «Sin horario».
+    expect(labels).toContain('Sin horario');
   });
 });
