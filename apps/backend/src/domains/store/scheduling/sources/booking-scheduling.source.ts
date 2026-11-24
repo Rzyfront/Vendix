@@ -154,10 +154,29 @@ export function buildBookingWhere(
     where.provider_id = { in: filters.staff_ids };
   }
   if (filters.from || filters.to) {
-    where.date = {
-      ...(filters.from && { gte: new Date(filters.from) }),
-      ...(filters.to && { lte: new Date(filters.to) }),
+    const inRange: Prisma.bookingsWhereInput = {
+      date: {
+        ...(filters.from && { gte: new Date(filters.from) }),
+        ...(filters.to && { lte: new Date(filters.to) }),
+      },
     };
+    if (filters.from) {
+      // Reserva que empezó el día anterior y termina dentro del rango
+      // (p. ej. 23:00–01:00): su tramo de 00:00 también se ve en el rango.
+      where.AND = [
+        {
+          OR: [
+            inRange,
+            {
+              date: new Date(addDaysYmd(filters.from.slice(0, 10), -1)),
+              end_date: { gte: new Date(filters.from) },
+            },
+          ],
+        },
+      ];
+    } else {
+      where.date = inRange.date;
+    }
   }
   const search = filters.search?.trim();
   if (search) {
