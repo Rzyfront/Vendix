@@ -144,15 +144,20 @@ export interface QueueEntry {
 }
 
 /**
- * One row of the per-store business-hours master calendar. The store
- * availability service intersects provider schedules against these
- * windows so a provider can't be booked outside the store's open hours.
+ * One day of the store's single schedule (`settings.pos.business_hours`, the
+ * same one Settings → Sales edits). The store availability service intersects
+ * provider schedules against these windows so a provider can't be booked
+ * outside the store's open hours.
  */
 export interface BusinessHoursRow {
   day_of_week: number;       // 0 = Sunday, 6 = Saturday
   start_time: string | null; // HH:mm in 24h, null when closed
-  end_time: string | null;
+  end_time: string | null;   // end <= start ends the next day; 00:00-00:00 = 24 h
   is_active: boolean;
+  /** Every block of the day (split shift). Sent and returned by the API. */
+  blocks?: Array<{ start_time: string; end_time: string }>;
+  /** Read-only: the day is the explicit 00:00-00:00 block. */
+  is_24h?: boolean;
 }
 
 export interface BookingStats {

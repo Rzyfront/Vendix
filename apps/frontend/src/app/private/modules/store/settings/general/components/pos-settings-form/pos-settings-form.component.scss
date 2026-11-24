@@ -135,6 +135,12 @@
   }
 }
 
+.field__link {
+  color: var(--color-primary);
+  font-weight: 600;
+  text-decoration: underline;
+}
+
 .field__hint {
   margin: 0.25rem 0 0;
   font-size: 0.6875rem;
@@ -239,6 +245,11 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 6px;
+
+  .day-label {
+    margin-right: auto;
+  }
 
   @media (min-width: 768px) {
     width: auto;

@@ -920,6 +920,7 @@ jobs:
           --include='**/core/utils/backend-availability.util.spec.ts'
           --include='**/store/scheduling/utils/scheduling-calendar.util.spec.ts'
           --include='**/store/scheduling/pages/scheduling-pages.component.spec.ts'
+          --include='**/store/reservations/components/business-hours/business-hours.util.spec.ts'
           --include='**/store/scheduling/pages/agenda-shell/agenda-shell.component.spec.ts'
           --include='**/store/scheduling/agenda-access.guard.spec.ts'
           --include='**/store/scheduling/services/scheduling-api.service.spec.ts'

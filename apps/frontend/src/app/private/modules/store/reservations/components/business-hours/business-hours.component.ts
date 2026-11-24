@@ -1,174 +1,127 @@
-import {
-  Component,
-  computed,
-  inject,
-  OnInit,
-  signal,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms';
+import { Component, computed, inject, OnInit, signal } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import {
   ButtonComponent,
   IconComponent,
+  ToggleComponent,
 } from '../../../../../../shared/components';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ReservationsService } from '../../services/reservations.service';
-import { BusinessHoursRow } from '../../interfaces/reservation.interface';
-import { isClockTime, isOvernight, validateWeeklyBlocks } from '../../../../../../shared/utils/schedule-window.util';
-
-const DAY_LABELS: Array<{ dow: number; label: string; short: string }> = [
-  { dow: 0, label: 'Domingo', short: 'Dom' },
-  { dow: 1, label: 'Lunes', short: 'Lun' },
-  { dow: 2, label: 'Martes', short: 'Mar' },
-  { dow: 3, label: 'Miércoles', short: 'Mié' },
-  { dow: 4, label: 'Jueves', short: 'Jue' },
-  { dow: 5, label: 'Viernes', short: 'Vie' },
-  { dow: 6, label: 'Sábado', short: 'Sáb' },
-];
-
-interface DayRow {
-  day_of_week: number;
-  start_time: string;
-  end_time: string;
-  is_active: boolean;
-}
+import { StoreSettingsService } from '../../../settings/general/services/store-settings.service';
+import {
+  BusinessHoursDay,
+  DAY_LABELS,
+  MAX_BLOCKS_PER_DAY,
+  daysFromRows,
+  endsNextDay,
+  toPayload,
+  validateDays,
+} from './business-hours.util';
 
 /**
- * Master calendar of the store's open hours. The booking flow intersects
- * provider schedules against these windows so a provider can't be booked
- * outside the store's open hours.
- *
- * Save behavior: `PUT /store/business-hours` replaces every row for the
- * days listed. Days not listed are deactivated (closed). Closed days
- * keep their `is_active = false` flag so the panel re-loads cleanly.
+ * Store opening hours (Agenda → Configuración → Horario). It is the store's
+ * ONE schedule: the same `settings.pos.business_hours` that Settings → Sales
+ * edits and that bookings, the agenda and "open now" read. A block whose close
+ * is at or before its open ends the next day (17:00–04:00); «24 horas» opens
+ * the whole day, and consecutive 24 h days are continuous.
  */
 @Component({
   selector: 'app-business-hours',
   standalone: true,
-  imports: [
-    CommonModule,
-    FormsModule,
-    CardComponent,
-    ButtonComponent,
-    IconComponent,
-    StatsComponent,
-  ],
+  imports: [RouterLink, CardComponent, ButtonComponent, IconComponent, ToggleComponent, StatsComponent],
   templateUrl: './business-hours.component.html',
   styleUrls: ['./business-hours.component.scss'],
 })
 export class BusinessHoursComponent implements OnInit {
   private readonly reservations = inject(ReservationsService);
+  private readonly storeSettings = inject(StoreSettingsService);
+
+  /** Settings → Sales, where the same schedule (and the POS rules) live. */
+  readonly salesSettingsRoute = '/admin/settings/general/venta';
+  readonly maxBlocks = MAX_BLOCKS_PER_DAY;
+  readonly dayLabels = DAY_LABELS;
 
   readonly loading = signal(true);
   readonly saving = signal(false);
-  readonly rows = signal<DayRow[]>([]);
+  readonly days = signal<BusinessHoursDay[]>([]);
   readonly errorMsg = signal<string | null>(null);
   readonly successMsg = signal<string | null>(null);
 
-  readonly dayLabels = DAY_LABELS;
-  readonly activeDays = computed(() =>
-    this.rows().filter((r) => r.is_active && r.start_time && r.end_time).length,
-  );
+  readonly activeDays = computed(() => this.days().filter((d) => d.is_active).length);
+  readonly fullDays = computed(() => this.days().filter((d) => d.is_active && d.is_24h).length);
 
   ngOnInit(): void {
     this.reservations.getBusinessHours().subscribe({
-      next: (data) => {
-        const rows: DayRow[] = [];
-        for (let dow = 0; dow <= 6; dow++) {
-          const row = data.find((r) => r.day_of_week === dow);
-          rows.push({
-            day_of_week: dow,
-            start_time: row?.start_time ?? '09:00',
-            end_time: row?.end_time ?? '18:00',
-            is_active: row?.is_active ?? false,
-          });
-        }
-        this.rows.set(rows);
+      next: (rows) => {
+        this.days.set(daysFromRows(rows));
         this.loading.set(false);
       },
       error: () => {
-        // No rows yet — show empty state with default 09:00-18:00 for active days.
-        const rows: DayRow[] = [];
-        for (let dow = 0; dow <= 6; dow++) {
-          rows.push({
-            day_of_week: dow,
-            start_time: '09:00',
-            end_time: '18:00',
-            is_active: dow >= 1 && dow <= 5, // Mon-Fri by default
-          });
-        }
-        this.rows.set(rows);
+        this.days.set(daysFromRows([]));
+        this.errorMsg.set('No se pudo cargar el horario de la tienda');
         this.loading.set(false);
       },
     });
   }
 
+  day(dow: number): BusinessHoursDay | undefined {
+    return this.days().find((d) => d.day_of_week === dow);
+  }
+
+  private patch(dow: number, change: (d: BusinessHoursDay) => BusinessHoursDay): void {
+    this.days.update((days) => days.map((d) => (d.day_of_week === dow ? change(d) : d)));
+    this.successMsg.set(null);
+  }
+
   toggleDay(dow: number): void {
-    this.rows.update((rows) =>
-      rows.map((r) =>
-        r.day_of_week === dow ? { ...r, is_active: !r.is_active } : r,
-      ),
+    this.patch(dow, (d) => ({ ...d, is_active: !d.is_active }));
+  }
+
+  toggle24h(dow: number): void {
+    this.patch(dow, (d) => ({ ...d, is_24h: !d.is_24h }));
+  }
+
+  updateBlock(dow: number, index: number, field: 'start_time' | 'end_time', value: string): void {
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(value ?? '')) return;
+    this.patch(dow, (d) => ({
+      ...d,
+      blocks: d.blocks.map((b, i) => (i === index ? { ...b, [field]: value } : b)),
+    }));
+  }
+
+  addBlock(dow: number): void {
+    this.patch(dow, (d) =>
+      d.blocks.length >= MAX_BLOCKS_PER_DAY
+        ? d
+        : { ...d, blocks: [...d.blocks, { start_time: '14:00', end_time: '18:00' }] },
     );
   }
 
-  updateField<K extends keyof DayRow>(
-    dow: number,
-    field: K,
-    value: DayRow[K],
-  ): void {
-    this.rows.update((rows) =>
-      rows.map((r) =>
-        r.day_of_week === dow ? { ...r, [field]: value } : r,
-      ),
+  removeBlock(dow: number, index: number): void {
+    this.patch(dow, (d) =>
+      d.blocks.length <= 1 ? d : { ...d, blocks: d.blocks.filter((_, i) => i !== index) },
     );
   }
 
-  /** True when the row closes the next day (e.g. 20:00–03:00). */
-  closesNextDay(r: DayRow): boolean {
-    return isClockTime(r.start_time) && isClockTime(r.end_time) && isOvernight(r);
-  }
-
-  row(dow: number): DayRow | undefined {
-    return this.rows().find((r) => r.day_of_week === dow);
-  }
+  endsNextDay = endsNextDay;
 
   save(): void {
-    const activeRows = this.rows().filter((r) => r.is_active);
-    if (activeRows.length === 0) {
-      this.errorMsg.set('Debes activar al menos un día');
-      return;
-    }
-    // S21: a close at or before the open ends the next day (20:00–03:00); only the
-    // HH:mm format is required.
-    for (const r of activeRows) {
-      if (!isClockTime(r.start_time) || !isClockTime(r.end_time)) {
-        const dayLabel = DAY_LABELS.find((d) => d.dow === r.day_of_week)?.label;
-        this.errorMsg.set(`${dayLabel}: usa horas válidas (HH:mm)`);
-        return;
-      }
-    }
-    const overlap = validateWeeklyBlocks(
-      activeRows.map((r) => ({ day: r.day_of_week, start_time: r.start_time, end_time: r.end_time })),
-    );
-    if (overlap) {
-      const dayLabel = DAY_LABELS.find((d) => d.dow === overlap.day)?.label;
-      this.errorMsg.set(`${dayLabel}: el horario se cruza con el cierre nocturno del día anterior`);
+    const problem = validateDays(this.days());
+    if (problem) {
+      this.errorMsg.set(problem);
       return;
     }
     this.errorMsg.set(null);
     this.saving.set(true);
-    const payload: BusinessHoursRow[] = activeRows.map((r) => ({
-      day_of_week: r.day_of_week,
-      start_time: r.start_time,
-      end_time: r.end_time,
-      is_active: true,
-    }));
-    this.reservations.upsertBusinessHours(payload).subscribe({
-      next: () => {
+    this.reservations.upsertBusinessHours(toPayload(this.days())).subscribe({
+      next: (rows) => {
+        if (Array.isArray(rows) && rows.length) this.days.set(daysFromRows(rows));
         this.saving.set(false);
-        this.successMsg.set('Horario guardado');
-        setTimeout(() => this.successMsg.set(null), 3_000);
+        this.successMsg.set('Horario guardado. Ya aplica a reservas, agenda y Ajustes → Venta.');
+        // The agenda grids and the POS read the schedule from the store
+        // settings: refresh them so they use the new hours right away.
+        this.storeSettings.getSettings({ forceRefresh: true }).subscribe({ error: () => undefined });
       },
       error: (err) => {
         this.saving.set(false);

@@ -202,6 +202,38 @@
   }
 }
 
+.day-24h-btn {
+  justify-self: start;
+  grid-column: 1 / -1;
+  margin-top: 2px;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+
+  &.active {
+    border-color: var(--color-primary);
+    background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+    color: var(--color-primary);
+  }
+}
+
+.bar-next,
+.edit-next {
+  font-size: 10px;
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+.edit-next {
+  color: var(--color-warning);
+}
+
 .timeline-track:hover .add-block-btn {
   opacity: 1;
 }

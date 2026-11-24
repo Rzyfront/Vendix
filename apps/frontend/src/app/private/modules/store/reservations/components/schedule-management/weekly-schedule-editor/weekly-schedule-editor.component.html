@@ -58,7 +58,16 @@
                 [class.editing]="day.editingBlock === bi"
                 (click)="startEditing(i, bi)">
                 @if (day.editingBlock !== bi) {
-                  <span class="bar-label">{{ formatTimeShort(block.start_time) }} - {{ formatTimeShort(block.end_time) }}</span>
+                  @if (isFullDay(block)) {
+                    <span class="bar-label">24 horas</span>
+                  } @else {
+                    <span class="bar-label">
+                      {{ formatTimeShort(block.start_time) }} - {{ formatTimeShort(block.end_time) }}
+                      @if (endsNextDay(block)) {
+                        <span class="bar-next" title="Termina al día siguiente">(+1 día)</span>
+                      }
+                    </span>
+                  }
                   <!-- Remove block button (only if > 1 block) -->
                   @if (day.blocks.length > 1) {
                     <button
@@ -86,6 +95,9 @@
                     (change)="updateTime(i, bi, 'end_time', $any($event.target).value)"
                     class="time-input"
                   />
+                  @if (endsNextDay(block)) {
+                    <span class="edit-next">Termina al día siguiente</span>
+                  }
                   <!-- Stop propagation wrapper -->
                   <div (click)="$event.stopPropagation()">
                     <app-button variant="primary" size="xsm" (clicked)="stopEditing(i)">
@@ -96,6 +108,17 @@
               }
             </div>
           }
+
+          <!-- 24 h toggle for the day -->
+          <button
+            type="button"
+            class="day-24h-btn"
+            [class.active]="isDay24h(day)"
+            [attr.aria-pressed]="isDay24h(day)"
+            [attr.aria-label]="day.label + ': atender 24 horas'"
+            (click)="$event.stopPropagation(); toggleDay24h(i)">
+            24 h
+          </button>
 
           <!-- Add block button -->
           <button

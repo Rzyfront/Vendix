@@ -5,21 +5,24 @@
       Horario de la tienda
     </h2>
     <p class="business-hours__subtitle">
-      Ventana maestra que la reserva consulta al generar slots. Los proveedores no podrán ser agendados fuera de este horario.
+      Las reservas solo se ofrecen dentro de este horario y ningún prestador puede agendarse fuera de él.
     </p>
   </header>
 
+  <div class="business-hours__notice" data-testid="shared-schedule-notice">
+    <app-icon name="info" [size]="16"></app-icon>
+    <p>
+      Es el <strong>mismo horario de atención de la tienda</strong> que ves en
+      <a [routerLink]="salesSettingsRoute">Ajustes → Venta</a>: si lo cambias aquí, cambia allá, y al revés.
+      Para turnos de noche pon un cierre menor que la apertura (17:00 a 04:00 termina al día siguiente)
+      o activa <strong>24 horas</strong>.
+    </p>
+  </div>
+
   <section class="business-hours__stats">
-    <app-stats
-      title="Días activos"
-      [value]="activeDays().toString()"
-      iconName="calendar-check"
-    ></app-stats>
-    <app-stats
-      title="Días cerrados"
-      [value]="(7 - activeDays()).toString()"
-      iconName="calendar-x"
-    ></app-stats>
+    <app-stats title="Días abiertos" [value]="activeDays().toString()" iconName="calendar-check"></app-stats>
+    <app-stats title="Días 24 horas" [value]="fullDays().toString()" iconName="clock"></app-stats>
+    <app-stats title="Días cerrados" [value]="(7 - activeDays()).toString()" iconName="calendar-x"></app-stats>
   </section>
 
   @if (loading()) {
@@ -27,44 +30,70 @@
   } @else {
     <app-card>
       <ul class="days">
-        @for (day of dayLabels; track day.dow) {
-          @if (row(day.dow); as r) {
-            <li class="days__row" [class.days__row--closed]="!r.is_active">
-              <div class="days__name">
-                <label class="toggle">
-                  <input
-                    type="checkbox"
-                    [checked]="r.is_active"
-                    (change)="toggleDay(day.dow)"
-                  />
-                  <span class="toggle__label">{{ day.label }}</span>
-                </label>
-              </div>
-              <div class="days__inputs">
-                <input
-                  type="time"
-                  [disabled]="!r.is_active"
-                  [value]="r.start_time"
-                  (input)="updateField(day.dow, 'start_time', $any($event.target).value)"
+        @for (label of dayLabels; track label.dow) {
+          @if (day(label.dow); as d) {
+            <li class="days__row" [class.days__row--closed]="!d.is_active" [attr.data-day]="d.day_of_week">
+              <div class="days__head">
+                <app-toggle
+                  [checked]="d.is_active"
+                  [ariaLabel]="label.label + ': abrir o cerrar'"
+                  (toggled)="toggleDay(d.day_of_week)"
                 />
-                <span class="days__sep">a</span>
-                <input
-                  type="time"
-                  [disabled]="!r.is_active"
-                  [value]="r.end_time"
-                  (input)="updateField(day.dow, 'end_time', $any($event.target).value)"
-                />
-                @if (closesNextDay(r)) {
-                  <span class="days__sep">(+1 día)</span>
+                <span class="days__name">{{ label.label }}</span>
+                @if (d.is_active) {
+                  <label class="days__full">
+                    <app-toggle
+                      [checked]="d.is_24h"
+                      [ariaLabel]="label.label + ': abrir 24 horas'"
+                      (toggled)="toggle24h(d.day_of_week)"
+                    />
+                    <span>24 horas</span>
+                  </label>
                 }
               </div>
-              <div class="days__status">
-                @if (r.is_active) {
-                  <app-icon name="check" variant="success"></app-icon>
-                  <span>Abierto</span>
+
+              <div class="days__body">
+                @if (!d.is_active) {
+                  <span class="days__closed">Cerrado</span>
+                } @else if (d.is_24h) {
+                  <span class="days__badge">Abierto todo el día (00:00 a 00:00)</span>
                 } @else {
-                  <app-icon name="x" variant="muted"></app-icon>
-                  <span>Cerrado</span>
+                  @for (block of d.blocks; track $index; let i = $index) {
+                    <div class="days__block">
+                      <input
+                        type="time"
+                        [attr.aria-label]="label.label + ' apertura bloque ' + (i + 1)"
+                        [value]="block.start_time"
+                        (change)="updateBlock(d.day_of_week, i, 'start_time', $any($event.target).value)"
+                      />
+                      <span class="days__sep">a</span>
+                      <input
+                        type="time"
+                        [attr.aria-label]="label.label + ' cierre bloque ' + (i + 1)"
+                        [value]="block.end_time"
+                        (change)="updateBlock(d.day_of_week, i, 'end_time', $any($event.target).value)"
+                      />
+                      @if (endsNextDay(block)) {
+                        <span class="days__next" data-testid="ends-next-day">Termina al día siguiente</span>
+                      }
+                      @if (d.blocks.length > 1) {
+                        <button
+                          type="button"
+                          class="days__remove"
+                          [attr.aria-label]="'Quitar bloque ' + (i + 1) + ' del ' + label.label"
+                          (click)="removeBlock(d.day_of_week, i)"
+                        >
+                          <app-icon name="x" [size]="14"></app-icon>
+                        </button>
+                      }
+                    </div>
+                  }
+                  @if (d.blocks.length < maxBlocks) {
+                    <button type="button" class="days__add" (click)="addBlock(d.day_of_week)">
+                      <app-icon name="plus" [size]="14"></app-icon>
+                      Agregar bloque
+                    </button>
+                  }
                 }
               </div>
             </li>
@@ -76,10 +105,10 @@
 
   <footer class="business-hours__footer">
     @if (errorMsg()) {
-      <div class="business-hours__error">{{ errorMsg() }}</div>
+      <div class="business-hours__error" role="alert">{{ errorMsg() }}</div>
     }
     @if (successMsg()) {
-      <div class="business-hours__success">{{ successMsg() }}</div>
+      <div class="business-hours__success" role="status">{{ successMsg() }}</div>
     }
     <app-button
       variant="primary"

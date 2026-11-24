@@ -807,10 +807,16 @@
         <div class="p-4">
           <!-- Continuous Mode -->
           @if (!isCustomMode()) {
-            <p class="field__hint field__hint--block">
-              En modo Continuo las horas se editan desde el horario general de la
-              tienda; acá se muestran para que puedas verificarlas. Usa Abrir/Cerrar
-              para marcar los días sin atención.
+            <p class="field__hint field__hint--block" data-testid="agenda-hours-link">
+              Es el mismo horario de atención que usan las reservas y la Agenda. En modo
+              Continuo las horas (turnos de noche y 24 horas incluidos) se editan en
+              @if (showAgendaLink()) {
+                <a class="field__link" [routerLink]="agendaHoursRoute" [queryParams]="agendaHoursParams">Agenda → Configuración → Horario</a>;
+              } @else {
+                Agenda → Configuración → Horario de la tienda;
+              }
+              acá se muestran para que puedas verificarlas. Usa Abrir/Cerrar para marcar
+              los días sin atención.
             </p>
             <div class="grid grid-cols-1 gap-3">
               @for (day of daysOfWeek; track day.key) {
@@ -849,6 +855,11 @@
                         />
                       </div>
                     </div>
+                    @if (isFullDayRange(form.get('business_hours')?.value[day.key]?.open, form.get('business_hours')?.value[day.key]?.close)) {
+                      <span class="field__hint">Abierto 24 horas</span>
+                    } @else if (closesNextDay(form.get('business_hours')?.value[day.key]?.open, form.get('business_hours')?.value[day.key]?.close)) {
+                      <span class="field__hint">Termina al día siguiente</span>
+                    }
                   } @else {
                     <span class="day-closed-label">Cerrado</span>
                   }
@@ -860,14 +871,30 @@
           <!-- Custom Mode (multi-block per day) -->
           @if (isCustomMode()) {
             <p class="field__hint field__hint--block">
-              Cada bloque es una franja en la que el POS acepta cobrar. Entre un
-              bloque y el siguiente la tienda cuenta como cerrada.
+              Cada bloque es una franja en la que el POS acepta cobrar y se ofrecen
+              reservas. Entre un bloque y el siguiente la tienda cuenta como cerrada.
+              Un cierre menor que la apertura (17:00–04:00) termina al día siguiente.
+              @if (showAgendaLink()) {
+                También lo editas en
+                <a class="field__link" [routerLink]="agendaHoursRoute" [queryParams]="agendaHoursParams">Agenda → Configuración → Horario</a>.
+              }
             </p>
             <div class="grid grid-cols-1 gap-3">
               @for (day of daysOfWeek; track day.key) {
                 <div class="day-row">
                   <div class="day-row-top">
                     <span class="day-label">{{ day.label }}</span>
+                    @if (!isCustomDayClosed(day.key)) {
+                      <button
+                        type="button"
+                        class="day-toggle-btn"
+                        [class.day-toggle-btn--open]="isCustomDay24h(day.key)"
+                        [attr.aria-pressed]="isCustomDay24h(day.key)"
+                        (click)="toggleCustomDay24h(day.key)"
+                      >
+                        {{ isCustomDay24h(day.key) ? "24 horas ✓" : "24 horas" }}
+                      </button>
+                    }
                     <button
                       type="button"
                       (click)="toggleCustomDayStatus(day.key)"
@@ -901,7 +928,7 @@
                             />
                           </div>
                           @if (closesNextDay(block.open, block.close)) {
-                            <span class="field__hint">Cierra al día siguiente</span>
+                            <span class="field__hint">Termina al día siguiente</span>
                           }
                           @if (getDayBlocks(day.key).length > 1) {
                             <button

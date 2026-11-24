@@ -22,7 +22,7 @@ import {
   ButtonComponent,
   ToggleComponent,
 } from '../../../../../../../shared/components';
-import { validateWeeklyBlocks, windowMinutes } from '../../../../../../../shared/utils/schedule-window.util';
+import { isOvernight, validateWeeklyBlocks, windowMinutes } from '../../../../../../../shared/utils/schedule-window.util';
 
 /** Row the editor loads: a specialist row, or a station row mapped from `weekday`. */
 type EditorScheduleRow = Pick<ProviderSchedule, 'day_of_week' | 'start_time' | 'end_time'> & { block_order?: number };
@@ -286,6 +286,34 @@ export class WeeklyScheduleEditorComponent {
     this.emitStats();
   }
 
+  /** The day is the explicit 24 h block `00:00-00:00`. */
+  isDay24h(day: ScheduleDay): boolean {
+    return day.blocks.length === 1 && this.isFullDay(day.blocks[0]);
+  }
+
+  isFullDay(block: Pick<ScheduleBlock, 'start_time' | 'end_time'>): boolean {
+    return block.start_time === '00:00' && block.end_time === '00:00';
+  }
+
+  /** The block closes the next day (e.g. 17:00–04:00); 24 h is not a night shift. */
+  endsNextDay(block: Pick<ScheduleBlock, 'start_time' | 'end_time'>): boolean {
+    return this.isValidBlock(block.start_time, block.end_time) && !this.isFullDay(block) && isOvernight(block);
+  }
+
+  /** «24 h» on → one 00:00–00:00 block (consecutive 24 h days are continuous); off → 09:00–18:00. */
+  toggleDay24h(dayIndex: number): void {
+    const updated = [...this.days()];
+    const day = { ...updated[dayIndex] };
+    day.is_active = true;
+    day.blocks = this.isDay24h(day)
+      ? [{ block_order: 0, start_time: '09:00', end_time: '18:00' }]
+      : [{ block_order: 0, start_time: '00:00', end_time: '00:00' }];
+    day.editingBlock = null;
+    updated[dayIndex] = day;
+    this.days.set(updated);
+    this.emitStats();
+  }
+
   removeBlock(dayIndex: number, blockIndex: number): void {
     const updated = [...this.days()];
     const day = { ...updated[dayIndex] };
@@ -356,6 +384,20 @@ export class WeeklyScheduleEditorComponent {
         if (!this.isValidBlock(block.start_time, block.end_time)) {
           this.toastService.error(
             `Revisa el horario del ${d.label.toLowerCase()}: usa horas válidas (HH:mm)`,
+          );
+          return;
+        }
+      }
+    }
+
+    // Specialists: a zero-length block is only valid as the 24 h 00:00–00:00
+    // (the API answers 400 otherwise).
+    if (this.providerId()) {
+      for (const d of this.days()) {
+        if (!d.is_active) continue;
+        if (d.blocks.some((b) => b.start_time === b.end_time && !this.isFullDay(b))) {
+          this.toastService.error(
+            `Revisa el horario del ${d.label.toLowerCase()}: la entrada y la salida son la misma hora. Usa «24 h» para todo el día`,
           );
           return;
         }

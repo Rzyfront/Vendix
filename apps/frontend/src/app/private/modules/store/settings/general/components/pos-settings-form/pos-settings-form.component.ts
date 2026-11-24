@@ -10,7 +10,7 @@ import {
   signal,
   Injector,
 } from '@angular/core';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
@@ -39,12 +39,14 @@ import { DialogService } from '../../../../../../../shared/components/dialog/dia
 import { VariableBarcodeFormatsModalComponent } from '../variable-barcode-formats-modal.component';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { isClockTime, isOvernight } from '../../../../../../../shared/utils/schedule-window.util';
+import { agendaQueryParams, AGENDA_ROUTE } from '../../../../scheduling/scheduling-tabs';
 
 @Component({
   selector: 'app-pos-settings-form',
   standalone: true,
   imports: [
     ReactiveFormsModule,
+    RouterLink,
     SettingToggleComponent,
     ToggleComponent,
     SelectorComponent,
@@ -63,6 +65,8 @@ import { isClockTime, isOvernight } from '../../../../../../../shared/utils/sche
 export class PosSettingsForm implements OnInit {
   readonly settings = input.required<PosSettings>();
   readonly settingsLoaded = input<boolean>(false);
+  /** Link to Agenda → Horario (store admin only; the organization modal hides it). */
+  readonly showAgendaLink = input<boolean>(true);
   readonly settingsChange = output<PosSettings>();
 
   /**
@@ -597,9 +601,43 @@ export class PosSettingsForm implements OnInit {
     }
   }
 
-  /** S21: a close at or before the open ends the next day (e.g. 20:00–03:00). */
+  /** Agenda → Configuración → Horario: the same store schedule, editable there. */
+  readonly agendaHoursRoute = AGENDA_ROUTE;
+  readonly agendaHoursParams = agendaQueryParams('configuracion', 'horario');
+
+  /**
+   * S21: a close at or before the open ends the next day (e.g. 20:00–03:00).
+   * `00:00–00:00` is the explicit 24 h block, not a night shift.
+   */
   closesNextDay(open: string, close: string): boolean {
-    return isClockTime(open) && isClockTime(close) && isOvernight({ start_time: open, end_time: close });
+    return (
+      isClockTime(open) &&
+      isClockTime(close) &&
+      !this.isFullDayRange(open, close) &&
+      isOvernight({ start_time: open, end_time: close })
+    );
+  }
+
+  isFullDayRange(open: string, close: string): boolean {
+    return open === '00:00' && close === '00:00';
+  }
+
+  /** Custom mode: the day is one `00:00–00:00` block (open 24 hours). */
+  isCustomDay24h(day: string): boolean {
+    const blocks = this.getDayBlocks(day);
+    return blocks.length === 1 && this.isFullDayRange(blocks[0].open, blocks[0].close);
+  }
+
+  /** Custom mode: «24 horas» on → one 00:00–00:00 block; off → 09:00–18:00. */
+  toggleCustomDay24h(day: string) {
+    const hours = { ...this.form.get('business_hours')?.value };
+    if (!hours?.[day]) return;
+    const blocks = this.isCustomDay24h(day)
+      ? [{ open: '09:00', close: '18:00' }]
+      : [{ open: '00:00', close: '00:00' }];
+    hours[day] = { ...hours[day], open: blocks[0].open, close: blocks[0].close, blocks };
+    this.form.get('business_hours')?.setValue(hours);
+    this.onBusinessHoursChange();
   }
 
   isDayClosed(day: string): boolean {
@@ -748,10 +786,16 @@ export class PosSettingsForm implements OnInit {
     const dayHours = this.form.get('business_hours')?.value?.[first.key];
     const range = this.isCustomMode()
       ? this.getDayBlocks(first.key)
-          .map((block) => `${block.open}–${block.close}${this.closesNextDay(block.open, block.close) ? ' (+1 día)' : ''}`)
+          .map((block) =>
+            this.isFullDayRange(block.open, block.close)
+              ? '24 horas'
+              : `${block.open}–${block.close}${this.closesNextDay(block.open, block.close) ? ' (+1 día)' : ''}`,
+          )
           .join(' y ')
       : dayHours
-        ? `${dayHours.open}–${dayHours.close}${this.closesNextDay(dayHours.open, dayHours.close) ? ' (+1 día)' : ''}`
+        ? this.isFullDayRange(dayHours.open, dayHours.close)
+          ? '24 horas'
+          : `${dayHours.open}–${dayHours.close}${this.closesNextDay(dayHours.open, dayHours.close) ? ' (+1 día)' : ''}`
         : '';
 
     const closedLabels = this.daysOfWeek
