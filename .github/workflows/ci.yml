@@ -724,6 +724,7 @@ jobs:
           --include='**/restaurant-ops/production/components/production-order-detail/production-order-detail.component.spec.ts'
           --include='**/restaurant-ops/tables/pages/table-session-page/table-session-page.a11y.spec.ts'
           --include='**/manufacturing/orders/pages/order-detail-page/order-detail-page.component.spec.ts'
+          --include='**/manufacturing/orders/pages/orders-list-page/orders-list-page.plant-url.spec.ts'
           --include='**/manufacturing/orders/components/complete-order-modal/complete-order-modal.component.spec.ts'
           --include='**/manufacturing/services/plant-selection.util.spec.ts'
           --include='**/manufacturing/services/manufacturing-plants.service.spec.ts'
