@@ -451,7 +451,14 @@ export interface RouteSheetCurrentStop {
   result: string | null;
   grand_total: number;
   collected_amount: number;
+  /** DERIVED prepaid: the order is already paid, nothing is collected. */
+  is_prepaid?: boolean;
+  /** Live amount still owed on the stop (0 when prepaid). */
+  pending_amount?: number;
 }
+
+/** Delivery outcome the operator confirms per stop (separate from collection). */
+export type RouteSheetStopOutcome = 'delivered' | 'rejected' | 'released' | 'pending';
 
 /** One proposed match: extracted row + resolved real stop + suggested result. */
 export interface RouteSheetMatchedStop {
@@ -461,7 +468,12 @@ export interface RouteSheetMatchedStop {
   remision_number: string | null;
   match_method: RouteSheetMatchMethod;
   current: RouteSheetCurrentStop | null;
-  suggested_result: DispatchRouteStopResult;
+  suggested_result: DispatchRouteStopResult | null;
+  /**
+   * Suggested DELIVERY outcome: `delivered` when the sheet marks it delivered,
+   * `pending` otherwise. Rejecting/releasing needs a reason: the operator does it.
+   */
+  suggested_outcome?: 'delivered' | 'pending';
 }
 
 /** `POST /scan/match` → proposal (no persistence). */
@@ -474,10 +486,13 @@ export interface RouteSheetMatchResult {
 /** Human-confirmed decision for a single stop. */
 export interface ConfirmRouteSheetStopDto {
   stop_id: number;
-  delivered: boolean;
+  /** Legacy flag; `result` is the delivery outcome when present. */
+  delivered?: boolean;
   collected_amount?: number;
   payment_method?: string;
-  result?: DispatchRouteStopResult;
+  result?: 'delivered' | 'rejected' | 'released';
+  /** Required to reject or release (stored in the stop history). */
+  reason?: string;
   withholding_breakdown?: {
     retefuente?: number;
     reteiva?: number;
@@ -517,7 +532,9 @@ export interface ConfirmRouteSheetResult {
     reason:
       | 'not_in_route'
       | 'already_settled'
-      | 'short_payment_requires_decision';
+      | 'short_payment_requires_decision'
+      /** Legacy `delivered: false` without `result`: left untouched. */
+      | 'outcome_required';
     collected_amount?: number;
     net?: number;
   }>;

@@ -328,6 +328,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Esta parada ya fue liquidada con otro resultado.',
   DISPATCH_ROUTE_COLLECTION_MISMATCH:
     'El recaudo no cuadra con el saldo pendiente de la orden.',
+  DISPATCH_ROUTE_BATCH_INVALID:
+    'No se liquidó ninguna parada: una o más no pasaron la validación. Revisa el detalle y vuelve a confirmar.',
   ORDERS_BULK_LOCKED_001:
     'Esta orden se está procesando en otra operación; inténtalo cuando termine.',
   INVOICING_ORDER_UNPAID_001:
@@ -923,6 +925,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'No pudimos leer la planilla. Intenta con una foto más nítida y completa.',
   RTSCAN_MATCH_001:
     'Una fila de la planilla no coincide con ninguna parada de la ruta. Revisa que sea la planilla correcta.',
+  RTSCAN_CONFIRM_INVALID:
+    'No se aplicó ningún cambio: hay datos de la planilla fuera de rango o incompletos (monto, confianza o motivo). Corrígelos y vuelve a confirmar.',
   MEMBER_SCAN_NO_FILE: 'Sube una foto o un PDF con la lista de socios.',
   MEMBER_SCAN_INVALID_FILE:
     'Formato no soportado. Usa una imagen (JPG, PNG, WebP), un PDF, Excel (xlsx, xls) o CSV.',
