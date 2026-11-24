@@ -5,6 +5,7 @@ import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import * as crypto from 'crypto';
 import { AvailabilityService } from './availability.service';
 import { ServiceAllocationCoordinator } from './service-allocation-coordinator.service';
+import { releasePlanSeatsForBookingInTx } from './service-plans/service-plan-seats.util';
 
 @Injectable()
 export class BookingConfirmationService {
@@ -193,6 +194,8 @@ export class BookingConfirmationService {
         if (booking.product?.requires_station) {
           await this.allocationCoordinator!.releaseBooking(tx, booking.store_id, booking.id, 'cancelled');
         }
+        // QUI-1060: a cancelled plan booking gives its seats back to the departure.
+        await releasePlanSeatsForBookingInTx(tx, booking.id);
         await tx.bookings.update({ where: { id: booking.id }, data: { status: 'cancelled', updated_at: new Date() } });
       });
       this.logger.log(`Booking ${booking.id} cancelled via token`);

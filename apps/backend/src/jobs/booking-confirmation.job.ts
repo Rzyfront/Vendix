@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { releasePlanSeatsForBookingInTx } from '../domains/store/reservations/service-plans/service-plan-seats.util';
 
 @Injectable()
 export class BookingConfirmationJob {
@@ -34,9 +35,13 @@ export class BookingConfirmationJob {
         ?.reservations;
       if (!settings?.confirmation?.auto_cancel_if_unconfirmed) continue;
 
-      await this.prisma.bookings.update({
-        where: { id: booking.id },
-        data: { status: 'cancelled', updated_at: new Date() },
+      // QUI-1060: the seats of a plan booking go back with the cancellation.
+      await this.prisma.$transaction(async (tx) => {
+        await releasePlanSeatsForBookingInTx(tx, booking.id);
+        await tx.bookings.update({
+          where: { id: booking.id },
+          data: { status: 'cancelled', updated_at: new Date() },
+        });
       });
 
       this.eventEmitter.emit('booking.auto_cancelled', {

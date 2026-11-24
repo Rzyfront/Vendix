@@ -37,6 +37,8 @@ describe('BookingConfirmationService.processToken (double-validation)', () => {
         updateMany: jest.fn().mockImplementation(() => Promise.resolve({ count: 1 })),
       },
       bookings: {
+        // QUI-1060: the cancel path reads the booking to give plan seats back.
+        findFirst: jest.fn().mockResolvedValue({ store_id: 1, departure_id: null, pax_adults: null, pax_children: null }),
         update: jest.fn().mockImplementation(({ data }: any) => {
           updateCalls.push({ kind: 'booking', data });
           return Promise.resolve({ id: 42 });
@@ -47,6 +49,7 @@ describe('BookingConfirmationService.processToken (double-validation)', () => {
         update: jest.fn().mockResolvedValue({}),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
+      $executeRaw: jest.fn().mockResolvedValue(1),
       $transaction: jest.fn(async (cb: (tx: any) => Promise<any>) => cb(rawClient)),
     };
     const prisma: any = {
@@ -69,7 +72,7 @@ describe('BookingConfirmationService.processToken (double-validation)', () => {
       availabilityService,
     );
 
-    return { service, isSlotAvailable, emits, updateCalls };
+    return { service, isSlotAvailable, emits, updateCalls, rawClient };
   }
 
   it('confirms and emits booking.confirmed when the slot is still free', async () => {
@@ -121,6 +124,19 @@ describe('BookingConfirmationService.processToken (double-validation)', () => {
     const result = await service.processToken('tkn');
     expect(result.action).toBe('cancel');
     expect(emits.map((e) => e.name)).toEqual(['booking.cancelled']);
+  });
+
+  it('QUI-1060: cancelling a plan booking by token gives its seats back in the same transaction', async () => {
+    const { service, rawClient, updateCalls } = buildService({ slotAvailable: true });
+    rawClient.bookings.findFirst.mockResolvedValue({ store_id: 1, departure_id: 3, pax_adults: 2, pax_children: 2 });
+    rawClient.booking_confirmation_tokens.findUnique = jest.fn().mockResolvedValue({
+      id: 1, token: 'tkn', booking_id: 42, used: false, expires_at: new Date(Date.now() + 60_000), action: 'cancel',
+      booking: { id: 42, store_id: 1, booking_number: 'BKG-42', date: new Date('2026-07-18T00:00:00Z'), start_time: '10:00', end_time: '11:00', customer: { first_name: 'Juan', last_name: 'Pérez' }, product: { name: 'Plan' } },
+    });
+
+    await service.processToken('tkn');
+    expect(rawClient.$executeRaw.mock.calls[0].slice(1)).toEqual([4, 3, 1]);
+    expect(updateCalls.find((c) => c.kind === 'booking')?.data.status).toBe('cancelled');
   });
 
   it('throws BOOK_CONFIRM_001 when token is expired', async () => {

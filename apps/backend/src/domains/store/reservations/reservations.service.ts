@@ -10,7 +10,7 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { RequestContextService } from '@common/context/request-context.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { booking_status_enum, booking_mode_enum, Prisma } from '@prisma/client';
-import { bookingEndDateFor, bookingMinuteSpan } from '@common/utils/schedule-window.util';
+import { addDaysToDateString, bookingEndDateFor, bookingMinuteSpan } from '@common/utils/schedule-window.util';
 import {
   CreateBookingDto,
   RescheduleBookingDto,
@@ -37,6 +37,9 @@ import { RentalPrepayService } from './rental-prepay/rental-prepay.service';
 import { ServiceDepositsService } from '../service-deposits/service-deposits.service';
 import { recordTriggerEvent } from '../workflows/engine/workflow-trigger.outbox';
 import { SAFE_USER_SELECT } from '@common/utils/safe-user-select.util';
+import { ServicePlansService, type PlanBookingResolution } from './service-plans/service-plans.service';
+import { isPlanProduct } from './service-plans/service-plan-pricing.util';
+import { releasePlanSeatsForBookingInTx } from './service-plans/service-plan-seats.util';
 
 @Injectable()
 export class ReservationsService {
@@ -62,6 +65,8 @@ export class ReservationsService {
     @Optional() private readonly rentalPrepay?: RentalPrepayService,
     // Ledger of consumable deposits: the compensation of a failed order releases a received deposit to credit.
     @Optional() private readonly serviceDeposits?: ServiceDepositsService,
+    // QUI-1060 modo Plan: salidas, cupos y precio por grupo. Optional: other services never touch it.
+    @Optional() private readonly servicePlans?: ServicePlansService,
   ) {}
 
   // Estado maquina de transiciones validas
@@ -203,6 +208,12 @@ export class ReservationsService {
         usage_nature: true,
         is_ingredient: true,
         is_sellable: true,
+        // QUI-1060 modo Plan
+        service_pricing_type: true,
+        plan_duration_days: true,
+        plan_departure_mode: true,
+        plan_min_pax: true,
+        plan_max_pax: true,
       },
     });
 
@@ -213,6 +224,14 @@ export class ReservationsService {
     // reserva quedaría trabada. Se valida aquí, antes de crear orden o reserva.
     assertSaleNatureProducts([product]);
 
+    // QUI-1060: a multi-day booking never ends before it starts.
+    if (dto.end_date && dto.end_date.slice(0, 10) < dto.date.slice(0, 10)) {
+      throw new VendixHttpException(ErrorCodes.SERVICE_BOOKING_END_DATE_001);
+    }
+    // QUI-1060 modo Plan: package service with days. Return date, departure, group and
+    // price come from the plan; any other service keeps the flow below untouched.
+    const planBooking = isPlanProduct(product) ? await this.resolvePlanBooking(product, dto) : null;
+
     // S21: bookings can cross midnight (`end_time <= start_time` ends on D+1) and, on
     // station services, have no end at all (D9). Daytime bookings keep `end_date` null.
     const isOpenEnded = !!dto.is_open_ended;
@@ -220,7 +239,9 @@ export class ReservationsService {
       throw new BadRequestException('Solo los servicios con estación admiten reservas sin hora de fin');
     }
     const endTime = dto.end_time ?? dto.start_time;
-    const endDateValue = isOpenEnded
+    const endDateValue = planBooking
+      ? planBooking.endDate
+      : isOpenEnded
       ? null
       : dto.end_date && dto.end_date.slice(0, 10) !== dto.date.slice(0, 10)
         ? dto.end_date.slice(0, 10)
@@ -286,7 +307,9 @@ export class ReservationsService {
     } else if (
       product.booking_mode === booking_mode_enum.provider_required &&
       !dto.skip_availability_check &&
-      !isOpenEnded
+      !isOpenEnded &&
+      // A plan is sold by departures/dates and seats, not by hourly provider slots.
+      !planBooking
     ) {
       // Check if there are ANY providers for this service
       const serviceProviders = await this.prisma.provider_services.findMany({
@@ -321,7 +344,7 @@ export class ReservationsService {
       product.booking_mode === booking_mode_enum.free_booking;
     const noProvidersConfigured = !resolvedProviderId && !dto.provider_id;
     const shouldSkipAvailability =
-      dto.skip_availability_check || isFreeBooking || noProvidersConfigured || isOpenEnded;
+      dto.skip_availability_check || isFreeBooking || noProvidersConfigured || isOpenEnded || !!planBooking;
 
     if (!shouldSkipAvailability) {
       const isAvailable = await this.availabilityService.isSlotAvailable(
@@ -395,7 +418,8 @@ export class ReservationsService {
             }
           : undefined,
       });
-      const price = priceResult.unitPrice;
+      // QUI-1060: a plan is charged at its package price for the group size.
+      const price = planBooking ? planBooking.price : priceResult.unitPrice;
       const createdOrder = await this.ordersService.create(
         {
           customer_id: dto.customer_id,
@@ -481,10 +505,25 @@ export class ReservationsService {
                 dto.service_location_type === 'home'
                   ? (dto.service_address_id ?? null)
                   : null,
+              // QUI-1060 modo Plan: departure and group size (null on any other service).
+              departure_id: planBooking?.departureId ?? null,
+              pax_adults: planBooking?.paxAdults ?? null,
+              pax_children: planBooking?.paxChildren ?? null,
               updated_at: new Date(),
             },
             include: this.BOOKING_INCLUDE,
           });
+
+          // QUI-1060: the booking takes its seats in the same transaction (conditional
+          // UPDATE): if it fails, neither the booking nor the seats are written.
+          if (planBooking?.departureId != null) {
+            await this.servicePlans!.reserveSeatsInTx(tx, {
+              storeId: store_id,
+              productId: dto.product_id,
+              departureId: planBooking.departureId,
+              pax: planBooking.totalPax,
+            });
+          }
 
           if (product.requires_station) {
             const allocated = await this.allocationCoordinator!.allocateBooking(tx, {
@@ -542,7 +581,16 @@ export class ReservationsService {
         },
         { isolationLevel: 'Serializable' },
       );
-    } catch (err) {
+    } catch (caught) {
+      let err = caught;
+      // QUI-1060: two bookings racing for the last seat — the serializable transaction
+      // aborts the loser; answer the seats error instead of a generic database error.
+      if (planBooking?.departureId != null && this.isSerializationFailure(caught)) {
+        err = new VendixHttpException(
+          ErrorCodes.SERVICE_PLAN_008,
+          'Otra reserva tomó los cupos de esta salida al mismo tiempo: revisa los cupos y vuelve a intentar.',
+        );
+      }
       // Compensar la orden pre-creada para preservar el invariante de
       // QUI-649: reserva y orden nacen juntas o no nacen. Si la
       // cancelación también falla (DB caída, lock), la orden queda en
@@ -685,6 +733,59 @@ export class ReservationsService {
       };
     }
     return booking;
+  }
+
+  /**
+   * QUI-1060 modo Plan: validates the plan booking (departure mode, open departure,
+   * group size, package price, return date). Seats are taken later, inside the
+   * booking transaction. A plan is never a station, open-ended or deposit booking.
+   */
+  private async resolvePlanBooking(
+    product: {
+      id: number;
+      requires_station: boolean | null;
+      service_pricing_type: string | null;
+      plan_duration_days: number | null;
+      plan_departure_mode: 'fixed' | 'on_demand' | 'both' | null;
+      plan_min_pax: number | null;
+      plan_max_pax: number | null;
+    },
+    dto: CreateBookingDto,
+  ): Promise<PlanBookingResolution> {
+    if (!this.servicePlans) {
+      throw new VendixHttpException(ErrorCodes.SERVICE_PLAN_001, 'No se pudo validar el plan de este servicio.');
+    }
+    if (product.requires_station || dto.is_open_ended || dto.deposit) {
+      throw new BadRequestException('Un plan por paquete no se reserva con estación, sin hora de fin ni con anticipo de estación.');
+    }
+    return this.servicePlans.resolveBooking(product, {
+      date: dto.date,
+      end_date: dto.end_date ?? null,
+      departure_id: dto.departure_id ?? null,
+      pax_adults: dto.pax_adults ?? null,
+      pax_children: dto.pax_children ?? null,
+    });
+  }
+
+  /** Postgres serialization failure (40001) as Prisma surfaces it (P2034, or a raw-query error). */
+  private isSerializationFailure(err: unknown): boolean {
+    if (err instanceof Prisma.PrismaClientKnownRequestError) {
+      if (err.code === 'P2034') return true;
+      const meta = err.meta as { code?: string } | undefined;
+      if (meta?.code === '40001') return true;
+    }
+    const message = err instanceof Error ? err.message : '';
+    return message.includes('40001') || message.includes('could not serialize access');
+  }
+
+  /**
+   * QUI-1060: a plan booking (it carries a group size or a departure) is not moved to
+   * another date: its seats and package price belong to its departure/date.
+   */
+  private assertNotPlanBooking(booking: { departure_id?: number | null; pax_adults?: number | null }): void {
+    if (booking.departure_id != null || booking.pax_adults != null) {
+      throw new VendixHttpException(ErrorCodes.SERVICE_PLAN_016);
+    }
   }
 
   /**
@@ -1331,6 +1432,7 @@ export class ReservationsService {
    */
   async reschedule(id: number, dto: RescheduleBookingDto) {
     const booking = await this.findOne(id);
+    this.assertNotPlanBooking(booking);
 
     // Solo se pueden reprogramar reservas pendientes o confirmadas
     if (
@@ -1539,6 +1641,7 @@ export class ReservationsService {
       requestedByCustomerId?: number;
     },
   ) {
+    this.assertNotPlanBooking(booking);
     // Si ya existe una solicitud PENDING para esta reserva, no dejamos
     // crear otra — el cliente debe cancelar la anterior primero.
     const existing = await this.prisma.booking_reschedule_requests.findFirst({
@@ -2018,7 +2121,10 @@ export class ReservationsService {
     const range = { gte: new Date(query.date_from), lte: new Date(query.date_to) };
     // S21 / A14: an overnight booking also shows on the day it ends, so it is
     // fetched when either its start day or its end day is inside the range.
-    const where: any = { OR: [{ date: range }, { end_date: range }] };
+    // QUI-1060: a multi-day booking (plan) that covers the whole range is fetched too.
+    const where: any = {
+      OR: [{ date: range }, { end_date: range }, { date: { lt: range.gte }, end_date: { gt: range.lte } }],
+    };
 
     if (query.product_id) where.product_id = query.product_id;
     if (query.status) where.status = query.status;
@@ -2040,14 +2146,15 @@ export class ReservationsService {
     const inRange = (key: string) => key >= fromKey && key <= toKey;
     for (const booking of bookings) {
       const dateKey = dayKey(booking.date);
-      const endKey = (booking as any).end_date ? dayKey((booking as any).end_date) : null;
-      if (inRange(dateKey)) {
-        if (!grouped[dateKey]) grouped[dateKey] = [];
-        grouped[dateKey].push(booking);
-      }
-      if (endKey && endKey !== dateKey && inRange(endKey)) {
-        if (!grouped[endKey]) grouped[endKey] = [];
-        grouped[endKey].push(booking);
+      const endKey = (booking as any).end_date ? dayKey((booking as any).end_date) : dateKey;
+      // Every day the booking covers inside the range (start day, middle days of a
+      // multi-day plan and end day). A same-day or overnight booking keeps 1-2 days.
+      let key = dateKey < fromKey ? fromKey : dateKey;
+      const last = endKey > toKey ? toKey : endKey;
+      for (let guard = 0; key <= last && guard < 400; guard++) {
+        if (!grouped[key]) grouped[key] = [];
+        grouped[key].push(booking);
+        key = addDaysToDateString(key, 1);
       }
     }
 
@@ -2170,6 +2277,10 @@ export class ReservationsService {
       throw new VendixHttpException(ErrorCodes.STATION_012);
     }
     return this.prisma.$transaction(async (tx) => {
+      // QUI-1060: a cancelled plan booking gives its seats back to the departure.
+      if (targetStatus === 'cancelled') {
+        await releasePlanSeatsForBookingInTx(tx, id);
+      }
       if (product?.requires_station && ['cancelled', 'no_show', 'completed'].includes(targetStatus)) {
         await this.allocationCoordinator!.releaseBooking(tx, booking.store_id, id, targetStatus === 'cancelled' ? 'cancelled' : 'released');
       }
@@ -2210,6 +2321,8 @@ export class ReservationsService {
         await this.allocationCoordinator!.releaseBooking(tx, booking.store_id, id, 'cancelled');
         await tx.bookings.update({ where: { id }, data: { status: booking_status_enum.cancelled, expires_at: null, updated_at: new Date() } });
       } else {
+        // QUI-1060: the seats go back before the row (and its departure link) disappears.
+        await releasePlanSeatsForBookingInTx(tx, id);
         await tx.bookings.delete({ where: { id } });
       }
     });
