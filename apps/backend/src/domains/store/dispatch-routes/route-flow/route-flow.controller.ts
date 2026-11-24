@@ -31,6 +31,9 @@ import {
   ConfirmRouteSheetDto,
   RouteSheetScanResult,
 } from './dto/scan-route-sheet.dto';
+import { plainToInstance } from 'class-transformer';
+import { ValidationError, validateSync } from 'class-validator';
+import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
@@ -231,23 +234,64 @@ export class RouteFlowController {
    * Build a `ConfirmRouteSheetDto` from a multipart body. The frontend
    * sends the `stops` array and the `scan_result` object as JSON-encoded
    * strings (FormData cannot carry structured payloads natively).
+   *
+   * The global `ValidationPipe` does not run on a raw `Record` body, so the DTO
+   * is validated HERE with class-validator: an amount, id or text out of the
+   * column range is a 400 `RTSCAN_CONFIRM_INVALID` before anything is written
+   * (never a Prisma P2020 in the middle of the settle).
    */
   private parseConfirmDto(raw: Record<string, unknown>): ConfirmRouteSheetDto {
-    const stopsRaw = raw['stops'];
-    const stops: ConfirmRouteSheetDto['stops'] = Array.isArray(stopsRaw)
-      ? (stopsRaw as ConfirmRouteSheetDto['stops'])
-      : typeof stopsRaw === 'string' && stopsRaw.length > 0
-        ? JSON.parse(stopsRaw)
-        : [];
+    const parseJson = (value: unknown, field: string) => {
+      if (typeof value !== 'string') return value;
+      if (value.length === 0) return undefined;
+      try {
+        return JSON.parse(value);
+      } catch {
+        throw new VendixHttpException(
+          ErrorCodes.RTSCAN_CONFIRM_INVALID,
+          `No se aplicó ningún cambio: el campo ${field} no es un JSON válido.`,
+        );
+      }
+    };
 
-    const scanRaw = raw['scan_result'];
-    const scan_result: ConfirmRouteSheetDto['scan_result'] =
-      scanRaw == null
-        ? undefined
-        : typeof scanRaw === 'string' && scanRaw.length > 0
-          ? JSON.parse(scanRaw)
-          : (scanRaw as ConfirmRouteSheetDto['scan_result']);
+    const stopsRaw = parseJson(raw['stops'], 'stops');
+    const scanRaw = parseJson(raw['scan_result'], 'scan_result');
 
-    return { stops, scan_result };
+    const dto = plainToInstance(ConfirmRouteSheetDto, {
+      stops: stopsRaw ?? [],
+      scan_result: scanRaw ?? undefined,
+    });
+    const errors = validateSync(dto, { whitelist: true });
+    const messages = this.flattenValidation(errors);
+    // `scan_result` is the raw AI answer (kept as JSON); only its confidence is
+    // written to a column (`scan_confidence`, a 0-100 percentage stored 0-1).
+    const confidence = (dto.scan_result as { confidence?: unknown } | undefined)
+      ?.confidence;
+    if (confidence !== undefined && confidence !== null && confidence !== '') {
+      const pct = Number(confidence);
+      if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+        messages.push('scan_result.confidence: debe estar entre 0 y 100');
+      }
+    }
+    if (messages.length > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.RTSCAN_CONFIRM_INVALID,
+        `No se aplicó ningún cambio: ${messages.join('; ')}`,
+      );
+    }
+    return dto;
+  }
+
+  /** class-validator errors → "stops.0.collected_amount: …" messages. */
+  private flattenValidation(errors: ValidationError[], prefix = ''): string[] {
+    const out: string[] = [];
+    for (const e of errors) {
+      const path = prefix ? `${prefix}.${e.property}` : e.property;
+      for (const msg of Object.values(e.constraints ?? {})) {
+        out.push(`${path}: ${msg}`);
+      }
+      if (e.children?.length) out.push(...this.flattenValidation(e.children, path));
+    }
+    return out;
   }
 }

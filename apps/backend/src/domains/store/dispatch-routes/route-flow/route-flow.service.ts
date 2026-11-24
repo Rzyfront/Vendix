@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  HttpException,
   Logger,
 } from '@nestjs/common';
 import {
@@ -13,7 +14,10 @@ import { resolveCustomerSnapshotName } from '../../../../common/helpers/customer
 import { RequestContextService } from '@common/context/request-context.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
-import { CashSettlementService } from './cash-settlement.service';
+import {
+  CashSettlementService,
+  PaymentReceivedInput,
+} from './cash-settlement.service';
 import { PdfExportService } from './pdf-export.service';
 import { OrderFlowService } from '../../orders/order-flow/order-flow.service';
 import {
@@ -37,6 +41,103 @@ import {
 } from '../../settings/interfaces/store-settings.interface';
 // F-222 — comparación de dinero en centavos enteros (no `Math.abs` en floats).
 import { differsByAtLeastCents } from '@common/money-kernel';
+
+/**
+ * Stop read used by the settle validation: the dispatch note with its live
+ * payment signals (derived prepaid / pending), order credit form and the
+ * customer's withholding-agent flag.
+ */
+const SETTLE_STOP_INCLUDE = {
+  dispatch_note: {
+    select: {
+      id: true,
+      dispatch_number: true,
+      grand_total: true,
+      customer_id: true,
+      sales_order_id: true,
+      // Current remisión status — drives the idempotent transition to
+      // 'delivered' (and confirmed-on-the-fly for draft) in
+      // markDispatchNoteDeliveredInTx.
+      status: true,
+      // COD link: the real orders.id whose state the route drives. Needed
+      // for the `live` order_state_update_mode (advance to delivered here).
+      order_id: true,
+      // Live payment signals so the prepaid gate is DERIVED (never the
+      // frozen stop.is_prepaid boolean).
+      needs_collection: true,
+      sales_order: { select: { id: true, order_number: true, status: true } },
+      invoice: { select: { payment_date: true } },
+      order: {
+        select: {
+          remaining_balance: true,
+          // Credit rule at settle: only an installments plan may be
+          // delivered with less than the total (see `prepareSettle`).
+          payment_form: true,
+          credit_type: true,
+        },
+      },
+      // For withholding-agent validation: a retenedor cliente must
+      // arrive at 'delivered' WITH a populated withholding_breakdown,
+      // otherwise the fiscal accounting will not balance.
+      customer: { select: { is_withholding_agent: true } },
+    },
+  },
+};
+
+/**
+ * The stop as `StorePrismaService` returns it. Its scoped client is untyped
+ * (`any`), exactly like the inline read this replaced; the full Prisma payload
+ * type is avoided on purpose (it exhausts the heap of the per-file type-check).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SettleStopRecord = any;
+
+/** Post-commit payload of `dispatch_note.delivered`. */
+type DeliveredNotePayload = {
+  dispatch_note_id: number;
+  dispatch_number: string;
+  store_id: number;
+  sales_order_id: number | null;
+  order_id: number | null;
+};
+
+/** A validated settle of ONE stop, ready to be written in a transaction. */
+interface PreparedStopSettle {
+  kind: 'settle';
+  route_id: number;
+  stop_id: number;
+  store_id: number;
+  user_id: number | undefined;
+  dto: SettleStopDto;
+  stop: SettleStopRecord;
+  from_status: string;
+  stopIsPrepaid: boolean;
+  net: number;
+  collected: number;
+  anticipo: number;
+  change: number;
+  withholding: number;
+  paymentInput: PaymentReceivedInput | null;
+}
+
+/** A validated release of ONE stop, ready to be written in a transaction. */
+interface PreparedStopRelease {
+  kind: 'release';
+  route_id: number;
+  stop_id: number;
+  user_id: number | undefined;
+  from_status: string;
+  reason: string;
+}
+
+type PreparedSettleResult =
+  | PreparedStopSettle
+  | { kind: 'idempotent'; stop: SettleStopRecord };
+
+/** One item of {@link RouteFlowService.settleStopsAtomically}. */
+export type AtomicStopItem =
+  | { kind: 'settle'; stop_id: number; dto: SettleStopDto }
+  | { kind: 'release'; stop_id: number; reason: string };
 
 const ROUTE_INCLUDE = {
   vehicle: true,
@@ -642,51 +743,44 @@ export class RouteFlowService {
   /**
    * Settle a stop with result + amounts.
    * Emits payment / credit / refund / withholding events via CashSettlementService.
+   *
+   * Three phases (shared with {@link settleStopsAtomically}):
+   *   1. `prepareSettle`   — reads + every business validation, NO writes.
+   *   2. `applySettleInTx` — the writes, inside the caller's transaction.
+   *   3. `emitSettleSideEffects` — post-commit events (cash/AR/inventory).
    */
   async settleStop(id: number, stopId: number, dto: SettleStopDto) {
     const store_id = this.getStoreId();
     const user_id = RequestContextService.getContext()?.user_id;
     const route = await this.getRoute(id, store_id);
+    const prepared = await this.prepareSettle(route, stopId, dto, store_id, user_id);
+    if (prepared.kind === 'idempotent') return prepared.stop;
+
+    const applied = await this.prisma.$transaction((tx) =>
+      this.applySettleInTx(tx, prepared),
+    );
+    await this.emitSettleSideEffects(prepared, applied.deliveredEventPayload);
+    return applied.updated_stop;
+  }
+
+  /**
+   * Validate a settle WITHOUT writing anything. Throws the same errors the
+   * settle always threw (status gate, partial disabled, withholding agent,
+   * collection mismatch, prepaid with collection). Returns either the
+   * idempotent answer (stop already delivered and asked delivered again) or a
+   * plan that {@link applySettleInTx} writes inside a transaction.
+   */
+  private async prepareSettle(
+    route: { id: number; status: string },
+    stopId: number,
+    dto: SettleStopDto,
+    store_id: number,
+    user_id: number | undefined,
+  ): Promise<PreparedSettleResult> {
+    const id = route.id;
     const stop = await this.prisma.dispatch_route_stops.findFirst({
       where: { id: stopId, route_id: id },
-      include: {
-        dispatch_note: {
-          select: {
-            id: true,
-            dispatch_number: true,
-            grand_total: true,
-            customer_id: true,
-            sales_order_id: true,
-            // Current remisión status — drives the idempotent transition to
-            // 'delivered' (and confirmed-on-the-fly for draft) in
-            // markDispatchNoteDeliveredInTx.
-            status: true,
-            // COD link: the real orders.id whose state the route drives. Needed
-            // for the `live` order_state_update_mode (advance to delivered here).
-            order_id: true,
-            // Live payment signals so the prepaid gate below is DERIVED (never
-            // the frozen stop.is_prepaid boolean).
-            needs_collection: true,
-            sales_order: { select: { id: true, order_number: true, status: true } },
-            invoice: { select: { payment_date: true } },
-            order: {
-              select: {
-                remaining_balance: true,
-                // Credit rule at settle: only an installments plan may be
-                // delivered with less than the total (see `settleStop`).
-                payment_form: true,
-                credit_type: true,
-              },
-            },
-            // For withholding-agent validation: a retenedor cliente must
-            // arrive at 'delivered' or 'partial' WITH a populated
-            // withholding_breakdown, otherwise the fiscal accounting will
-            // not balance. We surface a 400 here instead of accepting a
-            // malformed stop that downstream listeners can't reconcile.
-            customer: { select: { is_withholding_agent: true } },
-          },
-        },
-      },
+      include: SETTLE_STOP_INCLUDE,
     });
     if (!stop) throw new NotFoundException(`Parada #${stopId} no encontrada`);
     if (!['dispatched', 'in_transit'].includes(route.status)) {
@@ -701,7 +795,7 @@ export class RouteFlowService {
       this.logger.log(
         `Parada #${stopId} ya entregada: reintento ignorado (idempotente)`,
       );
-      return stop;
+      return { kind: 'idempotent', stop };
     }
 
     if (stop.status === 'released' || stop.status === 'delivered') {
@@ -776,15 +870,19 @@ export class RouteFlowService {
     const pendingAmount = derivePendingAmount(stop);
     const toCents = (value: number) => Math.round(value * 100);
 
+    // Ya pagada: no se cobra NADA sobre ella, sea cual sea el resultado
+    // (entregada, rechazada o liberada). Un recaudo o una retención > 0 se
+    // rechaza: nada de pagos extra silenciosos ni de cobrar dos veces.
+    if (stopIsPrepaid && toCents(total_paid + withholding) > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.DISPATCH_ROUTE_STOP_ALREADY_PAID,
+        dto.result === 'delivered'
+          ? `Esta orden ya está pagada: no hay nada que recaudar (recibiste ${total_paid + withholding}). Entrégala con recaudo 0.`
+          : `Esta orden ya está pagada: no se registra cobro sobre ella (recibiste ${total_paid + withholding}).`,
+      );
+    }
+
     if (dto.result === 'delivered') {
-      // Ya pagada: se entrega con recaudo 0. Un recaudo > 0 se rechaza (nada de
-      // pagos extra silenciosos).
-      if (stopIsPrepaid && toCents(total_paid) > 0) {
-        throw new VendixHttpException(
-          ErrorCodes.DISPATCH_ROUTE_STOP_ALREADY_PAID,
-          `Esta orden ya está pagada: no hay nada que recaudar (recibiste ${total_paid}). Entrégala con recaudo 0.`,
-        );
-      }
       // El cobro debe cubrir lo que realmente se debe (saldo vivo de la orden)
       // — salvo que la parada esté prepagada, en cuyo caso el dinero ya entró
       // antes del despacho y exigir recaudo aquí lo cobraría dos veces.
@@ -834,25 +932,12 @@ export class RouteFlowService {
     // los caminos de LECTURA, para no volver no-terminales las paradas
     // liquidadas antes de esta regla. Ver `SETTLED_RESULTS` en route-stop-calc.
 
-    const from_status = stop.status;
-
-    // Captured inside the tx, emitted AFTER commit so the listener that reacts
-    // to `dispatch_note.delivered` (inventory primitive) re-reads the note and
-    // sees status:'delivered' already persisted. `null` ⇒ no transition, no emit.
-    let deliveredEventPayload: {
-      dispatch_note_id: number;
-      dispatch_number: string;
-      store_id: number;
-      sales_order_id: number | null;
-      order_id: number | null;
-    } | null = null;
-
     // Credit orders also register a collection when only the customer's
     // withholding settles part of the balance (collected 0, W > 0).
     const isCreditOrderStop =
       (stop.dispatch_note.order as { payment_form?: string | null } | null | undefined)
         ?.payment_form === '2';
-    const paymentInput = !stopIsPrepaid &&
+    const paymentInput: PaymentReceivedInput | null = !stopIsPrepaid &&
       (collected > 0 || anticipo > 0 || (isCreditOrderStop && withholding > 0))
       ? {
           store_id,
@@ -871,72 +956,130 @@ export class RouteFlowService {
     // D8: el recaudo en ruta NO exige ni registra caja. El movimiento de caja
     // se asienta al cerrar la planilla (`close` → recordRouteCloseMovements).
 
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const updated_stop = await tx.dispatch_route_stops.update({
-        where: { id: stopId },
-        data: {
-          status: dto.result,
-          result: dto.result,
-          collected_amount: collected,
-          anticipo_amount: anticipo,
-          change_amount: change,
-          withholding_amount: withholding,
-          withholding_breakdown: dto.withholding_breakdown as any,
-          payment_method: dto.payment_method,
-          notes: dto.notes,
-          settled_at: new Date(),
-          settled_by_user_id: user_id,
-          updated_at: new Date(),
-        },
-      });
+    return {
+      kind: 'settle',
+      route_id: id,
+      stop_id: stopId,
+      store_id,
+      user_id,
+      dto,
+      stop,
+      from_status: stop.status,
+      stopIsPrepaid,
+      net,
+      collected,
+      anticipo,
+      change,
+      withholding,
+      paymentInput,
+    };
+  }
 
-      await tx.dispatch_route_stop_history.create({
-        data: {
-          stop_id: stopId,
-          action: 'settle',
-          from_status,
-          to_status: dto.result,
-          metadata: {
-            collected_amount: collected,
-            anticipo_amount: anticipo,
-            change_amount: change,
-            withholding_amount: withholding,
-            payment_method: dto.payment_method,
-          } as any,
-        },
-      });
-
-      // Keep parent totals in sync so the detail page reflects live "Recaudado".
-      await this.refreshRouteTotals(tx, id);
-
-      // NOTE: the linked COD order state is NOT written here. `settleStop`
-      // emits `dispatch_note.delivered` post-commit (see below); its listener
-      // (`handleDelivered`) drives the single reconciler
-      // (`OrderFlowService.reconcileOrderFromDispatch`). This keeps the order
-      // state a derived read of the persisted route/note state — no parallel
-      // `orders.state` writer lives in the route.
-
-      // Sync the remisión with the route close-out: a stop settled as delivered
-      // (pago total) drives its dispatch_note → 'delivered' (idempotent).
-      // rejected/released do NOT deliver the note. The event is emitted AFTER
-      // the tx commits (see deliveredEventPayload below).
-      if (dto.result === 'delivered') {
-        deliveredEventPayload = await this.markDispatchNoteDeliveredInTx(
-          tx,
-          stop.dispatch_note as any,
-          store_id,
-          user_id,
-        );
-      }
-
-      return updated_stop;
+  /**
+   * Writes of a prepared settle, inside the caller's transaction. Returns the
+   * updated stop and the `dispatch_note.delivered` payload to emit AFTER the
+   * transaction commits (`null` ⇒ no transition, no emit).
+   */
+  private async applySettleInTx(
+    tx: Prisma.TransactionClient,
+    plan: PreparedStopSettle,
+  ) {
+    const { dto, stop } = plan;
+    // Conditional write: only if the stop is STILL in the status validated by
+    // `prepareSettle`. A concurrent settle (another tab, the manual flow, a
+    // repeated stop_id in a batch) leaves count 0 → ALREADY_SETTLED, which
+    // aborts the transaction (nothing applied, no second payment).
+    const guard = await tx.dispatch_route_stops.updateMany({
+      where: {
+        id: plan.stop_id,
+        route_id: plan.route_id,
+        status: plan.from_status as any,
+      },
+      data: {
+        status: dto.result,
+        result: dto.result,
+        collected_amount: plan.collected,
+        anticipo_amount: plan.anticipo,
+        change_amount: plan.change,
+        withholding_amount: plan.withholding,
+        withholding_breakdown: dto.withholding_breakdown as any,
+        payment_method: dto.payment_method,
+        notes: dto.notes,
+        settled_at: new Date(),
+        settled_by_user_id: plan.user_id,
+        updated_at: new Date(),
+      },
     });
+    if (guard.count === 0) this.throwStopChanged(plan.stop_id);
+    const updated_stop = await tx.dispatch_route_stops.findFirst({
+      where: { id: plan.stop_id },
+    });
+
+    await tx.dispatch_route_stop_history.create({
+      data: {
+        stop_id: plan.stop_id,
+        action: 'settle',
+        from_status: plan.from_status,
+        to_status: dto.result,
+        // Motivo del rechazo (opcional en el flujo manual; obligatorio en la
+        // carga con IA). Mismo campo `reason` que usa la liberación.
+        ...(dto.reason ? { reason: dto.reason } : {}),
+        metadata: {
+          collected_amount: plan.collected,
+          anticipo_amount: plan.anticipo,
+          change_amount: plan.change,
+          withholding_amount: plan.withholding,
+          payment_method: dto.payment_method,
+        } as any,
+      },
+    });
+
+    // Keep parent totals in sync so the detail page reflects live "Recaudado".
+    await this.refreshRouteTotals(tx, plan.route_id);
+
+    // NOTE: the linked COD order state is NOT written here. `settleStop`
+    // emits `dispatch_note.delivered` post-commit (see emitSettleSideEffects);
+    // its listener (`handleDelivered`) drives the single reconciler
+    // (`OrderFlowService.reconcileOrderFromDispatch`). This keeps the order
+    // state a derived read of the persisted route/note state — no parallel
+    // `orders.state` writer lives in the route.
+
+    // Sync the remisión with the route close-out: a stop settled as delivered
+    // (pago total) drives its dispatch_note → 'delivered' (idempotent).
+    // rejected/released do NOT deliver the note. The event is emitted AFTER
+    // the tx commits.
+    let deliveredEventPayload: DeliveredNotePayload | null = null;
+    if (dto.result === 'delivered') {
+      deliveredEventPayload = await this.markDispatchNoteDeliveredInTx(
+        tx,
+        stop.dispatch_note as any,
+        plan.store_id,
+        plan.user_id,
+      );
+    }
+
+    return { updated_stop, deliveredEventPayload };
+  }
+
+  /**
+   * Post-commit side effects of a settle: payment / refund / withholding events
+   * (only for non-prepaid stops, DERIVED prepaid) and the remisión-delivered
+   * event that drives the inventory primitive.
+   */
+  private async emitSettleSideEffects(
+    plan: PreparedStopSettle,
+    deliveredEventPayload: DeliveredNotePayload | null,
+  ): Promise<void> {
+    const { stop, dto, store_id, user_id } = plan;
+    const id = plan.route_id;
+    const stopId = plan.stop_id;
+    const { change, withholding, net } = plan;
 
     // Emit domain events to drive accounting / AR / notifications.
     // Only for non-prepaid stops with actual collection (DERIVED prepaid).
-    if (!stopIsPrepaid) {
-      if (paymentInput) {
-        await this.cashSettlement.emitPaymentReceived(paymentInput, {
+    if (!plan.stopIsPrepaid) {
+      if (plan.paymentInput) {
+        await this.cashSettlement.emitPaymentReceived(plan.paymentInput, {
           cashMovementHandled: true,
         });
       }
@@ -992,9 +1135,8 @@ export class RouteFlowService {
     }
 
     this.logger.log(
-      `Parada #${stopId} liquidada: result=${dto.result} collected=${collected} withholding=${withholding}`,
+      `Parada #${stopId} liquidada: result=${dto.result} collected=${plan.collected} withholding=${withholding}`,
     );
-    return updated;
   }
 
   /**
@@ -1005,8 +1147,25 @@ export class RouteFlowService {
     const store_id = this.getStoreId();
     const user_id = RequestContextService.getContext()?.user_id;
     const route = await this.getRoute(id, store_id);
+    const plan = await this.prepareRelease(route, stopId, dto.reason, user_id);
+
+    const updated = await this.prisma.$transaction((tx) =>
+      this.applyReleaseInTx(tx, plan),
+    );
+
+    this.logger.log(`Parada #${stopId} liberada para reasignación: ${dto.reason}`);
+    return updated;
+  }
+
+  /** Validate a release WITHOUT writing anything (see {@link releaseStop}). */
+  private async prepareRelease(
+    route: { id: number; status: string },
+    stopId: number,
+    reason: string,
+    user_id: number | undefined,
+  ): Promise<PreparedStopRelease> {
     const stop = await this.prisma.dispatch_route_stops.findFirst({
-      where: { id: stopId, route_id: id },
+      where: { id: stopId, route_id: route.id },
     });
     if (!stop) throw new NotFoundException(`Parada #${stopId} no encontrada`);
     if (['closed', 'voided'].includes(route.status)) {
@@ -1017,39 +1176,194 @@ export class RouteFlowService {
     if (['released', 'delivered'].includes(stop.status)) {
       throw new BadRequestException(`La parada ya está '${stop.status}'`);
     }
+    return {
+      kind: 'release',
+      route_id: route.id,
+      stop_id: stopId,
+      user_id,
+      from_status: stop.status,
+      reason,
+    };
+  }
 
-    const from_status = stop.status;
+  /**
+   * The stop is no longer in the status that was validated (settled or
+   * released meanwhile). Thrown INSIDE the transaction so it rolls back.
+   */
+  private throwStopChanged(stopId: number): never {
+    throw new VendixHttpException(
+      ErrorCodes.DISPATCH_ROUTE_STOP_ALREADY_SETTLED,
+      `La parada #${stopId} cambió de estado mientras se liquidaba (ya fue liquidada o liberada). No se aplicó ningún cambio; recarga la planilla.`,
+    );
+  }
 
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const updated_stop = await tx.dispatch_route_stops.update({
-        where: { id: stopId },
-        data: {
-          status: 'released',
-          result: 'released',
-          released_at: new Date(),
-          updated_at: new Date(),
-        },
-      });
-      await tx.dispatch_route_stop_history.create({
-        data: {
-          stop_id: stopId,
-          action: 'release',
-          from_status,
-          to_status: 'released',
-          reason: dto.reason,
-          released_by: user_id,
-        },
-      });
-
-      // Released stops drop out of pending; refresh aggregates so the detail
-      // page re-computes the "A cobrar" / variance projections live.
-      await this.refreshRouteTotals(tx, id);
-
-      return updated_stop;
+  /** Writes of a prepared release, inside the caller's transaction. */
+  private async applyReleaseInTx(
+    tx: Prisma.TransactionClient,
+    plan: PreparedStopRelease,
+  ) {
+    // Same conditional write as the settle (see applySettleInTx).
+    const guard = await tx.dispatch_route_stops.updateMany({
+      where: {
+        id: plan.stop_id,
+        route_id: plan.route_id,
+        status: plan.from_status as any,
+      },
+      data: {
+        status: 'released',
+        result: 'released',
+        released_at: new Date(),
+        updated_at: new Date(),
+      },
+    });
+    if (guard.count === 0) this.throwStopChanged(plan.stop_id);
+    const updated_stop = await tx.dispatch_route_stops.findFirst({
+      where: { id: plan.stop_id },
+    });
+    await tx.dispatch_route_stop_history.create({
+      data: {
+        stop_id: plan.stop_id,
+        action: 'release',
+        from_status: plan.from_status,
+        to_status: 'released',
+        reason: plan.reason,
+        released_by: plan.user_id,
+      },
     });
 
-    this.logger.log(`Parada #${stopId} liberada para reasignación: ${dto.reason}`);
-    return updated;
+    // Released stops drop out of pending; refresh aggregates so the detail
+    // page re-computes the "A cobrar" / variance projections live.
+    await this.refreshRouteTotals(tx, plan.route_id);
+
+    return updated_stop;
+  }
+
+  /**
+   * Batch settle/release of several stops of ONE route, all-or-nothing (used by
+   * the AI route-sheet confirm).
+   *
+   * 1. Every item is validated first with the same rules as the single-stop
+   *    endpoints (`prepareSettle` / `prepareRelease`). If ANY item fails, the
+   *    method throws `DISPATCH_ROUTE_BATCH_INVALID` (400) with the per-stop
+   *    errors and NOTHING has been written.
+   * 2. All writes — plus the caller's `extraWrites` (e.g. the scan metadata of
+   *    the route) — run in ONE transaction: a failure in the middle rolls back
+   *    every stop.
+   * 3. Only after the commit are the post-commit events emitted.
+   */
+  async settleStopsAtomically(
+    id: number,
+    items: ReadonlyArray<AtomicStopItem>,
+    extraWrites?: (tx: Prisma.TransactionClient) => Promise<void>,
+  ): Promise<Array<{ stop_id: number; result: string }>> {
+    const store_id = this.getStoreId();
+    const user_id = RequestContextService.getContext()?.user_id;
+    const route = await this.getRoute(id, store_id);
+
+    // A stop may appear ONCE: a repeated stop_id would be settled twice (two
+    // payments, two `dispatch_note.delivered`). The conditional write also
+    // stops it inside the tx; this gives the clear 400 before writing.
+    const seen = new Set<number>();
+    const duplicated = new Set<number>();
+    for (const item of items) {
+      if (seen.has(item.stop_id)) duplicated.add(item.stop_id);
+      seen.add(item.stop_id);
+    }
+    if (duplicated.size > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.DISPATCH_ROUTE_BATCH_INVALID,
+        `No se aplicó ningún cambio: la parada ${[...duplicated]
+          .map((id) => `#${id}`)
+          .join(', ')} viene repetida en el lote.`,
+        { duplicated_stop_ids: [...duplicated] },
+      );
+    }
+
+    const plans: Array<PreparedStopSettle | PreparedStopRelease> = [];
+    const errors: Array<{ stop_id: number; message: string }> = [];
+    for (const item of items) {
+      try {
+        if (item.kind === 'release') {
+          plans.push(
+            await this.prepareRelease(route, item.stop_id, item.reason, user_id),
+          );
+        } else {
+          const prepared = await this.prepareSettle(
+            route,
+            item.stop_id,
+            item.dto,
+            store_id,
+            user_id,
+          );
+          // Already delivered and asked delivered again: nothing to write.
+          if (prepared.kind !== 'idempotent') plans.push(prepared);
+        }
+      } catch (err) {
+        // Only business validation errors (4xx) are collected per stop; an
+        // unexpected failure (DB down, bug) propagates as it is.
+        if (!(err instanceof HttpException)) throw err;
+        errors.push({ stop_id: item.stop_id, message: err.message });
+      }
+    }
+
+    if (errors.length > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.DISPATCH_ROUTE_BATCH_INVALID,
+        `No se aplicó ningún cambio: ${errors.length} parada(s) no pasaron la validación. ${errors
+          .map((e) => `Parada #${e.stop_id}: ${e.message}`)
+          .join(' | ')}`,
+        { errors } as any,
+      );
+    }
+
+    const delivered = await this.prisma.$transaction(
+      async (tx) => {
+        const payloads: Array<DeliveredNotePayload | null> = [];
+        for (const plan of plans) {
+          if (plan.kind === 'release') {
+            await this.applyReleaseInTx(tx, plan);
+            payloads.push(null);
+          } else {
+            const applied = await this.applySettleInTx(tx, plan);
+            payloads.push(applied.deliveredEventPayload);
+          }
+        }
+        if (extraWrites) await extraWrites(tx);
+        return payloads;
+      },
+      // A route sheet carries tens of stops; each settle does a few writes
+      // plus the totals refresh, so the default 5 s would abort big sheets.
+      { timeout: 60_000, maxWait: 10_000 },
+    );
+
+    // Post-commit side effects, in the same order as the writes. The stops
+    // are already committed: one failing emit must not skip the events of the
+    // others (nor turn a committed confirm into an error), so each is isolated
+    // and logged for follow-up.
+    for (let i = 0; i < plans.length; i++) {
+      const plan = plans[i];
+      if (plan.kind === 'settle') {
+        try {
+          await this.emitSettleSideEffects(plan, delivered[i]);
+        } catch (err) {
+          this.logger.error(
+            `[settleStopsAtomically] Ruta #${id} parada #${plan.stop_id}: falló un evento post-commit (la parada SÍ quedó liquidada): ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+            err instanceof Error ? err.stack : undefined,
+          );
+        }
+      } else {
+        this.logger.log(
+          `Parada #${plan.stop_id} liberada para reasignación: ${plan.reason}`,
+        );
+      }
+    }
+
+    return plans.map((p) => ({
+      stop_id: p.stop_id,
+      result: p.kind === 'release' ? 'released' : p.dto.result,
+    }));
   }
 
   /**

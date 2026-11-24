@@ -5260,6 +5260,16 @@ export const ErrorCodes = {
     devMessage:
       'The stop is already settled (delivered/released) and cannot be settled again with a different result',
   },
+  /**
+   * Batch settle (AI route-sheet confirm): at least one stop failed the settle
+   * validation, so NOTHING was written. `details.errors` lists each stop.
+   */
+  DISPATCH_ROUTE_BATCH_INVALID: {
+    code: 'DISPATCH_ROUTE_BATCH_INVALID',
+    httpStatus: 400,
+    devMessage:
+      'One or more stops failed validation; no stop of the batch was settled',
+  },
   DISPATCH_ROUTE_COLLECTION_MISMATCH: {
     code: 'DISPATCH_ROUTE_COLLECTION_MISMATCH',
     httpStatus: 400,
@@ -5605,6 +5615,16 @@ export const ErrorCodes = {
     code: 'RTSCAN_MATCH_001',
     httpStatus: 400,
     devMessage: 'Could not match a scanned row to a route stop',
+  },
+  /**
+   * Route-sheet confirm payload rejected BEFORE writing anything: a value out
+   * of range (amount, confidence, id), a missing reason for a rejected/released
+   * stop, or a collection on a prepaid / not-delivered stop.
+   */
+  RTSCAN_CONFIRM_INVALID: {
+    code: 'RTSCAN_CONFIRM_INVALID',
+    httpStatus: 400,
+    devMessage: 'Invalid route sheet confirmation; nothing was applied',
   },
 
   // RUT Scanner (fiscal identity extraction)

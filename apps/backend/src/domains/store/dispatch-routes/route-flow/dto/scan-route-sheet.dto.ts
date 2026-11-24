@@ -1,11 +1,15 @@
 import {
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsNumber,
   IsObject,
   IsOptional,
   IsString,
+  Max,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -69,6 +73,14 @@ export interface RouteSheetMatchedStop {
     result: string | null;
     grand_total: number;
     collected_amount: number;
+    /**
+     * DERIVED prepaid (live payment state of the note/order). A prepaid stop
+     * is never collected: the review UI hides the collection fields and the
+     * confirm rejects any amount on it.
+     */
+    is_prepaid?: boolean;
+    /** Live amount still owed on the stop (0 when prepaid). */
+    pending_amount?: number;
   } | null;
   /**
    * Suggested settle result derived from the extracted row.
@@ -80,6 +92,13 @@ export interface RouteSheetMatchedStop {
    * decisión del operador — ver `short_payment_requires_decision` en el confirm.
    */
   suggested_result: dispatch_route_stop_result_enum | null;
+  /**
+   * Resultado de ENTREGA sugerido para la revisión, independiente del cobro:
+   * `delivered` si la hoja la marca entregada, `pending` en cualquier otro
+   * caso. Nunca sugiere `rejected`/`released`: esos exigen motivo y los marca
+   * el operador.
+   */
+  suggested_outcome?: 'delivered' | 'pending';
 }
 
 export interface RouteSheetMatchResult {
@@ -92,46 +111,109 @@ export interface RouteSheetMatchResult {
 // /scan/confirm — human-confirmed decisions to settle
 // ─────────────────────────────────────────────────────────────────────────────
 
-export class ConfirmRouteSheetStopDto {
-  @IsInt()
-  stop_id: number;
+/**
+ * Largest amount a `Decimal(14,2)` column can store (dispatch_route_stops
+ * collected/withholding amounts and the route totals). A bigger value made
+ * Postgres reject the write with Prisma P2020 in the middle of the settle.
+ */
+export const ROUTE_SHEET_MAX_AMOUNT = 999_999_999_999.99;
 
-  @IsBoolean()
-  delivered: boolean;
+/** Largest id an `Int` (int4) column can store. */
+const MAX_INT4 = 2_147_483_647;
 
+const toAmount = ({ value }: { value: unknown }) =>
+  value === null || value === undefined || value === '' ? 0 : Number(value);
+
+/** Withholding certificate lines of a withholding-agent customer. */
+export class RouteSheetWithholdingBreakdownDto {
   @IsOptional()
-  @Transform(({ value }) =>
-    value === null || value === undefined || value === '' ? 0 : Number(value),
-  )
+  @Transform(toAmount)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
+  @Max(ROUTE_SHEET_MAX_AMOUNT)
+  retefuente?: number;
+
+  @IsOptional()
+  @Transform(toAmount)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(ROUTE_SHEET_MAX_AMOUNT)
+  reteiva?: number;
+
+  @IsOptional()
+  @Transform(toAmount)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(ROUTE_SHEET_MAX_AMOUNT)
+  reteica?: number;
+}
+
+/**
+ * Resultado de ENTREGA que el operador confirma por parada. Va separado del
+ * cobro (`collected_amount` / `payment_method`): una parada se entrega,
+ * se rechaza o se libera; el cobro es otro dato que se confirma aparte.
+ * Las paradas que quedan pendientes simplemente no viajan en el confirm.
+ */
+export const ROUTE_SHEET_STOP_RESULTS = [
+  'delivered',
+  'rejected',
+  'released',
+] as const;
+export type RouteSheetStopResult = (typeof ROUTE_SHEET_STOP_RESULTS)[number];
+
+export class ConfirmRouteSheetStopDto {
+  @IsInt()
+  @Min(1)
+  @Max(MAX_INT4)
+  stop_id: number;
+
+  /**
+   * Legacy: la entrega como booleano. Se usa solo si no viene `result`;
+   * `delivered: false` sin `result` NO rechaza la parada (queda sin tocar, en
+   * `skipped[]` con `outcome_required`): rechazar exige motivo.
+   */
+  @IsOptional()
+  @IsBoolean()
+  delivered?: boolean;
+
+  @IsOptional()
+  @Transform(toAmount)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(ROUTE_SHEET_MAX_AMOUNT)
   collected_amount?: number = 0;
 
   @IsOptional()
   @IsString()
+  @MaxLength(40)
   payment_method?: string;
 
   /**
-   * Explicit settle result. When omitted, the service derives it from
-   * `delivered` + `collected_amount`:
-   *   - no entregada                       → 'rejected'
+   * Resultado de entrega explícito: `delivered`, `rejected` o `released`.
+   * Si no viene, se deriva de `delivered` + `collected_amount`:
    *   - entregada y cubre el neto           → 'delivered'
    *   - entregada y NO cubre el neto        → sin derivación: la parada sale en
    *     `skipped[]` con `reason: 'short_payment_requires_decision'` y no se
    *     liquida, porque en ruta no hay pago parcial y la disyuntiva (rechazar vs
    *     asumir el faltante) es una decisión de caja que toma el operador.
+   *   - no entregada                        → sin derivación (`outcome_required`).
    */
   @IsOptional()
+  @IsIn(ROUTE_SHEET_STOP_RESULTS as unknown as string[], {
+    message: 'result debe ser: delivered, rejected o released',
+  })
+  result?: RouteSheetStopResult;
+
+  /** Motivo del rechazo o de la liberación. Obligatorio para ambos. */
+  @IsOptional()
   @IsString()
-  result?: dispatch_route_stop_result_enum;
+  @MaxLength(500)
+  reason?: string;
 
   @IsOptional()
-  @IsObject()
-  withholding_breakdown?: {
-    retefuente?: number;
-    reteiva?: number;
-    reteica?: number;
-  };
+  @ValidateNested()
+  @Type(() => RouteSheetWithholdingBreakdownDto)
+  withholding_breakdown?: RouteSheetWithholdingBreakdownDto;
 
   @IsOptional()
   @IsString()
@@ -145,6 +227,7 @@ export class ConfirmRouteSheetDto {
     typeof value === 'string' ? JSON.parse(value) : value,
   )
   @IsArray()
+  @ArrayMaxSize(500)
   @ValidateNested({ each: true })
   @Type(() => ConfirmRouteSheetStopDto)
   stops: ConfirmRouteSheetStopDto[];
@@ -152,7 +235,8 @@ export class ConfirmRouteSheetDto {
   /**
    * The raw scan result to persist on the route (`scan_result` JSON +
    * `scan_confidence`). Optional: the file + decisions are the source of truth.
-   * Also JSON-string-decoded for multipart transport.
+   * Also JSON-string-decoded for multipart transport. `confidence` is the scan
+   * percentage (0-100); it is stored as a 0-1 fraction (`Decimal(5,4)`).
    */
   @Transform(({ value }) =>
     typeof value === 'string' ? JSON.parse(value) : value,
