@@ -107,9 +107,10 @@ describe('TableSessionPageComponent accesibilidad (QUI-1053)', () => {
       })
       .compileComponents();
 
+    // Sin ngOnInit: la sesión se inyecta directa, sin cargas ni SSE. Va en el
+    // prototipo porque Angular registra el hook al compilar, no por instancia.
+    spyOn(TableSessionPageComponent.prototype, 'ngOnInit');
     fixture = TestBed.createComponent(TableSessionPageComponent);
-    // Sin ngOnInit: la sesión se inyecta directa, sin cargas ni SSE.
-    spyOn(fixture.componentInstance, 'ngOnInit');
   });
 
   const render = async (items: TableSessionOrderItem[]) => {
