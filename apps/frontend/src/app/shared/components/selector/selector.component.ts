@@ -76,6 +76,7 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
                Opt-in via [searchable]="true"; default keeps the native <select>. -->
           <div [class]="wrapperClasses">
             <button
+              #triggerButton
               type="button"
               [id]="id()"
               [class]="selectClasses + ' text-left flex items-center'"
@@ -238,6 +239,10 @@ export class SelectorComponent implements ControlValueAccessor {
   private readonly searchInput =
     viewChild<ElementRef<HTMLInputElement>>('searchInput');
 
+  /** Botón que abre el panel searchable; recibe el foco al cerrarlo con Esc. */
+  private readonly triggerButton =
+    viewChild<ElementRef<HTMLButtonElement>>('triggerButton');
+
   readonly id = input<string>(`selector-${Math.random().toString(36).substr(2, 9)}`);
   readonly label = input<string>('');
   readonly placeholder = input<string>('');
@@ -372,6 +377,22 @@ export class SelectorComponent implements ControlValueAccessor {
     if (!isInside) {
       this.isOpen.set(false);
     }
+  }
+
+  /**
+   * QUI-1059: Esc con el panel searchable abierto cierra solo el panel. El
+   * listener vive en el host, así que corre antes que el de `document` de
+   * `app-modal`; detener la propagación evita que el modal se cierre y se
+   * pierda lo capturado. Con el panel cerrado no se toca el evento: el modal
+   * sigue cerrándose con Esc como siempre.
+   */
+  @HostListener('keydown.escape', ['$event'])
+  onEscape(event: Event): void {
+    if (!this.isOpen()) return;
+    event.preventDefault();
+    event.stopPropagation();
+    this.isOpen.set(false);
+    this.triggerButton()?.nativeElement.focus();
   }
 
   onModelChange(value: string | number | null): void {
