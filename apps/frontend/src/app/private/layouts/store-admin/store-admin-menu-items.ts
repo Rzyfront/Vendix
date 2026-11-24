@@ -113,6 +113,8 @@ export const STORE_ADMIN_MENU_ITEMS: readonly MenuItem[] = [
     // settings left the group: iCal → Configuración → General → Hotelería
     // (R2), VAT-exempt services → Configuración → General → Facturación (R3);
     // the loose reports stay reachable by URL until R4.
+    // Agenda F2: hotel reservations are the main tab of Recepción
+    // (?tab=reservations); the old "Reservas de hotel" entry left the menu.
     label: 'Hotelería',
     icon: 'hotel',
     children: [
@@ -128,14 +130,6 @@ export const STORE_ADMIN_MENU_ITEMS: readonly MenuItem[] = [
         label: 'Rack',
         icon: 'layout-grid',
         route: '/admin/hospitality/rack',
-        panelUiKey: 'hospitality_reservations',
-      },
-      {
-        // "Reservas" is the appointments module (`orders_reservations`);
-        // the hotel entry carries its own name and key so both can coexist.
-        label: 'Reservas de hotel',
-        icon: 'calendar-check',
-        route: '/admin/hospitality/reservations',
         panelUiKey: 'hospitality_reservations',
       },
       {

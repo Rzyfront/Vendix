@@ -144,7 +144,7 @@ export const MODULE_ROUTES: Record<string, string> = {
   // Hotelería
   hospitality: '/admin/hospitality/rooms',
   hospitality_rooms: '/admin/hospitality/rooms',
-  hospitality_reservations: '/admin/hospitality/reservations',
+  hospitality_reservations: '/admin/hospitality/front-desk',
   hospitality_rates: '/admin/hospitality/rates',
 
   // Administración (flujos-documental S1). P5.7: one key per sidebar child.

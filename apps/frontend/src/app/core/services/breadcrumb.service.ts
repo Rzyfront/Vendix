@@ -1096,12 +1096,6 @@ export class BreadcrumbService {
       icon: 'bed-double',
     },
     {
-      path: '/admin/hospitality/reservations',
-      title: 'Reservas de hotel',
-      parent: 'Hotelería',
-      icon: 'calendar-check',
-    },
-    {
       path: '/admin/hospitality/rack',
       title: 'Rack',
       parent: 'Hotelería',
