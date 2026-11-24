@@ -118,7 +118,7 @@ export function createWriteBatchTools({
             buildToolErrorEnvelope(
               PROPOSE_WRITE_BATCH,
               `Son ${steps.length} cambios y el máximo por llamada es ${WRITE_BATCH_MAX_STEPS_PER_CALL}. No propuse el lote.`,
-              'Divide el trabajo en lotes más pequeños y propónlos uno por uno.',
+              `Propón lotes de ${WRITE_BATCH_MAX_STEPS_PER_CALL} cambios (el máximo por llamada), nunca cambios sueltos.`,
             ),
           );
         }
