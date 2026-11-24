@@ -328,6 +328,9 @@ export class MenuFilterService {
     // y `diagnose()` apliquen el gating por industria a la key.
     Contratos: 'orders_contracts',
     'Plan Separe': 'orders_layaway',
+    // Agenda unificada F1: «Programación» y «Agenda» reúnen ambas keys con
+    // `panelUiAnyOf` en el ítem. Las etiquetas viejas quedan mapeadas para
+    // `diagnose()` y Vexi (sus módulos siguen existiendo).
     Reservas: 'orders_reservations',
     'Pedidos programados': 'orders_scheduled',
     'Estaciones de Servicio': 'orders_service_stations',
@@ -974,6 +977,26 @@ export class MenuFilterService {
         }
 
         filtered.push(auditOnlyItem);
+        return filtered;
+      }
+
+      // Case 1b: entry that gathers several modules (`panelUiAnyOf`,
+      // agenda-unificada F1). Visible when at least one key passes every layer
+      // on its own; a key the store or the industry closes never opens the
+      // entry through another one.
+      if (item.panelUiAnyOf?.length) {
+        const openKeys = this.anyOfKeysFor(item).filter(
+          (key) =>
+            this.isModuleKeyVisible(key, visibleModules) &&
+            this.applyAccessGate([key], true, 'sidebar', item.route),
+        );
+        if (openKeys.length) {
+          filtered.push({
+            ...item,
+            _locked: locked,
+            _planLocked: this.isLockedForSidebar(openKeys),
+          });
+        }
         return filtered;
       }
 
@@ -1988,8 +2011,20 @@ export class MenuFilterService {
     return null;
   }
 
+  /**
+   * Keys of a `panelUiAnyOf` entry whose store-setting precondition holds.
+   * `orders_scheduled` needs `scheduled_orders.enabled`, the same rule the
+   * old «Pedidos programados» entry had (`passesAuthorizationGates`).
+   */
+  private anyOfKeysFor(item: MenuItem): string[] {
+    return (item.panelUiAnyOf ?? []).filter(
+      (key) => key !== 'orders_scheduled' || this.scheduledOrdersEnabled(),
+    );
+  }
+
   /** Normalizes `moduleKeyMap`'s `string | string[] | undefined` to an array. */
   private moduleKeysFor(item: MenuItem): string[] {
+    if (item.panelUiAnyOf?.length) return this.anyOfKeysFor(item);
     // apps-f4: `accessAuditOnly` items (the pre-F4 `alwaysVisible` ones) got
     // their real `panelUiKey` only for the audit gate. Every pre-F4 path
     // (item lookup by key, diagnose, fiscal fallback) keeps resolving them by
@@ -2006,6 +2041,7 @@ export class MenuFilterService {
 
   /** Keys the apps-f4 access gate evaluates: the explicit key wins. */
   private gateKeysFor(item: MenuItem): string[] {
+    if (item.panelUiAnyOf?.length) return this.anyOfKeysFor(item);
     return item.panelUiKey ? [item.panelUiKey] : this.labelKeysFor(item);
   }
 

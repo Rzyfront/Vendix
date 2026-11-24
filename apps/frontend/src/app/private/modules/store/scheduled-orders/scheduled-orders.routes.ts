@@ -2,10 +2,11 @@ import { Routes } from '@angular/router';
 
 export const SCHEDULED_ORDERS_ROUTES: Routes = [
   {
+    // Agenda unificada F1: la agenda de pedidos pasó a Órdenes → Programación
+    // y Agenda (un solo calendario). Los enlaces viejos llegan a Programación.
     path: '',
     pathMatch: 'full',
-    loadComponent: () =>
-      import('./pages/agenda-page/agenda-page.component').then((c) => c.AgendaPageComponent),
+    redirectTo: '/admin/orders/scheduling',
   },
   {
     // T14 (QUI-996): same shared view as Operaciones → Producción and Planta.

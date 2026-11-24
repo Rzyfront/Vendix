@@ -496,6 +496,22 @@ export const storeAdminRoutes: Routes = [
                 (c) => c.OrdersBulkPageComponent,
               ),
           },
+          // Agenda unificada F1: Programación (tabla) y Agenda (calendario) de
+          // reservas de servicio y pedidos programados. Antes de `:id`.
+          {
+            path: 'scheduling',
+            loadChildren: () =>
+              import('../../private/modules/store/scheduling/scheduling.routes').then(
+                (r) => r.SCHEDULING_LIST_ROUTES,
+              ),
+          },
+          {
+            path: 'agenda',
+            loadChildren: () =>
+              import('../../private/modules/store/scheduling/scheduling.routes').then(
+                (r) => r.SCHEDULING_AGENDA_ROUTES,
+              ),
+          },
           {
             path: ':id',
             // El detalle de orden reutiliza `vendix-invoice-detail` (el modal
@@ -521,12 +537,12 @@ export const storeAdminRoutes: Routes = [
         path: 'reservations',
         children: [
           {
+            // Agenda unificada F1: «Reservas» ya no es entrada de menú; sus
+            // reservas viven en Órdenes → Programación (tabla) y Agenda
+            // (calendario). Los enlaces viejos llegan a Programación.
             path: '',
             pathMatch: 'full',
-            loadComponent: () =>
-              import('../../private/modules/store/reservations/reservations.component').then(
-                (c) => c.ReservationsComponent,
-              ),
+            redirectTo: '/admin/orders/scheduling',
           },
           {
             path: 'schedules',

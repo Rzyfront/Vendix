@@ -1411,3 +1411,121 @@ describe('MenuFilterService — hijos de Flujos y Documentos (P5.7)', () => {
     expect(service.resolveKeysForRoute('/admin/documents/search')).toContain('documents');
   });
 });
+
+describe('MenuFilterService — Órdenes: Programación y Agenda (agenda-unificada F1)', () => {
+  let service: MenuFilterService;
+  let panelUiState: WritableSignal<Record<string, boolean>>;
+  let panelUi$: BehaviorSubject<Record<string, boolean>>;
+  let settingsState: WritableSignal<Record<string, any>>;
+  let settings$: BehaviorSubject<Record<string, any>>;
+  let industries: WritableSignal<string[]>;
+  let visibleModules$: BehaviorSubject<string[]>;
+  let owner: boolean;
+
+  const NEW_ROUTES = ['/admin/orders/scheduling', '/admin/orders/agenda'];
+  const ordersTree = (): MenuItem[] =>
+    STORE_ADMIN_MENU_ITEMS.filter((item) => item.label === 'Órdenes').map((item) => ({
+      ...item,
+      children: item.children?.map((child) => ({ ...child })),
+    }));
+  const childRoutes = async () =>
+    (await firstValueFrom(service.filterMenuItems(ordersTree()).pipe(take(1)))).flatMap((g) =>
+      (g.children ?? []).map((c) => c.route),
+    );
+  const setStore = (storeIndustries: string[], extra: Record<string, any> = {}) => {
+    const value = { general: { store_type: 'hybrid', industries: storeIndustries }, ...extra };
+    industries.set(storeIndustries);
+    settings$.next(value);
+    settingsState.set(value);
+  };
+  const setUserPanel = (value: Record<string, boolean>) => {
+    panelUi$.next(value);
+    panelUiState.set(value);
+    visibleModules$.next(Object.keys(value).filter((key) => value[key]));
+  };
+
+  beforeEach(() => {
+    const panel = { orders: true, orders_sales: true, orders_reservations: true, orders_scheduled: true };
+    panelUiState = signal<Record<string, boolean>>(panel);
+    panelUi$ = new BehaviorSubject<Record<string, boolean>>(panel);
+    settingsState = signal<Record<string, any>>({});
+    settings$ = new BehaviorSubject<Record<string, any>>({});
+    industries = signal<string[]>(['retail']);
+    owner = false;
+    visibleModules$ = new BehaviorSubject<string[]>(Object.keys(panel));
+    const authFacade = {
+      getVisibleModules$: () => visibleModules$.asObservable(),
+      userStoreType$: of('hybrid'), userIndustries$: of(['retail']), storeSettings$: settings$.asObservable(),
+      userOrganization$: of({ operating_scope: 'STORE', fiscal_scope: 'STORE' }), activeFiscalAreas$: of([]),
+      currentAppPanelUi$: panelUi$.asObservable(), userPermissions$: of([]),
+      fiscalScope: signal('STORE'), operatingScope: signal('STORE'), activeFiscalAreas: signal<string[]>([]),
+      storeSettings: settingsState, userIndustries: industries, userStoreType: signal<string | null>('hybrid'),
+      currentAppPanelUi: panelUiState,
+      isModuleVisible: (key: string) => panelUiState()[key] === true,
+      hasPermission: () => false,
+      hasAnyRole: () => false, hasAnyPermission: () => false,
+      isOwner: () => owner, isAdmin: () => false,
+    };
+    TestBed.configureTestingModule({ providers: [
+      MenuFilterService,
+      { provide: AuthFacade, useValue: authFacade },
+      { provide: AccessGateService, useValue: accessGateStub() },
+      { provide: SubscriptionAccessService, useValue: { canUseAI: () => () => true } },
+    ] });
+    service = TestBed.inject(MenuFilterService);
+  });
+
+  it('el Sidebar real reemplaza «Reservas» y «Pedidos programados» por Programación y Agenda', () => {
+    const orders = STORE_ADMIN_MENU_ITEMS.find((item) => item.label === 'Órdenes')!;
+    const labels = orders.children!.map((c) => c.label);
+    expect(labels).not.toContain('Reservas');
+    expect(labels).not.toContain('Pedidos programados');
+    for (const route of NEW_ROUTES) {
+      const entry = orders.children!.find((c) => c.route === route)!;
+      expect(entry).withContext(route).toBeDefined();
+      expect(entry.panelUiAnyOf).withContext(route).toEqual(['orders_reservations', 'orders_scheduled']);
+    }
+    // Los accesos de configuración de reservas siguen en el menú.
+    expect(orders.children!.map((c) => c.route)).toContain('/admin/reservations/schedules');
+  });
+
+  it('una tienda de servicios ve Programación y Agenda por las reservas', async () => {
+    setStore(['service']);
+    const routes = await childRoutes();
+    for (const route of NEW_ROUTES) expect(routes).withContext(route).toContain(route);
+  });
+
+  it('un restaurante los ve solo con los pedidos programados activos en la tienda', async () => {
+    setStore(['restaurant']);
+    service.scheduledOrdersEnabled.set(false);
+    let routes = await childRoutes();
+    for (const route of NEW_ROUTES) expect(routes).withContext(route).not.toContain(route);
+
+    service.scheduledOrdersEnabled.set(true);
+    routes = await childRoutes();
+    for (const route of NEW_ROUTES) expect(routes).withContext(route).toContain(route);
+  });
+
+  it('una tienda retail no los ve aunque el panel y el ajuste los tengan, owner incluido', async () => {
+    owner = true;
+    setStore(['retail']);
+    service.scheduledOrdersEnabled.set(true);
+    const routes = await childRoutes();
+    for (const route of NEW_ROUTES) expect(routes).withContext(route).not.toContain(route);
+    expect(routes).toContain('/admin/orders/sales');
+  });
+
+  it('apagar las reservas en el panel del usuario no abre la entrada por la otra key cerrada', async () => {
+    setStore(['service']);
+    setUserPanel({ orders: true, orders_sales: true, orders_reservations: false, orders_scheduled: true });
+    const routes = await childRoutes();
+    for (const route of NEW_ROUTES) expect(routes).withContext(route).not.toContain(route);
+  });
+
+  it('las rutas nuevas no quedan gobernadas por una sola de las dos keys en la URL', () => {
+    for (const route of NEW_ROUTES) {
+      expect(service.resolveKeysForRoute(route)).withContext(route).toEqual([]);
+      expect(service.resolveGateKeysForRoute(route)).withContext(route).toEqual(['orders']);
+    }
+  });
+});

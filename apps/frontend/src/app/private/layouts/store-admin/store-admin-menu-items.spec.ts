@@ -344,9 +344,11 @@ describe('Órdenes: Equipo de Servicio (demo hotel/canchas S25)', () => {
     );
   });
 
-  it('keeps Reservas and Solicitudes de pago where they were', () => {
+  it('keeps Solicitudes de pago where it was; Reservas now lives in Programación (agenda-unificada F1)', () => {
     const routes = orders()?.children?.map((child) => child.route) ?? [];
-    expect(routes).toContain('/admin/reservations');
+    expect(routes).not.toContain('/admin/reservations');
+    expect(routes).toContain('/admin/orders/scheduling');
+    expect(routes).toContain('/admin/orders/agenda');
     expect(routes).toContain('/admin/reservations/payment-requests');
     expect(routes.indexOf('/admin/reservations/schedules')).toBe(
       routes.indexOf('/admin/reservations/payment-requests') + 1,
