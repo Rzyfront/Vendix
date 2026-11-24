@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ConflictException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { GlobalPrismaService as PrismaService } from '../../prisma/services/global-prisma.service';
 import { JwtService } from '@nestjs/jwt';
@@ -73,6 +74,7 @@ describe('AuthService Login Flow', () => {
       create: jest.fn(),
       findFirst: jest.fn(),
       update: jest.fn(),
+      deleteMany: jest.fn(),
     },
     login_attempts: {
       create: jest.fn(),
@@ -80,11 +82,22 @@ describe('AuthService Login Flow', () => {
     password_reset_tokens: {
       updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       create: jest.fn().mockResolvedValue({}),
+      findUnique: jest.fn(),
+      update: jest.fn(),
+    },
+    email_verification_tokens: {
+      findUnique: jest.fn(),
+      update: jest.fn(),
     },
     user_roles: {
       findMany: jest.fn().mockResolvedValue([]),
+      findFirst: jest.fn(),
     },
-    $transaction: jest.fn((cb) => cb(mockPrismaService)),
+    // Acepta las dos formas de Prisma: callback interactivo y arreglo de
+    // operaciones (resetPassword de staff usa el arreglo).
+    $transaction: jest.fn((arg) =>
+      Array.isArray(arg) ? Promise.all(arg) : arg(mockPrismaService),
+    ),
   };
 
   const mockJwtService = {
@@ -608,7 +621,7 @@ describe('AuthService Login Flow', () => {
         expect.objectContaining({
           where: {
             email: { equals: 'admin@example.com', mode: 'insensitive' },
-            state: { notIn: ['suspended', 'archived'] },
+            state: { notIn: ['inactive', 'suspended', 'archived'] },
           },
         }),
       );
@@ -712,7 +725,7 @@ describe('AuthService Login Flow', () => {
         where: {
           email: { equals: 'cajero@tienda.com', mode: 'insensitive' },
           organization_id: { in: [12] },
-          state: { notIn: ['suspended', 'archived'] },
+          state: { in: ['active', 'pending_verification'] },
         },
       });
       expect(
@@ -1209,6 +1222,584 @@ describe('AuthService Login Flow', () => {
         expect.objectContaining({ id: 9, email: 'cliente@test.com' }),
       );
       expect(result.access_token).toBe('a');
+    });
+  });
+
+  /**
+   * QUI-1045 — "Inactivo" tiene que valer en todo el dominio auth: una cuenta
+   * desactivada, suspendida o archivada no recibe enlace de recuperación, no
+   * se reactiva con un enlace público y no inicia ni renueva sesión.
+   * `pending_verification` sigue pudiendo fijar su clave (alta de dueños,
+   * empleados y clientes creados por terceros).
+   */
+  describe('cuentas no activas (QUI-1045)', () => {
+    const GENERIC =
+      'Si el email existe, recibirás instrucciones para restablecer tu contraseña';
+    const BLOCKED = ['inactive', 'suspended', 'archived'];
+    const NEW_PASSWORD = 'Nueva#Clave2026';
+    let oldHash: string;
+
+    /** Filtra como Postgres: el doble respeta `state: { in | notIn }`. */
+    function matchesState(filter: any, state: string): boolean {
+      if (!filter) return true;
+      if (filter.in) return filter.in.includes(state);
+      if (filter.notIn) return !filter.notIn.includes(state);
+      return filter === state;
+    }
+
+    function staffWithState(state: string) {
+      return accountRow({
+        id: 41,
+        email: 'cajero@tienda.com',
+        first_name: 'Ana',
+        organization_id: 12,
+        state,
+        user_roles: [{ roles: { name: 'employee', role_permissions: [] } }],
+      });
+    }
+
+    /** Deja lista la rama de resolución de `forgotPassword` y devuelve su V-link. */
+    function arrangeStaffRecovery(
+      branch: 'org' | 'store' | 'none',
+      account: Record<string, any>,
+    ): string | undefined {
+      mockPrismaService.users.findMany.mockImplementation(async ({ where }) =>
+        matchesState(where.state, account.state) ? [account] : [],
+      );
+      if (branch === 'org') {
+        mockPrismaService.organizations.findUnique.mockResolvedValue({
+          id: 12,
+        });
+        mockPrismaService.users.findFirst.mockResolvedValue(account);
+        return 'org-a';
+      }
+      if (branch === 'store') {
+        mockPrismaService.organizations.findUnique.mockResolvedValue(null);
+        mockPrismaService.stores.findMany.mockResolvedValue([
+          { organization_id: 12 },
+        ]);
+        return 'mi-tienda';
+      }
+      return undefined;
+    }
+
+    function arrangeResetToken(state: string, user: Record<string, any> = {}) {
+      mockPrismaService.password_reset_tokens.findUnique.mockResolvedValue({
+        id: 5,
+        token: 'tok',
+        used: false,
+        expires_at: new Date(Date.now() + 60 * 60 * 1000),
+        user_id: 41,
+        users: {
+          id: 41,
+          organization_id: 12,
+          state,
+          email_verified: true,
+          password: oldHash,
+          ...user,
+        },
+      });
+    }
+
+    function arrangeCustomerRecovery(state: string) {
+      mockPrismaService.stores.findUnique.mockResolvedValue({
+        id: 22,
+        organization_id: 12,
+        name: 'Mi Tienda',
+      });
+      mockPrismaService.users.findFirst.mockResolvedValue({
+        id: 77,
+        email: 'cliente@x.com',
+        first_name: 'Luis',
+        state,
+        user_roles: [{ roles: { name: 'customer' } }],
+        store_users: [],
+      });
+    }
+
+    beforeAll(async () => {
+      oldHash = await bcrypt.hash('Vieja#Clave2025', 4);
+    });
+
+    beforeEach(() => {
+      mockPrismaService.organizations.findUnique.mockReset();
+      mockPrismaService.users.findFirst.mockReset();
+      mockPrismaService.users.findMany.mockReset().mockResolvedValue([]);
+      mockPrismaService.users.update.mockReset().mockResolvedValue({});
+      mockPrismaService.stores.findMany.mockReset().mockResolvedValue([]);
+      mockPrismaService.stores.findUnique.mockReset();
+      mockPrismaService.store_users.findFirst.mockReset();
+      mockPrismaService.user_roles.findFirst.mockReset();
+      mockPrismaService.login_attempts.create.mockReset().mockResolvedValue({});
+      mockPrismaService.password_reset_tokens.create
+        .mockReset()
+        .mockResolvedValue({});
+      mockPrismaService.password_reset_tokens.updateMany
+        .mockReset()
+        .mockResolvedValue({ count: 1 });
+      mockPrismaService.password_reset_tokens.update
+        .mockReset()
+        .mockResolvedValue({});
+      mockPrismaService.password_reset_tokens.findUnique.mockReset();
+      mockPrismaService.email_verification_tokens.findUnique.mockReset();
+      mockPrismaService.email_verification_tokens.update
+        .mockReset()
+        .mockResolvedValue({});
+      mockPrismaService.refresh_tokens.findFirst.mockReset();
+      mockPrismaService.refresh_tokens.deleteMany
+        .mockReset()
+        .mockResolvedValue({ count: 0 });
+      mockPrismaService.$transaction.mockImplementation((arg) =>
+        Array.isArray(arg) ? Promise.all(arg) : arg(mockPrismaService),
+      );
+      mockEmailService.sendPasswordResetEmail
+        .mockReset()
+        .mockResolvedValue({ success: true });
+      mockAuditService.logAuth.mockClear();
+      jest
+        .spyOn((service as any).logger, 'warn')
+        .mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+      mockConfigService.get.mockReset();
+      jest.restoreAllMocks();
+    });
+
+    describe.each(['org', 'store', 'none'] as const)(
+      'forgotPassword de staff (rama V-link %s)',
+      (branch) => {
+        it.each(BLOCKED)(
+          '%s: mismo mensaje genérico, sin token ni correo',
+          async (state) => {
+            const vlink = arrangeStaffRecovery(branch, staffWithState(state));
+
+            const result = await service.forgotPassword(
+              'cajero@tienda.com',
+              vlink,
+            );
+
+            expect(result).toEqual({ message: GENERIC });
+            expect(
+              mockPrismaService.password_reset_tokens.updateMany,
+            ).not.toHaveBeenCalled();
+            expect(
+              mockPrismaService.password_reset_tokens.create,
+            ).not.toHaveBeenCalled();
+            expect(
+              mockEmailService.sendPasswordResetEmail,
+            ).not.toHaveBeenCalled();
+            expect(mockAuditService.logAuth).not.toHaveBeenCalled();
+          },
+        );
+
+        it.each(['active', 'pending_verification'])(
+          '%s: sí recibe el enlace',
+          async (state) => {
+            const vlink = arrangeStaffRecovery(branch, staffWithState(state));
+
+            const result = await service.forgotPassword(
+              'cajero@tienda.com',
+              vlink,
+            );
+
+            expect(result).toEqual({ message: GENERIC });
+            expect(
+              mockPrismaService.password_reset_tokens.create,
+            ).toHaveBeenCalledWith(
+              expect.objectContaining({
+                data: expect.objectContaining({ user_id: 41 }),
+              }),
+            );
+            expect(
+              mockEmailService.sendPasswordResetEmail,
+            ).toHaveBeenCalledWith(
+              'cajero@tienda.com',
+              expect.any(String),
+              'Ana',
+              undefined,
+            );
+          },
+        );
+      },
+    );
+
+    it.each(['org', 'store', 'none'] as const)(
+      'forgotPassword (rama V-link %s) deja en el log el estado suprimido, sin el correo',
+      async (branch) => {
+        const vlink = arrangeStaffRecovery(branch, staffWithState('inactive'));
+        const warn = (service as any).logger.warn as jest.Mock;
+
+        await service.forgotPassword('cajero@tienda.com', vlink);
+
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringMatching(/user 41 .*inactive/),
+        );
+        expect(warn).not.toHaveBeenCalledWith(
+          expect.stringContaining('cajero@tienda.com'),
+        );
+      },
+    );
+
+    it('forgotPassword no registra supresión para un correo desconocido', async () => {
+      const warn = (service as any).logger.warn as jest.Mock;
+
+      await expect(service.forgotPassword('nadie@x.com')).resolves.toEqual({
+        message: GENERIC,
+      });
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('forgotPassword responde el mensaje genérico aunque falle la consulta del log', async () => {
+      mockPrismaService.users.findMany
+        .mockResolvedValueOnce([])
+        .mockRejectedValueOnce(new Error('db down'));
+
+      await expect(
+        service.forgotPassword('cajero@tienda.com'),
+      ).resolves.toEqual({ message: GENERIC });
+    });
+
+    it('resetPassword: pending_verification fija la clave sin cambiar su estado', async () => {
+      arrangeResetToken('pending_verification');
+
+      await expect(service.resetPassword('tok', NEW_PASSWORD)).resolves.toEqual(
+        { message: 'Contraseña restablecida exitosamente' },
+      );
+      expect(mockPrismaService.users.update).toHaveBeenCalledWith({
+        where: { id: 41 },
+        data: {
+          password: expect.any(String),
+          failed_login_attempts: 0,
+          locked_until: null,
+        },
+      });
+    });
+
+    it('resetPassword: active sigue fijando la clave', async () => {
+      arrangeResetToken('active');
+
+      await expect(service.resetPassword('tok', NEW_PASSWORD)).resolves.toEqual(
+        { message: 'Contraseña restablecida exitosamente' },
+      );
+      expect(mockPrismaService.users.update).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(BLOCKED)(
+      'resetPassword: %s sigue rechazado con AUTH_FIND_001',
+      async (state) => {
+        arrangeResetToken(state);
+
+        await expect(
+          service.resetPassword('tok', NEW_PASSWORD),
+        ).rejects.toMatchObject({ errorCode: 'AUTH_FIND_001' });
+        expect(mockPrismaService.users.update).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(BLOCKED)(
+      'forgotPasswordCustomer: %s no recibe token (mismo mensaje genérico)',
+      async (state) => {
+        arrangeCustomerRecovery(state);
+
+        await expect(
+          service.forgotPasswordCustomer('cliente@x.com', 22),
+        ).resolves.toEqual({ message: GENERIC });
+        expect(
+          mockPrismaService.password_reset_tokens.updateMany,
+        ).not.toHaveBeenCalled();
+        expect(
+          mockPrismaService.password_reset_tokens.create,
+        ).not.toHaveBeenCalled();
+        expect(mockEmailService.sendPasswordResetEmail).not.toHaveBeenCalled();
+      },
+    );
+
+    it('forgotPasswordCustomer: el log de supresión no lleva el correo', async () => {
+      arrangeCustomerRecovery('inactive');
+      const warn = (service as any).logger.warn as jest.Mock;
+
+      await service.forgotPasswordCustomer('cliente@x.com', 22);
+
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringMatching(/user 77 .*inactive/),
+      );
+      expect(warn).not.toHaveBeenCalledWith(
+        expect.stringContaining('cliente@x.com'),
+      );
+    });
+
+    it('forgotPasswordCustomer: pending_verification sí recibe el enlace', async () => {
+      arrangeCustomerRecovery('pending_verification');
+
+      await service.forgotPasswordCustomer('cliente@x.com', 22);
+
+      expect(
+        mockPrismaService.password_reset_tokens.create,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ user_id: 77 }),
+        }),
+      );
+      expect(mockEmailService.sendPasswordResetEmail).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['inactive', 'suspended'])(
+      'resetCustomerPassword: %s no se reactiva y el enlace queda usado',
+      async (state) => {
+        arrangeResetToken(state, { email_verified: false });
+        mockPrismaService.user_roles.findFirst.mockResolvedValue({ id: 1 });
+
+        await expect(
+          service.resetCustomerPassword('tok', NEW_PASSWORD, 22),
+        ).rejects.toMatchObject({ errorCode: 'AUTH_TOKEN_001' });
+        expect(mockPrismaService.users.update).not.toHaveBeenCalled();
+        expect(
+          mockPrismaService.password_reset_tokens.updateMany,
+        ).toHaveBeenCalledWith({
+          where: { id: 5, used: false },
+          data: { used: true },
+        });
+      },
+    );
+
+    it('resetCustomerPassword: archived conserva AUTH_CUSTOMER_ARCHIVED_001', async () => {
+      arrangeResetToken('archived', { email_verified: false });
+      mockPrismaService.user_roles.findFirst.mockResolvedValue({ id: 1 });
+
+      await expect(
+        service.resetCustomerPassword('tok', NEW_PASSWORD, 22),
+      ).rejects.toMatchObject({ errorCode: 'AUTH_CUSTOMER_ARCHIVED_001' });
+      expect(mockPrismaService.users.update).not.toHaveBeenCalled();
+    });
+
+    it('resetCustomerPassword: pending_verification sí se activa', async () => {
+      arrangeResetToken('pending_verification', { email_verified: false });
+      mockPrismaService.user_roles.findFirst.mockResolvedValue({ id: 1 });
+      mockPrismaService.stores.findUnique.mockResolvedValue({
+        organization_id: 12,
+      });
+      mockPrismaService.store_users.findFirst.mockResolvedValue({ id: 3 });
+
+      await expect(
+        service.resetCustomerPassword('tok', NEW_PASSWORD, 22),
+      ).resolves.toEqual({
+        message: 'Cuenta activada y contraseña restablecida exitosamente',
+        activated: true,
+      });
+      expect(mockPrismaService.users.update).toHaveBeenCalledWith({
+        where: { id: 41 },
+        data: expect.objectContaining({
+          state: 'active',
+          email_verified: true,
+        }),
+      });
+    });
+
+    it('login: una cuenta inactive no entra, igual que suspended/archived', async () => {
+      const inactive = accountRow({
+        email: 'owner@test.com',
+        password: await bcrypt.hash('123', 4),
+        state: 'inactive',
+        user_roles: [{ roles: { name: 'owner', role_permissions: [] } }],
+      });
+      mockPrismaService.users.findMany.mockImplementation(async ({ where }) =>
+        matchesState(where.state, inactive.state) ? [inactive] : [],
+      );
+
+      await expect(
+        service.login({ email: 'owner@test.com', password: '123' }),
+      ).rejects.toMatchObject({ errorCode: 'AUTH_CREDENTIALS_001' });
+      expect(mockPrismaService.users.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            state: { notIn: ['inactive', 'suspended', 'archived'] },
+          }),
+        }),
+      );
+    });
+
+    it.each(BLOCKED)(
+      'login: la segunda barrera rechaza %s aunque la consulta lo devuelva',
+      async (state) => {
+        mockPrismaService.users.findMany.mockResolvedValue([
+          accountRow({
+            email: 'owner@test.com',
+            password: await bcrypt.hash('123', 4),
+            state,
+            user_roles: [{ roles: { name: 'owner', role_permissions: [] } }],
+          }),
+        ]);
+        const generate = jest.spyOn(service as any, 'generateTokens');
+
+        await expect(
+          service.login({ email: 'owner@test.com', password: '123' }),
+        ).rejects.toMatchObject({ errorCode: 'AUTH_VALIDATE_001' });
+        expect(generate).not.toHaveBeenCalled();
+      },
+    );
+
+    it('login: pending_verification sigue resolviendo su cuenta', async () => {
+      const pending = accountRow({
+        email: 'owner@test.com',
+        state: 'pending_verification',
+        user_roles: [{ roles: { name: 'owner', role_permissions: [] } }],
+      });
+      mockPrismaService.users.findMany.mockImplementation(async ({ where }) =>
+        matchesState(where.state, pending.state) ? [pending] : [],
+      );
+
+      const lookup = await service.findUserAccountsByEmail('owner@test.com');
+
+      expect(lookup.matchType).toBe('single_account');
+      expect(lookup.user?.id).toBe(1);
+    });
+
+    it('loginCustomer: inactive con la clave correcta no recibe sesión', async () => {
+      mockPrismaService.stores.findUnique.mockResolvedValue({
+        id: 22,
+        organization_id: 12,
+      });
+      mockPrismaService.users.findFirst.mockResolvedValue({
+        id: 77,
+        email: 'cliente@x.com',
+        password: await bcrypt.hash('123', 4),
+        state: 'inactive',
+        user_roles: [{ roles: { name: 'customer' } }],
+        store_users: [{ id: 1 }],
+        organizations: { domain_settings: [] },
+      });
+      const generate = jest.spyOn(service as any, 'generateTokens');
+
+      await expect(
+        service.loginCustomer({
+          email: 'cliente@x.com',
+          password: '123',
+          store_id: 22,
+        }),
+      ).rejects.toMatchObject({
+        status: 401,
+        message: 'Cuenta suspendida o archivada',
+      });
+      expect(generate).not.toHaveBeenCalled();
+    });
+
+    function arrangeRefresh(state: string) {
+      mockConfigService.get.mockReturnValue('secret');
+      mockJwtService.verify.mockReturnValue({ sub: 41, organization_id: 12 });
+      mockPrismaService.refresh_tokens.findFirst.mockResolvedValue({
+        id: 9,
+        user_id: 41,
+        users: { id: 41, organization_id: 12, state, user_roles: [] },
+      });
+      jest
+        .spyOn(service as any, 'validateRefreshTokenSecurity')
+        .mockResolvedValue(undefined);
+    }
+
+    it.each(BLOCKED)(
+      'refreshToken: una sesión de una cuenta %s no se renueva',
+      async (state) => {
+        arrangeRefresh(state);
+        const generate = jest.spyOn(service as any, 'generateTokens');
+
+        await expect(
+          service.refreshToken({ refresh_token: 'rt' } as any),
+        ).rejects.toMatchObject({ errorCode: 'AUTH_TOKEN_001' });
+        expect(generate).not.toHaveBeenCalled();
+      },
+    );
+
+    it('refreshToken: pending_verification sí renueva', async () => {
+      arrangeRefresh('pending_verification');
+      // Se corta justo al emitir: basta con saber que llegó a generar tokens.
+      const generate = jest
+        .spyOn(service as any, 'generateTokens')
+        .mockRejectedValue(new Error('emitido'));
+
+      await expect(
+        service.refreshToken({ refresh_token: 'rt' } as any),
+      ).rejects.toMatchObject({ errorCode: 'AUTH_TOKEN_001' });
+      expect(generate).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 41 }),
+        expect.anything(),
+      );
+    });
+
+    function arrangeEmailVerification(state: string) {
+      mockPrismaService.email_verification_tokens.findUnique.mockResolvedValue({
+        id: 3,
+        user_id: 41,
+        verified: false,
+        expires_at: new Date(Date.now() + 60 * 60 * 1000),
+        users: { id: 41, state },
+      });
+    }
+
+    it.each(BLOCKED)(
+      'verifyEmail: %s verifica el correo pero no se reactiva',
+      async (state) => {
+        arrangeEmailVerification(state);
+
+        await service.verifyEmail('vt');
+
+        expect(mockPrismaService.users.update).toHaveBeenCalledWith({
+          where: { id: 41 },
+          data: { email_verified: true },
+        });
+      },
+    );
+
+    it('verifyEmail: pending_verification se activa', async () => {
+      arrangeEmailVerification('pending_verification');
+
+      await service.verifyEmail('vt');
+
+      expect(mockPrismaService.users.update).toHaveBeenCalledWith({
+        where: { id: 41 },
+        data: { email_verified: true, state: 'active' },
+      });
+    });
+
+    function arrangeExistingCustomer(state: string) {
+      mockPrismaService.stores.findUnique.mockResolvedValue({
+        id: 22,
+        organization_id: 12,
+      });
+      mockPrismaService.users.findFirst.mockResolvedValue({ id: 77, state });
+      mockPrismaService.user_roles.findFirst.mockResolvedValue({ id: 1 });
+      mockPrismaService.store_users.findFirst.mockResolvedValue(null);
+    }
+
+    it.each(BLOCKED)(
+      'registerCustomer: un cliente %s no recibe la invitación a reclamar la cuenta',
+      async (state) => {
+        arrangeExistingCustomer(state);
+
+        await expect(
+          service.registerCustomer({
+            email: 'cliente@x.com',
+            first_name: 'Luis',
+            last_name: 'P',
+            store_id: 22,
+          } as any),
+          // AUTH_CUSTOMER_CLAIMABLE_001 también es 409: lo que distingue es la
+          // clase (el 409 genérico de "ya existe"), no el status.
+        ).rejects.toBeInstanceOf(ConflictException);
+      },
+    );
+
+    it('registerCustomer: pending_verification sí recibe AUTH_CUSTOMER_CLAIMABLE_001', async () => {
+      arrangeExistingCustomer('pending_verification');
+
+      await expect(
+        service.registerCustomer({
+          email: 'cliente@x.com',
+          first_name: 'Luis',
+          last_name: 'P',
+          store_id: 22,
+        } as any),
+      ).rejects.toMatchObject({ errorCode: 'AUTH_CUSTOMER_CLAIMABLE_001' });
     });
   });
 
