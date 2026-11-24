@@ -485,8 +485,9 @@ const CODE_MODE_ROUTING_RULE = [
  * Vex: a goal that needs 2+ writes is proposed as ONE batch (one approval),
  * from the first answer. Static text (no store, tool or user data), injected
  * only when `propose_write_batch` is in the turn's authority, so every other
- * turn stays byte-identical. It overrides the stored prompt's «de a una» rule
- * (migration 20261002150000), which predates the batch circuit (F5).
+ * turn stays byte-identical. The stored prompt said «de a una» (migration
+ * 20261002150000, older than the batch circuit F5); 20261228110000 aligns it
+ * with this rule, which still overrides it where that migration is pending.
  * It only changes HOW writes are proposed: the card, its role gate and the
  * explicit approval stay exactly as they are.
  */
