@@ -7,6 +7,8 @@ import {
   suggestAssignees,
 } from './checkout-clean.service';
 import { cleaningRoleNames } from './cleaning-role';
+import { PERMISSIONS_KEY } from '../../../auth/decorators/permissions.decorator';
+import { HousekeepingController } from './housekeeping.controller';
 
 jest.mock('@common/utils/store-timezone.util', () => ({
   ...jest.requireActual('@common/utils/store-timezone.util'),
@@ -93,6 +95,19 @@ describe('CheckoutCleanService', () => {
       expect([...suggestAssignees([10, 11, 12], staff).values()]).toEqual([3, 3, 4]);
       expect(suggestAssignees([10], [])).toEqual(new Map([[10, null]]));
     });
+
+    it('preselects nobody when no one holds the cleaning role', () => {
+      const staff = [
+        { id: 1, name: 'Ana Gerente', is_cleaning_role: false, pending_tasks: 0 },
+        { id: 5, name: 'Beto Admin', is_cleaning_role: false, pending_tasks: 0 },
+      ];
+      expect(suggestAssignees([10, 11], staff)).toEqual(
+        new Map([
+          [10, null],
+          [11, null],
+        ]),
+      );
+    });
   });
 
   describe('suggestion', () => {
@@ -121,10 +136,38 @@ describe('CheckoutCleanService', () => {
         }),
       ]);
       expect(result.rooms[0].suggested_note).toContain('llega un huésped hoy');
-      // Only people who hold the role or may finish cleaning tasks.
+    });
+
+    it('lists only active staff of this store holding the role or an active operate permission', async () => {
+      checkedOut(unit(7, '101'));
+      await service.suggestion(9);
+
       const where = users.findMany.mock.calls[0][0].where;
-      expect(JSON.stringify(where)).toContain('store:lodging:housekeeping:operate');
-      expect(JSON.stringify(where)).toContain('housekeeper');
+      // Tenant isolation: `users` is not store-scoped, the query must name the store.
+      expect(where.state).toBe('active');
+      expect(where.store_users).toEqual({ some: { store_id: 5 } });
+      expect(where.user_roles.some.OR).toEqual([{ store_id: null }, { store_id: 5 }]);
+      expect(where.user_roles.some.roles.OR).toEqual([
+        { name: { in: ['housekeeper'] } },
+        {
+          role_permissions: {
+            some: {
+              granted: true,
+              permissions: { name: 'store:lodging:housekeeping:operate', status: 'active' },
+            },
+          },
+        },
+      ]);
+    });
+
+    it('leaves the clean unassigned when nobody holds the cleaning role', async () => {
+      checkedOut(unit(7, '101'));
+      users.findMany.mockResolvedValue([user(1, 'Ana', ['owner'])]);
+
+      const result = await service.suggestion(9);
+
+      expect(result.staff).toEqual([expect.objectContaining({ id: 1, is_cleaning_role: false })]);
+      expect(result.rooms[0].suggested_user_id).toBeNull();
     });
 
     it('is refused before the check-out', async () => {
@@ -174,8 +217,30 @@ describe('CheckoutCleanService', () => {
       expect(result[0].outcome).toBe('assigned');
     });
 
+    it('keeps the current assignee when no person is sent', async () => {
+      tasks.findFirst.mockResolvedValue({ id: 40, status: 'pending', assigned_user_id: 3 });
+      tasks.updateMany.mockResolvedValue({ count: 1 });
+
+      const result = await service.assign(9, [{ unit_id: 7, notes: 'Revisar minibar' }]);
+
+      const data = tasks.updateMany.mock.calls[0][0].data;
+      expect(data).not.toHaveProperty('assigned_user_id');
+      expect(data.notes).toBe('Revisar minibar');
+      expect(result[0]).toMatchObject({ assigned_user_id: 3, outcome: 'assigned' });
+    });
+
+    it('unassigns the day task only on an explicit null', async () => {
+      tasks.findFirst.mockResolvedValue({ id: 40, status: 'pending', assigned_user_id: 3 });
+      tasks.updateMany.mockResolvedValue({ count: 1 });
+
+      const result = await service.assign(9, [{ unit_id: 7, assigned_user_id: null }]);
+
+      expect(tasks.updateMany.mock.calls[0][0].data).toMatchObject({ assigned_user_id: null });
+      expect(result[0]).toMatchObject({ assigned_user_id: null, outcome: 'assigned' });
+    });
+
     it('falls back to the update when the day list made it meanwhile', async () => {
-      tasks.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 41 });
+      tasks.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 41, assigned_user_id: null });
       tasks.create.mockRejectedValue(
         new Prisma.PrismaClientKnownRequestError('dup', { code: 'P2002', clientVersion: 'x' }),
       );
@@ -211,5 +276,18 @@ describe('CheckoutCleanService', () => {
       );
       expect(tasks.create).not.toHaveBeenCalled();
     });
+  });
+
+  describe('endpoints', () => {
+    it.each(['checkoutCleanSuggestion', 'assignCheckoutClean'] as const)(
+      '%s accepts housekeeping assign OR front desk operate',
+      (method) => {
+        const handler = HousekeepingController.prototype[method];
+        expect(Reflect.getMetadata(PERMISSIONS_KEY, handler)).toEqual([
+          'store:lodging:housekeeping:assign',
+          'store:lodging:front_desk:operate',
+        ]);
+      },
+    );
   });
 });

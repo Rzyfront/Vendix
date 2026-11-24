@@ -48,6 +48,7 @@ export interface CheckoutCleanSuggestion {
 
 export interface CheckoutCleanAssignment {
   unit_id: number;
+  /** undefined: keep the current assignee; null: leave it unassigned. */
   assigned_user_id?: number | null;
   notes?: string | null;
 }
@@ -76,15 +77,15 @@ export function rankCheckoutCleanStaff(staff: CheckoutCleanStaff[]): CheckoutCle
 
 /**
  * One recommended person per room, spreading the rooms over the cleaning
- * role (or everyone, when nobody holds it) by the lightest load.
+ * role by the lightest load. Without anyone in the role nobody is
+ * preselected ("Sin asignar"): the other staff stay a manual choice, so a
+ * manager is never handed a clean by default.
  */
 export function suggestAssignees(
   unitIds: number[],
   ranked: CheckoutCleanStaff[],
 ): Map<number, number | null> {
-  const pool = ranked.some((s) => s.is_cleaning_role)
-    ? ranked.filter((s) => s.is_cleaning_role)
-    : ranked;
+  const pool = ranked.filter((s) => s.is_cleaning_role);
   const load = new Map(pool.map((s) => [s.id, s.pending_tasks]));
   const result = new Map<number, number | null>();
   for (const unit_id of unitIds) {
@@ -216,6 +217,8 @@ export class CheckoutCleanService {
     unit: { id: number; code: string },
     item: CheckoutCleanAssignment,
   ): Promise<CheckoutCleanResultRow> {
+    // undefined keeps whoever already holds the day's task; null unassigns it.
+    const keep = item.assigned_user_id === undefined;
     const assigned_user_id = item.assigned_user_id ?? null;
     const note = item.notes?.trim() || null;
     const key = { unit_id: unit.id, task_date: dateOnlyToDb(today), type: 'checkout_clean' as const };
@@ -245,18 +248,26 @@ export class CheckoutCleanService {
     }
     const task =
       current ??
-      (await this.prisma.lodging_housekeeping_tasks.findFirst({ where: key, select: { id: true } }));
+      (await this.prisma.lodging_housekeeping_tasks.findFirst({
+        where: key,
+        select: { id: true, assigned_user_id: true },
+      }));
     if (!task) {
       throw new VendixHttpException(ErrorCodes.LODGING_HOUSEKEEPING_TASK_FIND_001);
     }
     const { count } = await this.prisma.lodging_housekeeping_tasks.updateMany({
       where: { id: task.id, status: 'pending' },
-      data: { assigned_user_id, ...(note ? { notes: note } : {}), updated_at: new Date() },
+      data: {
+        ...(keep ? {} : { assigned_user_id }),
+        ...(note ? { notes: note } : {}),
+        updated_at: new Date(),
+      },
     });
     if (count === 0) {
       return { ...base, task_id: task.id, assigned_user_id: null, outcome: 'done' };
     }
-    return { ...base, task_id: task.id, assigned_user_id, outcome: 'assigned' };
+    const holder = keep ? (task.assigned_user_id ?? null) : assigned_user_id;
+    return { ...base, task_id: task.id, assigned_user_id: holder, outcome: 'assigned' };
   }
 
   /** Rooms (with a unit) of a reservation that already checked out. */
@@ -311,7 +322,11 @@ export class CheckoutCleanService {
                 { name: { in: roleNames } },
                 {
                   role_permissions: {
-                    some: { granted: true, permissions: { name: HOUSEKEEPING_OPERATE_PERMISSION } },
+                    some: {
+                      granted: true,
+                      // Same rule as PermissionsGuard: an inactive permission grants nothing.
+                      permissions: { name: HOUSEKEEPING_OPERATE_PERMISSION, status: 'active' },
+                    },
                   },
                 },
               ],
