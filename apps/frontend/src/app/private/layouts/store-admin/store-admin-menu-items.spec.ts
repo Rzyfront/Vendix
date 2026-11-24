@@ -331,25 +331,31 @@ describe('Administración (flujos-documental S6): entradas del sidebar', () => {
   });
 });
 
-describe('Órdenes: Equipo de Servicio (demo hotel/canchas S25)', () => {
+describe('Órdenes: Agenda reúne Reservas, Pedidos programados y Equipo de Servicio (agenda-unificada F1)', () => {
   const orders = () => STORE_ADMIN_MENU_ITEMS.find((item) => item.label === 'Órdenes');
 
-  it('lists "Equipo de Servicio" under Órdenes with the same panel_ui key as Reservas', () => {
-    const team = orders()?.children?.find((child) => child.label === 'Equipo de Servicio');
-    expect(team).toEqual(
+  it('una sola entrada «Agenda»; ni «Programación» ni «Equipo de Servicio» quedan sueltas', () => {
+    const children = orders()?.children ?? [];
+    const labels = children.map((child) => child.label);
+    const routes = children.map((child) => child.route);
+    expect(labels.filter((label) => label === 'Agenda').length).toBe(1);
+    for (const gone of ['Programación', 'Equipo de Servicio', 'Reservas', 'Pedidos programados']) {
+      expect(labels).withContext(gone).not.toContain(gone);
+    }
+    for (const gone of ['/admin/orders/scheduling', '/admin/reservations/schedules', '/admin/reservations', '/admin/scheduled-orders']) {
+      expect(routes).withContext(gone).not.toContain(gone);
+    }
+    expect(children.find((child) => child.label === 'Agenda')).toEqual(
       jasmine.objectContaining({
-        route: '/admin/reservations/schedules',
-        panelUiKey: 'orders_reservations',
+        route: '/admin/orders/agenda',
+        panelUiAnyOf: ['orders_reservations', 'orders_scheduled'],
       }),
     );
   });
 
-  it('keeps Reservas and Solicitudes de pago where they were', () => {
+  it('conserva «Solicitudes de pago» y «Estaciones de Servicio»', () => {
     const routes = orders()?.children?.map((child) => child.route) ?? [];
-    expect(routes).toContain('/admin/reservations');
     expect(routes).toContain('/admin/reservations/payment-requests');
-    expect(routes.indexOf('/admin/reservations/schedules')).toBe(
-      routes.indexOf('/admin/reservations/payment-requests') + 1,
-    );
+    expect(routes).toContain('/admin/services/stations');
   });
 });

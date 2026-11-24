@@ -11,6 +11,10 @@ import { aiAgentsSettingsGuard } from '../../core/guards/vexi-settings.guard';
 import { vexAccessGuard } from '../../core/guards/vex-access.guard';
 import { storeDashboardGuard } from '../../core/guards/store-dashboard.guard'; // QUI-418
 import { HomePanelService } from '../../private/modules/store/dashboard/home-panels/home-panel.service';
+import {
+  agendaAccessGuard,
+  agendaTabRedirect,
+} from '../../private/modules/store/scheduling/agenda-access.guard';
 import { appKindGuard } from '../../private/modules/store/apps/utils/app-routes.util';
 import {
   panelUiGuard,
@@ -496,6 +500,22 @@ export const storeAdminRoutes: Routes = [
                 (c) => c.OrdersBulkPageComponent,
               ),
           },
+          // Agenda unificada F1: un solo módulo «Agenda» (Calendario |
+          // Programación | Configuración en `?tab=`). Antes de `:id`.
+          {
+            path: 'scheduling',
+            pathMatch: 'full',
+            redirectTo: () => agendaTabRedirect('programacion'),
+          },
+          {
+            path: 'agenda',
+            // Abre si Reservas o Pedidos programados pasan todas las capas.
+            canActivate: [agendaAccessGuard],
+            loadChildren: () =>
+              import('../../private/modules/store/scheduling/scheduling.routes').then(
+                (r) => r.SCHEDULING_AGENDA_ROUTES,
+              ),
+          },
           {
             path: ':id',
             // El detalle de orden reutiliza `vendix-invoice-detail` (el modal
@@ -520,41 +540,33 @@ export const storeAdminRoutes: Routes = [
       {
         path: 'reservations',
         children: [
+          // Agenda unificada F1: Reservas vive en Órdenes → Agenda. Las URLs
+          // viejas abren la pestaña que les corresponde; la configuración de
+          // disponibilidad, su sección en Configuración.
           {
             path: '',
             pathMatch: 'full',
-            loadComponent: () =>
-              import('../../private/modules/store/reservations/reservations.component').then(
-                (c) => c.ReservationsComponent,
-              ),
+            redirectTo: () => agendaTabRedirect('calendario'),
           },
           {
             path: 'schedules',
-            loadComponent: () =>
-              import('../../private/modules/store/reservations/components/schedule-management/schedule-management.component').then(
-                (c) => c.ScheduleManagementComponent,
-              ),
+            pathMatch: 'full',
+            redirectTo: () => agendaTabRedirect('configuracion', 'equipo'),
           },
           {
             path: 'availability',
-            loadComponent: () =>
-              import(
-                '../../private/modules/store/reservations/components/provider-availability/provider-availability.component'
-              ).then((c) => c.ProviderAvailabilityComponent),
+            pathMatch: 'full',
+            redirectTo: () => agendaTabRedirect('configuracion', 'disponibilidad'),
           },
           {
             path: 'queue',
-            loadComponent: () =>
-              import(
-                '../../private/modules/store/reservations/components/appointment-queue-panel/appointment-queue-panel.component'
-              ).then((c) => c.AppointmentQueuePanelComponent),
+            pathMatch: 'full',
+            redirectTo: () => agendaTabRedirect('configuracion', 'cola'),
           },
           {
             path: 'business-hours',
-            loadComponent: () =>
-              import(
-                '../../private/modules/store/reservations/components/business-hours/business-hours.component'
-              ).then((c) => c.BusinessHoursComponent),
+            pathMatch: 'full',
+            redirectTo: () => agendaTabRedirect('configuracion', 'horario'),
           },
           {
             path: 'reminders',

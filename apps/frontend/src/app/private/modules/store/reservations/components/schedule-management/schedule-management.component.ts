@@ -2,6 +2,7 @@ import {
   Component,
   DestroyRef,
   inject,
+  input,
   signal,
   computed,
 } from '@angular/core';
@@ -49,6 +50,7 @@ import type { SelectorOption } from '../../../../../../shared/components/selecto
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { ProviderNamePipe } from '../../../../../../shared/pipes/provider-name/provider-name.pipe';
 import { STATION_TYPES_META } from '../service-stations/service-stations-page.component';
+import { agendaUrl } from '../../../scheduling/scheduling-tabs';
 
 interface BookableService {
   id: number;
@@ -83,6 +85,8 @@ interface BookableService {
   styleUrls: ['./schedule-management.component.scss'],
 })
 export class ScheduleManagementComponent {
+  /** Montada en Agenda → Configuración: sin cabecera propia (agenda-unificada F1). */
+  readonly embedded = input(false);
   private reservationsService = inject(ReservationsService);
   private stationsService = inject(ServiceStationsService);
   private toastService = inject(ToastService);
@@ -299,7 +303,7 @@ export class ScheduleManagementComponent {
   }
 
   goBack(): void {
-    this.router.navigate(['/admin/reservations']);
+    this.router.navigateByUrl(agendaUrl('configuracion'));
   }
 
   closeDetailModal(): void {

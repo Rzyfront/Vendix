@@ -335,28 +335,21 @@ export const STORE_ADMIN_MENU_ITEMS: readonly MenuItem[] = [
         route: '/admin/orders/layaway',
       },
       {
-        label: 'Reservas',
-        icon: 'calendar-clock',
-        route: '/admin/reservations',
+        // Agenda unificada F1: UN módulo con Calendario | Programación |
+        // Configuración. Reemplaza «Reservas», «Pedidos programados» y
+        // «Equipo de Servicio» (sus URLs redirigen a la pestaña que les
+        // corresponde). Se ve si la tienda tiene cualquiera de los dos módulos.
+        label: 'Agenda',
+        icon: 'calendar-days',
+        route: '/admin/orders/agenda',
+        panelUiAnyOf: ['orders_reservations', 'orders_scheduled'],
       },
       {
-        // Same panel_ui module as "Reservas": the payment requests belong to its flow.
+        // Same panel_ui module as reservations (`orders_reservations`): the payment requests belong to its flow.
         label: 'Solicitudes de pago',
         icon: 'receipt',
         route: '/admin/reservations/payment-requests',
         panelUiKey: 'orders_reservations',
-      },
-      {
-        // Same panel_ui module as "Reservas": providers are who attends the bookings.
-        label: 'Equipo de Servicio',
-        icon: 'user-cog',
-        route: '/admin/reservations/schedules',
-        panelUiKey: 'orders_reservations',
-      },
-      {
-        label: 'Pedidos programados',
-        icon: 'calendar-clock',
-        route: '/admin/scheduled-orders',
       },
       {
         label: 'Estaciones de Servicio',

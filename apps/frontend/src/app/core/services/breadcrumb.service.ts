@@ -1011,6 +1011,13 @@ export class BreadcrumbService {
       parent: 'Órdenes',
       icon: 'clipboard',
     },
+    // Agenda unificada F1 (antes de `:id`).
+    {
+      path: '/admin/orders/agenda',
+      title: 'Agenda',
+      parent: 'Órdenes',
+      icon: 'calendar-days',
+    },
     {
       path: '/admin/orders/:id',
       title: 'Detalles del Pedido',

@@ -7,6 +7,9 @@ import { REPORT_DEFINITIONS } from '../../private/modules/store/reports/config/r
 import { MODULE_ROUTES } from '../../shared/constants/store-module-catalog.constant';
 import { STORE_ADMIN_MENU_ITEMS } from '../../private/layouts/store-admin/store-admin-menu-items';
 import { MenuItem } from '../../shared/components/sidebar/sidebar.component';
+import { MenuFilterService } from '../../core/services/menu-filter.service';
+import { SCHEDULED_ORDERS_ROUTES } from '../../private/modules/store/scheduled-orders/scheduled-orders.routes';
+import { agendaAccessGuard } from '../../private/modules/store/scheduling/agenda-access.guard';
 
 /**
  * QUI-1024: the "Rutas" module lives at `/admin/orders/rutas`. The old
@@ -119,5 +122,71 @@ describe('QUI-1024: URLs del módulo Rutas', () => {
     const routes = menuRoutes(STORE_ADMIN_MENU_ITEMS);
     expect(routes).toContain('/admin/orders/rutas');
     expect(routes.filter((route) => route.includes('planillas'))).toEqual([]);
+  });
+});
+
+describe('Agenda unificada F1: URLs reales de Órdenes → Agenda', () => {
+  let router: Router;
+  let open: string[];
+  const adminChildren = childrenOf(storeAdminRoutes, 'admin');
+  const reservationsChildren = childrenOf(adminChildren, 'reservations');
+
+  beforeEach(() => {
+    open = ['orders_reservations', 'orders_scheduled'];
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: MenuFilterService, useValue: { openAnyOfKeys: (keys: string[]) => keys.filter((k) => open.includes(k)) } },
+        provideRouter([
+          { path: 'admin/orders', children: stubbed(ordersChildren) },
+          { path: 'admin/reservations', children: stubbed(reservationsChildren) },
+          { path: 'admin/scheduled-orders', children: stubbed(SCHEDULED_ORDERS_ROUTES) },
+        ]),
+      ],
+    });
+    router = TestBed.inject(Router);
+  });
+
+  it('agenda va antes de :id y lleva su guard; el detalle de orden sigue en :id', async () => {
+    const paths = ordersChildren.map((route) => route.path);
+    expect(paths.indexOf('agenda')).toBeLessThan(paths.indexOf(':id'));
+    expect(paths.indexOf('scheduling')).toBeLessThan(paths.indexOf(':id'));
+    expect(ordersChildren.find((route) => route.path === 'agenda')?.canActivate).toEqual([agendaAccessGuard]);
+    await router.navigateByUrl('/admin/orders/agenda');
+    expect(leaf(router).routeConfig?.path).toBe('agenda');
+  });
+
+  const REDIRECTS: Array<[string, string]> = [
+    ['/admin/orders/scheduling', '/admin/orders/agenda?tab=programacion'],
+    ['/admin/reservations', '/admin/orders/agenda?tab=calendario'],
+    ['/admin/scheduled-orders', '/admin/orders/agenda?tab=calendario'],
+    ['/admin/reservations/schedules', '/admin/orders/agenda?tab=configuracion&seccion=equipo'],
+    ['/admin/reservations/availability', '/admin/orders/agenda?tab=configuracion&seccion=disponibilidad'],
+    ['/admin/reservations/queue', '/admin/orders/agenda?tab=configuracion&seccion=cola'],
+    ['/admin/reservations/business-hours', '/admin/orders/agenda?tab=configuracion&seccion=horario'],
+  ];
+  for (const [from, to] of REDIRECTS) {
+    it(`${from} → ${to}`, async () => {
+      await router.navigateByUrl(from);
+      expect(router.url).toBe(to);
+    });
+  }
+
+  it('sin Reservas abierto, la URL vieja de Equipo de servicio cae en el Calendario', async () => {
+    open = ['orders_scheduled'];
+    await router.navigateByUrl('/admin/reservations/schedules');
+    expect(router.url).toBe('/admin/orders/agenda?tab=calendario');
+  });
+
+  it('las demás pantallas de Reservas y Pedidos siguen en su ruta', async () => {
+    for (const url of [
+      '/admin/reservations/reminders',
+      '/admin/reservations/reschedule-requests',
+      '/admin/reservations/payment-requests',
+      '/admin/scheduled-orders/day',
+      '/admin/scheduled-orders/production',
+    ]) {
+      await router.navigateByUrl(url);
+      expect(router.url).withContext(url).toBe(url);
+    }
   });
 });

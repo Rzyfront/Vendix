@@ -1,6 +1,7 @@
 import {
   Component,
   inject,
+  input,
   signal,
   computed,
   effect,
@@ -44,6 +45,7 @@ import {
   ProviderSchedule,
 } from '../../interfaces/reservation.interface';
 import { bookingDaySpan } from '../calendar/booking-day-span.util';
+import { agendaQueryParams, agendaUrl } from '../../../scheduling/scheduling-tabs';
 
 /**
  * Provider availability dashboard.
@@ -72,6 +74,8 @@ import { bookingDaySpan } from '../calendar/booking-day-span.util';
   styleUrls: ['./provider-availability.component.scss'],
 })
 export class ProviderAvailabilityComponent {
+  /** Montada en Agenda → Configuración: sin cabecera propia (agenda-unificada F1). */
+  readonly embedded = input(false);
   private service = inject(ReservationsService);
   private toast = inject(ToastService);
   private destroyRef = inject(DestroyRef);
@@ -307,7 +311,7 @@ export class ProviderAvailabilityComponent {
   readonly headerActions: StickyHeaderActionButton[] = [
     {
       id: 'back',
-      label: 'Reservas',
+      label: 'Agenda',
       variant: 'outline',
       icon: 'arrow-left',
     },
@@ -787,16 +791,16 @@ export class ProviderAvailabilityComponent {
    * markup and the routes are easy to find/change in one place.
    */
   goBack(): void {
-    this.router.navigate(['/admin/reservations']);
+    this.router.navigateByUrl(agendaUrl('calendario'));
   }
 
   goToSchedules(): void {
-    this.router.navigate(['/admin/reservations/schedules']);
+    this.router.navigateByUrl(agendaUrl('configuracion', 'equipo'));
   }
 
   openProviderSchedules(row: ProviderAvailabilityRow): void {
-    this.router.navigate(['/admin/reservations/schedules'], {
-      queryParams: { provider_id: row.provider_id },
+    this.router.navigate(['/admin/orders/agenda'], {
+      queryParams: { ...agendaQueryParams('configuracion', 'equipo'), provider_id: row.provider_id },
     });
   }
 

@@ -1,11 +1,15 @@
-import { Routes } from '@angular/router';
+import { inject } from '@angular/core';
+import { Router, Routes } from '@angular/router';
+import { AGENDA_ROUTE, agendaQueryParams } from '../scheduling/scheduling-tabs';
 
 export const SCHEDULED_ORDERS_ROUTES: Routes = [
   {
+    // Agenda unificada F1: la agenda de pedidos pasó a Órdenes → Agenda (un
+    // solo calendario). Los enlaces viejos abren la pestaña Calendario.
     path: '',
     pathMatch: 'full',
-    loadComponent: () =>
-      import('./pages/agenda-page/agenda-page.component').then((c) => c.AgendaPageComponent),
+    redirectTo: () =>
+      inject(Router).createUrlTree([AGENDA_ROUTE], { queryParams: agendaQueryParams('calendario') }),
   },
   {
     // T14 (QUI-996): same shared view as Operaciones → Producción and Planta.
