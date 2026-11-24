@@ -684,6 +684,25 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
         ).rejects.toThrow('El nombre del cliente es obligatorio');
       });
 
+      it.each([
+        ['only an email', { email: 'solo@x.com' }],
+        ['a document number without type', { document_number: '12345678' }],
+        [
+          'a JURIDICA with only legal_name',
+          { legal_name: 'Acme SAS', person_type: 'JURIDICA' },
+        ],
+      ])('does not reject %s', async (_label, dto) => {
+        mockPrismaService.users.findFirst.mockResolvedValue(null);
+        mockPrismaService.users.findMany.mockResolvedValue([]);
+
+        await service
+          .findOrCreateByEmailOrDocument(1, dto as any)
+          .catch((err) => {
+            expect(err?.errorCode).not.toBe('SYS_VALIDATION_001');
+          });
+        expect(mockPrismaService.stores.findUnique).toHaveBeenCalled();
+      });
+
       it('still creates a name-only customer when a real name arrives', async () => {
         mockPrismaService.users.findFirst.mockResolvedValue(null);
         mockPrismaService.users.findMany.mockResolvedValue([]);
