@@ -1,6 +1,6 @@
 import { Component, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import {
   BadgeComponent,
@@ -262,6 +262,7 @@ export class TasksComponent {
   private readonly crm = inject(CrmService);
   private readonly toast = inject(ToastService);
   private readonly auth = inject(AuthFacade);
+  private readonly route = inject(ActivatedRoute);
 
   protected readonly tabs: ScrollableTab[] = [
     { id: 'today', label: 'Mis tareas de hoy', icon: 'sun' },
@@ -319,6 +320,18 @@ export class TasksComponent {
       this.statsScope();
       untracked(() => void this.loadStats());
     });
+    void this.openFromQuery();
+  }
+
+  /** Enlace `?task=<id>` (p. ej. desde el detalle de una reserva): abre esa tarea una sola vez. */
+  private async openFromQuery(): Promise<void> {
+    const id = Number(this.route.snapshot.queryParamMap.get('task'));
+    if (!Number.isInteger(id) || id <= 0) return;
+    try {
+      this.openEdit(await firstValueFrom(this.crm.task(id)));
+    } catch {
+      this.toast.error('No se pudo abrir la tarea');
+    }
   }
 
   openNew(): void {

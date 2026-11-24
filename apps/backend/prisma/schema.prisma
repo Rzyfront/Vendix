@@ -1235,6 +1235,7 @@ model stores {
   service_plan_departures        service_plan_departures[]
   service_plan_pax_prices        service_plan_pax_prices[]
   service_plan_activities        service_plan_activities[]
+  service_plan_booking_tasks     service_plan_booking_tasks[]
   lodging_room_charges           lodging_room_charges[]
   lodging_housekeeping_tasks     lodging_housekeeping_tasks[]
   lodging_inventory_blocks       lodging_inventory_blocks[]
@@ -4057,6 +4058,7 @@ model suppliers {
   organizations                       organizations              @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   store                               stores?                    @relation(fields: [store_id], references: [id], onDelete: SetNull)
   addresses                           addresses?                 @relation("supplier_addresses", fields: [address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  service_plan_activities             service_plan_activities[]
   invoices                            invoices[]
   withholding_calculations            withholding_calculations[]
   accounts_payable                    accounts_payable[]         @relation("supplier_accounts_payable")
@@ -11448,6 +11450,7 @@ model bookings {
   service_sessions_booking_fkey service_sessions[] @relation("service_sessions_booking_fkey")
 
   service_deposits_booking_fkey service_deposits[] @relation("service_deposits_booking_fkey")
+  service_plan_booking_tasks service_plan_booking_tasks[]
 
   series booking_series? @relation("bookings_series_fkey", fields: [series_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "bookings_series_id_fkey")
 
@@ -16146,6 +16149,7 @@ model crm_tasks {
   created_by    users?               @relation("crm_tasks_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   move_to_stage crm_pipeline_stages? @relation(fields: [move_to_stage_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   supporters    crm_task_assignees[]
+  plan_booking_tasks service_plan_booking_tasks[]
 
   @@index([store_id, assigned_user_id, status, due_at])
   @@index([customer_id])
@@ -17032,6 +17036,9 @@ model service_plan_activities {
   provider_id      Int?
   supplier_name    String?  @db.VarChar(200)
   supplier_contact String?  @db.VarChar(200)
+  /// F3: tercero elegido de los proveedores registrados; nombre y contacto quedan
+  /// copiados en `supplier_name`/`supplier_contact` como respaldo.
+  supplier_id      Int?
   cost             Decimal? @db.Decimal(12, 2)
   /// F3: crea una tarea al vender el plan.
   creates_task     Boolean  @default(false)
@@ -17042,9 +17049,35 @@ model service_plan_activities {
   store    stores             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "service_plan_activities_store_fkey")
   product  products           @relation("service_plan_activities_product_fkey", fields: [store_id, product_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_plan_activities_product_fkey")
   provider service_providers? @relation("service_plan_activities_provider_fkey", fields: [store_id, provider_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_plan_activities_provider_fkey")
+  supplier suppliers?         @relation(fields: [supplier_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "service_plan_activities_supplier_fkey")
+  booking_tasks service_plan_booking_tasks[]
 
   @@index([store_id, product_id, day_number, sort_order], map: "service_plan_activities_store_product_day_order_idx")
+  @@index([supplier_id], map: "service_plan_activities_supplier_id_idx")
   @@map("service_plan_activities")
+}
+
+/// QUI-1060 F3: tarea CRM generada por una actividad del plan al confirmar la
+/// reserva. El UNIQUE (booking_id, activity_id) hace idempotente la generación.
+model service_plan_booking_tasks {
+  id          Int      @id @default(autoincrement())
+  store_id    Int
+  booking_id  Int
+  activity_id Int?
+  crm_task_id Int?
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  store    stores                   @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "service_plan_booking_tasks_store_fkey")
+  booking  bookings                 @relation(fields: [store_id, booking_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_plan_booking_tasks_booking_fkey")
+  activity service_plan_activities? @relation(fields: [activity_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "service_plan_booking_tasks_activity_fkey")
+  crm_task crm_tasks?               @relation(fields: [crm_task_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "service_plan_booking_tasks_crm_task_fkey")
+
+  @@unique([booking_id, activity_id], map: "service_plan_booking_tasks_booking_activity_key")
+  @@index([store_id, booking_id], map: "service_plan_booking_tasks_store_booking_idx")
+  @@index([activity_id], map: "service_plan_booking_tasks_activity_id_idx")
+  @@index([crm_task_id], map: "service_plan_booking_tasks_crm_task_id_idx")
+  @@map("service_plan_booking_tasks")
 }
 
 enum service_deposit_kind_enum {

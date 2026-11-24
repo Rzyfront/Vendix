@@ -12,6 +12,7 @@ import {
   UpdatePlanDepartureDto,
 } from './dto/service-plan.dto';
 import { assertPlanDurationKeepsActivities } from './service-plan-duration.util';
+import { supplierContactLine } from './service-plan-tasks.util';
 import { buildPublicItinerary, compareActivities, type PublicItineraryDay } from './service-plan-itinerary.util';
 import {
   findOverlappingTiers,
@@ -66,9 +67,17 @@ type ActivityRow = {
   provider_id: number | null;
   supplier_name: string | null;
   supplier_contact: string | null;
+  supplier_id: number | null;
   cost: Prisma.Decimal | number | null;
   creates_task: boolean;
   is_public: boolean;
+};
+
+type ActivityOwner = {
+  provider_id: number | null;
+  supplier_id: number | null;
+  supplier_name: string | null;
+  supplier_contact: string | null;
 };
 
 /** Comprobante de una reserva de plan: evento, ida y regreso, grupo e itinerario público. */
@@ -296,7 +305,12 @@ export class ServicePlansService {
     if (dto.cost !== undefined) data.cost = dto.cost === null ? null : new Prisma.Decimal(dto.cost);
     if (dto.creates_task !== undefined) data.creates_task = dto.creates_task;
     if (dto.is_public !== undefined) data.is_public = dto.is_public;
-    if (dto.provider_id !== undefined || dto.supplier_name !== undefined || dto.supplier_contact !== undefined) {
+    if (
+      dto.provider_id !== undefined ||
+      dto.supplier_id !== undefined ||
+      dto.supplier_name !== undefined ||
+      dto.supplier_contact !== undefined
+    ) {
       Object.assign(data, await this.resolveActivityOwner(dto, current));
     }
 
@@ -577,32 +591,69 @@ export class ServicePlansService {
   }
 
   /**
-   * Responsable efectivo (lo enviado sobre lo guardado): interno XOR tercero, y el
-   * interno debe ser un prestador de esta tienda.
+   * Responsable efectivo (lo enviado sobre lo guardado): interno XOR tercero. El
+   * interno es un prestador de esta tienda; el tercero registrado es un proveedor
+   * activo de la organización (general o de esta tienda) y su nombre y contacto se
+   * copian como respaldo (QUI-1060 F3).
    */
   private async resolveActivityOwner(
-    dto: { provider_id?: number | null; supplier_name?: string | null; supplier_contact?: string | null },
-    current: Pick<ActivityRow, 'provider_id' | 'supplier_name' | 'supplier_contact'> | null,
-  ): Promise<{ provider_id: number | null; supplier_name: string | null; supplier_contact: string | null }> {
-    const pick = <K extends 'provider_id' | 'supplier_name' | 'supplier_contact'>(key: K) =>
+    dto: {
+      provider_id?: number | null;
+      supplier_id?: number | null;
+      supplier_name?: string | null;
+      supplier_contact?: string | null;
+    },
+    current: Pick<ActivityRow, 'provider_id' | 'supplier_id' | 'supplier_name' | 'supplier_contact'> | null,
+  ): Promise<ActivityOwner> {
+    const pick = <K extends keyof ActivityOwner>(key: K) =>
       dto[key] !== undefined ? (dto[key] ?? null) : (current?.[key] ?? null);
-    const owner = {
+    const owner: ActivityOwner = {
       provider_id: pick('provider_id') as number | null,
+      supplier_id: pick('supplier_id') as number | null,
       supplier_name: pick('supplier_name') as string | null,
       supplier_contact: pick('supplier_contact') as string | null,
     };
-    if (owner.provider_id != null && (owner.supplier_name != null || owner.supplier_contact != null)) {
+    if (
+      owner.provider_id != null &&
+      (owner.supplier_id != null || owner.supplier_name != null || owner.supplier_contact != null)
+    ) {
       throw new VendixHttpException(ErrorCodes.SERVICE_PLAN_020);
     }
+    const storeId = this.requireStoreId();
     if (owner.provider_id != null && owner.provider_id !== current?.provider_id) {
-      const storeId = this.requireStoreId();
       const provider = await this.prisma.service_providers.findFirst({
         where: { id: owner.provider_id, store_id: storeId },
         select: { id: true },
       });
       if (!provider) throw new VendixHttpException(ErrorCodes.SERVICE_PLAN_021);
     }
+    // Con proveedor registrado, nombre y contacto salen de su ficha. Elegirlo exige que
+    // esté activo; conservar el ya guardado (otro proveedor inactivado después) no
+    // bloquea la edición: refresca la copia si sigue activo y si no deja la guardada.
+    if (owner.supplier_id != null) {
+      const changed = owner.supplier_id !== current?.supplier_id;
+      const supplier = changed
+        ? await this.findSelectableSupplier(owner.supplier_id, storeId)
+        : await this.findSelectableSupplier(owner.supplier_id, storeId).catch(() => null);
+      owner.supplier_name = supplier ? supplier.name.slice(0, 200) : (current?.supplier_name ?? null);
+      owner.supplier_contact = supplier ? supplierContactLine(supplier) : (current?.supplier_contact ?? null);
+    }
     return owner;
+  }
+
+  /** Proveedor activo de la organización de la tienda: general (sin tienda) o de esta tienda. */
+  private async findSelectableSupplier(supplierId: number, storeId: number) {
+    // El cliente de tienda ya filtra `suppliers` por la organización del contexto.
+    const supplier = await this.prisma.suppliers.findFirst({
+      where: {
+        id: supplierId,
+        state: 'active',
+        OR: [{ store_id: null }, { store_id: storeId }],
+      },
+      select: { id: true, name: true, contact_person: true, mobile: true, phone: true, email: true },
+    });
+    if (!supplier) throw new VendixHttpException(ErrorCodes.SERVICE_PLAN_027);
+    return supplier;
   }
 
   private async nextSortOrder(productId: number, dayNumber: number): Promise<number> {
@@ -626,6 +677,7 @@ export class ServicePlansService {
       provider_id: a.provider_id,
       supplier_name: a.supplier_name,
       supplier_contact: a.supplier_contact,
+      supplier_id: a.supplier_id ?? null,
       cost: a.cost != null ? Number(a.cost) : null,
       creates_task: a.creates_task,
       is_public: a.is_public,

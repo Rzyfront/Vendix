@@ -3,6 +3,7 @@ import { ResponseService } from '@common/responses/response.service';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { ServicePlansService } from './service-plans.service';
+import { ServicePlanTasksService } from './service-plan-tasks.service';
 import {
   CreatePlanActivityDto,
   CreatePlanDepartureDto,
@@ -23,6 +24,7 @@ import {
 export class ServicePlansController {
   constructor(
     private readonly servicePlans: ServicePlansService,
+    private readonly planTasks: ServicePlanTasksService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -32,6 +34,14 @@ export class ServicePlansController {
   async getBookingItinerary(@Param('bookingId', ParseIntPipe) bookingId: number) {
     const itinerary = await this.servicePlans.getBookingItinerary(bookingId);
     return this.responseService.success(itinerary, 'Itinerario de la reserva obtenido');
+  }
+
+  /** «Tareas del plan»: tareas CRM generadas por las actividades de la reserva (null si no es plan). */
+  @Get('bookings/:bookingId/tasks')
+  @Permissions('store:reservations:read')
+  async getBookingTasks(@Param('bookingId', ParseIntPipe) bookingId: number) {
+    const tasks = await this.planTasks.listForBooking(bookingId);
+    return this.responseService.success(tasks, 'Tareas del plan obtenidas');
   }
 
   @Get(':productId')

@@ -319,6 +319,8 @@ const REQUIRED_COLUMNS = [
   'bookings.departure_id',
   'bookings.pax_adults',
   'bookings.pax_children',
+  // QUI-1060 F3 — tercero del itinerario elegido de los proveedores (20261230150000).
+  'service_plan_activities.supplier_id',
 ];
 
 /** Tablas cuya ausencia completa es igual de fatal. */
@@ -344,6 +346,8 @@ const REQUIRED_TABLES = [
   'service_plan_pax_prices',
   // QUI-1060 F2 — itinerario del plan (migración 20261230090000).
   'service_plan_activities',
+  // QUI-1060 F3 — tareas CRM generadas por las actividades del plan (20261230150000).
+  'service_plan_booking_tasks',
 ];
 
 /** Tipos enum que el schema referencia y la base debe conocer. */

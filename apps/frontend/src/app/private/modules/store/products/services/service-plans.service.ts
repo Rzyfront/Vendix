@@ -36,6 +36,7 @@ export interface PlanActivity {
   description: string | null;
   sort_order: number;
   provider_id: number | null;
+  supplier_id: number | null;
   supplier_name: string | null;
   supplier_contact: string | null;
   cost: number | null;
@@ -49,11 +50,26 @@ export interface PlanActivityInput {
   title?: string;
   description?: string | null;
   provider_id?: number | null;
+  supplier_id?: number | null;
   supplier_name?: string | null;
   supplier_contact?: string | null;
   cost?: number | null;
   creates_task?: boolean;
   is_public?: boolean;
+}
+
+/** Tarea del CRM generada por una actividad de un plan al confirmar la reserva (QUI-1060 F3). */
+export interface PlanBookingTask {
+  link_id: number;
+  task_id: number | null;
+  activity_id: number | null;
+  day_number: number | null;
+  kind: 'internal' | 'supplier' | 'none';
+  title: string;
+  status: 'pending' | 'done' | 'cancelled' | null;
+  /** ISO UTC. */
+  due_at: string | null;
+  assigned_user: { id: number; first_name: string | null; last_name: string | null } | null;
 }
 
 /** Comprobante de una reserva de plan: evento, ida y regreso, grupo e itinerario público. */
@@ -169,6 +185,13 @@ export class ServicePlansService {
   getBookingItinerary(bookingId: number): Observable<PlanBookingItinerary | null> {
     return this.http
       .get<{ data?: PlanBookingItinerary | null }>(`${this.apiUrl}/bookings/${bookingId}/itinerary`)
+      .pipe(map((res) => res?.data ?? null));
+  }
+
+  /** Tareas del CRM de una reserva: null cuando la reserva no es de un plan. */
+  getBookingTasks(bookingId: number): Observable<PlanBookingTask[] | null> {
+    return this.http
+      .get<{ data?: PlanBookingTask[] | null }>(`${this.apiUrl}/bookings/${bookingId}/tasks`)
       .pipe(map((res) => res?.data ?? null));
   }
 }

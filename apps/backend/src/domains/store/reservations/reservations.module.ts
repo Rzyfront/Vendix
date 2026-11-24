@@ -1,4 +1,4 @@
-import { Module, OnModuleInit } from '@nestjs/common';
+import { Module, OnModuleInit, forwardRef } from '@nestjs/common';
 import { ReservationsService } from './reservations.service';
 import { ReservationsExportService } from './reservations-export.service';
 import { AvailabilityService } from './availability.service';
@@ -30,6 +30,9 @@ import { ServiceDepositsModule } from '../service-deposits/service-deposits.modu
 import { PaymentRequestsModule } from '../payment-requests/payment-requests.module';
 import { ReservationDepositsService } from './reservation-deposits.service';
 import { ServiceStationsModule } from '../service-stations/service-stations.module';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { ServicePlanTasksService } from './service-plans/service-plan-tasks.service';
+import { ServicePlanTasksListener } from './service-plans/service-plan-tasks.listener';
 import { RentalPrepayService } from './rental-prepay/rental-prepay.service';
 import { RentalPrepayPaidListener } from './rental-prepay/rental-prepay-paid.listener';
 import { RentalPrepayHoldExpiryJob } from './rental-prepay/rental-prepay-hold-expiry.job';
@@ -55,6 +58,8 @@ import { ServicePlansService } from './service-plans/service-plans.service';
     PaymentRequestsModule,
     // RentalQuoteService: the rental price of a booking (T15).
     ServiceStationsModule,
+    // QUI-1060 F3: recordatorios y aviso de asignación de las tareas del plan.
+    forwardRef(() => NotificationsModule),
   ],
   controllers: [
     ProvidersController,
@@ -82,6 +87,8 @@ import { ServicePlansService } from './service-plans/service-plans.service';
     RentalPrepayPaidListener,
     RentalPrepayHoldExpiryJob,
     ServicePlansService,
+    ServicePlanTasksService,
+    ServicePlanTasksListener,
   ],
   exports: [
     ReservationsService,

@@ -6685,6 +6685,7 @@ export const ErrorCodes = {
   SERVICE_PLAN_024: { code: 'SERVICE_PLAN_024', httpStatus: 400, devMessage: 'El nuevo orden no coincide con las actividades de ese día.' },
   SERVICE_PLAN_025: { code: 'SERVICE_PLAN_025', httpStatus: 400, devMessage: 'El título de la actividad es obligatorio.' },
   SERVICE_PLAN_026: { code: 'SERVICE_PLAN_026', httpStatus: 404, devMessage: 'La reserva no existe.' },
+  SERVICE_PLAN_027: { code: 'SERVICE_PLAN_027', httpStatus: 400, devMessage: 'El proveedor elegido no está activo o no pertenece a esta tienda.' },
   SERVICE_BOOKING_END_DATE_001: { code: 'SERVICE_BOOKING_END_DATE_001', httpStatus: 400, devMessage: 'La fecha de fin no puede ser anterior a la fecha de inicio.' },
   STATION_BOOKING_010: { code: 'STATION_BOOKING_010', httpStatus: 409, devMessage: 'Esta estación cobra anticipo: reserva desde el flujo de reservas, no desde el carrito.' },
   STATION_BOOKING_011: { code: 'STATION_BOOKING_011', httpStatus: 400, devMessage: 'Una serie recurrente no se permite en estaciones con cobro para reservar o anticipo obligatorio.' },
