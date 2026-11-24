@@ -284,6 +284,35 @@ jobs:
           src/domains/store/data-collection/template-json/template-json.contract.parity.spec.ts
           src/domains/store/data-collection/template-json/template-json.contract.spec.ts
 
+  # GUARDIA OBLIGATORIA (pedido de Rafael, 2026-11-24): el ícono dinámico de la
+  # app instalada (PWA) por tienda. Check requerido en develop y main; el job,
+  # el spec y el código que protege están bajo CODEOWNERS de Rafael. Corre en
+  # TODO PR (sin filtro de rutas): un cambio en cualquier parte que rompa el
+  # manifest o la caché de los íconos debe fallar aquí.
+  pwa-manifest-guard:
+    name: PWA Manifest Guard
+    runs-on: ubuntu-latest
+    needs: audits
+    if: needs.audits.outputs.run_ci == 'true'
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - name: Generar Prisma Client
+        working-directory: apps/backend
+        run: npx prisma generate
+      - name: Jest — ícono dinámico del manifest
+        working-directory: apps/backend
+        run: >-
+          npx jest --ci --runInBand --config jest.isolated.config.js
+          --runTestsByPath
+          src/domains/public/pwa/public-pwa.manifest-guard.spec.ts
+          src/domains/public/pwa/public-pwa.service.spec.ts
+
   # Lo que un doble en memoria no prueba del motor de Flujos: concurrencia,
   # SKIP LOCKED, idempotencia, triggers de evidencia y outbox transaccional.
   # El esquema sale de `migrate diff` y no de `migrate deploy`: las migraciones

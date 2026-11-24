@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
@@ -33,32 +34,85 @@ const PWA_CACHE_TTL_MS = 300_000;
  * `GET /pwa/:asset`, never a signed S3 URL: presigned URLs expire in 24h and
  * the installed app would silently lose its icon (the defect this closes).
  */
-const MANIFEST_ICONS: ReadonlyArray<Record<string, string>> = [
+/**
+ * Icons of the manifest. Their `src` is built per tenant by `buildManifest()`
+ * as `/pwa/v/{version}/{file}`: the version changes with the tenant logo, so a
+ * new logo is a NEW URL and no CDN or browser cache can keep serving the old
+ * (or the Vendix fallback) icon under it.
+ */
+const MANIFEST_ICONS: ReadonlyArray<{
+  file: string;
+  sizes: string;
+  type: string;
+  purpose: string;
+}> = [
+  { file: 'icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+  { file: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
   {
-    src: '/pwa/icon-192.png',
-    sizes: '192x192',
-    type: 'image/png',
-    purpose: 'any',
-  },
-  {
-    src: '/pwa/icon-512.png',
-    sizes: '512x512',
-    type: 'image/png',
-    purpose: 'any',
-  },
-  {
-    src: '/pwa/icon-maskable-512.png',
+    file: 'icon-maskable-512.png',
     sizes: '512x512',
     type: 'image/png',
     purpose: 'maskable',
   },
   {
-    src: '/pwa/apple-touch-icon-180.png',
+    file: 'apple-touch-icon-180.png',
     sizes: '180x180',
     type: 'image/png',
     purpose: 'any',
   },
 ];
+
+/** Bump when the icon derivation changes, so every installed app refetches. */
+export const PWA_ICON_PIPELINE_VERSION = '1';
+
+/** Version segment of the icon URLs when the tenant has no usable logo. */
+export const PWA_BRAND_ICON_VERSION = 'brand';
+
+const PWA_ICON_VERSION_RE = /^(?:brand|[a-f0-9]{12})$/;
+
+/** Cache-Control of an icon that may be cached "forever" (it is versioned). */
+export const PWA_ICON_IMMUTABLE_CACHE = 'public, max-age=604800, immutable';
+
+/** Cache-Control of every other icon response (brand fallback, stale or unversioned URL). */
+export const PWA_ICON_SHORT_CACHE = 'public, max-age=300';
+
+/**
+ * Version of a tenant icon: changes whenever its source logo (or the theme
+ * color painted behind it) changes. `brand` when there is no usable logo.
+ */
+export function pwaIconVersion(
+  logoKey: string | null | undefined,
+  themeColor: string,
+): string {
+  if (!logoKey) return PWA_BRAND_ICON_VERSION;
+  return createHash('sha256')
+    .update(`${PWA_ICON_PIPELINE_VERSION}|${logoKey}|${themeColor}`)
+    .digest('hex')
+    .slice(0, 12);
+}
+
+export function isPwaIconVersion(value: string): boolean {
+  return PWA_ICON_VERSION_RE.test(value);
+}
+
+/**
+ * Cache-Control for an icon response. Only a tenant icon requested under its
+ * CURRENT version is immutable: the Vendix fallback, an unversioned URL and an
+ * outdated version are cached 5 minutes. Serving the fallback as immutable is
+ * what pinned the Vendix icon on Chromium installs (Android, Windows, Linux)
+ * for a week in CloudFront and in the browser.
+ */
+export function pwaIconCacheControl(
+  icon: { fromTenant: boolean; version: string | null },
+  requestedVersion: string | null,
+): string {
+  return icon.fromTenant &&
+    !!icon.version &&
+    icon.version !== PWA_BRAND_ICON_VERSION &&
+    requestedVersion === icon.version
+    ? PWA_ICON_IMMUTABLE_CACHE
+    : PWA_ICON_SHORT_CACHE;
+}
 
 interface PwaDomainContext {
   app_type: string;
@@ -80,6 +134,8 @@ interface PwaLogoSource {
 /** Cached icon payload. `b64 === null` means "serve the Vendix brand icon". */
 interface CachedPwaIcon {
   b64: string | null;
+  /** `pwaIconVersion()` of the cached tenant icon. */
+  v?: string;
 }
 
 /**
@@ -140,6 +196,13 @@ export class PublicPwaService {
 
     const context = await this.resolveDomainContext(host);
     const themeColor = this.resolveThemeColor(context);
+    let logoKey: string | null = null;
+    try {
+      logoKey = (await this.resolveTenantLogoSource(context))?.logo_key ?? null;
+    } catch {
+      // The manifest must never fail: unversioned brand icons, short-cached.
+    }
+    const version = pwaIconVersion(logoKey, themeColor);
 
     const manifest: Record<string, unknown> = {
       id: '/',
@@ -150,7 +213,10 @@ export class PublicPwaService {
       display: 'standalone',
       theme_color: themeColor,
       background_color: themeColor,
-      icons: MANIFEST_ICONS.map((icon) => ({ ...icon })),
+      icons: MANIFEST_ICONS.map(({ file, ...icon }) => ({
+        src: `/pwa/v/${version}/${file}`,
+        ...icon,
+      })),
     };
 
     await this.cache.set(cacheKey, manifest, PWA_CACHE_TTL_MS);
@@ -168,7 +234,7 @@ export class PublicPwaService {
   async resolveIconBuffer(
     hostname: string,
     variant: PwaIconVariant,
-  ): Promise<{ buffer: Buffer; fromTenant: boolean }> {
+  ): Promise<{ buffer: Buffer; fromTenant: boolean; version: string | null }> {
     const host = this.normalizeHostname(hostname);
     const cacheKey = pwaIconCacheKey(host, variant);
 
@@ -176,28 +242,41 @@ export class PublicPwaService {
       const cached = await this.cache.get<CachedPwaIcon>(cacheKey);
       if (cached) {
         return cached.b64
-          ? { buffer: Buffer.from(cached.b64, 'base64'), fromTenant: true }
-          : { buffer: this.getBrandIconBuffer(variant), fromTenant: false };
+          ? {
+              buffer: Buffer.from(cached.b64, 'base64'),
+              fromTenant: true,
+              version: cached.v ?? null,
+            }
+          : {
+              buffer: this.getBrandIconBuffer(variant),
+              fromTenant: false,
+              version: PWA_BRAND_ICON_VERSION,
+            };
       }
 
       const context = await this.resolveDomainContext(host);
       const source = await this.resolveTenantLogoSource(context);
 
       if (source) {
+        const themeColor = this.resolveThemeColor(context);
+        // The derived PNG is stored under its version, so the bytes always
+        // match the version advertised by the manifest (same logo + color).
+        const version = pwaIconVersion(source.logo_key, themeColor);
         const buffer = await this.s3Service.getOrCreatePwaIcon(
           source.logo_key,
           source.base_path,
           variant,
-          this.resolveThemeColor(context),
+          themeColor,
+          version,
         );
 
         if (buffer?.length) {
           await this.cache.set(
             cacheKey,
-            { b64: buffer.toString('base64') } satisfies CachedPwaIcon,
+            { b64: buffer.toString('base64'), v: version } satisfies CachedPwaIcon,
             PWA_CACHE_TTL_MS,
           );
-          return { buffer, fromTenant: true };
+          return { buffer, fromTenant: true, version };
         }
       }
 
@@ -215,7 +294,11 @@ export class PublicPwaService {
       );
     }
 
-    return { buffer: this.getBrandIconBuffer(variant), fromTenant: false };
+    return {
+      buffer: this.getBrandIconBuffer(variant),
+      fromTenant: false,
+      version: PWA_BRAND_ICON_VERSION,
+    };
   }
 
   /**

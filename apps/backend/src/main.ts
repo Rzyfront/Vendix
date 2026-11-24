@@ -23,7 +23,12 @@ import { PlatformAlertService } from './common/platform-alerts/platform-alert.se
 import { DomainConfigService } from '@common/config/domain.config';
 import { GlobalPrismaService } from './prisma/services/global-prisma.service';
 import { PublicSeoService } from './domains/public/seo/public-seo.service';
-import { PublicPwaService } from './domains/public/pwa/public-pwa.service';
+import {
+  PublicPwaService,
+  PWA_ICON_SHORT_CACHE,
+  isPwaIconVersion,
+  pwaIconCacheControl,
+} from './domains/public/pwa/public-pwa.service';
 import { isPwaIconVariant } from '@common/config/image-presets';
 import { resolveTenantHostname } from '@common/utils/tenant-hostname.util';
 import {
@@ -565,7 +570,10 @@ async function bootstrapApi(role: VendixProcessRole) {
     'apple-touch-icon-180.png',
   ]);
 
-  httpAdapter.get('/pwa/:asset', async (req, res) => {
+  // `/pwa/v/:version/:asset` is what the manifest links (versioned by the
+  // tenant logo, cacheable for a week); `/pwa/:asset` stays for the static
+  // apple-touch-icon of index.html and for apps installed before versioning.
+  const servePwaIcon = async (req: any, res: any) => {
     const asset = String(req.params?.asset ?? '');
     if (!PWA_ASSETS.has(asset)) {
       res.status(404).send('Not Found');
@@ -578,19 +586,35 @@ async function bootstrapApi(role: VendixProcessRole) {
       return;
     }
 
+    const rawVersion = req.params?.version;
+    const requestedVersion =
+      rawVersion === undefined ? null : String(rawVersion);
+    if (requestedVersion !== null && !isPwaIconVersion(requestedVersion)) {
+      res.status(404).send('Not Found');
+      return;
+    }
+
     try {
       const hostname = resolveTenantHostname(req);
-      const { buffer } = await pwaService.resolveIconBuffer(hostname, variant);
+      const icon = await pwaService.resolveIconBuffer(hostname, variant);
       res.setHeader('Content-Type', 'image/png');
-      res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
-      res.status(200).send(buffer);
+      // Never `immutable` for the Vendix fallback or a stale version: that is
+      // what kept the Vendix icon on Chromium installs for a week.
+      res.setHeader(
+        'Cache-Control',
+        pwaIconCacheControl(icon, requestedVersion),
+      );
+      res.status(200).send(icon.buffer);
     } catch (error) {
       // An installed app must never show a broken icon: serve the Vendix brand.
       res.setHeader('Content-Type', 'image/png');
-      res.setHeader('Cache-Control', 'public, max-age=300');
+      res.setHeader('Cache-Control', PWA_ICON_SHORT_CACHE);
       res.status(200).send(pwaService.getBrandIconBuffer(variant));
     }
-  });
+  };
+
+  httpAdapter.get('/pwa/v/:version/:asset', servePwaIcon);
+  httpAdapter.get('/pwa/:asset', servePwaIcon);
 
   httpAdapter.get('/google002d194fa98388f5.html', (_req, res) => {
     res.setHeader('Content-Type', 'text/html');
