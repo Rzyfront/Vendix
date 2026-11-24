@@ -24,6 +24,7 @@ import { WalletBalanceService } from '../../../wallet/services/wallet-balance.se
 import { depositTotals } from '../deposits/lodging-deposit-math';
 import { AddFolioChargeDto, FolioPaymentDto, VoidFolioChargeDto } from './folio.dto';
 import { nightLineDescription } from './folio-nights';
+import { createReservationFolioInTx, WHOLE_STAY_BOUND } from './reservation-folio';
 import {
   exemptNightTaxRows,
   isVatExemptRow,
@@ -52,6 +53,21 @@ const toCents = (value: Prisma.Decimal | number | string | null | undefined) =>
   Math.round(Number(value ?? 0) * 100);
 
 type Cents = Prisma.Decimal | number | string | null | undefined;
+
+const FOLIO_SELECT = {
+  id: true,
+  status: true,
+  charges_blocked: true,
+  reservation_id: true,
+  order_id: true,
+  verified_at: true,
+  verified_total: true,
+  closed_at: true,
+} as const;
+
+/** QUI-1063 — reasons of the night lines a stay change takes off the folio. */
+export const NIGHT_NOT_SOLD_REASON = 'Noche que ya no se vende (reserva modificada)';
+export const NIGHT_NOT_SLEPT_REASON = 'Salida anticipada: noche no dormida';
 
 /** H6.6 — what an online payment still has open: not applied, not kept as penalty. */
 const openCents = (row: { amount: Cents; applied_amount: Cents; retained_amount?: Cents }) =>
@@ -190,9 +206,21 @@ export class LodgingFolioService {
         select: { kind: true, status: true, amount: true },
       }),
     );
+    // QUI-1063 — the folio exists from the confirmation: payments wait for
+    // the guest in house; advances (deposit, online payment) show against it.
+    const reservation = await this.prisma.lodging_reservations.findFirst({
+      where: { id: reservation_id },
+      select: { status: true },
+    });
+    const balance = Math.max(0, Math.round((total - paid) * 100) / 100);
+    const deposit_available = Number(deposit.balance.toFixed(2));
+    const online_payment_available = await this.onlinePaymentAvailable(reservation_id);
+    const advances_available = Math.round((deposit_available + online_payment_available) * 100) / 100;
     return {
       id: folio.id,
       status: folio.status,
+      reservation_status: reservation?.status ?? null,
+      payments_allowed: folio.status === 'open' && reservation?.status === 'checked_in',
       charges_blocked: folio.charges_blocked ?? false,
       reservation_id,
       order_id: order.id,
@@ -236,11 +264,13 @@ export class LodgingFolioService {
       tax_amount: Number(order.tax_amount),
       total,
       paid,
-      balance: Math.max(0, Math.round((total - paid) * 100) / 100),
+      balance,
       pending_nights,
-      deposit_available: Number(deposit.balance.toFixed(2)),
+      deposit_available,
       // H6.6 — online reservation payment not applied to the folio yet.
-      online_payment_available: await this.onlinePaymentAvailable(reservation_id),
+      online_payment_available,
+      advances_available,
+      balance_after_advances: Math.max(0, Math.round((balance - advances_available) * 100) / 100),
       // H3.7 / D11 — reviewed at this total; a later change asks again.
       verified_at: folio.verified_at ?? null,
       verified_current:
@@ -557,6 +587,219 @@ export class LodgingFolioService {
     );
   }
 
+  // ------------------------------------------- reservation order (QUI-1063)
+
+  /**
+   * QUI-1063 / QUI-1064 — a confirmed reservation has its draft order and
+   * folio from the start, with every night of the stay already on it, so the
+   * order carries the real value before check-in (not $0 until the night
+   * audit). Idempotent: the reservation row is locked and a folio already
+   * there is reused, so a double click or the check-in never opens a second
+   * one. A tentative web hold (or any other status) gets none: returns null.
+   */
+  async ensureReservationOrder(reservation_id: number): Promise<FolioRow | null> {
+    const store_id = this.requireStoreId();
+    const user_id = RequestContextService.getContext()?.user_id ?? null;
+    let folio: FolioRow | null = await this.prisma.lodging_folios.findFirst({
+      where: { reservation_id },
+      select: FOLIO_SELECT,
+    });
+    if (!folio) {
+      const currency = await this.settings.getStoreCurrency();
+      folio = await this.prisma.$transaction(async (tx) => {
+        // Inside `$transaction` the client is not store-scoped: name the store.
+        await tx.$executeRaw`SELECT id FROM lodging_reservations WHERE id = ${reservation_id} AND store_id = ${store_id} FOR UPDATE`;
+        const existing = await tx.lodging_folios.findFirst({
+          where: { reservation_id, store_id },
+          select: FOLIO_SELECT,
+        });
+        if (existing) return existing;
+        const reservation = await tx.lodging_reservations.findFirst({
+          where: { id: reservation_id, store_id, status: { in: ['confirmed', 'checked_in'] } },
+          select: { reservation_number: true, customer_id: true },
+        });
+        if (!reservation) return null;
+        const created = await createReservationFolioInTx(tx, {
+          store_id,
+          reservation_id,
+          reservation_number: reservation.reservation_number,
+          customer_id: reservation.customer_id,
+          user_id,
+          currency,
+          now: new Date(),
+        });
+        return tx.lodging_folios.findFirst({ where: { id: created.folio_id, store_id }, select: FOLIO_SELECT });
+      });
+    }
+    if (!folio) return null;
+    await this.syncStayNights(folio);
+    return folio;
+  }
+
+  /** `syncStayNights` of a reservation's folio; 0 when it has none. */
+  async syncReservationNights(reservation_id: number): Promise<number> {
+    const folio = await this.prisma.lodging_folios.findFirst({
+      where: { reservation_id },
+      select: FOLIO_SELECT,
+    });
+    if (!folio) return 0;
+    return this.syncStayNights(folio);
+  }
+
+  /**
+   * QUI-1063 — keeps an open folio in step with the nights the reservation
+   * still sells: takes off the lines of nights no longer sold (room
+   * cancelled, dates moved) or sold as another room type, then posts every
+   * active night not on it yet. The posting is the night audit's own
+   * (`posted_order_item_id` per night), so the audit never charges a night
+   * twice. Nights before today (slept) and of a closed business day are
+   * never touched. Returns how many nights it posted.
+   */
+  async syncStayNights(folio: FolioRow): Promise<number> {
+    if (folio.status !== 'open') return 0;
+    await this.releaseNightLines(folio, false);
+    return this.postNightsThrough(folio, WHOLE_STAY_BOUND, true);
+  }
+
+  /**
+   * QUI-1063 — early departure: the nights from today on were posted when
+   * the reservation was confirmed but will not be slept. Their lines leave
+   * the folio before it is reviewed and invoiced, so check-out bills only
+   * the nights slept (as when the night audit posted them one by one).
+   */
+  async releaseUnsleptNights(folio: FolioRow): Promise<number> {
+    if (folio.status !== 'open') return 0;
+    // Only a guest in house departs: a confirmed stay keeps its nights.
+    const reservation = await this.prisma.lodging_reservations.findFirst({
+      where: { id: folio.reservation_id },
+      select: { status: true },
+    });
+    if (reservation?.status !== 'checked_in') return 0;
+    return this.releaseNightLines(folio, true);
+  }
+
+  /**
+   * Voids (with a reason, never deletes) the posted lines of the nights from
+   * today on that are no longer sold — or every one of them when `unslept` —
+   * and unlinks the night so a later post can charge it again. A night whose
+   * room only changed keeps its line with the new label.
+   */
+  private async releaseNightLines(folio: FolioRow, unslept: boolean): Promise<number> {
+    const store_id = this.requireStoreId();
+    const today = localDateString(new Date(), await resolveStoreTimezone(this.prisma, store_id));
+    const from = new Date(`${today}T00:00:00.000Z`);
+    const nights = await this.prisma.lodging_room_nights.findMany({
+      where: {
+        store_id,
+        posted_order_item_id: { not: null },
+        night_date: { gte: from },
+        reservation_room: { reservation_id: folio.reservation_id },
+        posted_order_item: { is: { cancelled_at: null, order_id: folio.order_id } },
+      },
+      select: {
+        id: true,
+        night_date: true,
+        is_active: true,
+        posted_order_item_id: true,
+        reservation_room: { select: { cancelled_at: true } },
+        unit: { select: { code: true } },
+        unit_type: { select: { name: true, product: { select: { id: true } } } },
+        posted_order_item: { select: { id: true, product_id: true, description: true } },
+      },
+      orderBy: [{ night_date: 'asc' }, { id: 'asc' }],
+    });
+    if (nights.length === 0) return 0;
+    const frozen = new Set(
+      (await this.closedNightDates(from, nights[nights.length - 1].night_date)).map((d) => d.getTime()),
+    );
+    const stale: Array<{ night_id: number; item_id: number }> = [];
+    const relabel: Array<{ item_id: number; description: string }> = [];
+    for (const night of nights) {
+      const item = night.posted_order_item;
+      if (!item || frozen.has(night.night_date.getTime())) continue;
+      const sold = night.is_active && !night.reservation_room.cancelled_at;
+      if (unslept || !sold || item.product_id !== night.unit_type.product.id) {
+        stale.push({ night_id: night.id, item_id: item.id });
+        continue;
+      }
+      const description = nightLineDescription(
+        night.night_date.toISOString().slice(0, 10),
+        night.unit_type.name,
+        night.unit?.code ?? null,
+      );
+      if (item.description !== description) relabel.push({ item_id: item.id, description });
+    }
+    if (stale.length === 0 && relabel.length === 0) return 0;
+
+    const reason = unslept ? NIGHT_NOT_SLEPT_REASON : NIGHT_NOT_SOLD_REASON;
+    return this.prisma.$transaction(
+      async (tx) => {
+        const order = await this.lockFolioOrder(tx, folio, store_id);
+        const now = new Date();
+        let released = 0;
+        for (const { night_id, item_id } of stale) {
+          // Conditional: a concurrent sync already released this night.
+          const unlinked = await tx.lodging_room_nights.updateMany({
+            where: { id: night_id, store_id, posted_order_item_id: item_id },
+            data: { posted_order_item_id: null, updated_at: now },
+          });
+          if (unlinked.count !== 1) continue;
+          await tx.order_items.updateMany({
+            where: { id: item_id, order_id: order.id, cancelled_at: null },
+            data: { cancelled_at: now, cancellation_reason: reason, cancellation_type: 'before_fire', updated_at: now },
+          });
+          released += 1;
+        }
+        for (const { item_id, description } of relabel) {
+          await tx.order_items.updateMany({
+            where: { id: item_id, order_id: order.id, cancelled_at: null },
+            data: { description, updated_at: now },
+          });
+        }
+        if (released > 0) await this.recalcTotals(tx, order.id);
+        return released;
+      },
+      { timeout: 20_000, maxWait: 5_000 },
+    );
+  }
+
+  /**
+   * QUI-1063 — a cancelled or no-show reservation: its folio closes and its
+   * draft order stays in Orders as "Cancelada". Runs inside the status
+   * change transaction. Payments only enter the folio with the guest in
+   * house, so a reservation that can still be cancelled has none; if one
+   * does (data from before), the order is left untouched for the desk.
+   */
+  static async cancelReservationFolioInTx(
+    tx: Tx,
+    input: { store_id: number; reservation_id: number; reason: string | null; now: Date },
+  ): Promise<boolean> {
+    const folio = await tx.lodging_folios.findFirst({
+      where: { reservation_id: input.reservation_id, store_id: input.store_id, status: 'open' },
+      select: { id: true, order_id: true },
+    });
+    if (!folio) return false;
+    const order = await tx.orders.findFirst({
+      where: { id: folio.order_id, store_id: input.store_id },
+      select: { state: true, total_paid: true },
+    });
+    if (!order || order.state !== 'draft' || Number(order.total_paid ?? 0) > 0) return false;
+    await tx.orders.update({
+      where: { id: folio.order_id },
+      data: {
+        state: 'cancelled',
+        remaining_balance: 0,
+        internal_notes: `Reserva cancelada${input.reason ? `: ${input.reason}` : ''}`.slice(0, 500),
+        updated_at: input.now,
+      },
+    });
+    await tx.lodging_folios.update({
+      where: { id: folio.id },
+      data: { status: 'closed', closed_at: input.now, updated_at: input.now },
+    });
+    return true;
+  }
+
   /**
    * U15 — what "Cerrar día" will charge, without writing: the nights
    * `postNightsThrough(folio, through, true)` takes for every open in-house
@@ -815,6 +1058,7 @@ export class LodgingFolioService {
   async registerPayment(reservation_id: number, dto: FolioPaymentDto) {
     const folio = await this.findFolio(reservation_id);
     this.assertOpen(folio);
+    await this.assertInHouse(reservation_id);
     const store_id = this.requireStoreId();
     const user_id = RequestContextService.getContext()?.user_id;
     if (!user_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
@@ -940,6 +1184,7 @@ export class LodgingFolioService {
   async applyDeposit(reservation_id: number) {
     const folio = await this.findFolio(reservation_id);
     this.assertOpen(folio);
+    await this.assertInHouse(reservation_id);
     const store_id = this.requireStoreId();
     const user_id = RequestContextService.getContext()?.user_id ?? null;
 
@@ -1057,6 +1302,7 @@ export class LodgingFolioService {
   async applyOnlinePayments(reservation_id: number) {
     const folio = await this.findFolio(reservation_id);
     this.assertOpen(folio);
+    await this.assertInHouse(reservation_id);
     const store_id = this.requireStoreId();
     const user_id = RequestContextService.getContext()?.user_id ?? null;
 
@@ -1135,19 +1381,29 @@ export class LodgingFolioService {
   async findFolio(reservation_id: number): Promise<FolioRow> {
     const folio = await this.prisma.lodging_folios.findFirst({
       where: { reservation_id },
-      select: {
-        id: true,
-        status: true,
-        charges_blocked: true,
-        reservation_id: true,
-        order_id: true,
-        verified_at: true,
-        verified_total: true,
-        closed_at: true,
-      },
+      select: FOLIO_SELECT,
     });
     if (!folio) throw new VendixHttpException(ErrorCodes.LODGING_FOLIO_FIND_001);
     return folio;
+  }
+
+  /**
+   * QUI-1063 — money goes into the folio order only with the guest in house
+   * (as before the folio existed from the confirmation): before arrival it is
+   * an advance (`lodging_deposits`, 2805) that the desk applies at check-in.
+   * Keeps a cancelled reservation's order free of payments.
+   */
+  private async assertInHouse(reservation_id: number): Promise<void> {
+    const reservation = await this.prisma.lodging_reservations.findFirst({
+      where: { id: reservation_id },
+      select: { status: true },
+    });
+    if (reservation?.status !== 'checked_in') {
+      throw new VendixHttpException(
+        ErrorCodes.LODGING_FOLIO_PAYMENT_001,
+        'Los pagos de la cuenta se registran con el huésped en casa; antes de la llegada usa Anticipos',
+      );
+    }
   }
 
   /**

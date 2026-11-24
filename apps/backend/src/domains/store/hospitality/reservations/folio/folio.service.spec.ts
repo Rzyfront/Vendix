@@ -47,6 +47,8 @@ function build(
     online?: number;
     holder?: ReturnType<typeof touristHolder> | null;
     rnt?: string;
+    /** QUI-1063 — status of the reservation (the folio exists from the confirmation). */
+    status?: string;
   } = {},
 ) {
   const holder = options.holder ?? null;
@@ -227,6 +229,9 @@ function build(
     },
   };
   const prisma = {
+    lodging_reservations: {
+      findFirst: jest.fn(async () => ({ status: options.status ?? 'checked_in' })),
+    },
     lodging_reservation_payments: onlinePayments,
     lodging_guests: { findFirst: jest.fn(async () => (holder ? { ...holder } : null)) },
     orders: { findUnique: jest.fn(async () => order) },
@@ -512,6 +517,34 @@ describe('LodgingFolioService (H3.4)', () => {
       });
     });
 
+    it('QUI-1064 — syncing the stay posts every night at once (not $0 until the night audit)', async () => {
+      const { service, items, nights, order, prisma } = build({ status: 'confirmed' });
+      // No posted line to take off the folio.
+      jest.spyOn(prisma.lodging_room_nights, 'findMany').mockResolvedValueOnce([] as any);
+
+      const posted = await service.syncStayNights({ id: 70, status: 'open', reservation_id: 1, order_id: 500 });
+
+      expect(posted).toBe(2);
+      expect(items.map((it) => it.description)).toEqual([
+        'Noche 10-nov · Doble · 101',
+        'Noche 11-nov · Doble · 101',
+      ]);
+      expect(nights.every((n) => n.posted_order_item_id !== null)).toBe(true);
+      expect(order.grand_total).toBe(595000);
+    });
+
+    it('QUI-1064 — the night audit after a synced stay charges nothing twice', async () => {
+      const { service, items, prisma } = build({ status: 'confirmed' });
+      jest.spyOn(prisma.lodging_room_nights, 'findMany').mockResolvedValueOnce([] as any);
+      const folio = { id: 70, status: 'open', reservation_id: 1, order_id: 500 };
+      await service.syncStayNights(folio);
+
+      const audited = await service.postNightsThrough(folio, '2026-11-11', true);
+
+      expect(audited).toBe(0);
+      expect(items).toHaveLength(2);
+    });
+
     it('a closed folio takes no nights', async () => {
       const { service, prisma, items } = build();
       prisma.lodging_folios.findFirst.mockResolvedValueOnce({
@@ -669,6 +702,26 @@ describe('LodgingFolioService (H3.4)', () => {
       // Emitted once the transaction resolved.
       const txDone = prisma.$transaction.mock.invocationCallOrder.at(-1)!;
       expect(eventEmitter.emit.mock.invocationCallOrder[0]).toBeGreaterThan(txDone);
+    });
+
+    it('QUI-1063 — before check-in the folio takes no payment: the advance goes to Anticipos', async () => {
+      const { service, payments } = build({ status: 'confirmed' });
+
+      const error = await errorOf(
+        service.registerPayment(1, { amount: 100000, store_payment_method_id: 4, request_id: 'r-1' } as any),
+      );
+
+      expect(error.errorCode).toBe(ErrorCodes.LODGING_FOLIO_PAYMENT_001.code);
+      expect(payments).toHaveLength(0);
+    });
+
+    it('QUI-1063 — before check-in the deposit is not applied to the folio', async () => {
+      const { service, payments } = build({ status: 'confirmed', deposit: 100000 });
+
+      const error = await errorOf(service.applyDeposit(1));
+
+      expect(error.errorCode).toBe(ErrorCodes.LODGING_FOLIO_PAYMENT_001.code);
+      expect(payments).toHaveLength(0);
     });
 
     it('a double click registers the payment once', async () => {

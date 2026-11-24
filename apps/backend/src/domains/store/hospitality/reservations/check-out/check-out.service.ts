@@ -95,6 +95,18 @@ export class LodgingCheckOutService {
    */
   async verify(reservation_id: number) {
     const folio = await this.openFolio(reservation_id);
+    // QUI-1063 — the folio exists from the confirmation; it is reviewed for
+    // its invoice only with the guest in house (before, the stay is pending).
+    const reservation = await this.prisma.lodging_reservations.findFirst({
+      where: { id: reservation_id },
+      select: { status: true },
+    });
+    if (reservation?.status !== 'checked_in') {
+      throw new VendixHttpException(
+        ErrorCodes.LODGING_CHECKOUT_001,
+        'La cuenta se verifica con el huésped en casa',
+      );
+    }
     await this.postSleptNights(folio);
     await this.markVerified(folio.id, folio.order_id);
     return this.folios.getFolio(reservation_id);
@@ -568,6 +580,10 @@ export class LodgingCheckOutService {
   private async postSleptNights(folio: FolioRow): Promise<void> {
     const store_id = RequestContextService.getContext()?.store_id;
     if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    // QUI-1063 — the stay is posted from the confirmation: on an early
+    // departure the nights from today on leave the folio before its review,
+    // so only the nights slept are invoiced.
+    await this.folios.releaseUnsleptNights(folio);
     const today = localDateString(new Date(), await resolveStoreTimezone(this.prisma, store_id));
     await this.folios.postNightsThrough(folio, today, false);
     // H7.1 freezes the nights of a closed business day; a night the night

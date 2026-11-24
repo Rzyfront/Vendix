@@ -8,6 +8,7 @@ import {
   LodgingReservationsService,
   nextReservationNumber,
 } from './reservations.service';
+import { LodgingFolioService } from './folio/folio.service';
 import { LodgingAvailabilityService } from './lodging-availability.service';
 import { formatShortDate, stayNights } from './stay-dates';
 import { CancelReservationDto, CreateReservationDto, ReservationQueryDto } from './dto';
@@ -268,6 +269,8 @@ function createFakeStore(
         return data;
       }),
     },
+    // QUI-1063 — no folio unless a test creates one.
+    lodging_folios: { findFirst: jest.fn(async () => null) },
     lodging_inventory_blocks: { findMany: jest.fn(async () => []) },
     lodging_allotments: {
       findMany: jest.fn(async ({ where }: any) =>
@@ -380,13 +383,19 @@ describe('LodgingReservationsService', () => {
       ),
       announceOnlineRetained: jest.fn(),
     };
+    // QUI-1063 — the order (folio) a confirmed reservation is born with.
+    const folios = {
+      ensureReservationOrder: jest.fn(async () => null),
+      syncReservationNights: jest.fn(async () => 0),
+    };
     const service = new LodgingReservationsService(
       fake.prisma as any,
       new LodgingAvailabilityService(fake.prisma as any),
       // H3.5 — no deposit held unless a test says so (deposits.service.spec).
       deposits as any,
+      folios as any,
     );
-    return { ...fake, service, deposits };
+    return { ...fake, service, deposits, folios };
   };
 
   beforeEach(() => {
@@ -1307,6 +1316,55 @@ describe('LodgingReservationsService', () => {
       expect(await service.releaseHold(1, 'Reserva web vencida sin pago')).toBe(false);
       expect(reservations[0].status).toBe('confirmed');
       expect(activeNights(nights)).toBe(3);
+    });
+  });
+
+  describe('QUI-1063 — la orden de la reserva', () => {
+    const hold = { expires_at: new Date('2026-11-01T17:30:00Z'), reason: 'Reserva web: pendiente de pago en línea' };
+    it('una reserva confirmada nace con su orden (una vez, tras el commit)', async () => {
+      const { service, folios } = build(1);
+      const created = await service.create(sale(stay));
+      expect(folios.ensureReservationOrder).toHaveBeenCalledTimes(1);
+      expect(folios.ensureReservationOrder).toHaveBeenCalledWith(created.id);
+    });
+
+    it('un hold web (tentativa) no tiene orden hasta que se paga', async () => {
+      const { service, folios } = build(1);
+      await service.create(sale(stay), hold);
+      expect(folios.ensureReservationOrder).not.toHaveBeenCalled();
+      expect(await service.confirmHold(1, 'Pago en línea recibido')).toBe(true);
+      expect(folios.ensureReservationOrder).toHaveBeenCalledWith(1);
+      // A second payment notice does not open anything again.
+      expect(await service.confirmHold(1, 'otra vez')).toBe(false);
+      expect(folios.ensureReservationOrder).toHaveBeenCalledTimes(1);
+    });
+
+    it('si la orden falla la reserva igual queda creada (el check-in la crea)', async () => {
+      const { service, folios, reservations } = build(1);
+      folios.ensureReservationOrder.mockRejectedValueOnce(new Error('db down'));
+      await service.create(sale(stay));
+      expect(reservations[0].status).toBe('confirmed');
+    });
+
+    it('cancelar o no-show cancela la orden de la reserva dentro de la misma transacción', async () => {
+      const { service } = build(1);
+      const cancelFolio = jest.spyOn(LodgingFolioService, 'cancelReservationFolioInTx').mockResolvedValue(true);
+      const created = await service.create(sale(stay));
+      await service.cancel(created.id, 'Cliente desistió');
+      expect(cancelFolio).toHaveBeenCalledWith(expect.anything(), {
+        store_id: 5,
+        reservation_id: created.id,
+        reason: 'Cliente desistió',
+        now: expect.any(Date),
+      });
+    });
+
+    it('un hold vencido que se libera no tiene orden que cancelar pero se revisa igual', async () => {
+      const { service } = build(1);
+      const cancelFolio = jest.spyOn(LodgingFolioService, 'cancelReservationFolioInTx').mockResolvedValue(false);
+      await service.create(sale(stay), hold);
+      await service.releaseHold(1, 'Reserva web vencida sin pago');
+      expect(cancelFolio).toHaveBeenCalledTimes(1);
     });
   });
 });

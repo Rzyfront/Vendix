@@ -180,11 +180,14 @@ function createFake(options: Options = {}) {
     },
   };
   client.$transaction = jest.fn(async (cb: (tx: any) => unknown) => cb(client));
+  // QUI-1063 — the reservation's order follows its nights.
+  const folios = { syncReservationNights: jest.fn(async () => 0) };
   const service = new LodgingRoomChangesService(
     client,
     new LodgingAvailabilityService(client),
+    folios as any,
   );
-  return { service, client };
+  return { service, client, folios };
 }
 
 async function rejection(promise: Promise<unknown>) {
@@ -294,6 +297,24 @@ describe('LodgingRoomChangesService', () => {
       const error = await rejection(service.apply(5, { unit_id: 2 }));
       expect(codeOf(error)).toBe('LODGING_RESERVATION_ROOM_CONFLICT_001');
       expect(messageOf(error)).toBe('La 102 está ocupada en esas fechas');
+    });
+
+    it('QUI-1063 — after the change commits, the reservation order follows its nights', async () => {
+      const { service, folios } = createFake();
+      await expect(service.apply(5, { unit_id: 1 })).resolves.toBe(9);
+      expect(folios.syncReservationNights).toHaveBeenCalledWith(9);
+    });
+
+    it('QUI-1063 — a failing order sync never undoes the room change', async () => {
+      const { service, folios } = createFake();
+      folios.syncReservationNights.mockRejectedValueOnce(new Error('split active'));
+      await expect(service.apply(5, { unit_id: 1 })).resolves.toBe(9);
+    });
+
+    it('QUI-1063 — a rejected change does not touch the order', async () => {
+      const { service, folios } = createFake({ taken: { unit_id: 2, night_date: '2026-11-11' } });
+      await rejection(service.apply(5, { unit_id: 2 }));
+      expect(folios.syncReservationNights).not.toHaveBeenCalled();
     });
 
     it('assigns a free room under the sale lock and records the history', async () => {
