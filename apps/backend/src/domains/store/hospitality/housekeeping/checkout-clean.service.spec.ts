@@ -170,6 +170,21 @@ describe('CheckoutCleanService', () => {
       expect(result.rooms[0].suggested_user_id).toBeNull();
     });
 
+    it('keeps the current assignee only while she is still eligible', async () => {
+      checkedOut(unit(7, '101'), unit(8, '102'));
+      users.findMany.mockResolvedValue([user(2, 'Luz', ['housekeeper'])]);
+      tasks.findMany
+        .mockResolvedValueOnce([
+          { id: 40, unit_id: 7, status: 'pending', assigned_user_id: 2 },
+          { id: 41, unit_id: 8, status: 'pending', assigned_user_id: 99 },
+        ])
+        .mockResolvedValue([]);
+
+      const result = await service.suggestion(9);
+
+      expect(result.rooms.map((r) => r.suggested_user_id)).toEqual([2, 2]);
+    });
+
     it('is refused before the check-out', async () => {
       reservations.findFirst.mockResolvedValue({ id: 9, status: 'checked_in', rooms: [] });
       await expectCode(service.suggestion(9), 'LODGING_RESERVATION_TRANSITION_001');

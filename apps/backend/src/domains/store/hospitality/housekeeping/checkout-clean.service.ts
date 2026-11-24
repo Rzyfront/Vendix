@@ -140,8 +140,15 @@ export class CheckoutCleanService {
     const taskByUnit = new Map(existing.map((t) => [t.unit_id, t]));
     const arriving = new Set(arrivals.map((a) => a.unit_id));
     const pendingUnits = unitIds.filter((id) => taskByUnit.get(id)?.status !== 'done');
+    // The current assignee is kept only while she may still receive cleans:
+    // preselecting someone who lost the role would fail the whole batch.
+    const eligible = new Set(staff.map((s) => s.id));
+    const holder = (unit_id: number): number | null => {
+      const id = taskByUnit.get(unit_id)?.assigned_user_id ?? null;
+      return id != null && eligible.has(id) ? id : null;
+    };
     const suggested = suggestAssignees(
-      pendingUnits.filter((id) => taskByUnit.get(id)?.assigned_user_id == null),
+      pendingUnits.filter((id) => holder(id) == null),
       staff,
     );
 
@@ -160,7 +167,7 @@ export class CheckoutCleanService {
           priority: high ? 'high' : 'normal',
           priority_reason: high ? HIGH_PRIORITY_REASON : null,
           suggested_note: high ? HIGH_PRIORITY_REASON : '',
-          suggested_user_id: task?.assigned_user_id ?? suggested.get(unit.id) ?? null,
+          suggested_user_id: holder(unit.id) ?? suggested.get(unit.id) ?? null,
           existing_task: task
             ? { id: task.id, status: task.status, assigned_user_id: task.assigned_user_id }
             : null,
