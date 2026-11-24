@@ -304,6 +304,7 @@ describe('CatalogService active promotions on listing', () => {
           provide: PriceResolverService,
           useValue: {
             resolvePrice: jest.fn(() => ({
+              unitPrice: 100,
               unitBasePrice: 100,
               unitPriceWithTax: 100,
             })),
