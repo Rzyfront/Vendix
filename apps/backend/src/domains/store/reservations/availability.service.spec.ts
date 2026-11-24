@@ -540,6 +540,101 @@ describe('AvailabilityService — horarios nocturnos (S21)', () => {
     });
   });
 
+  describe('24 h continuas (consecutive 24 h days)', () => {
+    // 2026-11-16 is a Monday, 2026-11-17 a Tuesday.
+    const MONDAY = '2026-11-16';
+    const TUESDAY = '2026-11-17';
+    const fullDay = (day: number) => ({ day_of_week: day, start_time: '00:00', end_time: '00:00' });
+    const fullDayProvider = (day: number) => ({ provider_id: 5, ...fullDay(day), is_active: true });
+
+    it('offers a slot that starts on Monday and ends on Tuesday, once, dated Monday', async () => {
+      const { service } = buildService({
+        product: { service_duration_minutes: 50 },
+        storeHours: [fullDay(1), fullDay(2)],
+        providers: ana,
+        schedules: [fullDayProvider(1), fullDayProvider(2)],
+      });
+      const slots = await service.getAvailableSlots(10, MONDAY, TUESDAY);
+      const crossing = slots.filter((s) => s.end_date);
+      expect(crossing).toEqual([
+        expect.objectContaining({ date: MONDAY, start_time: '23:20', end_time: '00:10', end_date: TUESDAY }),
+      ]);
+      // Tuesday's own grid starts again at 00:00 and its slots are not dated Monday.
+      expect(slots.find((s) => s.date === TUESDAY && s.start_time === '00:00')).toBeDefined();
+      const keys = slots.map((s) => `${s.date}|${s.start_time}`);
+      expect(new Set(keys).size).toBe(keys.length);
+    });
+
+    it('keeps the Monday grid inside the day when Tuesday is closed', async () => {
+      const { service } = buildService({
+        product: { service_duration_minutes: 50 },
+        storeHours: [fullDay(1), fullDay(2)],
+        providers: ana,
+        schedules: [fullDayProvider(1)],
+      });
+      const slots = await service.getAvailableSlots(10, MONDAY, MONDAY);
+      expect(slots.some((s) => s.end_date)).toBe(false);
+      expect(slots[slots.length - 1]).toMatchObject({ start_time: '22:30', end_time: '23:20' });
+    });
+
+    it('accepts a 23:00-01:00 booking when the provider works 24 h on both days', async () => {
+      const { service } = buildService({
+        storeHours: [fullDay(1), fullDay(2)],
+        providers: ana,
+        schedules: [fullDayProvider(1), fullDayProvider(2)],
+      });
+      await expect(service.isSlotAvailable(10, MONDAY, '23:00', '01:00', 5)).resolves.toBe(true);
+    });
+
+    it('rejects it when the provider does not work Tuesday', async () => {
+      const { service } = buildService({
+        storeHours: [fullDay(1), fullDay(2)],
+        providers: ana,
+        schedules: [fullDayProvider(1)],
+      });
+      await expect(service.isSlotAvailable(10, MONDAY, '23:00', '01:00', 5)).resolves.toBe(false);
+    });
+
+    it('rejects it when the provider has a Tuesday 00:30 booking (overlap across midnight)', async () => {
+      const { service } = buildService({
+        storeHours: [fullDay(1), fullDay(2)],
+        providers: ana,
+        schedules: [fullDayProvider(1), fullDayProvider(2)],
+        bookings: [
+          { provider_id: 5, date: new Date(`${TUESDAY}T00:00:00.000Z`), end_date: null, start_time: '00:30', end_time: '01:30' },
+        ],
+      });
+      await expect(service.isSlotAvailable(10, MONDAY, '23:00', '01:00', 5)).resolves.toBe(false);
+      await expect(service.isSlotAvailable(10, MONDAY, '22:00', '23:00', 5)).resolves.toBe(true);
+    });
+
+    it('joins a 17:00-04:00 night shift with a Tuesday block starting at 04:00', async () => {
+      const { service } = buildService({
+        storeHours: [
+          { day_of_week: 1, start_time: '17:00', end_time: '04:00' },
+          { day_of_week: 2, start_time: '04:00', end_time: '12:00' },
+        ],
+        providers: ana,
+        schedules: [
+          { provider_id: 5, day_of_week: 1, start_time: '17:00', end_time: '04:00', is_active: true },
+          { provider_id: 5, day_of_week: 2, start_time: '04:00', end_time: '12:00', is_active: true },
+        ],
+      });
+      await expect(service.isSlotAvailable(10, TUESDAY, '03:00', '05:00', 5)).resolves.toBe(true);
+    });
+
+    it('free booking: a 24 h store offers the crossing slot too', async () => {
+      const { service } = buildService({
+        product: { booking_mode: 'free_booking', service_duration_minutes: 50 },
+        storeHours: [fullDay(1), fullDay(2)],
+      });
+      const slots = await service.getAvailableSlots(10, MONDAY, MONDAY);
+      expect(slots.filter((s) => s.end_date)).toEqual([
+        expect.objectContaining({ date: MONDAY, start_time: '23:20', end_time: '00:10', end_date: TUESDAY }),
+      ]);
+    });
+  });
+
   describe('estaciones sin especialistas (A13)', () => {
     const station = { id: 3, name: 'Cava 3', capacity: 1 };
     const stationNight = [
