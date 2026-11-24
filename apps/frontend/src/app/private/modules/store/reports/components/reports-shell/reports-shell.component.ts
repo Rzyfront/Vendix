@@ -8,6 +8,7 @@ import {
   getCategoryById,
   getReportsByCategory,
 } from '../../config/report-registry';
+import { isReportVisibleForIndustries } from '../../config/report-industries';
 import { selectDateRange } from '../../state/reports.selectors';
 import { ReportsActions } from '../../state/reports.actions';
 import { dateRangeToQueryParams, queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
@@ -93,9 +94,12 @@ export class ReportsShellComponent {
     if (!categoryId) return [];
 
     const isModuleCategory = categoryId === 'accounting';
+    const industries = this.authFacade.storeIndustries();
 
     return getReportsByCategory(categoryId)
       .filter(report => !isModuleCategory || this.reportsWithModuleView.has(report.id))
+      // Agenda unificada F4: solo los reportes de las industrias de la tienda.
+      .filter(report => isReportVisibleForIndustries(report, industries))
       .map((report) => ({
         id: report.id,
         label: report.title,
@@ -126,7 +130,15 @@ export class ReportsShellComponent {
   private readonly CATEGORY_ACTION_DEFAULTS: Record<string, { id: string; label: string; icon: string; moduleKey?: string; route?: string }> = {
     accounting: { id: 'view-module', label: 'Ver Contabilidad', icon: 'scale', moduleKey: 'accounting', route: '/admin/accounting' },
     payroll: { id: 'view-module', label: 'Ver Nomina', icon: 'banknote', moduleKey: 'payroll', route: '/admin/payroll' },
+    hospitality: { id: 'view-module', label: 'Ver Recepción', icon: 'concierge-bell', moduleKey: 'hospitality_reservations', route: '/admin/hospitality/front-desk' },
   };
+
+  /**
+   * Categorías cuyas páginas cargan sus propios datos y traen "Actualizar" en
+   * su menú de opciones (los reportes de hotel): el "Actualizar" del shell
+   * recarga el store de Reportes, que esas páginas no usan.
+   */
+  private readonly SELF_REFRESHING_CATEGORIES: ReadonlySet<string> = new Set(['hospitality']);
 
   private resolveNavigationAction(
     reportId: string | null,
@@ -160,14 +172,15 @@ export class ReportsShellComponent {
   }
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => {
-    const actions: StickyHeaderActionButton[] = [
-      {
+    const actions: StickyHeaderActionButton[] = [];
+    if (!this.SELF_REFRESHING_CATEGORIES.has(this.categoryId() ?? '')) {
+      actions.push({
         id: 'refresh',
         label: 'Actualizar',
         icon: 'refresh-cw',
         variant: 'outline',
-      },
-    ];
+      });
+    }
 
     const navAction = this.resolveNavigationAction(
       this.extractReportId(this.router.url),

@@ -18,6 +18,11 @@ import {
   REPORT_CATEGORIES,
   REPORT_DEFINITIONS,
 } from '../../config/report-registry';
+import {
+  isReportCategoryVisibleForIndustries,
+  isReportVisibleForIndustries,
+} from '../../config/report-industries';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 
 /**
  * ReportsCatalogComponent
@@ -63,6 +68,20 @@ export class ReportsCatalogComponent {
   readonly reports = input<ReportDefinition[]>(REPORT_DEFINITIONS);
   readonly categories = input<ReportCategory[]>(REPORT_CATEGORIES);
 
+  /**
+   * Agenda unificada F4: el catálogo solo muestra los reportes y categorías de
+   * las industrias activas de la tienda (mapa en `report-industries.ts`), sea
+   * cual sea la lista que pase el padre.
+   */
+  private readonly authFacade = inject(AuthFacade);
+
+  readonly visibleCategories = computed(() => {
+    const industries = this.authFacade.storeIndustries();
+    return this.categories().filter((c) =>
+      isReportCategoryVisibleForIndustries(c.id, industries),
+    );
+  });
+
   readonly selectedCategory = signal<ReportCategoryId | null>(null);
   readonly searchTerm = signal<string>('');
 
@@ -102,14 +121,20 @@ export class ReportsCatalogComponent {
    */
   private readonly availableReports = computed(() => {
     const current = this.normalize(this.router.url);
+    const industries = this.authFacade.storeIndustries();
     return this.reports().filter(
-      (r) => this.normalize(r.route) !== current,
+      (r) =>
+        this.normalize(r.route) !== current &&
+        isReportVisibleForIndustries(r, industries),
     );
   });
 
+  /** Total del contador «n de N»: los reportes que aplican a la tienda. */
+  readonly totalAvailable = computed(() => this.availableReports().length);
+
   /** O(1) lookup of category metadata by id (label, icon, color). */
   private readonly categoryById = computed(
-    () => new Map(this.categories().map((c) => [c.id, c])),
+    () => new Map(this.visibleCategories().map((c) => [c.id, c])),
   );
 
   /**
@@ -143,7 +168,7 @@ export class ReportsCatalogComponent {
   /** Filtered reports grouped by their category, in registry order. */
   readonly reportsByCategory = computed(() => {
     const grouped = new Map<ReportCategoryId, ReportDefinition[]>();
-    const orderedCategories = this.categories();
+    const orderedCategories = this.visibleCategories();
 
     for (const cat of orderedCategories) {
       grouped.set(cat.id, []);

@@ -21,6 +21,9 @@ export const REPORT_CATEGORIES: ReportCategory[] = [
   { id: 'payroll', label: 'Nómina', description: 'Reportes de nómina: resumen por período, detalle por empleado y provisiones laborales', icon: 'banknote', color: 'var(--color-primary)' },
   { id: 'payments', label: 'Pagos', description: 'Reporte de pagos recibidos: método, estado, reembolsos, caja y comprobante', icon: 'credit-card', color: 'var(--color-primary)' },
   { id: 'dispatch', label: 'Despachos', description: 'Reportes de remisiones, rutas y vehículos de reparto', icon: 'truck', color: 'var(--color-warning)', panelUiKey: 'reports_dispatch' },
+  // Agenda unificada F4: los reportes de hotel salieron de Hotelería. Solo
+  // los ven las tiendas con la industria `hospitality` (report-industries.ts).
+  { id: 'hospitality', label: 'Hotelería', description: 'Reportes del hotel: cierre del día, indicadores, ritmo de reservas, cancelaciones y Fontur', icon: 'hotel', color: 'var(--color-info)', panelUiKey: 'hospitality_reservations' },
 ];
 
 export const REPORT_DEFINITIONS: ReportDefinition[] = [
@@ -1923,6 +1926,88 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     ],
     dataEndpoint: 'store/analytics/payments',
     exportEndpoint: 'store/analytics/payments/export',
+  },
+
+  // ─── HOTELERÍA (5) ───────────────────────────────────────────────────────────────
+  // Páginas propias de Hotelería montadas dentro de Reportes (agenda unificada
+  // F4). Cada página trae sus propios filtros, exportación y "Actualizar" en su
+  // menú de opciones, así que la definición solo alimenta catálogo y pestañas:
+  // sin columnas ni `exportEndpoint` (el visor genérico no las usa).
+
+  {
+    id: 'hotel-night-audit',
+    category: 'hospitality',
+    title: 'Cierre del día',
+    description: 'Noches cargadas, no presentados, llegadas pendientes y descuadre del día hotelero',
+    detailedDescription:
+      'Revisa el día hotelero y ciérralo: se cargan las noches, las llegadas pendientes pasan a no presentadas y la fecha queda congelada hasta que un gerente la reabra con un motivo.',
+    icon: 'moon',
+    route: '/admin/reports/hospitality/hotel-night-audit',
+    requiresDateRange: false,
+    requiresFiscalPeriod: false,
+    columns: [],
+    exportFilename: 'cierre-del-dia',
+    dataEndpoint: 'store/hospitality/night-audit',
+  },
+  {
+    id: 'hotel-performance',
+    category: 'hospitality',
+    title: 'Indicadores',
+    description: 'Ocupación, ADR y RevPAR por día o por mes',
+    detailedDescription:
+      'Ocupación, tarifa promedio (ADR) e ingreso por habitación disponible (RevPAR) por día hotelero o por mes, con gráfica de tendencia. Los días cerrados usan la foto congelada del cierre.',
+    icon: 'chart-line',
+    route: '/admin/reports/hospitality/hotel-performance',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    columns: [],
+    exportFilename: 'indicadores-hotel',
+    dataEndpoint: 'store/hospitality/reports/performance',
+  },
+  {
+    id: 'hotel-pickup',
+    category: 'hospitality',
+    title: 'Ritmo de reservas',
+    description: 'Noches reservadas a futuro, reservas recientes y ocupación proyectada',
+    detailedDescription:
+      'Para cada fecha de estadía futura: noches ya reservadas, cuántas entraron en los últimos 7 y 30 días y la ocupación proyectada, para decidir si subir o bajar la tarifa.',
+    icon: 'calendar-clock',
+    route: '/admin/reports/hospitality/hotel-pickup',
+    requiresDateRange: false,
+    requiresFiscalPeriod: false,
+    columns: [],
+    exportFilename: 'ritmo-de-reservas',
+    dataEndpoint: 'store/hospitality/reports/pickup',
+  },
+  {
+    id: 'hotel-cancellations',
+    category: 'hospitality',
+    title: 'Cancelaciones y no presentados',
+    description: 'Reservas perdidas por canal, con valor de la estadía y penalidad',
+    detailedDescription:
+      'Reservas canceladas y no presentadas del período por canal, con el valor de la estadía y la penalidad de la política, para detectar fugas. Cada fila abre su reserva.',
+    icon: 'calendar-x',
+    route: '/admin/reports/hospitality/hotel-cancellations',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    columns: [],
+    exportFilename: 'cancelaciones-hotel',
+    dataEndpoint: 'store/hospitality/reports/cancellations',
+  },
+  {
+    id: 'hotel-fontur',
+    category: 'hospitality',
+    title: 'Fontur',
+    description: 'Ingresos de alojamiento del trimestre y contribución estimada a Fontur',
+    detailedDescription:
+      'Ingresos facturados de las estadías del trimestre por línea (tipo de habitación u otros cargos) y la contribución estimada a la tarifa de la tienda. Es informativo: no bloquea la operación.',
+    icon: 'landmark',
+    route: '/admin/reports/hospitality/hotel-fontur',
+    requiresDateRange: false,
+    requiresFiscalPeriod: false,
+    columns: [],
+    exportFilename: 'fontur',
+    dataEndpoint: 'store/hospitality/reports/fontur',
   },
 ];
 

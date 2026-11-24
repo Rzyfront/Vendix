@@ -9,7 +9,7 @@
         <p class="catalog-description">Busca y filtra todos los reportes disponibles para descarga</p>
       </div>
       <div class="catalog-stats">
-        <span class="catalog-count">{{ filteredReports().length }} de {{ reports().length }}</span>
+        <span class="catalog-count">{{ filteredReports().length }} de {{ totalAvailable() }}</span>
       </div>
     </div>
 
@@ -21,7 +21,7 @@
         class="catalog-search"
       />
       <app-report-category-chips
-        [categories]="categories()"
+        [categories]="visibleCategories()"
         [selectedCategory]="selectedCategory()"
         [categoryCounts]="categoryCounts()"
         (categoryChange)="onCategoryChange($event)"
