@@ -820,11 +820,14 @@ export class RouteSheetScannerModalComponent {
     return dup;
   });
 
+  /** Same exclusions as the send validation: pending or settled rows are not sent, so they never warn. */
   isDuplicatedRow(index: number): boolean {
     const stop = this.editableStops()[index];
     return (
       !!stop &&
       stop.stop_id !== null &&
+      !stop.already_settled &&
+      stop.outcome !== 'pending' &&
       !this.isDiscarded(index) &&
       this.duplicatedStopIds().has(stop.stop_id)
     );
