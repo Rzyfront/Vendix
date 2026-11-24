@@ -161,6 +161,22 @@ export function focusScrollTop(
   return Math.round(Math.min(Math.max(y - clientHeight / 3, 0), Math.max(scrollHeight - clientHeight, 0)));
 }
 
+/**
+ * Clave del auto-foco de Semana/Día: se vuelve a enfocar solo cuando cambia.
+ * Si hoy no se ve, el foco depende del primer evento, así que la clave cambia
+ * también cuando llegan los eventos (antes se quedaba en las 08:00).
+ */
+export function calendarFocusKey(
+  view: AgendaView,
+  days: readonly string[],
+  focusToken: number,
+  todayVisible: boolean,
+  hasVisibleEvents: boolean,
+): string {
+  const target = todayVisible ? 'now' : hasVisibleEvents ? 'events' : 'empty';
+  return `${view}|${days.join(',')}|${focusToken}|${target}`;
+}
+
 /** Franja horaria visible: la de por defecto, ampliada para que quepa todo. */
 export function hourRangeFor(
   events: readonly SchedulingEvent[],

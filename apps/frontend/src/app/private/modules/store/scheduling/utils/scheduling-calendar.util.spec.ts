@@ -1,6 +1,7 @@
 import {
   FULL_DAY_RANGE,
   continuationsByDay,
+  calendarFocusKey,
   focusScrollTop,
   nowLinePercent,
   storeClock,
@@ -192,6 +193,18 @@ describe('Agenda 24 h — línea de ahora, foco y reservas nocturnas', () => {
     expect(focusScrollTop(720, FULL_DAY_RANGE, 1440, 600)).toBe(520);
     expect(focusScrollTop(30, FULL_DAY_RANGE, 1440, 600)).toBe(0);
     expect(focusScrollTop(1435, FULL_DAY_RANGE, 1440, 600)).toBe(840);
+  });
+
+  it('sin hoy a la vista, vuelve a enfocar cuando llegan los eventos', () => {
+    const days = ['2026-11-30', '2026-12-01'];
+    const empty = calendarFocusKey('week', days, 0, false, false);
+    const loaded = calendarFocusKey('week', days, 0, false, true);
+    expect(loaded).not.toBe(empty);
+    // Con hoy a la vista el foco es «ahora»: la llegada de eventos no lo mueve.
+    expect(calendarFocusKey('week', days, 0, true, false)).toBe(calendarFocusKey('week', days, 0, true, true));
+    // Otra semana o el botón «Hoy» siguen pidiendo foco nuevo.
+    expect(calendarFocusKey('week', ['2026-12-07'], 0, false, true)).not.toBe(loaded);
+    expect(calendarFocusKey('week', days, 1, false, true)).not.toBe(loaded);
   });
 
   it('una reserva 23:00–01:00 también se pinta el día siguiente desde las 00:00', () => {

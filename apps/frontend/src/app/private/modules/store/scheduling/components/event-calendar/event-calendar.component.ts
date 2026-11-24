@@ -23,6 +23,7 @@ import {
   AgendaView,
   FULL_DAY_RANGE,
   availabilityByDay,
+  calendarFocusKey,
   continuationsByDay,
   eventsByDay,
   focusScrollTop,
@@ -346,7 +347,13 @@ export class EventCalendarComponent {
     // actual si hoy está visible; si no, al primer evento o a las 08:00.
     afterRenderEffect(() => {
       const el = this.scroller()?.nativeElement;
-      const key = `${this.view()}|${this.days().join(',')}|${this.focusToken()}`;
+      const key = calendarFocusKey(
+        this.view(),
+        this.days(),
+        this.focusToken(),
+        this.days().includes(this.now().date),
+        this.visibleEvents().length > 0,
+      );
       if (!el || !el.scrollHeight || key === this.focusedKey) return;
       this.focusedKey = key;
       el.scrollTop = untracked(() =>
