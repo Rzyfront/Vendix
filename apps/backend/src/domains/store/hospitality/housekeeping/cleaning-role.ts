@@ -4,8 +4,8 @@ import { HOUSEKEEPER_ROLE } from '@common/constants/lodging-roles.constant';
  * Agenda unificada (F3) — the fixed cleaning role. Its users head the list
  * recommended when a check-out suggests the room's clean.
  *
- * The role already exists as the system role `housekeeper` (seeded by
- * `permissions-roles.seed.ts`); only its display name is pending. The
+ * The role is the existing system role `housekeeper` (seeded by
+ * `permissions-roles.seed.ts`), shown as «Camarera» everywhere. The
  * internal keys can be overridden without a deploy of the seed through
  * `LODGING_CLEANING_ROLE_NAMES` (comma separated role names); an empty or
  * missing value falls back to `housekeeper`.
