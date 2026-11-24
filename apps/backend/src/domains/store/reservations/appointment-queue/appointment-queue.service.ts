@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { NotificationsService } from '../../notifications/notifications.service';
+import { bookingInterval } from '@common/utils/schedule-window.util';
+import { resolveStoreTimezone } from '@common/utils/store-timezone.util';
 
 /**
  * Smart queue for the reservations redesign.
@@ -58,8 +60,9 @@ export class AppointmentQueueService {
     score: number;
     priority: number;
   }>> {
-    const startOfDay = new Date(`${isoDay}T00:00:00.000`);
-    const endOfDay = new Date(`${isoDay}T23:59:59.999`);
+    // `bookings` has no `starts_at`: the start is `date` (@db.Date) + `start_time`
+    // (HH:mm, store wall clock). Filter by the calendar day and derive the instant.
+    const day = new Date(`${isoDay.slice(0, 10)}T00:00:00.000Z`);
 
     // Pull every candidate in window in one round-trip; sort in app to
     // avoid a Postgres `ABS(timestamp - timestamp)` expression that the
@@ -69,7 +72,7 @@ export class AppointmentQueueService {
     const candidates = await this.prisma.bookings.findMany({
       where: {
         store_id: storeId,
-        starts_at: { gte: startOfDay, lte: endOfDay },
+        date: day,
         status: { in: ['arriving', 'attending'] as any },
         arrival_at: { not: null },
       },
@@ -78,7 +81,10 @@ export class AppointmentQueueService {
         booking_number: true,
         customer_id: true,
         provider_id: true,
-        starts_at: true,
+        date: true,
+        end_date: true,
+        start_time: true,
+        end_time: true,
         arrival_at: true,
         priority: true,
       },
@@ -87,20 +93,24 @@ export class AppointmentQueueService {
 
     if (candidates.length === 0) return [];
 
-    return candidates.map((c, idx) => ({
-      booking_id: c.id,
-      booking_number: c.booking_number,
-      customer_id: c.customer_id,
-      provider_id: c.provider_id ?? null,
-      starts_at: c.starts_at,
-      target_time: c.starts_at,
-      arrival_at: c.arrival_at!,
-      score:
-        c.arrival_at && c.starts_at
-          ? Math.abs(c.starts_at.getTime() - c.arrival_at.getTime())
+    const timezone = await resolveStoreTimezone(this.prisma, storeId);
+
+    return candidates.map((c) => {
+      const starts_at = bookingInterval(c, timezone).startAt;
+      return {
+        booking_id: c.id,
+        booking_number: c.booking_number,
+        customer_id: c.customer_id,
+        provider_id: c.provider_id ?? null,
+        starts_at,
+        target_time: starts_at,
+        arrival_at: c.arrival_at!,
+        score: c.arrival_at
+          ? Math.abs(starts_at.getTime() - c.arrival_at.getTime())
           : Number.POSITIVE_INFINITY,
-      priority: c.priority,
-    }));
+        priority: c.priority,
+      };
+    });
   }
 
   /**

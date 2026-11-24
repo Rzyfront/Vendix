@@ -679,6 +679,64 @@ describe('ReservationsService.hold — provider_id del técnico', () => {
   });
 });
 
+describe('ReservationsService.hold — free_booking multi-day tour (hotfix)', () => {
+  function build(product: Record<string, unknown>) {
+    const prisma: any = {
+      products: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 3,
+          name: 'Tour',
+          requires_booking: true,
+          requires_station: false,
+          ...product,
+        }),
+      },
+      product_variants: { findFirst: jest.fn().mockResolvedValue(null) },
+      bookings: {
+        create: jest.fn().mockResolvedValue({ id: 11 }),
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
+      $transaction: jest.fn(async (cb: any) => cb(prisma)),
+    };
+    const availability = { isSlotAvailable: jest.fn().mockResolvedValue(true) };
+    const service = new ReservationsService(
+      prisma,
+      availability as any,
+      {} as any,
+      { signUrl: jest.fn((u: string) => Promise.resolve(u)) } as any,
+      { emit: jest.fn() } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { record: jest.fn() } as any,
+    );
+    jest.spyOn(service as any, 'generateBookingNumber').mockResolvedValue('BK-1');
+    jest.spyOn(service as any, 'mapBooking').mockImplementation(async (b: any) => b);
+    return { service, prisma };
+  }
+
+  // The slot AvailabilityService offers for a 2880 min tour: opening 09:00 -> 09:00 two days later.
+  const dto = { customer_id: 1, product_id: 3, date: '2026-11-02', start_time: '09:00', end_time: '09:00' };
+
+  it('accepts the opening-time departure and stores end_date = start + duration (D+2)', async () => {
+    const { service, prisma } = build({ booking_mode: 'free_booking', service_duration_minutes: 2880 });
+    await service.hold(dto);
+    expect(prisma.bookings.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ end_date: new Date('2026-11-04'), end_time: '09:00' }),
+      }),
+    );
+  });
+
+  it('keeps the legacy end_date rule for a same-length overnight service (D+1)', async () => {
+    const { service, prisma } = build({ booking_mode: 'free_booking', service_duration_minutes: 1440 });
+    await service.hold(dto);
+    expect(prisma.bookings.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ end_date: new Date('2026-11-03') }) }),
+    );
+  });
+});
+
 /**
  * QUI-972 — reschedule may move the booking to another professional
  * (e.g. the current one has no schedule configured). The new provider
