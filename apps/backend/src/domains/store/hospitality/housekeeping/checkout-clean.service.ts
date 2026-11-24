@@ -137,7 +137,9 @@ export class CheckoutCleanService {
       }),
     ]);
 
-    const taskByUnit = new Map(existing.map((t) => [t.unit_id, t]));
+    const taskByUnit = new Map<number, (typeof existing)[number]>(
+      existing.map((t) => [t.unit_id, t]),
+    );
     const arriving = new Set(arrivals.map((a) => a.unit_id));
     const pendingUnits = unitIds.filter((id) => taskByUnit.get(id)?.status !== 'done');
     // The current assignee is kept only while she may still receive cleans:
@@ -183,7 +185,9 @@ export class CheckoutCleanService {
     const store_id = this.requireStoreId();
     const today = await this.today(store_id);
     const rooms = await this.checkedOutRooms(reservation_id);
-    const unitById = new Map(rooms.map((r) => [r.unit.id, r.unit]));
+    const unitById = new Map<number, (typeof rooms)[number]['unit']>(
+      rooms.map((r) => [r.unit.id, r.unit]),
+    );
 
     for (const item of assignments) {
       if (!unitById.has(item.unit_id)) {
