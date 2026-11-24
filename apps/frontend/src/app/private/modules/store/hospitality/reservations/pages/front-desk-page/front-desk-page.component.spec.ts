@@ -1,6 +1,8 @@
 import { Component, input, output, provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
+import { By } from '@angular/platform-browser';
+import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { of } from 'rxjs';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
@@ -198,5 +200,66 @@ describe('HospitalityFrontDeskPageComponent — Recepción con la pestaña Reser
     expect(url()).toBe('/admin/hospitality/front-desk?tab=reservations');
     expect(page.tab()).toBe('reservations');
     expect(text()).toContain('LISTA-RESERVAS');
+  });
+});
+
+describe('HospitalityReservationsListComponent — pestaña Reservas avisa a Recepción (agenda F2)', () => {
+  let reservations: jasmine.SpyObj<LodgingReservationsService>;
+
+  beforeEach(async () => {
+    reservations = jasmine.createSpyObj<LodgingReservationsService>('LodgingReservationsService', [
+      'list',
+      'stats',
+    ]);
+    reservations.list.and.returnValue(of({ data: [], total: 0, totalPages: 1 } as any));
+    reservations.stats.and.returnValue(
+      of({ arrivals_today: 0, in_house: 0, occupancy_percent: 0, active_units: 0, occupied_tonight: 0 } as any),
+    );
+
+    TestBed.configureTestingModule({
+      imports: [HospitalityReservationsListComponent],
+      providers: [
+        provideZonelessChangeDetection(),
+        provideRouter([]),
+        { provide: LodgingReservationsService, useValue: reservations },
+        { provide: UnitTypesService, useValue: { list: () => of([]) } },
+        { provide: ToastService, useValue: { success: jasmine.createSpy(), error: jasmine.createSpy() } },
+        { provide: CurrencyFormatService, useValue: { format: (value: number) => `$${value}` } },
+        { provide: AuthFacade, useValue: { ownerFlag: () => true, hasPermission: () => true } },
+      ],
+    });
+    TestBed.overrideComponent(HospitalityReservationsListComponent, {
+      remove: { imports: [ReservationFormModalComponent, ReservationDetailModalComponent] },
+      add: { imports: [FormModalStub, DetailModalStub] },
+    });
+    await TestBed.compileComponents();
+  });
+
+  function setup() {
+    const fixture = TestBed.createComponent(HospitalityReservationsListComponent);
+    fixture.detectChanges();
+    const changed = jasmine.createSpy('changed');
+    fixture.componentInstance.changed.subscribe(changed);
+    return { fixture, changed };
+  }
+
+  it('guardar en el formulario («saved») recarga la lista y emite «changed»', () => {
+    const { fixture, changed } = setup();
+    const listCalls = reservations.list.calls.count();
+
+    const form = fixture.debugElement.query(By.directive(FormModalStub));
+    (form.componentInstance as FormModalStub).saved.emit({});
+
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(reservations.list.calls.count()).toBe(listCalls + 1);
+  });
+
+  it('un cambio en el detalle («changed») también emite «changed»', () => {
+    const { fixture, changed } = setup();
+
+    const detail = fixture.debugElement.query(By.directive(DetailModalStub));
+    (detail.componentInstance as DetailModalStub).changed.emit();
+
+    expect(changed).toHaveBeenCalledTimes(1);
   });
 });
