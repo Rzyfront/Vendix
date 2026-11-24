@@ -780,7 +780,10 @@ export class VexController {
   private speechMeter(storeId?: number): VoiceMeter | undefined {
     if (!this.agentQuota || !storeId) return undefined;
     const quota = this.agentQuota;
-    const base = `${RequestContextService.getRequestId() ?? `speech-${randomUUID()}`}:speech-tts`;
+    // The dedupe id must not be derivable from the request: `X-Request-Id` is
+    // caller-supplied, so reusing it would let an owner replay distinct texts
+    // under one id and never add a second to the counter.
+    const base = `speech-${randomUUID()}:speech-tts`;
     return (seconds, index) => {
       void quota
         .consumeAgentVoice(

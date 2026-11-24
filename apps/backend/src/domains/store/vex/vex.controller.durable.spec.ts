@@ -180,8 +180,22 @@ describe('Vex durable objective aliases', () => {
         7,
         'vex',
         1250,
-        'req-1:speech-tts:0',
+        expect.stringMatching(/^speech-[0-9a-f-]{36}:speech-tts:0$/),
       );
+    });
+
+    it('dedupes per call, not per caller-supplied request id', async () => {
+      const c = speechFixture('ok');
+      const ids: string[] = [];
+      c.agentQuota.consumeAgentVoice.mockImplementation(
+        async (_s: number, _a: string, _ms: number, id: string) => {
+          ids.push(id);
+        },
+      );
+      await c.synthesizeSpeech({ text: 'Hola.' });
+      await c.synthesizeSpeech({ text: 'Adiós.' });
+      expect(ids).toHaveLength(2);
+      expect(ids[0]).not.toBe(ids[1]);
     });
 
     it('fails open when the quota decision is unavailable', async () => {
