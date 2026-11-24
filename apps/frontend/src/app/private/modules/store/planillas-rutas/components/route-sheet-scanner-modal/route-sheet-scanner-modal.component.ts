@@ -47,6 +47,7 @@ import {
   RouteSheetMatchResult,
   RouteSheetMatchedStop,
   RouteSheetScanResult,
+  RouteSheetStopOutcome,
 } from '../../interfaces/planilla.interface';
 
 /** Stop statuses that are already settled/terminal and cannot be re-settled. */
@@ -74,8 +75,21 @@ interface EditableStopDecision {
    */
   current_status: string | null;
   already_settled: boolean;
+  /**
+   * The order is already paid (DERIVED by the backend). A prepaid stop is
+   * never collected: the collection fields are hidden and 0 is sent.
+   */
+  is_prepaid: boolean;
+  /** What is really owed on the stop (0 when prepaid). */
+  pending_amount: number;
   // Editable fields
-  delivered: boolean;
+  /**
+   * Delivery outcome, independent from the collection. `pending` rows are not
+   * sent (the stop stays as it is). Rejecting / releasing needs a `reason`.
+   */
+  outcome: RouteSheetStopOutcome;
+  reason: string;
+  /** Collected amount: what the AI read (or 0). Never assumed to be the total. */
   collected_amount: number;
   payment_method: string;
   notes: string;
@@ -382,34 +396,74 @@ interface EditableStopDecision {
                       >; se conciliará automáticamente y no se volverá a liquidar.
                     </p>
                   } @else {
-                    <!-- Editable fields -->
+                    <!-- Editable fields: ENTREGA (resultado) separada del COBRO -->
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <!-- Delivered toggle -->
-                      <label class="flex items-center gap-2 cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          [checked]="stop.delivered"
-                          (change)="updateDelivered(i, $event)"
-                          class="h-4 w-4 rounded border-border text-primary-600 focus:ring-primary-600"
-                        />
-                        <span class="text-sm text-text-primary">Entregado (cobro total)</span>
-                      </label>
+                      <div>
+                        <label class="block text-xs font-medium text-text-secondary mb-1">
+                          Resultado de la entrega
+                        </label>
+                        <select
+                          class="w-full px-2 py-2 text-sm border border-border rounded-md bg-surface text-text-primary focus:ring-1 focus:ring-primary-600 focus:border-primary-600"
+                          [value]="stop.outcome"
+                          (change)="updateOutcome(i, $event)"
+                          [attr.data-testid]="'outcome_' + i"
+                        >
+                          @for (o of outcomeOptions; track o.value) {
+                            <option [value]="o.value" [selected]="o.value === stop.outcome">{{ o.label }}</option>
+                          }
+                        </select>
+                      </div>
 
-                      <!-- Collected amount (currency input) -->
+                      @if (needsReason(stop)) {
+                        <app-input
+                          [label]="stop.outcome === 'rejected' ? 'Motivo del rechazo' : 'Motivo de la liberación'"
+                          [ngModel]="stop.reason"
+                          (ngModelChange)="updateReason(i, $event)"
+                          [name]="'reason_' + i"
+                          placeholder="Obligatorio"
+                        ></app-input>
+                      }
+                    </div>
+
+                    @if (missingReason(stop)) {
+                      <p class="text-xs text-red-700">
+                        Indica el motivo para {{ stop.outcome === 'rejected' ? 'rechazar' : 'liberar' }} la parada.
+                      </p>
+                    }
+
+                    @if (stop.outcome === 'pending') {
+                      <p class="text-xs text-text-secondary">
+                        Quedará pendiente: no se liquida con esta planilla.
+                      </p>
+                    }
+                  }
+
+                  @if (stop.stop_id !== null && !stop.already_settled && stop.outcome === 'delivered') {
+                    @if (stop.is_prepaid) {
+                      <div class="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                        <strong>Pagada.</strong> Esta orden ya está pagada: no hay nada que
+                        cobrar, solo se confirma la entrega.
+                      </div>
+                    } @else {
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <!-- Collected amount (currency input): lo que leyó la IA o 0 -->
                       <app-input
-                        label="Recaudado"
+                        label="Cobrado"
                         [currency]="true"
                         [ngModel]="stop.collected_amount"
                         (ngModelChange)="updateCollected(i, $event)"
                         [name]="'collected_' + i"
                       ></app-input>
+                      <div class="flex items-end pb-2 text-xs text-text-secondary">
+                        A cobrar: {{ stop.pending_amount | currency }}
+                      </div>
                     </div>
 
                     @if (isUndercollected(stop)) {
                       <p class="text-xs text-red-700">
-                        Efectivo + retención no cubren el total
-                        ({{ stop.net_total | currency }}). No se permiten pagos
-                        parciales: completa el cobro o desmarca "Entregado".
+                        Lo cobrado + retención no cubre lo que se debe
+                        ({{ stop.pending_amount | currency }}). No se permiten pagos
+                        parciales: confirma el cobro completo o cambia el resultado.
                       </p>
                     }
 
@@ -474,16 +528,19 @@ interface EditableStopDecision {
                           }
                         </select>
                       </div>
-
-                      <!-- Notes -->
-                      <app-input
-                        label="Notas"
-                        [ngModel]="stop.notes"
-                        (ngModelChange)="updateNotes(i, $event)"
-                        [name]="'notes_' + i"
-                        placeholder="Opcional"
-                      ></app-input>
                     </div>
+                    }
+                  }
+
+                  @if (stop.stop_id !== null && !stop.already_settled) {
+                    <!-- Notes -->
+                    <app-input
+                      label="Notas"
+                      [ngModel]="stop.notes"
+                      (ngModelChange)="updateNotes(i, $event)"
+                      [name]="'notes_' + i"
+                      placeholder="Opcional"
+                    ></app-input>
                   }
                 </div>
               }
@@ -664,7 +721,7 @@ export class RouteSheetScannerModalComponent {
   readonly confirmableCount = computed(
     () =>
       this.editableStops().filter(
-        (s) => s.stop_id !== null && !s.already_settled,
+        (s) => s.stop_id !== null && !s.already_settled && s.outcome !== 'pending',
       ).length,
   );
 
@@ -673,17 +730,38 @@ export class RouteSheetScannerModalComponent {
     () => this.editableStops().filter((s) => s.already_settled).length,
   );
 
+  /** What is owed on the stops confirmed as delivered (prepaid owe nothing). */
   readonly totalNet = computed(() =>
     this.editableStops()
-      .filter((s) => s.stop_id !== null && !s.already_settled)
-      .reduce((sum, s) => sum + (s.net_total || 0), 0),
+      .filter((s) => this.isCollectable(s))
+      .reduce((sum, s) => sum + (s.pending_amount || 0), 0),
   );
 
+  /** What was collected on the stops confirmed as delivered. */
   readonly totalCollected = computed(() =>
     this.editableStops()
-      .filter((s) => s.stop_id !== null && !s.already_settled)
+      .filter((s) => this.isCollectable(s))
       .reduce((sum, s) => sum + (s.collected_amount || 0), 0),
   );
+
+  /** Delivered, not prepaid, resolved and not yet settled: the only rows with a collection. */
+  isCollectable(stop: EditableStopDecision): boolean {
+    return (
+      stop.stop_id !== null &&
+      !stop.already_settled &&
+      stop.outcome === 'delivered' &&
+      !stop.is_prepaid
+    );
+  }
+
+  /** Rejecting or releasing a stop needs a reason (same history as the manual flow). */
+  needsReason(stop: EditableStopDecision): boolean {
+    return stop.outcome === 'rejected' || stop.outcome === 'released';
+  }
+
+  missingReason(stop: EditableStopDecision): boolean {
+    return this.needsReason(stop) && !stop.reason.trim();
+  }
 
   /** Sum of the per-row withholding breakdown (0 unless capture is enabled). */
   private rowWithholding(stop: EditableStopDecision): number {
@@ -700,35 +778,45 @@ export class RouteSheetScannerModalComponent {
    * agent the customer pays cash + withholding certificate = total.
    */
   readonly hasUndercollectedDelivery = computed(() =>
-    this.editableStops().some(
-      (s) =>
-        s.stop_id !== null &&
-        !s.already_settled &&
-        s.delivered &&
-        (s.net_total || 0) > 0 &&
-        (s.collected_amount || 0) + this.rowWithholding(s) < (s.net_total || 0),
-    ),
+    this.keptStops().some((s) => this.isUndercollected(s)),
   );
 
-  /** Per-row helper: a delivered row whose cash + withholding is below total. */
+  /** Per-row helper: a delivered (not prepaid) row whose cash + withholding is below what is owed. */
   isUndercollected(stop: EditableStopDecision): boolean {
     return (
-      !stop.already_settled &&
-      stop.delivered &&
-      (stop.net_total || 0) > 0 &&
-      (stop.collected_amount || 0) + this.rowWithholding(stop) < (stop.net_total || 0)
+      this.isCollectable(stop) &&
+      (stop.pending_amount || 0) > 0 &&
+      (stop.collected_amount || 0) + this.rowWithholding(stop) < (stop.pending_amount || 0)
     );
   }
 
-  /** Confirm enabled only when there is something to settle and no under-collection. */
+  /** A kept row marked rejected/released without a reason. */
+  readonly hasMissingReason = computed(() =>
+    this.keptStops().some(
+      (s) => s.stop_id !== null && !s.already_settled && this.missingReason(s),
+    ),
+  );
+
+  /** Confirm enabled only when there is something to settle, no under-collection and every reason. */
   readonly canConfirm = computed(
-    () => this.confirmableCount() > 0 && !this.hasUndercollectedDelivery(),
+    () =>
+      this.confirmableCount() > 0 &&
+      !this.hasUndercollectedDelivery() &&
+      !this.hasMissingReason(),
   );
 
   readonly wizardSteps = [
     { label: 'Subir' },
     { label: 'Analizar' },
     { label: 'Revisar' },
+  ];
+
+  /** Delivery outcome per stop: the same states as the manual settle / release. */
+  readonly outcomeOptions: ReadonlyArray<{ value: RouteSheetStopOutcome; label: string }> = [
+    { value: 'delivered', label: 'Entregada' },
+    { value: 'rejected', label: 'Rechazada' },
+    { value: 'released', label: 'Liberada (reasignar)' },
+    { value: 'pending', label: 'Pendiente (no liquidar)' },
   ];
 
   readonly paymentMethods: ReadonlyArray<{ value: string; label: string }> = [
@@ -912,17 +1000,26 @@ export class RouteSheetScannerModalComponent {
       s.stop_id !== null &&
       currentStatus !== null &&
       TERMINAL_STOP_STATUSES.includes(currentStatus);
+    const isPrepaid = !!s.current?.is_prepaid;
+    const netTotal = s.current?.grand_total ?? 0;
     return {
       stop_id: s.stop_id,
       stop_sequence: s.stop_sequence,
       remision_number: s.remision_number ?? ex.remision_number,
       match_method: s.match_method,
-      net_total: s.current?.grand_total ?? 0,
+      net_total: netTotal,
       current_collected: s.current?.collected_amount ?? 0,
       current_status: currentStatus,
       already_settled: alreadySettled,
-      delivered: ex.delivered,
-      collected_amount: ex.collected_amount ?? 0,
+      is_prepaid: isPrepaid,
+      pending_amount: isPrepaid ? 0 : (s.current?.pending_amount ?? netTotal),
+      // Delivery suggestion only: what the sheet does not mark as delivered
+      // stays pending (rejecting/releasing needs a reason from the operator).
+      outcome: s.suggested_outcome ?? (ex.delivered ? 'delivered' : 'pending'),
+      reason: '',
+      // Collection is NOT assumed: what the AI read, or 0. Never collected on
+      // a prepaid order.
+      collected_amount: isPrepaid ? 0 : (ex.collected_amount ?? 0),
       payment_method: ex.payment_method ?? 'cash',
       notes: ex.notes ?? '',
       withholding_enabled: false,
@@ -952,9 +1049,27 @@ export class RouteSheetScannerModalComponent {
   // Review step actions (humano siempre confirma antes de persistir)
   // ============================================================
 
-  updateDelivered(index: number, event: Event): void {
-    const checked = (event.target as HTMLInputElement).checked;
-    this.patchStop(index, { delivered: checked });
+  updateOutcome(index: number, event: Event): void {
+    const outcome = (event.target as HTMLSelectElement).value as RouteSheetStopOutcome;
+    // Only a delivered stop carries a collection: leaving "delivered" clears it
+    // so a rejected / released / pending stop never sends money.
+    this.patchStop(
+      index,
+      outcome === 'delivered'
+        ? { outcome }
+        : {
+            outcome,
+            collected_amount: 0,
+            withholding_enabled: false,
+            retefuente: 0,
+            reteiva: 0,
+            reteica: 0,
+          },
+    );
+  }
+
+  updateReason(index: number, value: string): void {
+    this.patchStop(index, { reason: value ?? '' });
   }
 
   updateCollected(index: number, value: number | null): void {
@@ -1023,28 +1138,44 @@ export class RouteSheetScannerModalComponent {
     // Guard: never submit an under-collected delivery (no partial payments).
     if (this.hasUndercollectedDelivery()) {
       this.toast.error(
-        'Hay paradas marcadas como entregadas cuyo monto no cubre el total. Cobra el total o desmarca "Entregado": no se permiten pagos parciales.',
+        'Hay paradas entregadas cuyo cobro no cubre lo que se debe. Confirma el cobro completo o cambia el resultado: no se permiten pagos parciales.',
       );
+      return;
+    }
+
+    if (this.hasMissingReason()) {
+      this.toast.error('Indica el motivo de cada parada rechazada o liberada.');
       return;
     }
 
     // Only send resolved, NOT-yet-settled stops. Already-terminal stops are
     // reconciled by the backend (returned in `skipped`); re-sending them is
     // unnecessary and was the source of the previous 400.
+    // Pending rows are not sent: the stop stays as it is.
     const stops: ConfirmRouteSheetStopDto[] = this.keptStops()
-      .filter((s) => s.stop_id !== null && !s.already_settled)
+      .filter(
+        (s) => s.stop_id !== null && !s.already_settled && s.outcome !== 'pending',
+      )
       .map((s) => {
+        const result = s.outcome as 'delivered' | 'rejected' | 'released';
+        const collectable = this.isCollectable(s);
         const decision: ConfirmRouteSheetStopDto = {
           stop_id: s.stop_id as number,
-          delivered: s.delivered,
-          collected_amount: s.collected_amount,
-          payment_method: s.payment_method || undefined,
+          delivered: result === 'delivered',
+          result,
+          // Only a delivered, not prepaid stop is collected.
+          collected_amount: collectable ? s.collected_amount : 0,
+          payment_method:
+            collectable && s.collected_amount > 0
+              ? s.payment_method || undefined
+              : undefined,
           notes: s.notes || undefined,
         };
+        if (result !== 'delivered') decision.reason = s.reason.trim();
         // Withholding-agent stops: carry the captured breakdown so the backend
         // settles the order 100% (cash + withholding certificate, no AR) and
         // does not 400 on its withholding-agent validation. Only non-zero lines.
-        if (this.rowWithholding(s) > 0) {
+        if (collectable && this.rowWithholding(s) > 0) {
           const breakdown: {
             retefuente?: number;
             reteiva?: number;
@@ -1060,7 +1191,7 @@ export class RouteSheetScannerModalComponent {
 
     if (stops.length === 0) {
       this.toast.error(
-        'No hay paradas pendientes de liquidar en el escaneo (todas ya están liquidadas).',
+        'No hay paradas para liquidar: todas están ya liquidadas o marcadas como pendientes.',
       );
       return;
     }
@@ -1107,7 +1238,8 @@ export class RouteSheetScannerModalComponent {
     const shortPayment = allSkipped.filter(
       (s) => s.reason === 'short_payment_requires_decision',
     );
-    const reconciled = allSkipped.length - shortPayment.length;
+    const undecided = allSkipped.filter((s) => s.reason === 'outcome_required');
+    const reconciled = allSkipped.length - shortPayment.length - undecided.length;
 
     const summary = `Liquidadas: ${settled} / Conciliadas: ${reconciled} / Pendientes de decisión: ${shortPayment.length} / Errores: ${errors.length}`;
 
