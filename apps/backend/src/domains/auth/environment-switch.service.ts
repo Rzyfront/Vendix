@@ -25,6 +25,7 @@ import { STORE_AUTH_DOMAINS_INCLUDE } from './constants/store-public-domains.con
 import { buildActiveUserRolesWhere } from '@common/utils/role-scope.util';
 import { omitSensitiveUserFields } from '@common/utils/safe-user-select.util';
 import { signUserAvatar } from './helpers/sign-user-avatar.helper';
+import { isSessionBlockedState } from './constants/account-state.constants';
 import { VendixHttpException, ErrorCodes } from '../../common/errors';
 
 @Injectable()
@@ -64,7 +65,9 @@ export class EnvironmentSwitchService {
       },
     });
 
-    if (!user) {
+    // QUI-1045 — una cuenta desactivada, suspendida o archivada no abre otro
+    // entorno con un access token que todavía no venció.
+    if (!user || isSessionBlockedState(user.state)) {
       throw new UnauthorizedException('Usuario no encontrado');
     }
 

@@ -12,7 +12,11 @@ import { ErrorCodes } from '../../common/errors';
 describe('EnvironmentSwitchService — tiendas inactivas', () => {
   const ORG = 1;
 
-  function setup(roleName: string, store: { id: number; is_active: boolean }) {
+  function setup(
+    roleName: string,
+    store: { id: number; is_active: boolean },
+    userState?: string,
+  ) {
     const prisma: any = {
       users: {
         findUnique: jest
@@ -22,6 +26,7 @@ describe('EnvironmentSwitchService — tiendas inactivas', () => {
             id: 7,
             organization_id: ORG,
             main_store_id: 1,
+            ...(userState ? { state: userState } : {}),
             user_roles: [{ roles: { name: roleName } }],
           })
           // 2ª lectura (usuario completo, después de persistir main_store):
@@ -97,5 +102,39 @@ describe('EnvironmentSwitchService — tiendas inactivas', () => {
       where: { id: 7 },
       data: { main_store_id: 1 },
     });
+  });
+
+  /**
+   * QUI-1045 — una cuenta desactivada, suspendida o archivada no abre otro
+   * entorno con un access token que todavía no venció.
+   */
+  it.each(['inactive', 'suspended', 'archived'])(
+    'una cuenta %s no cambia de entorno (QUI-1045)',
+    async (state) => {
+      const { service, prisma } = setup(
+        'owner',
+        { id: 1, is_active: true },
+        state,
+      );
+
+      await expect(
+        service.switchEnvironment(7, 'STORE_ADMIN', 'vendix-crm'),
+      ).rejects.toThrow('Usuario no encontrado');
+      expect(prisma.stores.findFirst).not.toHaveBeenCalled();
+      expect(prisma.user_settings.upsert).not.toHaveBeenCalled();
+    },
+  );
+
+  it('una cuenta pending_verification sí cambia de entorno (QUI-1045)', async () => {
+    const { service, prisma } = setup(
+      'owner',
+      { id: 1, is_active: true },
+      'pending_verification',
+    );
+
+    await expect(
+      service.switchEnvironment(7, 'STORE_ADMIN', 'vendix-crm'),
+    ).rejects.toThrow('Usuario no encontrado');
+    expect(prisma.user_settings.upsert).toHaveBeenCalled();
   });
 });

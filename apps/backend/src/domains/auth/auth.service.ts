@@ -42,6 +42,12 @@ import {
   hmacSha256,
 } from './constants/token.constants';
 import { STORE_AUTH_DOMAINS_INCLUDE } from './constants/store-public-domains.constants';
+import {
+  PASSWORD_RECOVERY_USER_STATES,
+  SESSION_BLOCKED_USER_STATES,
+  canRecoverPassword,
+  isSessionBlockedState,
+} from './constants/account-state.constants';
 import { CustomersService } from '../store/customers/customers.service';
 import { S3Service } from '@common/services/s3.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -232,11 +238,12 @@ export class AuthService {
   ): Promise<UserAccountLookupResult> {
     const normalizedEmail = normalizeEmail(email);
 
-    // 1. Find ALL accounts with this email (excluding suspended/archived)
+    // 1. Find ALL accounts with this email (excluding inactive/suspended/archived,
+    //    QUI-1045: an account the admin deactivated cannot sign in)
     const allAccounts = await this.prismaService.users.findMany({
       where: {
         email: emailEquals(normalizedEmail),
-        state: { notIn: ['suspended', 'archived'] },
+        state: { notIn: [...SESSION_BLOCKED_USER_STATES] },
       },
       include: {
         // Se trae roles.role_permissions.permissions en la MISMA consulta para
@@ -1127,12 +1134,13 @@ export class AuthService {
         //   - the customer is linked but still pending_verification (the
         //     POS-created account they can't log in to).
         //
-        // Hotfix post-PR-576: NO dispares el CTA para clientes archivados.
-        // Archivar es decisión del comerciante; el flujo público no debe
-        // reactivar ni sugerir "reclamar" una cuenta archivada, ni
-        // exponer al mundo que existe.
-        const isArchived = existingUser.state === 'archived';
-        if ((!alreadyLinked || !isActive) && !isArchived) {
+        // Hotfix post-PR-576 + QUI-1045: NO dispares el CTA para clientes
+        // que no pueden recuperar su clave (inactivos, suspendidos,
+        // archivados). Es decisión del comerciante; el flujo público no
+        // debe reactivar ni sugerir "reclamar" esa cuenta, ni exponer al
+        // mundo que existe.
+        const canClaim = canRecoverPassword(existingUser.state);
+        if ((!alreadyLinked || !isActive) && canClaim) {
           throw new VendixHttpException(ErrorCodes.AUTH_CUSTOMER_CLAIMABLE_001);
         }
       }
@@ -1772,9 +1780,9 @@ export class AuthService {
       roles, // Array simple: ["owner", "admin"]
     };
 
-    // ✅ Validar que el usuario no esté suspended o archived
+    // ✅ Validar que el usuario no esté inactive, suspended o archived (QUI-1045)
     // Note: findUserAccountsByEmail already filters these, but double-check for safety
-    if (user.state === 'suspended' || user.state === 'archived') {
+    if (isSessionBlockedState(user.state)) {
       await this.logLoginAttempt(user.id, false);
       throw new VendixHttpException(ErrorCodes.AUTH_VALIDATE_001);
     }
@@ -2361,6 +2369,12 @@ export class AuthService {
         throw new VendixHttpException(ErrorCodes.AUTH_TOKEN_001);
       }
 
+      // QUI-1045 — una cuenta desactivada, suspendida o archivada no renueva
+      // la sesión que tenía abierta: se cierra al vencer el access token.
+      if (isSessionBlockedState(user.state)) {
+        throw new VendixHttpException(ErrorCodes.AUTH_TOKEN_001);
+      }
+
       // 🔒 VALIDACIÓN DE ORGANIZACIÓN: Asegurar que el token scope corresponde al usuario
       if (Number(payload.organization_id) !== user.organization_id) {
         throw new VendixHttpException(ErrorCodes.AUTH_TOKEN_001);
@@ -2714,12 +2728,16 @@ export class AuthService {
       data: { verified: true },
     });
 
-    // Marcar email como verificado y activar usuario
+    // Marcar email como verificado y activar usuario. QUI-1045: solo se
+    // activa una cuenta pendiente; una desactivada, suspendida o archivada
+    // conserva su estado (un enlace público no deshace la decisión del admin).
     await this.prismaService.users.update({
       where: { id: verificationToken.user_id },
       data: {
         email_verified: true,
-        state: 'active', // Activar usuario al verificar email
+        ...(verificationToken.users?.state === 'pending_verification'
+          ? { state: 'active' as const }
+          : {}),
       },
     });
 
@@ -2797,6 +2815,16 @@ export class AuthService {
 
     const user = await this.resolvePasswordRecoveryAccount(email, vlink);
     if (!user) {
+      await this.logSuppressedPasswordRecovery(email);
+      return { message: genericMessage };
+    }
+
+    // QUI-1045 — una cuenta que no puede usar el enlace no lo recibe: sin
+    // token ni correo, con el mismo mensaje genérico (anti-enumeración).
+    if (!canRecoverPassword(user.state)) {
+      this.logger.warn(
+        `forgotPassword: user ${user.id} is ${user.state} — reset suppressed`,
+      );
       return { message: genericMessage };
     }
 
@@ -2842,6 +2870,34 @@ export class AuthService {
   }
 
   /**
+   * QUI-1045 — Las ramas de V-link de tienda y sin V-link descartan en la
+   * consulta las cuentas que no pueden recuperar su clave, así que llegan a
+   * `forgotPassword` como "sin cuenta". Deja constancia en el log (id y
+   * estado, nunca el correo) igual que la rama de organización. Nunca
+   * propaga errores: la respuesta al cliente sigue siendo la genérica.
+   */
+  private async logSuppressedPasswordRecovery(email: string): Promise<void> {
+    try {
+      const blocked = await this.prismaService.users.findMany({
+        where: {
+          email: emailEquals(email),
+          state: { notIn: [...PASSWORD_RECOVERY_USER_STATES] },
+        },
+        select: { id: true, state: true },
+        take: 10,
+      });
+      for (const account of blocked) {
+        if (canRecoverPassword(account.state)) continue;
+        this.logger.warn(
+          `forgotPassword: user ${account.id} is ${account.state} — reset suppressed`,
+        );
+      }
+    } catch {
+      // Solo es trazabilidad: un fallo aquí no cambia la respuesta.
+    }
+  }
+
+  /**
    * Resuelve la cuenta de staff/propietario que pide recuperar su contraseña.
    *
    * 1. V-link = slug de organización → cuenta del email en esa organización
@@ -2859,7 +2915,12 @@ export class AuthService {
   private async resolvePasswordRecoveryAccount(
     email: string,
     vlink?: string,
-  ): Promise<{ id: number; email: string | null; first_name: string } | null> {
+  ): Promise<{
+    id: number;
+    email: string | null;
+    first_name: string;
+    state: string;
+  } | null> {
     const slug = vlink?.trim();
 
     if (slug) {
@@ -2889,7 +2950,7 @@ export class AuthService {
             where: {
               email: emailEquals(email),
               organization_id: { in: organizationIds },
-              state: { notIn: ['suspended', 'archived'] },
+              state: { in: [...PASSWORD_RECOVERY_USER_STATES] },
             },
           });
           if (storeAccounts.length === 1) return storeAccounts[0];
@@ -3000,13 +3061,13 @@ export class AuthService {
       return { message: genericMessage };
     }
 
-    // Hotfix post-PR-576: clientes archivados no reciben token de
-    // recuperación. Archivar es decisión del comerciante; el flujo
-    // público debe tratar al archivado como inexistente y NO emitir
-    // nada que sugiera reactivarlo.
-    if (user.state === 'archived') {
+    // Hotfix post-PR-576 + QUI-1045: clientes inactivos, suspendidos o
+    // archivados no reciben token de recuperación. Es decisión del
+    // comerciante; el flujo público los trata como inexistentes y NO emite
+    // nada que sugiera reactivarlos. El log no lleva el correo.
+    if (!canRecoverPassword(user.state)) {
       this.logger.warn(
-        `forgotPasswordCustomer: archived user ${user.id} (${email}) — token suppressed`,
+        `forgotPasswordCustomer: user ${user.id} is ${user.state} — token suppressed`,
       );
       return { message: genericMessage };
     }
@@ -3086,8 +3147,10 @@ export class AuthService {
       throw new VendixHttpException(ErrorCodes.AUTH_TOKEN_001);
     }
 
-    // Verificar que el usuario aún existe y está activo
-    if (!resetToken.users || resetToken.users.state !== 'active') {
+    // Verificar que el usuario aún existe y puede recuperar su clave.
+    // QUI-1045: `pending_verification` también (dueños y empleados que nunca
+    // verificaron fijan así su clave); su estado no cambia aquí.
+    if (!resetToken.users || !canRecoverPassword(resetToken.users.state)) {
       throw new VendixHttpException(ErrorCodes.AUTH_FIND_001);
     }
 
@@ -3223,10 +3286,23 @@ export class AuthService {
       );
     }
 
+    // QUI-1045: un cliente inactivo o suspendido tampoco se reactiva con el
+    // enlace público. Se rechaza como un token inválido y el token muere.
+    if (!canRecoverPassword(resetToken.users.state)) {
+      await this.prismaService.password_reset_tokens.updateMany({
+        where: { id: resetToken.id, used: false },
+        data: { used: true },
+      });
+      this.logger.warn(
+        `resetCustomerPassword: user ${resetToken.users.id} is ${resetToken.users.state} — reset rejected`,
+      );
+      throw new VendixHttpException(ErrorCodes.AUTH_TOKEN_001);
+    }
+
     // Activate the account if it was left in pending_verification. The
     // email is considered verified because the customer proved control
     // by receiving the reset token in their inbox.
-    const wasPending = resetToken.users.state !== 'active';
+    const wasPending = resetToken.users.state === 'pending_verification';
     const wasUnverified = !resetToken.users.email_verified;
 
     // Atomic consume: only mark `used = true` if the row is still
@@ -4395,8 +4471,8 @@ export class AuthService {
       throw new UnauthorizedException('Credenciales inválidas');
     }
 
-    // Validar que el usuario no esté suspendido o archivado
-    if (user.state === 'suspended' || user.state === 'archived') {
+    // Validar que el usuario no esté inactivo, suspendido o archivado (QUI-1045)
+    if (isSessionBlockedState(user.state)) {
       await this.logLoginAttempt(user.id, false);
       throw new UnauthorizedException('Cuenta suspendida o archivada');
     }
