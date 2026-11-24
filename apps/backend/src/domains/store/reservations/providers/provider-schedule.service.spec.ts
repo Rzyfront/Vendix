@@ -177,6 +177,27 @@ describe('ProviderScheduleService.upsertSchedule (QUI-968)', () => {
       expect(tx.provider_schedules.deleteMany).not.toHaveBeenCalled();
     });
 
+    it('accepts a 17:00-04:00 night shift and consecutive 24 h days', async () => {
+      const { service, tx } = buildService();
+      await service.upsertSchedule(8, [
+        { day_of_week: 1, block_order: 0, start_time: '17:00', end_time: '04:00' },
+        { day_of_week: 2, block_order: 0, start_time: '04:00', end_time: '12:00' },
+        { day_of_week: 3, block_order: 0, start_time: '00:00', end_time: '00:00' },
+        { day_of_week: 4, block_order: 0, start_time: '00:00', end_time: '00:00' },
+      ] as any);
+      expect(tx.provider_schedules.createMany).toHaveBeenCalled();
+    });
+
+    it('rejects a zero-length block other than 00:00-00:00', async () => {
+      const { service, tx } = buildService();
+      await expect(
+        service.upsertSchedule(8, [
+          { day_of_week: 2, block_order: 0, start_time: '09:00', end_time: '09:00' },
+        ] as any),
+      ).rejects.toThrow('usa 00:00 a 00:00 para atender las 24 horas');
+      expect(tx.provider_schedules.deleteMany).not.toHaveBeenCalled();
+    });
+
     it('keeps accepting overlapping daytime blocks as before', async () => {
       const { service, tx } = buildService();
       await service.upsertSchedule(8, [

@@ -148,11 +148,15 @@ export class ProviderScheduleService {
           start_time: item.start_time,
           end_time: item.end_time,
         })),
+        // A block of length 0 is only valid as the explicit 24 h `00:00-00:00`.
+        { rejectZeroLength: true },
       );
       if (invalid) {
         const dayName = DAY_NAMES[invalid.day] ?? `día ${invalid.day}`;
         throw new BadRequestException(
-          `Los bloques del ${dayName} se cruzan entre sí o con el bloque que termina de madrugada del día anterior`,
+          invalid.reason === 'zero'
+            ? `El bloque del ${dayName} empieza y termina a la misma hora: usa 00:00 a 00:00 para atender las 24 horas`
+            : `Los bloques del ${dayName} se cruzan entre sí o con el bloque que termina de madrugada del día anterior`,
         );
       }
     }

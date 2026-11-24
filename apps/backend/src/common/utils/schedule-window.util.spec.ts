@@ -10,6 +10,7 @@ import {
   isOpenAt,
   spansOverlap,
   validateWeeklyBlocks,
+  continuousSpan,
   windowSpan,
   windowsForDate,
 } from './schedule-window.util';
@@ -218,6 +219,76 @@ describe('schedule-window.util', () => {
       expect(
         validateWeeklyBlocks([{ day: 1, start_time: '9:00', end_time: '18:00' }]),
       ).toEqual({ day: 1, reason: 'format' });
+    });
+
+    it('keeps accepting a zero-length block unless asked (stations, rate windows)', () => {
+      expect(
+        validateWeeklyBlocks([{ day: 1, start_time: '09:00', end_time: '09:00' }]),
+      ).toBeNull();
+    });
+
+    it('rejects a zero-length block for store and provider hours', () => {
+      expect(
+        validateWeeklyBlocks([{ day: 2, start_time: '09:00', end_time: '09:00' }], { rejectZeroLength: true }),
+      ).toEqual({ day: 2, reason: 'zero' });
+    });
+
+    it('accepts the explicit 24 h block on consecutive days', () => {
+      expect(
+        validateWeeklyBlocks(
+          [
+            { day: 1, start_time: '00:00', end_time: '00:00' },
+            { day: 2, start_time: '00:00', end_time: '00:00' },
+          ],
+          { rejectZeroLength: true },
+        ),
+      ).toBeNull();
+    });
+
+    it('rejects a block that overlaps a 17:00-04:00 night shift spill', () => {
+      expect(
+        validateWeeklyBlocks(
+          [
+            { day: 1, start_time: '17:00', end_time: '04:00' },
+            { day: 2, start_time: '03:00', end_time: '12:00' },
+          ],
+          { rejectZeroLength: true },
+        ),
+      ).toEqual({ day: 2, reason: 'overlap' });
+    });
+  });
+
+  describe('continuousSpan', () => {
+    it('keeps a daytime block as is', () => {
+      expect(continuousSpan({ start_time: '09:00', end_time: '18:00' }, [{ start_time: '00:00', end_time: '00:00' }])).toEqual({
+        startMin: 540,
+        endMin: 1080,
+      });
+    });
+
+    it('joins two consecutive 24 h days', () => {
+      expect(continuousSpan({ start_time: '00:00', end_time: '00:00' }, [{ start_time: '00:00', end_time: '00:00' }])).toEqual({
+        startMin: 0,
+        endMin: 2880,
+      });
+    });
+
+    it('joins a night shift with the next day block that starts at its close', () => {
+      expect(continuousSpan({ start_time: '17:00', end_time: '04:00' }, [{ start_time: '04:00', end_time: '12:00' }])).toEqual({
+        startMin: 1020,
+        endMin: 2160,
+      });
+    });
+
+    it('does not join when the next day starts later', () => {
+      expect(continuousSpan({ start_time: '00:00', end_time: '00:00' }, [{ start_time: '08:00', end_time: '18:00' }])).toEqual({
+        startMin: 0,
+        endMin: 1440,
+      });
+    });
+
+    it('caps the window at two days', () => {
+      expect(continuousSpan({ start_time: '17:00', end_time: '17:00' }, [{ start_time: '17:00', end_time: '17:00' }]).endMin).toBe(2880);
     });
   });
 

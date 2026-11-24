@@ -4,10 +4,35 @@ import { UpsertBusinessHoursDto } from './dto';
 import {
   ClockWindow,
   isClockTime,
+  isFullDay,
   isOvernight,
+  toMinutes,
   validateWeeklyBlocks,
   windowSpan,
 } from '../../../../common/utils/schedule-window.util';
+import { getPersistableDefaultStoreSettings } from '../../settings/defaults/default-store-settings';
+
+/** `pos.business_hours` keys indexed by day_of_week (0 = Sunday). */
+const DAY_KEYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'] as const;
+
+interface PosDayHours {
+  open: string;
+  close: string;
+  is_active?: boolean;
+  blocks?: Array<{ open: string; close: string }>;
+}
+
+export interface BusinessHoursDayView {
+  day_of_week: number;
+  start_time: string | null;
+  end_time: string | null;
+  is_active: boolean;
+  is_24h: boolean;
+  blocks: ClockWindow[];
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value);
 
 const minutesToClock = (min: number) => {
   const m = min % 1440;
@@ -18,7 +43,8 @@ const minutesToClock = (min: number) => {
  * BusinessHoursService
  *
  * Per-store master calendar that the booking flow consults when computing
- * slot availability. Overrides / supplements per-provider provider_schedules
+ * slot availability. ONE source (M1): `store_settings.settings.pos.business_hours`,
+ * shared by the Agenda "Horario" screen and Settings → Sales. Overrides / supplements per-provider provider_schedules
  * (provider availability still wins when stricter).
  *
  * Provides three consumers:
@@ -35,95 +61,153 @@ export class BusinessHoursService {
   constructor(private readonly prisma: StorePrismaService) {}
 
   /**
-   * Returns the full week (7 rows; null where the store is closed that day).
-   * Sorted by day_of_week so the frontend can iterate in calendar order.
+   * Returns the full week (7 rows) of the store's ONE schedule (M1): the same
+   * windows the booking flow reads (`settings.pos.business_hours`, or the
+   * legacy `store_business_hours` table only when the JSON does not exist).
+   * `blocks` keeps every block of the day; `start_time`/`end_time` are the
+   * first open and the last close; `is_24h` marks the explicit 00:00-00:00.
    */
-  async getAllForStore(storeId: number) {
-    const rows = await this.prisma.store_business_hours.findMany({
-      where: { store_id: storeId },
-      orderBy: { day_of_week: 'asc' },
-    });
-    // Fill missing days with nulls so the frontend always gets 7 entries.
-    const all: Array<{
-      day_of_week: number;
-      start_time: string | null;
-      end_time: string | null;
-      is_active: boolean;
-    }> = [];
-    for (let dow = 0; dow <= 6; dow++) {
-      const row = rows.find((r) => r.day_of_week === dow);
-      all.push({
-        day_of_week: dow,
-        start_time: row?.start_time ?? null,
-        end_time: row?.end_time ?? null,
-        is_active: row?.is_active ?? false,
-      });
-    }
+  async getAllForStore(storeId: number): Promise<BusinessHoursDayView[]> {
+    const windows = await this.loadStoreWindows(storeId);
+    const all: BusinessHoursDayView[] = [];
+    for (let dow = 0; dow <= 6; dow++) all.push(this.dayView(dow, windows.get(dow) ?? []));
     return all;
   }
 
   /**
-   * Returns the row for a single day, or null when none exists.
+   * Returns the schedule of a single day, or null when the store is closed.
    */
-  async getForDay(storeId: number, dayOfWeek: number) {
-    return this.prisma.store_business_hours.findFirst({
-      where: { store_id: storeId, day_of_week: dayOfWeek },
-    });
+  async getForDay(storeId: number, dayOfWeek: number): Promise<BusinessHoursDayView | null> {
+    const windows = await this.loadStoreWindows(storeId);
+    const list = windows.get(dayOfWeek) ?? [];
+    return list.length ? this.dayView(dayOfWeek, list) : null;
+  }
+
+  private dayView(dow: number, list: ClockWindow[]): BusinessHoursDayView {
+    return {
+      day_of_week: dow,
+      start_time: list[0]?.start_time ?? null,
+      end_time: list[list.length - 1]?.end_time ?? null,
+      is_active: list.length > 0,
+      is_24h: list.length === 1 && isFullDay(list[0]),
+      blocks: list.map((w) => ({ start_time: w.start_time, end_time: w.end_time })),
+    };
   }
 
   /**
-   * Batch upsert: replaces ALL rows for the store with the provided items.
-   * Days omitted from the payload get deactivated (is_active = false)
-   * via a delete-then-insert; we keep the operation transactional.
+   * Batch upsert of the store's ONE schedule (M1): writes the days in the
+   * payload into `settings.pos.business_hours` — the key the booking flow,
+   * the agenda, "open now" and Settings → Sales already read — and keeps the
+   * rest of the settings JSON and the days not sent untouched. The legacy
+   * `store_business_hours` table is never written nor deleted (read fallback).
    *
-   * end_time <= start_time is valid and means the block ends the next day (S21).
+   * end_time <= start_time is valid and means the block ends the next day
+   * (S21); `00:00-00:00` is 24 h; any other zero-length block is rejected.
    */
   async upsertAll(storeId: number, dto: UpsertBusinessHoursDto) {
-    // S21: end <= start means the block ends the next day (00:00-00:00 = 24 h).
-    // Blocks must keep the HH:MM format and must not overlap, including the
-    // previous day's overnight spill.
-    const invalid = validateWeeklyBlocks(
-      dto.items.map((i) => ({
-        day: i.day_of_week,
-        start_time: i.start_time,
-        end_time: i.end_time,
-      })),
-    );
-    if (invalid) {
-      throw new BadRequestException(
-        invalid.reason === 'overlap'
-          ? `Día ${invalid.day}: el horario se cruza con otro bloque (incluido el que termina de madrugada del día anterior)`
-          : `Día ${invalid.day}: las horas deben tener formato HH:mm`,
-      );
-    }
-
     const daysTouched = new Set(dto.items.map((i) => i.day_of_week));
     if (daysTouched.size !== dto.items.length) {
       throw new BadRequestException('No se permiten días duplicados en el payload');
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      // Remove the rows for days we are about to overwrite; leave untouched
-      // days (no row for them today, no row in items) — those stay closed.
-      await tx.store_business_hours.deleteMany({
-        where: {
-          store_id: storeId,
-          day_of_week: { in: Array.from(daysTouched) },
-        },
-      });
-      // Insert the new rows.
-      await tx.store_business_hours.createMany({
-        data: dto.items.map((i) => ({
-          store_id: storeId,
-          day_of_week: i.day_of_week,
-          start_time: i.start_time,
-          end_time: i.end_time,
-          is_active: i.is_active ?? true,
-        })),
-      });
-      // Read back the full week.
-      return this.getAllForStore(storeId);
+    const blocksOf = (i: UpsertBusinessHoursDto['items'][number]): ClockWindow[] =>
+      i.blocks?.length
+        ? i.blocks.map((b) => ({ start_time: b.start_time, end_time: b.end_time }))
+        : [{ start_time: i.start_time, end_time: i.end_time }];
+    const active = dto.items.filter((i) => i.is_active !== false);
+
+    // S21: end <= start means the block ends the next day (00:00-00:00 = 24 h).
+    // Blocks must keep the HH:MM format and must not overlap, including the
+    // previous day's overnight spill.
+    const invalid = validateWeeklyBlocks(
+      active.flatMap((i) =>
+        blocksOf(i).map((b) => ({ day: i.day_of_week, start_time: b.start_time, end_time: b.end_time })),
+      ),
+      { rejectZeroLength: true },
+    );
+    if (invalid) {
+      throw new BadRequestException(
+        invalid.reason === 'overlap'
+          ? `Día ${invalid.day}: el horario se cruza con otro bloque (incluido el que termina de madrugada del día anterior)`
+          : invalid.reason === 'zero'
+            ? `Día ${invalid.day}: la apertura y el cierre son la misma hora; usa 00:00 a 00:00 para abrir las 24 horas`
+            : `Día ${invalid.day}: las horas deben tener formato HH:mm`,
+      );
+    }
+
+    const row = await this.prisma.store_settings.findUnique({
+      where: { store_id: storeId },
+      select: { settings: true },
     });
+    const settings = (isRecord(row?.settings) ? row.settings : null) as Record<string, any> | null;
+    const pos: Record<string, any> = isRecord(settings?.pos) ? { ...settings.pos } : {};
+
+    // Days not in the payload keep what the booking reads today; a store that
+    // only had the legacy table gets its days copied so none is lost.
+    const hours: Record<string, PosDayHours> = isRecord(pos.business_hours)
+      ? { ...(pos.business_hours as Record<string, PosDayHours>) }
+      : this.posHoursFromWindows(await this.loadStoreWindows(storeId));
+
+    const custom =
+      pos.schedule_mode === 'custom' || active.some((i) => blocksOf(i).length > 1);
+    if (custom && pos.schedule_mode !== 'custom') {
+      // Switching to custom: every day needs `blocks` (an empty list = closed).
+      for (const key of DAY_KEYS) {
+        const day = hours[key];
+        if (!day || day.blocks?.length) continue;
+        hours[key] =
+          isClockTime(day.open) && isClockTime(day.close)
+            ? { ...day, blocks: [{ open: day.open, close: day.close }] }
+            : { open: 'closed', close: 'closed', blocks: [] };
+      }
+    }
+
+    for (const item of dto.items) {
+      const key = DAY_KEYS[item.day_of_week];
+      if (item.is_active === false) {
+        hours[key] = custom ? { open: 'closed', close: 'closed', blocks: [] } : { open: 'closed', close: 'closed' };
+        continue;
+      }
+      const blocks = [...blocksOf(item)].sort((a, b) => toMinutes(a.start_time) - toMinutes(b.start_time));
+      const open = blocks[0].start_time;
+      const close = blocks[blocks.length - 1].end_time;
+      hours[key] = custom
+        ? { open, close, blocks: blocks.map((b) => ({ open: b.start_time, close: b.end_time })) }
+        : { open, close };
+    }
+
+    const nextPos = { ...pos, business_hours: hours, schedule_mode: custom ? 'custom' : (pos.schedule_mode ?? 'continuous') };
+    if (row) {
+      await this.prisma.store_settings.update({
+        where: { store_id: storeId },
+        data: { settings: { ...(settings ?? {}), pos: nextPos } as any, updated_at: new Date() },
+      });
+    } else {
+      const defaults = getPersistableDefaultStoreSettings() as unknown as Record<string, any>;
+      await this.prisma.store_settings.create({
+        data: { store_id: storeId, settings: { ...defaults, pos: { ...defaults.pos, ...nextPos } } as any },
+      });
+    }
+    this.logger.log(`[BusinessHours] store ${storeId}: pos.business_hours updated (${dto.items.length} days)`);
+    return this.getAllForStore(storeId);
+  }
+
+  /** Windows per weekday → `pos.business_hours` shape (closed when empty). */
+  private posHoursFromWindows(windows: Map<number, ClockWindow[]>): Record<string, PosDayHours> {
+    const out: Record<string, PosDayHours> = {};
+    DAY_KEYS.forEach((key, dow) => {
+      const list = windows.get(dow) ?? [];
+      out[key] = list.length
+        ? list.length === 1
+          ? { open: list[0].start_time, close: list[0].end_time }
+          : {
+              open: list[0].start_time,
+              close: list[list.length - 1].end_time,
+              blocks: list.map((w) => ({ open: w.start_time, close: w.end_time })),
+            }
+        : { open: 'closed', close: 'closed' };
+    });
+    return out;
   }
 
   /**

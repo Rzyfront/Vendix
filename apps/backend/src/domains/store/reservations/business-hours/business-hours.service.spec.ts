@@ -35,6 +35,8 @@ describe('BusinessHoursService', () => {
       // POS path so we mock it to return null and let the fallback run.
       store_settings: {
         findUnique: jest.fn().mockResolvedValue(null),
+        update: jest.fn().mockResolvedValue({}),
+        create: jest.fn().mockResolvedValue({}),
       },
       $transaction: jest.fn(async (cb: any) => {
         // Eagerly evaluate the callback with a passthrough tx.
@@ -54,7 +56,18 @@ describe('BusinessHoursService', () => {
     };
   }
 
-  it('getAllForStore returns 7 entries with nulls for missing days', async () => {
+  /** Mocks `store_settings.settings` so reads and writes go through the JSON. */
+  function withSettings(settings: any, initialRows: any[] = []) {
+    const built = buildService(initialRows);
+    built.prisma.store_settings.findUnique.mockResolvedValue(settings ? { settings } : null);
+    return built;
+  }
+  const writtenPos = (prisma: any) => {
+    const call = prisma.store_settings.update.mock.calls[0]?.[0] ?? prisma.store_settings.create.mock.calls[0]?.[0];
+    return (call.data.settings as any).pos;
+  };
+
+  it('getAllForStore returns 7 entries, falling back to the legacy table without POS hours', async () => {
     const { service } = buildService([
       {
         day_of_week: 1,
@@ -71,13 +84,129 @@ describe('BusinessHoursService', () => {
       start_time: null,
       end_time: null,
       is_active: false,
+      is_24h: false,
+      blocks: [],
     });
     expect(result[1]).toEqual({
       day_of_week: 1,
       start_time: '09:00',
       end_time: '18:00',
       is_active: true,
+      is_24h: false,
+      blocks: [{ start_time: '09:00', end_time: '18:00' }],
     });
+  });
+
+  it('getAllForStore reads the same POS hours the booking uses (one source)', async () => {
+    const { service } = withSettings(
+      {
+        pos: {
+          business_hours: {
+            monday: { open: '17:00', close: '04:00' },
+            tuesday: { open: '00:00', close: '00:00' },
+            sunday: { open: 'closed', close: 'closed' },
+          },
+        },
+      },
+      // The legacy table disagrees: it must be ignored when POS hours exist.
+      [{ day_of_week: 1, start_time: '08:00', end_time: '12:00', is_active: true, store_id: 1 }],
+    );
+    const result = await service.getAllForStore(1);
+    expect(result[1]).toMatchObject({ start_time: '17:00', end_time: '04:00', is_active: true, is_24h: false });
+    expect(result[2]).toMatchObject({ start_time: '00:00', end_time: '00:00', is_active: true, is_24h: true });
+    expect(result[0]).toMatchObject({ is_active: false, blocks: [] });
+  });
+
+  it('upsertAll writes pos.business_hours, keeps other days and settings, and never touches the legacy table', async () => {
+    const { service, prisma } = withSettings({
+      general: { timezone: 'America/Bogota' },
+      pos: {
+        enable_schedule_validation: true,
+        business_hours: {
+          monday: { open: '09:00', close: '19:00' },
+          friday: { open: '09:00', close: '20:00' },
+        },
+      },
+    });
+    await service.upsertAll(1, {
+      items: [
+        { day_of_week: 1, start_time: '17:00', end_time: '04:00', is_active: true },
+        { day_of_week: 0, start_time: '09:00', end_time: '12:00', is_active: false },
+      ],
+    } as any);
+    const call = prisma.store_settings.update.mock.calls[0][0];
+    expect(call.where).toEqual({ store_id: 1 });
+    expect(call.data.settings.general).toEqual({ timezone: 'America/Bogota' });
+    const pos = writtenPos(prisma);
+    expect(pos.enable_schedule_validation).toBe(true);
+    expect(pos.business_hours.monday).toEqual({ open: '17:00', close: '04:00' });
+    expect(pos.business_hours.sunday).toEqual({ open: 'closed', close: 'closed' });
+    expect(pos.business_hours.friday).toEqual({ open: '09:00', close: '20:00' });
+    expect(pos.schedule_mode).toBe('continuous');
+    expect(prisma.store_business_hours.createMany).not.toHaveBeenCalled();
+    expect(prisma.store_business_hours.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('upsertAll copies the legacy table days first so a store without POS hours loses none', async () => {
+    const { service, prisma } = withSettings({ general: {} }, [
+      { day_of_week: 3, start_time: '10:00', end_time: '16:00', is_active: true, store_id: 1 },
+    ]);
+    await service.upsertAll(1, {
+      items: [{ day_of_week: 1, start_time: '09:00', end_time: '18:00', is_active: true }],
+    } as any);
+    const pos = writtenPos(prisma);
+    expect(pos.business_hours.wednesday).toEqual({ open: '10:00', close: '16:00' });
+    expect(pos.business_hours.monday).toEqual({ open: '09:00', close: '18:00' });
+    expect(pos.business_hours.sunday).toEqual({ open: 'closed', close: 'closed' });
+  });
+
+  it('upsertAll with a split shift switches to custom mode and gives every day its blocks', async () => {
+    const { service, prisma } = withSettings({
+      pos: {
+        schedule_mode: 'continuous',
+        business_hours: {
+          tuesday: { open: '09:00', close: '19:00' },
+          sunday: { open: 'closed', close: 'closed' },
+        },
+      },
+    });
+    await service.upsertAll(1, {
+      items: [
+        {
+          day_of_week: 1,
+          start_time: '08:00',
+          end_time: '18:00',
+          is_active: true,
+          blocks: [
+            { start_time: '14:00', end_time: '18:00' },
+            { start_time: '08:00', end_time: '12:00' },
+          ],
+        },
+      ],
+    } as any);
+    const pos = writtenPos(prisma);
+    expect(pos.schedule_mode).toBe('custom');
+    expect(pos.business_hours.monday).toEqual({
+      open: '08:00',
+      close: '18:00',
+      blocks: [
+        { open: '08:00', close: '12:00' },
+        { open: '14:00', close: '18:00' },
+      ],
+    });
+    expect(pos.business_hours.tuesday.blocks).toEqual([{ open: '09:00', close: '19:00' }]);
+    expect(pos.business_hours.sunday).toEqual({ open: 'closed', close: 'closed', blocks: [] });
+  });
+
+  it('upsertAll creates the settings row with defaults when the store has none', async () => {
+    const { service, prisma } = buildService();
+    await service.upsertAll(1, {
+      items: [{ day_of_week: 6, start_time: '00:00', end_time: '00:00', is_active: true }],
+    } as any);
+    expect(prisma.store_settings.update).not.toHaveBeenCalled();
+    const call = prisma.store_settings.create.mock.calls[0][0];
+    expect(call.data.store_id).toBe(1);
+    expect(call.data.settings.pos.business_hours.saturday).toEqual({ open: '00:00', close: '00:00' });
   });
 
   it('upsertAll accepts a block that ends the next day (S21)', async () => {
@@ -87,11 +216,7 @@ describe('BusinessHoursService', () => {
         { day_of_week: 5, start_time: '18:00', end_time: '03:00', is_active: true },
       ],
     } as any);
-    expect(prisma.store_business_hours.createMany).toHaveBeenCalledWith({
-      data: [
-        expect.objectContaining({ day_of_week: 5, start_time: '18:00', end_time: '03:00' }),
-      ],
-    });
+    expect(writtenPos(prisma).business_hours.friday).toEqual({ open: '18:00', close: '03:00' });
   });
 
   it('upsertAll accepts 00:00-00:00 as 24 hours', async () => {
@@ -103,6 +228,17 @@ describe('BusinessHoursService', () => {
         ],
       } as any),
     ).resolves.toBeDefined();
+  });
+
+  it('upsertAll rejects a zero-length block other than 00:00-00:00', async () => {
+    const { service, prisma } = buildService();
+    await expect(
+      service.upsertAll(1, {
+        items: [{ day_of_week: 2, start_time: '09:00', end_time: '09:00', is_active: true }],
+      } as any),
+    ).rejects.toThrow('usa 00:00 a 00:00');
+    expect(prisma.store_settings.update).not.toHaveBeenCalled();
+    expect(prisma.store_settings.create).not.toHaveBeenCalled();
   });
 
   it('upsertAll rejects a day that overlaps the previous day overnight spill', async () => {

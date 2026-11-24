@@ -8,9 +8,9 @@ import { Type } from 'class-transformer';
 import { BusinessHoursDayDto } from './business-hours-day.dto';
 
 /**
- * Batch upsert payload for the weekly business-hours master calendar.
- * Replaces ALL rows for the current store (callers send every day they
- * want active). Days omitted from the payload are deactivated.
+ * Batch upsert payload for the store's single weekly schedule
+ * (`settings.pos.business_hours`). Only the days sent are rewritten;
+ * a day with `is_active: false` is closed, omitted days keep their hours.
  */
 export class UpsertBusinessHoursDto {
   @IsArray()

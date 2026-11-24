@@ -179,13 +179,50 @@ export interface WeeklyBlock {
   end_time: string;
 }
 
+/** `00:00-00:00`: the explicit "open 24 hours" block. */
+export function isFullDay(w: ClockWindow): boolean {
+  return w.start_time === '00:00' && w.end_time === '00:00';
+}
+
+/**
+ * Span of `w` (minutes from 00:00 of its own day) extended through the next
+ * day's block that starts exactly where `w` ends, so consecutive 24 h days or
+ * `17:00-04:00` followed by `04:00-...` read as one continuous window and a
+ * booking may cross midnight. One step only: the result never exceeds 2880.
+ * Same-day blocks keep their span (a block ending before 24:00 never chains).
+ */
+export function continuousSpan(w: ClockWindow, nextDayBlocks: ClockWindow[] = []): Span {
+  const own = windowSpan(w);
+  if (own.endMin < DAY_MIN) return own;
+  const joinAt = own.endMin - DAY_MIN;
+  let endMin = own.endMin;
+  for (const next of nextDayBlocks) {
+    const s = windowSpan(next);
+    if (s.startMin === joinAt) endMin = Math.max(endMin, DAY_MIN + s.endMin);
+  }
+  return { startMin: own.startMin, endMin: Math.min(endMin, 2 * DAY_MIN) };
+}
+
+export type WeeklyBlockProblem = { day: number; reason: 'format' | 'overlap' | 'zero' };
+
 /**
  * Validates a week of blocks: HH:MM format and no overlap on spans, including
  * the previous day's overnight spill. Returns the first offending day or null.
+ *
+ * `rejectZeroLength` (store and provider hours): a block whose end equals its
+ * start is rejected unless it is the explicit 24 h block `00:00-00:00`.
  */
-export function validateWeeklyBlocks(blocks: WeeklyBlock[]): { day: number; reason: 'format' | 'overlap' } | null {
+export function validateWeeklyBlocks(
+  blocks: WeeklyBlock[],
+  options: { rejectZeroLength?: boolean } = {},
+): WeeklyBlockProblem | null {
   for (const b of blocks) {
     if (!isClockTime(b.start_time) || !isClockTime(b.end_time)) return { day: b.day, reason: 'format' };
+  }
+  if (options.rejectZeroLength) {
+    for (const b of blocks) {
+      if (b.start_time === b.end_time && !isFullDay(b)) return { day: b.day, reason: 'zero' };
+    }
   }
   const byDay = new Map<number, ClockWindow[]>();
   for (const b of blocks) {
