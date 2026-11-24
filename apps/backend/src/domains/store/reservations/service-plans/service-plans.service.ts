@@ -5,10 +5,14 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { resolveStoreTimezone, localDateString } from '@common/utils/store-timezone.util';
 import { ErrorCodes, VendixHttpException } from '../../../../common/errors';
 import {
+  CreatePlanActivityDto,
   CreatePlanDepartureDto,
   PlanPaxTierDto,
+  UpdatePlanActivityDto,
   UpdatePlanDepartureDto,
 } from './dto/service-plan.dto';
+import { assertPlanDurationKeepsActivities } from './service-plan-duration.util';
+import { buildPublicItinerary, compareActivities, type PublicItineraryDay } from './service-plan-itinerary.util';
 import {
   findOverlappingTiers,
   isPlanProduct,
@@ -51,6 +55,37 @@ const PLAN_PRODUCT_SELECT = {
   plan_max_pax: true,
 } as const;
 
+type ActivityRow = {
+  id: number;
+  product_id: number;
+  day_number: number;
+  start_time: string | null;
+  title: string;
+  description: string | null;
+  sort_order: number;
+  provider_id: number | null;
+  supplier_name: string | null;
+  supplier_contact: string | null;
+  cost: Prisma.Decimal | number | null;
+  creates_task: boolean;
+  is_public: boolean;
+};
+
+/** Comprobante de una reserva de plan: evento, ida y regreso, grupo e itinerario público. */
+export interface PlanBookingItinerary {
+  booking_id: number;
+  product_id: number;
+  departure_id: number | null;
+  start_date: string;
+  end_date: string;
+  duration_days: number;
+  duration_nights: number | null;
+  pax_adults: number | null;
+  pax_children: number | null;
+  total_pax: number | null;
+  itinerary: PublicItineraryDay[];
+}
+
 type DepartureRow = {
   id: number;
   product_id: number;
@@ -74,7 +109,7 @@ export class ServicePlansService {
   async getPlan(productId: number, includePast = false) {
     const product = await this.findServiceProduct(productId);
     const today = await this.storeToday();
-    const [tiers, departures] = await Promise.all([
+    const [tiers, departures, activities] = await Promise.all([
       this.prisma.service_plan_pax_prices.findMany({
         where: { product_id: productId },
         orderBy: { min_pax: 'asc' },
@@ -86,6 +121,7 @@ export class ServicePlansService {
         },
         orderBy: [{ departure_date: 'asc' }, { id: 'asc' }],
       }),
+      this.prisma.service_plan_activities.findMany({ where: { product_id: productId } }),
     ]);
     return {
       product_id: product.id,
@@ -97,6 +133,7 @@ export class ServicePlansService {
       plan_max_pax: product.plan_max_pax,
       pax_prices: tiers.map((t) => this.mapTier(t)),
       departures: departures.map((d) => this.mapDeparture(d as DepartureRow)),
+      activities: (activities as ActivityRow[]).sort(compareActivities).map((a) => this.mapActivity(a)),
     };
   }
 
@@ -208,6 +245,155 @@ export class ServicePlansService {
       });
     }
     return this.mapDeparture(await this.findDeparture(productId, departureId));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Itinerario (QUI-1060 F2)
+  // ---------------------------------------------------------------------------
+
+  /** Agrega una actividad al final de su día. */
+  async createActivity(productId: number, dto: CreatePlanActivityDto) {
+    const product = await this.findPackageProduct(productId);
+    this.assertActivityDay(dto.day_number, product.plan_duration_days);
+    const title = this.requireTitle(dto.title);
+    const owner = await this.resolveActivityOwner(dto, null);
+    const storeId = this.requireStoreId();
+    const now = new Date();
+    const created = await this.prisma.service_plan_activities.create({
+      data: {
+        store_id: storeId,
+        product_id: productId,
+        day_number: dto.day_number,
+        start_time: dto.start_time ?? null,
+        title,
+        description: dto.description ?? null,
+        sort_order: await this.nextSortOrder(productId, dto.day_number),
+        ...owner,
+        cost: dto.cost != null ? new Prisma.Decimal(dto.cost) : null,
+        creates_task: dto.creates_task ?? false,
+        is_public: dto.is_public ?? true,
+        created_at: now,
+        updated_at: now,
+      },
+    });
+    return this.mapActivity(created as ActivityRow);
+  }
+
+  /** Edita una actividad; cambiar de día la manda al final del nuevo día. */
+  async updateActivity(productId: number, activityId: number, dto: UpdatePlanActivityDto) {
+    const product = await this.findPackageProduct(productId);
+    const current = await this.findActivity(productId, activityId);
+    const data: Prisma.service_plan_activitiesUpdateManyMutationInput = { updated_at: new Date() };
+
+    if (dto.day_number !== undefined && dto.day_number !== current.day_number) {
+      this.assertActivityDay(dto.day_number, product.plan_duration_days);
+      data.day_number = dto.day_number;
+      data.sort_order = await this.nextSortOrder(productId, dto.day_number);
+    }
+    if (dto.title !== undefined) data.title = this.requireTitle(dto.title);
+    if (dto.start_time !== undefined) data.start_time = dto.start_time;
+    if (dto.description !== undefined) data.description = dto.description;
+    if (dto.cost !== undefined) data.cost = dto.cost === null ? null : new Prisma.Decimal(dto.cost);
+    if (dto.creates_task !== undefined) data.creates_task = dto.creates_task;
+    if (dto.is_public !== undefined) data.is_public = dto.is_public;
+    if (dto.provider_id !== undefined || dto.supplier_name !== undefined || dto.supplier_contact !== undefined) {
+      Object.assign(data, await this.resolveActivityOwner(dto, current));
+    }
+
+    const storeId = this.requireStoreId();
+    await this.prisma.service_plan_activities.updateMany({
+      where: { id: activityId, store_id: storeId, product_id: productId },
+      data,
+    });
+    return this.mapActivity(await this.findActivity(productId, activityId));
+  }
+
+  async deleteActivity(productId: number, activityId: number): Promise<{ id: number }> {
+    await this.findPackageProduct(productId);
+    await this.findActivity(productId, activityId);
+    const storeId = this.requireStoreId();
+    await this.prisma.service_plan_activities.deleteMany({
+      where: { id: activityId, store_id: storeId, product_id: productId },
+    });
+    return { id: activityId };
+  }
+
+  /** Reordena un día: `activityIds` debe ser exactamente el conjunto de actividades de ese día. */
+  async reorderActivities(productId: number, dayNumber: number, activityIds: number[]) {
+    await this.findPackageProduct(productId);
+    const dayRows = await this.prisma.service_plan_activities.findMany({
+      where: { product_id: productId, day_number: dayNumber },
+      select: { id: true },
+    });
+    const expected = new Set(dayRows.map((r) => r.id));
+    const unique = new Set(activityIds);
+    if (unique.size !== activityIds.length || unique.size !== expected.size || activityIds.some((id) => !expected.has(id))) {
+      throw new VendixHttpException(ErrorCodes.SERVICE_PLAN_024);
+    }
+    const storeId = this.requireStoreId();
+    const now = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      for (const [index, id] of activityIds.entries()) {
+        await tx.service_plan_activities.updateMany({
+          where: { id, store_id: storeId, product_id: productId, day_number: dayNumber },
+          data: { sort_order: index, updated_at: now },
+        });
+      }
+    });
+    const rows = await this.prisma.service_plan_activities.findMany({
+      where: { product_id: productId, day_number: dayNumber },
+    });
+    return (rows as ActivityRow[]).sort(compareActivities).map((a) => this.mapActivity(a));
+  }
+
+  /**
+   * Comprobante de una reserva de plan: evento, ida y regreso, grupo e itinerario
+   * público con fechas reales (día 1 = fecha de inicio). null si no es de un plan.
+   */
+  async getBookingItinerary(bookingId: number): Promise<PlanBookingItinerary | null> {
+    const booking = await this.prisma.bookings.findFirst({
+      where: { id: bookingId },
+      select: {
+        id: true,
+        product_id: true,
+        date: true,
+        end_date: true,
+        departure_id: true,
+        pax_adults: true,
+        pax_children: true,
+        product: { select: PLAN_PRODUCT_SELECT },
+      },
+    });
+    if (!booking) throw new VendixHttpException(ErrorCodes.SERVICE_PLAN_026);
+    const product = booking.product;
+    if (!product || !isPlanProduct(product)) return null;
+
+    const days = product.plan_duration_days as number;
+    const start = this.dateOnly(booking.date);
+    const end = booking.end_date ? this.dateOnly(booking.end_date) : planReturnDate(start, days);
+    const activities = await this.prisma.service_plan_activities.findMany({
+      where: { product_id: product.id, is_public: true },
+    });
+    const adults = booking.pax_adults ?? null;
+    const children = booking.pax_children ?? null;
+    return {
+      booking_id: booking.id,
+      product_id: product.id,
+      departure_id: booking.departure_id ?? null,
+      start_date: start,
+      end_date: end,
+      duration_days: days,
+      duration_nights: product.plan_duration_nights ?? null,
+      pax_adults: adults,
+      pax_children: children,
+      total_pax: adults == null && children == null ? null : (adults ?? 0) + (children ?? 0),
+      itinerary: buildPublicItinerary(activities as ActivityRow[], days, start),
+    };
+  }
+
+  /** Ver `assertPlanDurationKeepsActivities`. */
+  async assertDurationKeepsActivities(productId: number, durationDays: number): Promise<void> {
+    await assertPlanDurationKeepsActivities(this.prisma, productId, durationDays);
   }
 
   // ---------------------------------------------------------------------------
@@ -357,6 +543,93 @@ export class ServicePlansService {
     });
     if (!departure) throw new VendixHttpException(ErrorCodes.SERVICE_PLAN_006);
     return departure as DepartureRow;
+  }
+
+  private async findActivity(productId: number, activityId: number): Promise<ActivityRow> {
+    const activity = await this.prisma.service_plan_activities.findFirst({
+      where: { id: activityId, product_id: productId },
+    });
+    if (!activity) throw new VendixHttpException(ErrorCodes.SERVICE_PLAN_022);
+    return activity as ActivityRow;
+  }
+
+  private assertActivityDay(day: number, durationDays: number | null): void {
+    if (durationDays == null || durationDays < 1) {
+      throw new VendixHttpException(
+        ErrorCodes.SERVICE_PLAN_019,
+        'Define la duración del plan (días) antes de cargar el itinerario.',
+      );
+    }
+    if (!Number.isInteger(day) || day < 1 || day > durationDays) {
+      throw new VendixHttpException(
+        ErrorCodes.SERVICE_PLAN_019,
+        `El plan dura ${durationDays} ${durationDays === 1 ? 'día' : 'días'}: elige un día entre 1 y ${durationDays}.`,
+      );
+    }
+  }
+
+  private requireTitle(title: string | null | undefined): string {
+    const value = typeof title === 'string' ? title.trim() : '';
+    if (!value) {
+      throw new VendixHttpException(ErrorCodes.SERVICE_PLAN_025);
+    }
+    return value;
+  }
+
+  /**
+   * Responsable efectivo (lo enviado sobre lo guardado): interno XOR tercero, y el
+   * interno debe ser un prestador de esta tienda.
+   */
+  private async resolveActivityOwner(
+    dto: { provider_id?: number | null; supplier_name?: string | null; supplier_contact?: string | null },
+    current: Pick<ActivityRow, 'provider_id' | 'supplier_name' | 'supplier_contact'> | null,
+  ): Promise<{ provider_id: number | null; supplier_name: string | null; supplier_contact: string | null }> {
+    const pick = <K extends 'provider_id' | 'supplier_name' | 'supplier_contact'>(key: K) =>
+      dto[key] !== undefined ? (dto[key] ?? null) : (current?.[key] ?? null);
+    const owner = {
+      provider_id: pick('provider_id') as number | null,
+      supplier_name: pick('supplier_name') as string | null,
+      supplier_contact: pick('supplier_contact') as string | null,
+    };
+    if (owner.provider_id != null && (owner.supplier_name != null || owner.supplier_contact != null)) {
+      throw new VendixHttpException(ErrorCodes.SERVICE_PLAN_020);
+    }
+    if (owner.provider_id != null && owner.provider_id !== current?.provider_id) {
+      const storeId = this.requireStoreId();
+      const provider = await this.prisma.service_providers.findFirst({
+        where: { id: owner.provider_id, store_id: storeId },
+        select: { id: true },
+      });
+      if (!provider) throw new VendixHttpException(ErrorCodes.SERVICE_PLAN_021);
+    }
+    return owner;
+  }
+
+  private async nextSortOrder(productId: number, dayNumber: number): Promise<number> {
+    const last = await this.prisma.service_plan_activities.findFirst({
+      where: { product_id: productId, day_number: dayNumber },
+      orderBy: { sort_order: 'desc' },
+      select: { sort_order: true },
+    });
+    return last ? last.sort_order + 1 : 0;
+  }
+
+  private mapActivity(a: ActivityRow) {
+    return {
+      id: a.id,
+      product_id: a.product_id,
+      day_number: a.day_number,
+      start_time: a.start_time,
+      title: a.title,
+      description: a.description,
+      sort_order: a.sort_order,
+      provider_id: a.provider_id,
+      supplier_name: a.supplier_name,
+      supplier_contact: a.supplier_contact,
+      cost: a.cost != null ? Number(a.cost) : null,
+      creates_task: a.creates_task,
+      is_public: a.is_public,
+    };
   }
 
   private async assertNotPast(date: string): Promise<void> {

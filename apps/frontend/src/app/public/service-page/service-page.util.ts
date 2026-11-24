@@ -22,10 +22,11 @@ export type ServiceCardData = Pick<
   | 'service_duration_unit'
   | 'service_modality'
   | 'requires_booking'
+  | 'is_plan'
   | 'categories'
 >;
 
-type ServiceLike = Pick<EcommerceProduct, 'id' | 'slug' | 'categories' | 'requires_booking'>;
+type ServiceLike = Pick<EcommerceProduct, 'id' | 'slug' | 'categories' | 'requires_booking' | 'is_plan'>;
 
 /** Categories of the listed services, in order of first appearance, with counts. */
 export function serviceCategories(services: ServiceLike[]): ServiceCategoryChip[] {
@@ -69,8 +70,15 @@ export function formatDuration(
 /**
  * Where "Reservar" goes: a bookable service opens the ecommerce booking
  * (`/book/:id`, the same route its product card uses); any other service
- * opens its detail, where it is added to the cart.
+ * opens its detail, where it is added to the cart. A multi-day plan (QUI-1060)
+ * is not booked online: it opens its detail, where the visitor contacts the store.
  */
 export function bookingTarget(service: ServiceLike): (string | number)[] {
-  return service.requires_booking ? ['/book', service.id] : ['/products', service.slug];
+  return service.requires_booking && !service.is_plan ? ['/book', service.id] : ['/products', service.slug];
+}
+
+/** Label of the card button: «Ver plan» for a plan, «Reservar» when it books, else «Ver servicio». */
+export function bookingLabel(service: Pick<ServiceLike, 'requires_booking' | 'is_plan'>, books: boolean): string {
+  if (service.is_plan) return 'Ver plan';
+  return service.requires_booking && books ? 'Reservar' : 'Ver servicio';
 }

@@ -342,6 +342,8 @@ const REQUIRED_TABLES = [
   // QUI-1060 — salidas y tramos de precio de planes (migración 20261229090000).
   'service_plan_departures',
   'service_plan_pax_prices',
+  // QUI-1060 F2 — itinerario del plan (migración 20261230090000).
+  'service_plan_activities',
 ];
 
 /** Tipos enum que el schema referencia y la base debe conocer. */

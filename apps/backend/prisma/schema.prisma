@@ -1234,6 +1234,7 @@ model stores {
   booking_series                 booking_series[]
   service_plan_departures        service_plan_departures[]
   service_plan_pax_prices        service_plan_pax_prices[]
+  service_plan_activities        service_plan_activities[]
   lodging_room_charges           lodging_room_charges[]
   lodging_housekeeping_tasks     lodging_housekeeping_tasks[]
   lodging_inventory_blocks       lodging_inventory_blocks[]
@@ -2544,6 +2545,7 @@ model products {
   booking_series_product_fkey booking_series[] @relation("booking_series_product_fkey")
   service_plan_departures_product_fkey service_plan_departures[] @relation("service_plan_departures_product_fkey")
   service_plan_pax_prices_product_fkey service_plan_pax_prices[] @relation("service_plan_pax_prices_product_fkey")
+  service_plan_activities_product_fkey service_plan_activities[] @relation("service_plan_activities_product_fkey")
 
   @@index([store_id, slug])
   @@index([store_id, sku])
@@ -11533,6 +11535,7 @@ model service_providers {
 
   service_station_providers_provider_fkey service_station_providers[] @relation("service_station_providers_provider_fkey")
   service_allocations_provider_fkey service_allocations[] @relation("service_allocations_provider_fkey")
+  service_plan_activities_provider_fkey service_plan_activities[] @relation("service_plan_activities_provider_fkey")
   booking_reschedule_requests_provider_store_fkey booking_reschedule_requests[] @relation("booking_reschedule_requests_provider_store_fkey")
 
   @@unique([store_id, employee_id])
@@ -17011,6 +17014,37 @@ model service_plan_pax_prices {
 
   @@index([store_id, product_id, min_pax], map: "service_plan_pax_prices_store_product_min_idx")
   @@map("service_plan_pax_prices")
+}
+
+/// QUI-1060 F2: actividad del itinerario de un plan, por día (1..plan_duration_days).
+/// Responsable interno (`provider_id`) o tercero (`supplier_*`), nunca los dos. Costo y
+/// responsables son internos: solo `is_public` sale al cliente (sin costo ni proveedor).
+model service_plan_activities {
+  id               Int      @id @default(autoincrement())
+  store_id         Int
+  product_id       Int
+  day_number       Int
+  /// `HH:mm` en la hora local de la tienda; null = sin hora.
+  start_time       String?  @db.VarChar(5)
+  title            String   @db.VarChar(200)
+  description      String?  @db.Text
+  sort_order       Int      @default(0)
+  provider_id      Int?
+  supplier_name    String?  @db.VarChar(200)
+  supplier_contact String?  @db.VarChar(200)
+  cost             Decimal? @db.Decimal(12, 2)
+  /// F3: crea una tarea al vender el plan.
+  creates_task     Boolean  @default(false)
+  is_public        Boolean  @default(true)
+  created_at       DateTime @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime @default(now()) @db.Timestamptz(6)
+
+  store    stores             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "service_plan_activities_store_fkey")
+  product  products           @relation("service_plan_activities_product_fkey", fields: [store_id, product_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_plan_activities_product_fkey")
+  provider service_providers? @relation("service_plan_activities_provider_fkey", fields: [store_id, provider_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_plan_activities_provider_fkey")
+
+  @@index([store_id, product_id, day_number, sort_order], map: "service_plan_activities_store_product_day_order_idx")
+  @@map("service_plan_activities")
 }
 
 enum service_deposit_kind_enum {

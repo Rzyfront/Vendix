@@ -25,12 +25,14 @@ import {
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import {
+  PlanActivity,
   PlanDeparture,
   PlanDepartureMode,
   PlanDepartureStatus,
   PlanPaxPrice,
   ServicePlansService,
 } from '../../services/service-plans.service';
+import { ServicePlanItineraryComponent } from './service-plan-itinerary.component';
 
 interface TierRow {
   min_pax: number | null;
@@ -69,6 +71,7 @@ const STATUS_LABELS: Record<PlanDepartureStatus, string> = {
     SpinnerComponent,
     TextareaComponent,
     CurrencyPipe,
+    ServicePlanItineraryComponent,
   ],
   template: `
     <section class="space-y-4 rounded-lg border border-border bg-surface p-4">
@@ -141,12 +144,12 @@ const STATUS_LABELS: Record<PlanDepartureStatus, string> = {
 
       @if (!productId()) {
         <p class="text-xs text-text-secondary">
-          Guarda el servicio para cargar tramos de precio y eventos.
+          Guarda el servicio para cargar tramos de precio, eventos e itinerario.
         </p>
       } @else if (loading()) {
         <div class="flex items-center gap-2 text-sm text-text-secondary">
           <app-spinner size="sm" color="primary"></app-spinner>
-          Cargando tramos y eventos...
+          Cargando tramos, eventos e itinerario...
         </div>
       } @else {
         <!-- Tramos de precio por tamaño de grupo -->
@@ -343,6 +346,13 @@ const STATUS_LABELS: Record<PlanDepartureStatus, string> = {
             }
           </div>
         }
+
+        <!-- Itinerario por día (QUI-1060 F2) -->
+        <app-service-plan-itinerary
+          [productId]="productId()!"
+          [durationDays]="durationDays()"
+          [(activities)]="activities"
+        ></app-service-plan-itinerary>
       }
     </section>
   `,
@@ -370,6 +380,9 @@ export class ServicePlanSectionComponent implements OnInit {
 
   readonly loading = signal(false);
   readonly mode = signal<PlanDepartureMode | null>(null);
+  /** Duración del formulario, en vivo: el itinerario muestra los días 1..N. */
+  readonly durationDays = signal<number | null>(null);
+  readonly activities = signal<PlanActivity[]>([]);
   readonly showDepartures = computed(() => this.mode() === 'fixed' || this.mode() === 'both');
 
   // Tramos
@@ -401,6 +414,13 @@ export class ServicePlanSectionComponent implements OnInit {
   }
 
   ngOnInit(): void {
+    const days = this.form().get('plan_duration_days');
+    if (days) {
+      this.durationDays.set(this.toNumber(days.value));
+      days.valueChanges
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe((value) => this.durationDays.set(this.toNumber(value)));
+    }
     const control = this.form().get('plan_departure_mode');
     if (!control) return;
     this.mode.set((control.value as PlanDepartureMode | null) ?? null);
@@ -412,6 +432,7 @@ export class ServicePlanSectionComponent implements OnInit {
   private reset(): void {
     this.tiers.set([]);
     this.departures.set([]);
+    this.activities.set([]);
     this.tiersDirty.set(false);
   }
 
@@ -424,6 +445,7 @@ export class ServicePlanSectionComponent implements OnInit {
         next: (plan) => {
           this.tiers.set(plan.pax_prices.map((p) => ({ min_pax: p.min_pax, max_pax: p.max_pax, price: p.price })));
           this.departures.set(plan.departures);
+          this.activities.set(plan.activities ?? []);
           this.tiersDirty.set(false);
           this.loading.set(false);
         },

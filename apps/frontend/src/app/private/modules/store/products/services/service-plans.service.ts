@@ -26,6 +26,55 @@ export interface PlanDeparture {
   notes: string | null;
 }
 
+/** Actividad del itinerario (QUI-1060 F2). Costo y responsables son internos. */
+export interface PlanActivity {
+  id: number;
+  product_id: number;
+  day_number: number;
+  start_time: string | null;
+  title: string;
+  description: string | null;
+  sort_order: number;
+  provider_id: number | null;
+  supplier_name: string | null;
+  supplier_contact: string | null;
+  cost: number | null;
+  creates_task: boolean;
+  is_public: boolean;
+}
+
+export interface PlanActivityInput {
+  day_number?: number;
+  start_time?: string | null;
+  title?: string;
+  description?: string | null;
+  provider_id?: number | null;
+  supplier_name?: string | null;
+  supplier_contact?: string | null;
+  cost?: number | null;
+  creates_task?: boolean;
+  is_public?: boolean;
+}
+
+/** Comprobante de una reserva de plan: evento, ida y regreso, grupo e itinerario público. */
+export interface PlanBookingItinerary {
+  booking_id: number;
+  product_id: number;
+  departure_id: number | null;
+  start_date: string;
+  end_date: string;
+  duration_days: number;
+  duration_nights: number | null;
+  pax_adults: number | null;
+  pax_children: number | null;
+  total_pax: number | null;
+  itinerary: {
+    day_number: number;
+    date: string | null;
+    activities: { start_time: string | null; title: string; description: string | null }[];
+  }[];
+}
+
 export interface ServicePlan {
   product_id: number;
   is_plan: boolean;
@@ -36,6 +85,7 @@ export interface ServicePlan {
   plan_max_pax: number | null;
   pax_prices: PlanPaxPrice[];
   departures: PlanDeparture[];
+  activities?: PlanActivity[];
 }
 
 export interface CreateDepartureInput {
@@ -84,5 +134,41 @@ export class ServicePlansService {
     return this.http
       .patch<{ data?: PlanDeparture }>(`${this.apiUrl}/${productId}/departures/${departureId}`, dto)
       .pipe(map((res) => (res?.data ?? (res as unknown as PlanDeparture))));
+  }
+
+  // ---- Itinerario (QUI-1060 F2) ----
+
+  createActivity(productId: number, dto: PlanActivityInput): Observable<PlanActivity> {
+    return this.http
+      .post<{ data?: PlanActivity }>(`${this.apiUrl}/${productId}/activities`, dto)
+      .pipe(map((res) => (res?.data ?? (res as unknown as PlanActivity))));
+  }
+
+  updateActivity(productId: number, activityId: number, dto: PlanActivityInput): Observable<PlanActivity> {
+    return this.http
+      .patch<{ data?: PlanActivity }>(`${this.apiUrl}/${productId}/activities/${activityId}`, dto)
+      .pipe(map((res) => (res?.data ?? (res as unknown as PlanActivity))));
+  }
+
+  deleteActivity(productId: number, activityId: number): Observable<{ id: number }> {
+    return this.http
+      .delete<{ data?: { id: number } }>(`${this.apiUrl}/${productId}/activities/${activityId}`)
+      .pipe(map((res) => (res?.data ?? (res as unknown as { id: number }))));
+  }
+
+  reorderActivities(productId: number, dayNumber: number, activityIds: number[]): Observable<PlanActivity[]> {
+    return this.http
+      .put<{ data?: PlanActivity[] }>(`${this.apiUrl}/${productId}/activities/reorder`, {
+        day_number: dayNumber,
+        activity_ids: activityIds,
+      })
+      .pipe(map((res) => (res?.data ?? (res as unknown as PlanActivity[]))));
+  }
+
+  /** Comprobante de una reserva: null cuando la reserva no es de un plan. */
+  getBookingItinerary(bookingId: number): Observable<PlanBookingItinerary | null> {
+    return this.http
+      .get<{ data?: PlanBookingItinerary | null }>(`${this.apiUrl}/bookings/${bookingId}/itinerary`)
+      .pipe(map((res) => res?.data ?? null));
   }
 }

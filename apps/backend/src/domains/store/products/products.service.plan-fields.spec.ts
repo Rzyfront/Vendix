@@ -31,3 +31,34 @@ describe('ProductsService.assertPlanFields (QUI-1060)', () => {
     expect(check({ plan_max_pax: null }, { plan_min_pax: 6, plan_max_pax: 4 })).not.toThrow();
   });
 });
+
+/** QUI-1060 F2: acortar el plan no deja actividades del itinerario fuera de rango. */
+describe('ProductsService.assertPlanDurationChange (QUI-1060 F2)', () => {
+  const build = (outside: number) => {
+    const service = Object.create(ProductsService.prototype) as any;
+    const count = jest.fn(async () => outside);
+    service.prisma = { service_plan_activities: { count } };
+    return { service, count };
+  };
+
+  it('rechaza bajar la duración con actividades en días que desaparecen', async () => {
+    const { service, count } = build(2);
+    await expect(service.assertPlanDurationChange(10, { plan_duration_days: 2 }, { plan_duration_days: 4 })).rejects.toMatchObject({
+      errorCode: 'SERVICE_PLAN_023',
+    });
+    expect(count).toHaveBeenCalledWith({ where: { product_id: 10, day_number: { gt: 2 } } });
+  });
+
+  it('permite bajarla si no quedan actividades fuera', async () => {
+    const { service } = build(0);
+    await expect(service.assertPlanDurationChange(10, { plan_duration_days: 2 }, { plan_duration_days: 4 })).resolves.toBeUndefined();
+  });
+
+  it('no consulta si la duración no baja o no se envía (servicios por horas intactos)', async () => {
+    const { service, count } = build(5);
+    await service.assertPlanDurationChange(10, { plan_duration_days: 5 }, { plan_duration_days: 4 });
+    await service.assertPlanDurationChange(10, { name: 'Corte' }, { plan_duration_days: null });
+    await service.assertPlanDurationChange(10, { plan_duration_days: null }, { plan_duration_days: 4 });
+    expect(count).not.toHaveBeenCalled();
+  });
+});

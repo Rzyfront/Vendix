@@ -1,4 +1,5 @@
 import {
+  bookingLabel,
   bookingTarget,
   formatDuration,
   serviceCategories,
@@ -38,5 +39,14 @@ describe('service page util', () => {
   it('books bookable services and opens the detail of the rest', () => {
     expect(bookingTarget(services[0])).toEqual(['/book', 10]);
     expect(bookingTarget(services[2])).toEqual(['/products', 'hidratacion']);
+  });
+
+  it('a multi-day plan opens its detail with «Ver plan» (QUI-1060)', () => {
+    const plan = { id: 14, slug: 'tour-3-dias', categories: [], requires_booking: true, is_plan: true };
+    expect(bookingTarget(plan)).toEqual(['/products', 'tour-3-dias']);
+    expect(bookingLabel(plan, true)).toBe('Ver plan');
+    expect(bookingLabel(services[0], true)).toBe('Reservar');
+    expect(bookingLabel(services[0], false)).toBe('Ver servicio');
+    expect(bookingLabel(services[2], true)).toBe('Ver servicio');
   });
 });

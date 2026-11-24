@@ -304,6 +304,7 @@ describe('CatalogService active promotions on listing', () => {
           provide: PriceResolverService,
           useValue: {
             resolvePrice: jest.fn(() => ({
+              unitPrice: 100,
               unitBasePrice: 100,
               unitPriceWithTax: 100,
             })),
@@ -1389,6 +1390,8 @@ describe('CatalogService public smart search (D.3)', () => {
         'is_available_now',
         'is_featured',
         'is_on_sale',
+        // QUI-1060 F2: la tarjeta de un plan abre su ficha (booleano, sin datos internos).
+        'is_plan',
         'loose_unit_price',
         'name',
         'next_available',

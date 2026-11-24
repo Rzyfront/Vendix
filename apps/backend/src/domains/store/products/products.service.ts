@@ -8,6 +8,7 @@ import {
   ForbiddenException,
   Optional,
 } from '@nestjs/common';
+import { assertPlanDurationKeepsActivities } from '../reservations/service-plans/service-plan-duration.util';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 // El ranking de "más vendidos" NO define su propio criterio de venta: reutiliza
@@ -1010,6 +1011,21 @@ export class ProductsService {
     if (min != null && max != null && min > max) {
       throw new VendixHttpException(ErrorCodes.SERVICE_PLAN_003);
     }
+  }
+
+  /**
+   * QUI-1060 F2: acortar un plan (o volver a darle días) no puede dejar actividades
+   * del itinerario en días que ya no existen. Solo consulta cuando la duración baja.
+   */
+  private async assertPlanDurationChange(
+    productId: number,
+    dto: Record<string, any>,
+    existing: { plan_duration_days?: number | null },
+  ): Promise<void> {
+    const days = dto.plan_duration_days;
+    if (typeof days !== 'number') return;
+    if (existing.plan_duration_days != null && days >= existing.plan_duration_days) return;
+    await assertPlanDurationKeepsActivities(this.prisma, productId, days);
   }
 
   /** S2 (T15): a rental pricing mode only makes sense for a service that requires a station. */
@@ -4371,6 +4387,7 @@ export class ProductsService {
         effectiveProductType === ProductType.SERVICE && !!effectiveRequiresStation;
       this.assertRentalPricingMode(sanitizedDto.rental_pricing_mode, isStationService);
       this.assertPlanFields(sanitizedDto, existingProduct);
+      await this.assertPlanDurationChange(id, sanitizedDto, existingProduct);
       // A product that stops being a station service cannot keep a rental mode.
       if (!isStationService && sanitizedDto.rental_pricing_mode === undefined) {
         sanitizedDto.rental_pricing_mode = null;

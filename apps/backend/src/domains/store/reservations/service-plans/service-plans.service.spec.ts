@@ -88,6 +88,7 @@ function buildDb() {
     products: delegate(products),
     service_plan_departures: delegate(departures),
     service_plan_pax_prices: delegate(tiers),
+    service_plan_activities: delegate([]),
     bookings: delegate(bookings),
     store_settings: { findFirst: jest.fn(async () => ({ settings: {}, stores: { timezone: 'America/Bogota' } })) },
     $executeRaw: jest.fn(async (strings: TemplateStringsArray, ...values: any[]) => {

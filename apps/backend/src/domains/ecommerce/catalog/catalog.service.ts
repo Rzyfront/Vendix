@@ -7,6 +7,7 @@ import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prism
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { CatalogQueryDto, ProductSortBy } from './dto/catalog-query.dto';
 import { RequestContextService } from '@common/context/request-context.service';
+import { isPlanProduct } from '../../store/reservations/service-plans/service-plan-pricing.util';
 import { S3Service } from '@common/services/s3.service';
 import { PriceResolverService } from '../../store/products/services/price-resolver.service';
 import {
@@ -1419,6 +1420,8 @@ export class CatalogService {
       variant_count: variantCount,
       product_type: product.product_type,
       requires_booking: product.requires_booking,
+      // QUI-1060 F2: la tarjeta de un plan abre su ficha (no se reserva en línea).
+      is_plan: isPlanProduct(product),
       service_duration_minutes: product.service_duration_minutes,
       service_duration_unit: product.service_duration_unit ?? null,
       rental_pricing_mode: product.rental_pricing_mode ?? null,
@@ -1581,6 +1584,10 @@ export class CatalogService {
       service_modality: product.service_modality,
       booking_mode: product.booking_mode,
       preparation_time_minutes: product.preparation_time_minutes ?? null,
+      // QUI-1060 F2: la ficha pide la ficha del plan (`plans/:id`) solo cuando esto es true.
+      is_plan: isPlanProduct(product),
+      plan_duration_days: isPlanProduct(product) ? product.plan_duration_days : null,
+      plan_duration_nights: isPlanProduct(product) ? (product.plan_duration_nights ?? null) : null,
     };
   }
 
