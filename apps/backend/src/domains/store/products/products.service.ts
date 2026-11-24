@@ -991,9 +991,27 @@ export class ProductsService {
   }
 
   /**
-   * Validates and normalizes product data based on product_type.
-   * Services cannot have physical attributes (weight, inventory, serial numbers).
+   * QUI-1060 modo Plan: noches ≤ días y mínimo de personas ≤ máximo, sobre el valor
+   * efectivo (lo enviado o, al editar, lo guardado).
    */
+  private assertPlanFields(
+    dto: Record<string, any>,
+    existing?: { plan_duration_days?: number | null; plan_duration_nights?: number | null; plan_min_pax?: number | null; plan_max_pax?: number | null } | null,
+  ): void {
+    const pick = (key: 'plan_duration_days' | 'plan_duration_nights' | 'plan_min_pax' | 'plan_max_pax') =>
+      dto[key] !== undefined ? dto[key] : (existing?.[key] ?? null);
+    const days = pick('plan_duration_days');
+    const nights = pick('plan_duration_nights');
+    const min = pick('plan_min_pax');
+    const max = pick('plan_max_pax');
+    if (days != null && nights != null && nights > days) {
+      throw new VendixHttpException(ErrorCodes.SERVICE_PLAN_017);
+    }
+    if (min != null && max != null && min > max) {
+      throw new VendixHttpException(ErrorCodes.SERVICE_PLAN_003);
+    }
+  }
+
   /** S2 (T15): a rental pricing mode only makes sense for a service that requires a station. */
   private assertRentalPricingMode(
     mode: string | null | undefined,
@@ -1006,6 +1024,10 @@ export class ProductsService {
     }
   }
 
+  /**
+   * Validates and normalizes product data based on product_type.
+   * Services cannot have physical attributes (weight, inventory, serial numbers).
+   */
   private validateByProductType(dto: Record<string, any>): void {
     if (dto.product_type !== ProductType.SERVICE) return;
 
@@ -1291,6 +1313,7 @@ export class ProductsService {
         sanitizedDto.product_type === ProductType.SERVICE &&
           !!sanitizedDto.requires_station,
       );
+      this.assertPlanFields(sanitizedDto);
       // A station-rate service with no booking mode would stay offline-only
       // ("provider_required"): default to free booking. An explicit value wins.
       if (
@@ -3526,6 +3549,9 @@ export class ProductsService {
             service_modality: product.service_modality,
             service_pricing_type: product.service_pricing_type,
             service_instructions: product.service_instructions,
+            // QUI-1060: el modal de reservas decide con estos si pide fecha fin o es un plan.
+            service_duration_unit: product.service_duration_unit,
+            plan_duration_days: product.plan_duration_days,
             image_url: signed_image_url || null,
             brand: product.brands,
             categories:
@@ -3755,6 +3781,9 @@ export class ProductsService {
           service_modality: product.service_modality,
           service_pricing_type: product.service_pricing_type,
           service_instructions: product.service_instructions,
+          // QUI-1060: el modal de reservas decide con estos si pide fecha fin o es un plan.
+          service_duration_unit: product.service_duration_unit,
+          plan_duration_days: product.plan_duration_days,
           image_url: signed_image_url || null,
           brand: product.brands,
           categories:
@@ -4084,6 +4113,15 @@ export class ProductsService {
       service_duration_unit: product.service_duration_unit,
       service_modality: product.service_modality,
       service_pricing_type: product.service_pricing_type,
+      // QUI-1060: el editor recarga la ficha del plan desde este mapeo.
+      plan_duration_days: product.plan_duration_days,
+      plan_duration_nights: product.plan_duration_nights,
+      plan_departure_mode: product.plan_departure_mode,
+      plan_min_pax: product.plan_min_pax,
+      plan_max_pax: product.plan_max_pax,
+      plan_includes: product.plan_includes,
+      plan_excludes: product.plan_excludes,
+      plan_recommendations: product.plan_recommendations,
       requires_booking: product.requires_booking,
       requires_station: product.requires_station,
       // The edit form patches it: leaving it out reset a station rental to "none" on save.
@@ -4332,6 +4370,7 @@ export class ProductsService {
       const isStationService =
         effectiveProductType === ProductType.SERVICE && !!effectiveRequiresStation;
       this.assertRentalPricingMode(sanitizedDto.rental_pricing_mode, isStationService);
+      this.assertPlanFields(sanitizedDto, existingProduct);
       // A product that stops being a station service cannot keep a rental mode.
       if (!isStationService && sanitizedDto.rental_pricing_mode === undefined) {
         sanitizedDto.rental_pricing_mode = null;

@@ -1232,6 +1232,8 @@ model stores {
   payment_requests               payment_requests[]
   service_station_rate_windows   service_station_rate_windows[]
   booking_series                 booking_series[]
+  service_plan_departures        service_plan_departures[]
+  service_plan_pax_prices        service_plan_pax_prices[]
   lodging_room_charges           lodging_room_charges[]
   lodging_housekeeping_tasks     lodging_housekeeping_tasks[]
   lodging_inventory_blocks       lodging_inventory_blocks[]
@@ -2311,6 +2313,19 @@ model products {
   rental_pricing_mode            rental_pricing_mode_enum?
   service_modality               service_modality_enum?
   service_pricing_type           service_pricing_type_enum?
+  /// QUI-1060 modo Plan (service_pricing_type = package): duración en días del plan. NULL = no es plan de varios días.
+  plan_duration_days             Int?
+  /// Noches del plan (informativo, ≤ días).
+  plan_duration_nights           Int?
+  /// Cómo se venden las salidas del plan: fijas, a fecha libre o ambas.
+  plan_departure_mode            service_plan_departure_mode_enum?
+  /// Tamaño de grupo admitido (pax totales = adultos + niños).
+  plan_min_pax                   Int?
+  plan_max_pax                   Int?
+  /// Ficha informativa del plan.
+  plan_includes                  String?                          @db.Text
+  plan_excludes                  String?                          @db.Text
+  plan_recommendations           String?                          @db.Text
   requires_booking               Boolean                          @default(false)
   /// CP-estaciones-servicio-reservas-qr-presupue A.2: opt-in, preserving legacy behavior.
   requires_station               Boolean                          @default(false)
@@ -2527,6 +2542,8 @@ model products {
   service_station_services_product_fkey service_station_services[] @relation("service_station_services_product_fkey")
   service_sessions_product_fkey service_sessions[] @relation("service_sessions_product_fkey")
   booking_series_product_fkey booking_series[] @relation("booking_series_product_fkey")
+  service_plan_departures_product_fkey service_plan_departures[] @relation("service_plan_departures_product_fkey")
+  service_plan_pax_prices_product_fkey service_plan_pax_prices[] @relation("service_plan_pax_prices_product_fkey")
 
   @@index([store_id, slug])
   @@index([store_id, sku])
@@ -11394,6 +11411,11 @@ model bookings {
   /// the same booking atomically. NULL when the booking was created
   /// outside the POS (ecommerce, reservations module, etc.).
   cart_item_id              String?                       @db.VarChar(80)
+  /// QUI-1060: salida fija del plan que ocupa esta reserva (NULL = fecha libre o servicio normal).
+  departure_id              Int?
+  /// QUI-1060: tamaño del grupo del plan. NULL en servicios normales.
+  pax_adults                Int?
+  pax_children              Int?
   created_at                DateTime?                     @default(now()) @db.Timestamp(6)
   updated_at                DateTime?                     @default(now()) @db.Timestamp(6)
 
@@ -11427,6 +11449,8 @@ model bookings {
 
   series booking_series? @relation("bookings_series_fkey", fields: [series_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "bookings_series_id_fkey")
 
+  departure service_plan_departures? @relation("bookings_departure_fkey", fields: [departure_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "bookings_departure_id_fkey")
+
   @@unique([store_id, booking_number])
   @@unique([series_id, series_index], map: "bookings_series_id_series_index_key")
   @@unique([store_id, id])
@@ -11437,6 +11461,7 @@ model bookings {
   @@index([provider_id])
   @@index([order_id])
   @@index([store_id, table_id])
+  @@index([departure_id])
 }
 
 /// Per-store business hours: the master calendar the booking flow consults
@@ -16931,6 +16956,61 @@ model booking_series {
 
   @@index([store_id, created_at], map: "booking_series_store_created_idx")
   @@map("booking_series")
+}
+
+/// QUI-1060 modo Plan: cómo se venden las salidas de un plan de varios días.
+enum service_plan_departure_mode_enum {
+  fixed
+  on_demand
+  both
+}
+
+/// QUI-1060: estado de una salida fija de un plan.
+enum service_plan_departure_status_enum {
+  open
+  closed
+  cancelled
+}
+
+/// QUI-1060: salida fija de un plan (fecha, cupo y vendidos). `seats_sold` se mueve
+/// con una actualización condicional atómica al reservar y al cancelar.
+model service_plan_departures {
+  id             Int                                @id @default(autoincrement())
+  store_id       Int
+  product_id     Int
+  departure_date DateTime                           @db.Date
+  capacity       Int
+  seats_sold     Int                                @default(0)
+  price_override Decimal?                           @db.Decimal(12, 2)
+  status         service_plan_departure_status_enum @default(open)
+  notes          String?                            @db.Text
+  created_at     DateTime                           @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime                           @default(now()) @db.Timestamptz(6)
+
+  store    stores     @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "service_plan_departures_store_fkey")
+  product  products   @relation("service_plan_departures_product_fkey", fields: [store_id, product_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_plan_departures_product_fkey")
+  bookings bookings[] @relation("bookings_departure_fkey")
+
+  @@index([store_id, product_id, departure_date], map: "service_plan_departures_store_product_date_idx")
+  @@map("service_plan_departures")
+}
+
+/// QUI-1060: precio del paquete según tamaño del grupo (tramos sin solape por producto).
+model service_plan_pax_prices {
+  id         Int      @id @default(autoincrement())
+  store_id   Int
+  product_id Int
+  min_pax    Int
+  max_pax    Int
+  price      Decimal  @db.Decimal(12, 2)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+
+  store   stores   @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "service_plan_pax_prices_store_fkey")
+  product products @relation("service_plan_pax_prices_product_fkey", fields: [store_id, product_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_plan_pax_prices_product_fkey")
+
+  @@index([store_id, product_id, min_pax], map: "service_plan_pax_prices_store_product_min_idx")
+  @@map("service_plan_pax_prices")
 }
 
 enum service_deposit_kind_enum {

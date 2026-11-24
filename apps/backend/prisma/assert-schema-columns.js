@@ -306,6 +306,19 @@ const REQUIRED_COLUMNS = [
   'ai_engine_logs.finish_reason',
   'ai_engine_logs.attempt',
   'ai_engine_logs.validation_error',
+  // QUI-1060 modo Plan (migración 20261229090000): toda lectura de products y
+  // bookings selecciona estas columnas; sin ellas el catálogo y la agenda dan 500.
+  'products.plan_duration_days',
+  'products.plan_duration_nights',
+  'products.plan_departure_mode',
+  'products.plan_min_pax',
+  'products.plan_max_pax',
+  'products.plan_includes',
+  'products.plan_excludes',
+  'products.plan_recommendations',
+  'bookings.departure_id',
+  'bookings.pax_adults',
+  'bookings.pax_children',
 ];
 
 /** Tablas cuya ausencia completa es igual de fatal. */
@@ -326,6 +339,9 @@ const REQUIRED_TABLES = [
   // QUI-1010 — bot de monitoreo (migración 20261205100000_platform_alerts): el
   // filtro global de errores y el barrido de colas escriben aquí en caliente.
   'platform_alerts',
+  // QUI-1060 — salidas y tramos de precio de planes (migración 20261229090000).
+  'service_plan_departures',
+  'service_plan_pax_prices',
 ];
 
 /** Tipos enum que el schema referencia y la base debe conocer. */
@@ -336,6 +352,9 @@ const REQUIRED_ENUM_TYPES = [
   'transfer_movement_mode_enum',
   'transfer_transport_method_enum',
   'transfer_support_document_type_enum',
+  // QUI-1060 — modo Plan (20261229090000).
+  'service_plan_departure_mode_enum',
+  'service_plan_departure_status_enum',
 ];
 
 /**

@@ -697,6 +697,59 @@ export class CreateProductDto {
   @IsEnum(ServicePricingType)
   service_pricing_type?: ServicePricingType;
 
+  // QUI-1060 modo Plan (solo con service_pricing_type = package). null limpia el valor.
+  @ApiPropertyOptional({ nullable: true, description: 'Duración del plan en días (modo Plan).' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'Los días del plan deben ser un número entero' })
+  @Min(1, { message: 'El plan dura mínimo 1 día' })
+  @Max(365)
+  plan_duration_days?: number | null;
+
+  @ApiPropertyOptional({ nullable: true, description: 'Noches del plan (informativo, no supera los días).' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'Las noches del plan deben ser un número entero' })
+  @Min(0, { message: 'Las noches del plan no pueden ser negativas' })
+  @Max(365)
+  plan_duration_nights?: number | null;
+
+  @ApiPropertyOptional({ enum: ['fixed', 'on_demand', 'both'], nullable: true })
+  @IsOptional()
+  @IsIn(['fixed', 'on_demand', 'both'], { message: 'El modo de eventos del plan debe ser fijos, a fecha libre o ambos' })
+  plan_departure_mode?: 'fixed' | 'on_demand' | 'both' | null;
+
+  @ApiPropertyOptional({ nullable: true, description: 'Mínimo de personas del grupo.' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'El mínimo de personas debe ser un número entero' })
+  @Min(1, { message: 'El mínimo de personas es 1' })
+  @Max(999)
+  plan_min_pax?: number | null;
+
+  @ApiPropertyOptional({ nullable: true, description: 'Máximo de personas del grupo.' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'El máximo de personas debe ser un número entero' })
+  @Min(1, { message: 'El máximo de personas es 1' })
+  @Max(999)
+  plan_max_pax?: number | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(5000)
+  plan_includes?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(5000)
+  plan_excludes?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(5000)
+  plan_recommendations?: string | null;
+
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
@@ -1276,6 +1329,59 @@ export class UpdateProductDto {
   @IsOptional()
   @IsEnum(ServicePricingType)
   service_pricing_type?: ServicePricingType;
+
+  // QUI-1060 modo Plan (solo con service_pricing_type = package). null limpia el valor.
+  @ApiPropertyOptional({ nullable: true, description: 'Duración del plan en días (modo Plan).' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'Los días del plan deben ser un número entero' })
+  @Min(1, { message: 'El plan dura mínimo 1 día' })
+  @Max(365)
+  plan_duration_days?: number | null;
+
+  @ApiPropertyOptional({ nullable: true, description: 'Noches del plan (informativo, no supera los días).' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'Las noches del plan deben ser un número entero' })
+  @Min(0, { message: 'Las noches del plan no pueden ser negativas' })
+  @Max(365)
+  plan_duration_nights?: number | null;
+
+  @ApiPropertyOptional({ enum: ['fixed', 'on_demand', 'both'], nullable: true })
+  @IsOptional()
+  @IsIn(['fixed', 'on_demand', 'both'], { message: 'El modo de eventos del plan debe ser fijos, a fecha libre o ambos' })
+  plan_departure_mode?: 'fixed' | 'on_demand' | 'both' | null;
+
+  @ApiPropertyOptional({ nullable: true, description: 'Mínimo de personas del grupo.' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'El mínimo de personas debe ser un número entero' })
+  @Min(1, { message: 'El mínimo de personas es 1' })
+  @Max(999)
+  plan_min_pax?: number | null;
+
+  @ApiPropertyOptional({ nullable: true, description: 'Máximo de personas del grupo.' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'El máximo de personas debe ser un número entero' })
+  @Min(1, { message: 'El máximo de personas es 1' })
+  @Max(999)
+  plan_max_pax?: number | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(5000)
+  plan_includes?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(5000)
+  plan_excludes?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(5000)
+  plan_recommendations?: string | null;
 
   @IsOptional()
   @IsBoolean()
@@ -2202,6 +2308,59 @@ export class UpdateProductWithVariantsDto {
   @IsOptional()
   @IsEnum(ServicePricingType)
   service_pricing_type?: ServicePricingType;
+
+  // QUI-1060 modo Plan (solo con service_pricing_type = package). null limpia el valor.
+  @ApiPropertyOptional({ nullable: true, description: 'Duración del plan en días (modo Plan).' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'Los días del plan deben ser un número entero' })
+  @Min(1, { message: 'El plan dura mínimo 1 día' })
+  @Max(365)
+  plan_duration_days?: number | null;
+
+  @ApiPropertyOptional({ nullable: true, description: 'Noches del plan (informativo, no supera los días).' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'Las noches del plan deben ser un número entero' })
+  @Min(0, { message: 'Las noches del plan no pueden ser negativas' })
+  @Max(365)
+  plan_duration_nights?: number | null;
+
+  @ApiPropertyOptional({ enum: ['fixed', 'on_demand', 'both'], nullable: true })
+  @IsOptional()
+  @IsIn(['fixed', 'on_demand', 'both'], { message: 'El modo de eventos del plan debe ser fijos, a fecha libre o ambos' })
+  plan_departure_mode?: 'fixed' | 'on_demand' | 'both' | null;
+
+  @ApiPropertyOptional({ nullable: true, description: 'Mínimo de personas del grupo.' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'El mínimo de personas debe ser un número entero' })
+  @Min(1, { message: 'El mínimo de personas es 1' })
+  @Max(999)
+  plan_min_pax?: number | null;
+
+  @ApiPropertyOptional({ nullable: true, description: 'Máximo de personas del grupo.' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'El máximo de personas debe ser un número entero' })
+  @Min(1, { message: 'El máximo de personas es 1' })
+  @Max(999)
+  plan_max_pax?: number | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(5000)
+  plan_includes?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(5000)
+  plan_excludes?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(5000)
+  plan_recommendations?: string | null;
 
   @IsOptional()
   @IsBoolean()

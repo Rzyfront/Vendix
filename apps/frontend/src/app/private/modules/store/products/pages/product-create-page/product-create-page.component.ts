@@ -146,6 +146,7 @@ import {
   PrincipalChangeGuard,
   SaleUnitSectionComponent,
 } from '../../components/sale-unit-section/sale-unit-section.component';
+import { ServicePlanSectionComponent } from '../../components/service-plan-section/service-plan-section.component';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import {
   PriceTiersService,
@@ -275,6 +276,7 @@ interface PriceTierOverrideRow {
     SelectorComponent,
     MultiSelectorComponent,
     SaleUnitSectionComponent,
+    ServicePlanSectionComponent,
     TextareaComponent,
     ModalComponent,
     SettingToggleComponent,
@@ -1753,6 +1755,14 @@ export class ProductCreatePageComponent {
         rental_pricing_mode: 'none',
         service_modality: null,
         service_pricing_type: null,
+        plan_duration_days: null,
+        plan_duration_nights: null,
+        plan_departure_mode: null,
+        plan_min_pax: null,
+        plan_max_pax: null,
+        plan_includes: '',
+        plan_excludes: '',
+        plan_recommendations: '',
         requires_booking: false,
         booking_mode: null,
         is_recurring: false,
@@ -2857,6 +2867,14 @@ export class ProductCreatePageComponent {
         rental_pricing_mode: ['none'],
         service_modality: [null],
         service_pricing_type: [null],
+        plan_duration_days: [null, [Validators.min(1)]],
+        plan_duration_nights: [null, [Validators.min(0)]],
+        plan_departure_mode: [null],
+        plan_min_pax: [null, [Validators.min(1)]],
+        plan_max_pax: [null, [Validators.min(1)]],
+        plan_includes: [''],
+        plan_excludes: [''],
+        plan_recommendations: [''],
         requires_booking: [false],
         requires_station: [false],
         booking_mode: [null],
@@ -3221,6 +3239,14 @@ export class ProductCreatePageComponent {
       rental_pricing_mode: product.rental_pricing_mode || 'none',
       service_modality: product.service_modality || null,
       service_pricing_type: product.service_pricing_type || null,
+      plan_duration_days: product.plan_duration_days ?? null,
+      plan_duration_nights: product.plan_duration_nights ?? null,
+      plan_departure_mode: product.plan_departure_mode ?? null,
+      plan_min_pax: product.plan_min_pax ?? null,
+      plan_max_pax: product.plan_max_pax ?? null,
+      plan_includes: product.plan_includes ?? '',
+      plan_excludes: product.plan_excludes ?? '',
+      plan_recommendations: product.plan_recommendations ?? '',
       requires_booking: product.requires_booking || false,
       requires_station: product.requires_station || false,
       booking_mode: product.booking_mode || null,
@@ -4803,6 +4829,10 @@ export class ProductCreatePageComponent {
       service_duration_minutes: 'Duración del servicio',
       service_modality: 'Modalidad del servicio',
       service_pricing_type: 'Tipo de precio del servicio',
+      plan_duration_days: 'Duración del plan (días)',
+      plan_duration_nights: 'Noches del plan',
+      plan_min_pax: 'Mínimo de personas del plan',
+      plan_max_pax: 'Máximo de personas del plan',
       service_instructions: 'Instrucciones del servicio',
       preparation_time_minutes: 'Tiempo de preparación',
       kds_id: 'Estación de preparación',
@@ -4915,6 +4945,29 @@ export class ProductCreatePageComponent {
         });
       }
     });
+
+    // (a.1) Plan / paquete: coherencia entre días, noches y personas ------------
+    if (this.isPackageService()) {
+      const planDays = this.numOrNull(form.get('plan_duration_days')?.value);
+      const planNights = this.numOrNull(form.get('plan_duration_nights')?.value);
+      const planMin = this.numOrNull(form.get('plan_min_pax')?.value);
+      const planMax = this.numOrNull(form.get('plan_max_pax')?.value);
+      const planIssue =
+        planNights != null && planDays != null && planNights > planDays
+          ? { id: 'plan_duration_nights', reason: 'Las noches no pueden superar los días del plan.' }
+          : planMin != null && planMax != null && planMin > planMax
+            ? { id: 'plan_min_pax', reason: 'El mínimo de personas no puede superar al máximo.' }
+            : null;
+      if (planIssue) {
+        requirements.push({
+          id: `plan:${planIssue.id}`,
+          label: 'Plan / paquete',
+          reason: planIssue.reason,
+          severity: 'required',
+          action: { label: 'Ir al campo', kind: 'focus', target: planIssue.id },
+        });
+      }
+    }
 
     // (b) Validaciones de variantes (trasladadas fielmente desde onSubmit) --
     if (this.hasVariants) {
@@ -5152,6 +5205,56 @@ export class ProductCreatePageComponent {
     return ProductUtils.generateSlug(typed);
   }
 
+  /** El formulario del servicio es de tipo paquete: muestra la sección «Plan / paquete». */
+  isPackageService(): boolean {
+    return this.productForm.get('service_pricing_type')?.value === 'package';
+  }
+
+  private numOrNull(value: unknown): number | null {
+    if (value === null || value === undefined || value === '') return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  /**
+   * Campos de plan del payload. Con tipo de cobro distinto de paquete se envían en null, así un
+   * servicio que deja de ser plan no conserva datos de plan; los tramos y salidas no se tocan.
+   */
+  private planPayload(formValue: Record<string, any>): {
+    plan_duration_days: number | null;
+    plan_duration_nights: number | null;
+    plan_departure_mode: 'fixed' | 'on_demand' | 'both' | null;
+    plan_min_pax: number | null;
+    plan_max_pax: number | null;
+    plan_includes: string | null;
+    plan_excludes: string | null;
+    plan_recommendations: string | null;
+  } {
+    if (formValue['service_pricing_type'] !== 'package') {
+      return {
+        plan_duration_days: null,
+        plan_duration_nights: null,
+        plan_departure_mode: null,
+        plan_min_pax: null,
+        plan_max_pax: null,
+        plan_includes: null,
+        plan_excludes: null,
+        plan_recommendations: null,
+      };
+    }
+    const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+    return {
+      plan_duration_days: this.numOrNull(formValue['plan_duration_days']),
+      plan_duration_nights: this.numOrNull(formValue['plan_duration_nights']),
+      plan_departure_mode: formValue['plan_departure_mode'] || null,
+      plan_min_pax: this.numOrNull(formValue['plan_min_pax']),
+      plan_max_pax: this.numOrNull(formValue['plan_max_pax']),
+      plan_includes: text(formValue['plan_includes']),
+      plan_excludes: text(formValue['plan_excludes']),
+      plan_recommendations: text(formValue['plan_recommendations']),
+    };
+  }
+
   onSubmit(stockUomConversion?: 'convert'): void {
     if (this.isSubmitting()) return;
     this.productForm.markAllAsTouched();
@@ -5316,6 +5419,7 @@ export class ProductCreatePageComponent {
             : null,
         service_modality: formValue.service_modality || undefined,
         service_pricing_type: formValue.service_pricing_type || undefined,
+        ...this.planPayload(formValue),
         requires_booking: !!formValue.requires_booking,
         requires_station: !!formValue.requires_station,
         booking_mode: formValue.booking_mode || undefined,
