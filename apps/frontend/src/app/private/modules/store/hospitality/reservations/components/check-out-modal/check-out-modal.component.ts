@@ -33,6 +33,7 @@ import { LodgingKeyHandover } from '../../interfaces/key-handover.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
 import { invoiceStateLabel } from '../../../shared/hospitality-labels';
 import { HospitalityLoadErrorComponent } from '../../../shared/load-error.component';
+import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { CheckoutCleanSuggestionComponent } from '../../../housekeeping/components/checkout-clean-suggestion/checkout-clean-suggestion.component';
 
 /** Methods the desk registers by hand; gateways settle themselves. */
@@ -335,6 +336,7 @@ export class CheckOutModalComponent {
   private readonly toastService = inject(ToastService);
   private readonly currency = inject(CurrencyFormatService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly authFacade = inject(AuthFacade);
 
   /** Reservation in house to check out; `null` keeps the modal closed. */
   readonly reservation = input<LodgingReservation | null>(null);
@@ -361,9 +363,19 @@ export class CheckOutModalComponent {
   /** H8.4 (D12) — keys the guests still have: a reminder, never a block. */
   readonly keysOut = signal<LodgingKeyHandover[]>([]);
   readonly returningKeyId = signal<number | null>(null);
+  /**
+   * F3 — who may assign the clean at the check-out (the API accepts either
+   * permission); anyone else closing the folio never sees the step.
+   */
+  readonly canAssignClean = computed(
+    () =>
+      this.authFacade.ownerFlag() ||
+      this.authFacade.hasPermission('store:lodging:housekeeping:assign') ||
+      this.authFacade.hasPermission('store:lodging:front_desk:operate'),
+  );
   /** F3 — the clean is offered once the reservation left (never before). */
   readonly cleanReservationId = computed(() =>
-    this.result() ? (this.reservation()?.id ?? null) : null,
+    this.result() && this.canAssignClean() ? (this.reservation()?.id ?? null) : null,
   );
   readonly allPaid = computed(() => this.split()?.accounts.every((a) => a.payment_state === 'paid') ?? true);
   protected readonly Number = Number;

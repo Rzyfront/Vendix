@@ -10,6 +10,8 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import { LodgingHousekeepingService } from '../../../housekeeping/services/housekeeping.service';
 import { LodgingReservation } from '../../interfaces/reservation.interface';
+import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
+import { signal } from '@angular/core';
 
 /**
  * Agenda unificada (F3) — closing the check-out offers the room's clean in
@@ -45,7 +47,16 @@ describe('CheckOutModalComponent — limpieza sugerida al cerrar', () => {
     document.querySelector('app-checkout-clean-suggestion') ??
     (fixture.nativeElement as HTMLElement).querySelector('app-checkout-clean-suggestion');
 
+  const owner = signal(false);
+  const permissions = signal<string[]>(['store:lodging:front_desk:operate']);
+  const authFacade = {
+    ownerFlag: owner,
+    hasPermission: (p: string) => permissions().includes(p),
+  };
+
   beforeEach(async () => {
+    owner.set(false);
+    permissions.set(['store:lodging:front_desk:operate']);
     reservations = jasmine.createSpyObj<LodgingReservationsService>('LodgingReservationsService', [
       'listKeys',
       'getFolio',
@@ -74,6 +85,7 @@ describe('CheckOutModalComponent — limpieza sugerida al cerrar', () => {
         provideRouter([]),
         { provide: LodgingReservationsService, useValue: reservations },
         { provide: LodgingHousekeepingService, useValue: housekeeping },
+        { provide: AuthFacade, useValue: authFacade },
         { provide: PaymentMethodsCatalogService, useValue: { getEnabledMethods: () => of([]) } },
         { provide: CurrencyFormatService, useValue: { format: (n: number) => `$${n}` } },
         {
@@ -103,5 +115,24 @@ describe('CheckOutModalComponent — limpieza sugerida al cerrar', () => {
     expect(component.cleanReservationId()).toBe(9);
     expect(housekeeping.checkoutCleanSuggestion).toHaveBeenCalledWith(9);
     expect(suggestionHost()).not.toBeNull();
+  });
+
+  it('no muestra el paso a quien cierra la cuenta sin permiso para asignar limpieza', async () => {
+    permissions.set(['store:lodging:folio:close']);
+    component.confirm();
+    await render();
+
+    expect(reservations.checkOut).toHaveBeenCalled();
+    expect(component.cleanReservationId()).toBeNull();
+    expect(housekeeping.checkoutCleanSuggestion).not.toHaveBeenCalled();
+  });
+
+  it('el owner o quien tiene housekeeping:assign sí lo ve', async () => {
+    permissions.set([]);
+    owner.set(true);
+    expect(component.canAssignClean()).toBeTrue();
+    owner.set(false);
+    permissions.set(['store:lodging:housekeeping:assign']);
+    expect(component.canAssignClean()).toBeTrue();
   });
 });

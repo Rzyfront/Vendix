@@ -6,6 +6,7 @@ import { CheckoutCleanSuggestionComponent } from './checkout-clean-suggestion.co
 import { LodgingHousekeepingService } from '../../services/housekeeping.service';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import { CheckoutCleanSuggestion } from '../../interfaces/housekeeping.interface';
+import { HOSPITALITY_TERMS } from '../../../shared/hospitality-labels';
 
 /**
  * Agenda unificada (F3) — the check-out suggests the room's clean with the
@@ -88,7 +89,8 @@ describe('CheckoutCleanSuggestionComponent — limpieza sugerida al check-out', 
   it('pone primero al personal del rol de limpieza en la lista recomendada', () => {
     const options = component.staffOptions();
     expect(options.map((o) => o.value)).toEqual([2, 1, 0]);
-    expect(options[0].label).toBe('Luz Gómez · Limpieza');
+    // The role is named as in Configuración › Usuarios (hospitality glossary).
+    expect(options[0].label).toBe(`Luz Gómez · ${HOSPITALITY_TERMS.housekeeper}`);
     expect(options[0].description).toContain('Recomendada');
     expect(options[1].description).toContain('Otro personal');
     expect(options[2].label).toBe('Sin asignar');
@@ -133,5 +135,25 @@ describe('CheckoutCleanSuggestionComponent — limpieza sugerida al check-out', 
     expect(component.drafts().length).toBe(0);
     expect(host().querySelector('[data-testid="checkout-clean-accept"]')).toBeNull();
     expect(host().textContent).toContain('ya está limpia hoy');
+  });
+
+  it('sin nadie del rol de limpieza deja «Sin asignar» y avisa con el nombre del rol', async () => {
+    const none = suggestion();
+    none.staff = [{ id: 1, name: 'Ana Admin', is_cleaning_role: false, pending_tasks: 0 }];
+    none.rooms[0].suggested_user_id = null;
+    service.checkoutCleanSuggestion.and.returnValue(of(none));
+    component.load();
+    await render();
+
+    expect(component.drafts()[0].userId).toBe(0);
+    const notice = host().querySelector('[data-testid="checkout-clean-no-staff"]');
+    expect(notice?.textContent).toContain(`«${HOSPITALITY_TERMS.housekeeper}»`);
+    expect(notice?.textContent).toContain('Configuración › Usuarios');
+    // The rest of the staff stays a manual choice.
+    expect(component.staffOptions().map((o) => o.value)).toEqual([1, 0]);
+  });
+
+  it('con personal del rol de limpieza no muestra el aviso', () => {
+    expect(host().querySelector('[data-testid="checkout-clean-no-staff"]')).toBeNull();
   });
 });

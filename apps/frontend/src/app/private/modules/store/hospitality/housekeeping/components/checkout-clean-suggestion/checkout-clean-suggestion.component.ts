@@ -112,10 +112,10 @@ interface RoomDraft {
             @for (room of doneRooms(); track room.unit_id) {
               <p class="text-xs text-text-secondary">Hab. {{ room.code }}: ya está limpia hoy.</p>
             }
-            @if (staff().length === 0) {
+            @if (!hasCleaningStaff()) {
               <p class="text-xs text-text-secondary" data-testid="checkout-clean-no-staff">
-                No hay personal con el rol {{ roleLabel }}. Créalo en Configuración › Usuarios; mientras tanto la
-                tarea queda sin asignar.
+                Nadie tiene el rol «{{ roleLabel }}». Asígnalo en Configuración › Usuarios; mientras tanto la
+                tarea queda sin asignar{{ staff().length > 0 ? ' o puedes elegir a otra persona' : '' }}.
               </p>
             }
             <div class="space-y-3">
@@ -202,6 +202,9 @@ export class CheckoutCleanSuggestionComponent {
   readonly drafts = signal<RoomDraft[]>([]);
   readonly doneRooms = signal<CheckoutCleanRoom[]>([]);
   readonly saved = signal<CheckoutCleanResultRow[]>([]);
+
+  /** Someone holds the fixed cleaning role (else the clean starts unassigned). */
+  readonly hasCleaningStaff = computed(() => this.staff().some((s) => s.is_cleaning_role));
 
   /** Recommended order as the API ranks it, then "Sin asignar". */
   readonly staffOptions = computed<SelectorOption[]>(() => [

@@ -1,3 +1,4 @@
+import { HOSPITALITY_TERMS } from '../../shared/hospitality-labels';
 import { HousekeepingStatus } from '../../rooms/interfaces/unit.interface';
 
 /** Hospitality Suite (H5.1) — guest situation of a room today. */
@@ -126,9 +127,11 @@ export interface HousekeepingTaskError {
 
 /**
  * Agenda unificada (F3) — display name of the fixed cleaning role (internal
- * key `housekeeper`). Default while the owner picks the final name.
+ * key `housekeeper`), taken from the hospitality glossary so the check-out
+ * names it exactly as Configuración › Usuarios does. Renaming the role is a
+ * change of that single term.
  */
-export const CLEANING_ROLE_LABEL = 'Limpieza';
+export const CLEANING_ROLE_LABEL: string = HOSPITALITY_TERMS.housekeeper;
 
 /** A person the check-out recommends for the clean, cleaning role first. */
 export interface CheckoutCleanStaff {
