@@ -2018,8 +2018,41 @@ export class MenuFilterService {
    */
   private anyOfKeysFor(item: MenuItem): string[] {
     return (item.panelUiAnyOf ?? []).filter(
-      (key) => key !== 'orders_scheduled' || this.scheduledOrdersEnabled(),
+      (key) => key !== 'orders_scheduled' || this.scheduledOrdersOn(),
     );
+  }
+
+  /**
+   * `scheduled_orders.enabled`. The layout hydrates `scheduledOrdersEnabled`
+   * once it mounts; guards run before that, so they also read the setting
+   * from the session (the industry layer still applies through the gate).
+   */
+  private scheduledOrdersOn(): boolean {
+    if (this.scheduledOrdersEnabled()) return true;
+    const settings = this.authFacade.storeSettings() as
+      | { scheduled_orders?: { enabled?: boolean } }
+      | null
+      | undefined;
+    return settings?.scheduled_orders?.enabled === true;
+  }
+
+  /**
+   * Keys of an entry that gathers several modules (`panelUiAnyOf`) that the
+   * current user can open, each one on its own through every layer
+   * (agenda-unificada F1, «Agenda»). Same verdict as the URL guard per key:
+   * the pre-F4 panel layers (user and store `panel_ui`, industry, store type;
+   * the owner skips them, as in `panelUiGuard`) and then the access gate
+   * (industry in enforce mode, plan). The screen shows each source only when
+   * its key is here.
+   */
+  openAnyOfKeys(keys: readonly string[], surface: AccessSurface = 'url'): string[] {
+    const owner = this.authFacade.isOwner();
+    return this.anyOfKeysFor({ panelUiAnyOf: [...keys] } as MenuItem).filter((key) => {
+      if (!owner && !this.diagnose({ label: key, icon: '', panelUiKey: key } as MenuItem).visible) {
+        return false;
+      }
+      return this.applyAccessGate([key], true, surface);
+    });
   }
 
   /** Normalizes `moduleKeyMap`'s `string | string[] | undefined` to an array. */

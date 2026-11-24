@@ -293,6 +293,10 @@ export const MODULE_GATE_ROUTES: Record<string, string[]> = {
   consultations: ['/admin/consultations'],
   products: ['/admin/products'],
   orders: ['/admin/orders'],
+  // Agenda unificada F1: Órdenes → Agenda reúne Reservas y Pedidos
+  // programados; la gobiernan las dos keys (OR en `applyAccessGate`).
+  orders_reservations: ['/admin/orders/agenda'],
+  orders_scheduled: ['/admin/orders/agenda'],
   inventory: ['/admin/inventory'],
   customers: ['/admin/customers'],
   marketing: ['/admin/marketing'],

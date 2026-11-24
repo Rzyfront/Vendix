@@ -2,8 +2,10 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, map } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
+import { MenuFilterService } from '../../../../../core/services/menu-filter.service';
 import {
   SchedulingCalendarResult,
+  SchedulingEventType,
   SchedulingListResponse,
   SchedulingQuery,
   SchedulingSources,
@@ -29,29 +31,71 @@ export function schedulingParams(query: SchedulingQuery): HttpParams {
   return params;
 }
 
-/** Órdenes → Programación y Agenda: lectura agregada (`/store/scheduling`). */
+/** Key de módulo del panel de cada fuente. */
+export const TYPE_KEY: Record<SchedulingEventType, string> = {
+  booking: 'orders_reservations',
+  scheduled_order: 'orders_scheduled',
+};
+
+/** Órdenes → Agenda: lectura agregada (`/store/scheduling`). */
 @Injectable({ providedIn: 'root' })
 export class SchedulingApiService {
   private readonly http = inject(HttpClient);
+  private readonly menuFilter = inject(MenuFilterService);
   private readonly baseUrl = `${environment.apiUrl}/store/scheduling`;
 
+  /**
+   * Fuentes que el backend habilita (industria, permiso, ajuste) ∩ las que el
+   * panel del usuario deja abiertas (`panel_ui` de usuario y tienda, plan):
+   * reservas con `orders_reservations`, pedidos con `orders_scheduled`.
+   */
   getSources(): Observable<SchedulingSources> {
     return this.http
       .get<ApiResponse<SchedulingSources>>(`${this.baseUrl}/sources`)
-      .pipe(map((r) => r.data));
+      .pipe(map((r) => this.restrictToPanel(r.data)));
   }
 
   getEvents(query: SchedulingQuery): Observable<SchedulingListResponse> {
     return this.http
-      .get<SchedulingListResponse>(`${this.baseUrl}/events`, { params: schedulingParams(query) })
+      .get<SchedulingListResponse>(`${this.baseUrl}/events`, {
+        params: schedulingParams(this.withPanelTypes(query)),
+      })
       .pipe(map((r) => ({ data: r.data ?? [], meta: r.meta })));
   }
 
   getCalendar(query: SchedulingQuery & { from: string; to: string }): Observable<SchedulingCalendarResult> {
     return this.http
       .get<ApiResponse<SchedulingCalendarResult>>(`${this.baseUrl}/calendar`, {
-        params: schedulingParams(query),
+        params: schedulingParams(this.withPanelTypes(query)),
       })
       .pipe(map((r) => r.data));
+  }
+
+  /** Tipos que el panel del usuario deja ver. */
+  panelTypes(): SchedulingEventType[] {
+    const open = this.menuFilter.openAnyOfKeys(Object.values(TYPE_KEY), 'url');
+    return (Object.keys(TYPE_KEY) as SchedulingEventType[]).filter((type) =>
+      open.includes(TYPE_KEY[type]),
+    );
+  }
+
+  private restrictToPanel(sources: SchedulingSources): SchedulingSources {
+    const allowed = this.panelTypes();
+    const types = (sources?.types ?? []).filter((t) => allowed.includes(t.value));
+    return {
+      ...sources,
+      types,
+      // El personal es de reservas: sin reservas abiertas no se ofrece.
+      staff: types.some((t) => t.value === 'booking') ? (sources?.staff ?? []) : [],
+    };
+  }
+
+  /** Sin filtro de tipo se piden solo los tipos abiertos en el panel. */
+  private withPanelTypes<T extends SchedulingQuery>(query: T): T {
+    const allowed = this.panelTypes();
+    const types = query.types?.length
+      ? query.types.filter((type) => allowed.includes(type))
+      : allowed;
+    return { ...query, types };
   }
 }

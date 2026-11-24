@@ -12,18 +12,9 @@ import { vexAccessGuard } from '../../core/guards/vex-access.guard';
 import { storeDashboardGuard } from '../../core/guards/store-dashboard.guard'; // QUI-418
 import { HomePanelService } from '../../private/modules/store/dashboard/home-panels/home-panel.service';
 import {
-  AGENDA_ROUTE,
-  agendaQueryParams,
-  type AgendaTab,
-  type ConfigSection,
-} from '../../private/modules/store/scheduling/scheduling-tabs';
-
-/** Redirección de una URL vieja a su pestaña de Órdenes → Agenda (F1). */
-export function agendaTabRedirect(tab: AgendaTab, section?: ConfigSection) {
-  return inject(Router).createUrlTree([AGENDA_ROUTE], {
-    queryParams: agendaQueryParams(tab, section),
-  });
-}
+  agendaAccessGuard,
+  agendaTabRedirect,
+} from '../../private/modules/store/scheduling/agenda-access.guard';
 import { appKindGuard } from '../../private/modules/store/apps/utils/app-routes.util';
 import {
   panelUiGuard,
@@ -518,6 +509,8 @@ export const storeAdminRoutes: Routes = [
           },
           {
             path: 'agenda',
+            // Abre si Reservas o Pedidos programados pasan todas las capas.
+            canActivate: [agendaAccessGuard],
             loadChildren: () =>
               import('../../private/modules/store/scheduling/scheduling.routes').then(
                 (r) => r.SCHEDULING_AGENDA_ROUTES,

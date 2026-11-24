@@ -1520,10 +1520,46 @@ describe('MenuFilterService — Órdenes: Agenda (agenda-unificada F1)', () => {
     for (const route of NEW_ROUTES) expect(routes).withContext(route).not.toContain(route);
   });
 
-  it('la ruta de Agenda no queda gobernada por una sola de las dos keys en la URL', () => {
+  it('la URL de Agenda la gobiernan las dos keys (OR), no solo «orders»', () => {
     for (const route of NEW_ROUTES) {
+      // El índice pre-F4 no la cierra por una sola key (la cierra agendaAccessGuard).
       expect(service.resolveKeysForRoute(route)).withContext(route).toEqual([]);
-      expect(service.resolveGateKeysForRoute(route)).withContext(route).toEqual(['orders']);
+      expect(service.resolveGateKeysForRoute(route).sort()).withContext(route).toEqual(
+        ['orders_reservations', 'orders_scheduled'],
+      );
     }
+  });
+
+  it('openAnyOfKeys: reservas apagadas en el panel del usuario → la Agenda no abre por URL', () => {
+    setStore(['service']);
+    setUserPanel({ orders: true, orders_sales: true, orders_reservations: false, orders_scheduled: true });
+    expect(service.openAnyOfKeys(['orders_reservations', 'orders_scheduled'])).toEqual([]);
+  });
+
+  it('openAnyOfKeys: reservas apagadas para toda la tienda → cerrada también', () => {
+    setStore(['service'], { panel_ui: { STORE_ADMIN: { orders_reservations: false } } });
+    expect(service.openAnyOfKeys(['orders_reservations', 'orders_scheduled'])).toEqual([]);
+  });
+
+  it('openAnyOfKeys: industria mixta con reservas apagadas → entra solo con pedidos', () => {
+    setStore(['service', 'restaurant'], { scheduled_orders: { enabled: true } });
+    setUserPanel({ orders: true, orders_sales: true, orders_reservations: false, orders_scheduled: true });
+    expect(service.openAnyOfKeys(['orders_reservations', 'orders_scheduled'])).toEqual(['orders_scheduled']);
+    // Sin el ajuste de pedidos (ni hidratado ni en la sesión): nada.
+    setStore(['service', 'restaurant']);
+    expect(service.openAnyOfKeys(['orders_reservations', 'orders_scheduled'])).toEqual([]);
+  });
+
+  it('openAnyOfKeys: con las dos abiertas entran ambas; el owner salta el panel pero no la industria de pedidos', () => {
+    setStore(['service', 'restaurant'], { scheduled_orders: { enabled: true } });
+    expect(service.openAnyOfKeys(['orders_reservations', 'orders_scheduled'])).toEqual([
+      'orders_reservations',
+      'orders_scheduled',
+    ]);
+    owner = true;
+    setUserPanel({ orders: true });
+    setStore(['service'], { scheduled_orders: { enabled: true } });
+    // Pedidos programados aplica su industria siempre (ENFORCED_INDUSTRY_KEYS).
+    expect(service.openAnyOfKeys(['orders_reservations', 'orders_scheduled'])).toEqual(['orders_reservations']);
   });
 });
