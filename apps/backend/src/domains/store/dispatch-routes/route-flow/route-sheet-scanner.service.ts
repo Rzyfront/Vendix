@@ -21,16 +21,21 @@ import {
   ROUTE_SHEET_MAX_BYTES,
   ROUTE_SHEET_PROFILE,
 } from './route-sheet-ingest.profile';
-import { RouteFlowService } from './route-flow.service';
+import { AtomicStopItem, RouteFlowService } from './route-flow.service';
 import { DispatchRoutesService } from '../dispatch-routes.service';
 import { SettleStopDto } from '../dto';
-import { deriveStopIsPrepaid } from '../utils/route-stop-calc';
+import {
+  derivePendingAmount,
+  deriveStopIsPrepaid,
+} from '../utils/route-stop-calc';
 import {
   ConfirmRouteSheetDto,
   RouteSheetMatchResult,
   RouteSheetMatchedStop,
   RouteSheetScanResult,
   RouteSheetScanStop,
+  RouteSheetStopResult,
+  ROUTE_SHEET_MAX_AMOUNT,
 } from './dto/scan-route-sheet.dto';
 
 /**
@@ -39,12 +44,14 @@ import {
  * 1:1 calque of `InvoiceScannerService` for dispatch route sheets:
  *   /scan    → shared page reader (ai-ingest) with 'route_sheet_ocr' + normalize (no persist)
  *   /match   → resolve each extracted row to a real stop (no persist)
- *   /confirm → settle confirmed stops via RouteFlowService.settleStop +
- *              persist the PDF (S3 KEY) and scan metadata on the route.
+ *   /confirm → settle / release the confirmed stops and persist the PDF
+ *              (S3 KEY) + scan metadata, all in ONE transaction.
  *
  * All Prisma access goes through `StorePrismaService` (store-scoped). Settlement
- * is NOT reimplemented — it is delegated to `RouteFlowService.settleStop`, which
- * owns the cash/AR/withholding/refund event fan-out.
+ * is NOT reimplemented — it is delegated to
+ * `RouteFlowService.settleStopsAtomically`, which reuses the validations and
+ * writes of `settleStop` / `releaseStop` and owns the cash/AR/withholding/refund
+ * event fan-out.
  */
 @Injectable()
 export class RouteSheetScannerService implements OnModuleInit {
@@ -206,7 +213,15 @@ export class RouteSheetScannerService implements OnModuleInit {
         result: true,
         collected_amount: true,
         dispatch_note: {
-          select: { dispatch_number: true, grand_total: true },
+          select: {
+            dispatch_number: true,
+            grand_total: true,
+            // Live payment signals: the review must know which stops are
+            // already paid (never collected) and what is really owed.
+            needs_collection: true,
+            invoice: { select: { payment_date: true } },
+            order: { select: { remaining_balance: true } },
+          },
         },
       },
     });
@@ -262,13 +277,20 @@ export class RouteSheetScannerService implements OnModuleInit {
               result: resolved.result ?? null,
               grand_total: Number(resolved.dispatch_note?.grand_total ?? 0),
               collected_amount: Number(resolved.collected_amount ?? 0),
+              is_prepaid: deriveStopIsPrepaid(resolved),
+              pending_amount: derivePendingAmount(resolved),
             }
           : null,
         suggested_result: this.deriveResult(
           extracted.delivered,
           Number(extracted.collected_amount ?? 0),
           Number(resolved?.dispatch_note?.grand_total ?? 0),
+          resolved ? deriveStopIsPrepaid(resolved) : false,
         ),
+        // Entrega y cobro van separados: la sugerencia es solo de ENTREGA.
+        // Lo que la hoja no marca como entregado queda pendiente — rechazar o
+        // liberar exige motivo y lo decide el operador, nunca la IA.
+        suggested_outcome: extracted.delivered ? 'delivered' : 'pending',
       });
     }
 
@@ -284,9 +306,24 @@ export class RouteSheetScannerService implements OnModuleInit {
   // ───────────────────────────────────────────────────────────────────────────
 
   /**
-   * Settle the human-confirmed stops in batch (delegating to
-   * `RouteFlowService.settleStop`), upload the route-sheet PDF to S3 (storing
-   * the KEY, never a presigned URL), and persist the scan metadata on the route.
+   * Settle the human-confirmed stops of a route sheet, ALL OR NOTHING.
+   *
+   *   1. Validate the whole payload before writing: the scan confidence is a
+   *      0-100 percentage (stored as a 0-1 fraction), rejecting/releasing needs
+   *      a reason, a prepaid or not-delivered stop carries no collection. Any
+   *      problem → `RTSCAN_CONFIRM_INVALID` (400) and nothing is written.
+   *   2. Upload the sheet to S3 (store the KEY, never a presigned URL).
+   *   3. Settle / release every stop AND persist the scan metadata in ONE
+   *      transaction (`RouteFlowService.settleStopsAtomically`, which reuses
+   *      the same validations and writes as the manual settle/release). A
+   *      failure in the middle rolls everything back.
+   *
+   * Already-terminal stops and stops outside the route are reconciled into
+   * `skipped[]` (idempotent re-confirm). Stops whose outcome is not decided
+   * (legacy `delivered: false` without `result`, or a delivered stop whose
+   * cash does not cover the net) stay untouched in `skipped[]` too.
+   * `errors[]` is kept for the response contract and is always empty: a
+   * failing stop now aborts the whole confirm instead of half-applying it.
    */
   async confirmAndSettle(
     routeId: number,
@@ -296,8 +333,9 @@ export class RouteSheetScannerService implements OnModuleInit {
     const store_id = this.getStoreId();
     this.assertValidFile(file);
 
-    // Validate the route belongs to the store, and resolve net totals per stop
-    // (needed to derive the settle result when not explicitly provided).
+    // Out-of-range confidence → 400 here, never a P2020 inside the write.
+    const scan_confidence = this.toScanConfidence(dto.scan_result?.confidence);
+
     const route = await this.prisma.dispatch_routes.findFirst({
       where: { id: routeId, store_id },
       select: { id: true },
@@ -306,9 +344,8 @@ export class RouteSheetScannerService implements OnModuleInit {
       throw new VendixHttpException(ErrorCodes.RTSCAN_MATCH_001);
     }
 
-    // Read every stop of the route once: net total (for result derivation) and
-    // CURRENT status (for the idempotent reconciliation). We index by the stop's
-    // own id so a decision pointing at a stop NOT in this route is detected.
+    // Read every stop of the route once: net total (for result derivation),
+    // DERIVED prepaid and CURRENT status (for the idempotent reconciliation).
     const stopIds = dto.stops.map((s) => s.stop_id);
     const stops = await this.prisma.dispatch_route_stops.findMany({
       where: { route_id: routeId, id: { in: stopIds } },
@@ -319,10 +356,8 @@ export class RouteSheetScannerService implements OnModuleInit {
           select: {
             grand_total: true,
             // Señales de pago vivas para DERIVAR el prepago (nunca el
-            // `is_prepaid` congelado de la parada). El escáner liquida en lote
-            // por `settleStop`, así que debe juzgar la cobertura del cobro con
-            // el mismo criterio que él: una remisión ya pagada no tiene neto
-            // que cubrir y no puede caer en "cobro corto".
+            // `is_prepaid` congelado de la parada): una remisión ya pagada no
+            // tiene neto que cubrir ni admite cobro.
             needs_collection: true,
             invoice: { select: { payment_date: true } },
             order: { select: { remaining_balance: true } },
@@ -349,9 +384,6 @@ export class RouteSheetScannerService implements OnModuleInit {
     // idempotent and reconcile against the live state, so we skip them.
     const TERMINAL_STATUSES = new Set(['delivered', 'rejected', 'released']);
 
-    // 1. Settle each confirmed stop via the existing settleStop flow, with
-    //    per-stop reconciliation. One failing stop must NOT abort the batch.
-    const settled: Array<{ stop_id: number; result: string }> = [];
     // `collected_amount` / `net` solo viajan con
     // `reason: 'short_payment_requires_decision'`, para que el operador vea
     // cuánto falta sin tener que reabrir la parada.
@@ -361,7 +393,9 @@ export class RouteSheetScannerService implements OnModuleInit {
       collected_amount?: number;
       net?: number;
     }> = [];
-    const errors: Array<{ stop_id: number; message: string }> = [];
+    const invalid: Array<{ stop_id: number; message: string }> = [];
+    const items: AtomicStopItem[] = [];
+    let batchCollected = 0;
 
     for (const decision of dto.stops) {
       const current = stopById.get(decision.stop_id);
@@ -372,7 +406,7 @@ export class RouteSheetScannerService implements OnModuleInit {
         continue;
       }
 
-      // Already in a terminal state — do NOT call settleStop (it would 400).
+      // Already in a terminal state — do NOT settle it again (it would 400).
       // This is the reconciliation that makes re-confirming a sheet idempotent.
       if (TERMINAL_STATUSES.has(current.status)) {
         skipped.push({ stop_id: decision.stop_id, reason: 'already_settled' });
@@ -380,91 +414,143 @@ export class RouteSheetScannerService implements OnModuleInit {
       }
 
       const collected_amount = Number(decision.collected_amount ?? 0);
-      const resolvedResult =
-        (decision.result as dispatch_route_stop_result_enum) ??
-        this.deriveResult(
-          decision.delivered,
-          collected_amount,
-          current.net,
-          current.is_prepaid,
-        );
+      const breakdown = this.cleanBreakdown(decision.withholding_breakdown);
+      const withholding = breakdown
+        ? Number(breakdown.retefuente || 0) +
+          Number(breakdown.reteiva || 0) +
+          Number(breakdown.reteica || 0)
+        : 0;
 
-      // Entregada con cobro menor al neto: no hay resultado derivable. En ruta el
-      // pago es total o no hay entrega, así que ni liquidamos ni elegimos por el
-      // operador — reversar inventario ya despachado (`rejected`) o asumir el
-      // faltante (`delivered`) es una decisión de caja suya. La parada queda sin
-      // tocar y el batch sigue con las demás.
-      if (resolvedResult == null) {
-        skipped.push({
+      let result: RouteSheetStopResult | null = decision.result ?? null;
+      if (!result) {
+        // Legacy payload (only the `delivered` flag). Not delivered is NOT a
+        // silent rejection anymore: rejecting needs a reason, so the stop stays
+        // untouched until the operator decides.
+        if (decision.delivered !== true) {
+          skipped.push({ stop_id: decision.stop_id, reason: 'outcome_required' });
+          continue;
+        }
+        // Entregada con cobro menor al neto: no hay resultado derivable. En
+        // ruta el pago es total o no hay entrega, así que ni liquidamos ni
+        // elegimos por el operador — la parada queda sin tocar.
+        if (
+          this.deriveResult(true, collected_amount, current.net, current.is_prepaid) ==
+          null
+        ) {
+          skipped.push({
+            stop_id: decision.stop_id,
+            reason: 'short_payment_requires_decision',
+            collected_amount,
+            net: current.net,
+          });
+          continue;
+        }
+        result = 'delivered';
+      }
+
+      const reason = decision.reason?.trim() || '';
+      const hasCollection = collected_amount > 0 || withholding > 0;
+      if (result !== 'delivered' && !reason) {
+        invalid.push({
           stop_id: decision.stop_id,
-          reason: 'short_payment_requires_decision',
-          collected_amount,
-          net: current.net,
+          message: `Indica el motivo para ${result === 'rejected' ? 'rechazar' : 'liberar'} la parada.`,
         });
+      }
+      if (current.is_prepaid && hasCollection) {
+        invalid.push({
+          stop_id: decision.stop_id,
+          message:
+            'La orden ya está pagada: no se registra cobro sobre esta parada.',
+        });
+      } else if (result !== 'delivered' && hasCollection) {
+        invalid.push({
+          stop_id: decision.stop_id,
+          message: `Una parada ${result === 'rejected' ? 'rechazada' : 'liberada'} no registra cobro.`,
+        });
+      }
+      batchCollected += collected_amount + withholding;
+
+      if (result === 'released') {
+        items.push({ kind: 'release', stop_id: decision.stop_id, reason });
         continue;
       }
 
       const settleDto = new SettleStopDto();
-      settleDto.result = resolvedResult;
+      settleDto.result = result;
       settleDto.collected_amount = collected_amount;
-      settleDto.payment_method = decision.payment_method;
-      settleDto.withholding_breakdown = decision.withholding_breakdown;
-      // Derive withholding_amount from the breakdown sum. settleStop reads
-      // `dto.withholding_amount` (not the breakdown) for the withholding-agent
-      // gate and requires it to equal the breakdown sum, so a scanner payload
-      // that only carries the breakdown would otherwise 400 for a retenedor.
-      const wb = decision.withholding_breakdown as
-        | { retefuente?: number; reteiva?: number; reteica?: number }
-        | undefined;
-      if (wb) {
-        settleDto.withholding_amount =
-          Number(wb.retefuente || 0) +
-          Number(wb.reteiva || 0) +
-          Number(wb.reteica || 0);
+      settleDto.payment_method =
+        result === 'delivered'
+          ? current.is_prepaid
+            ? 'prepaid'
+            : decision.payment_method
+          : undefined;
+      if (breakdown) {
+        settleDto.withholding_breakdown = breakdown;
+        // settleStop reads `withholding_amount` (not the breakdown) for the
+        // withholding-agent gate and requires it to equal the breakdown sum.
+        settleDto.withholding_amount = withholding;
       }
       settleDto.notes = decision.notes;
-
-      // Wrap each settle so a single failure (e.g. validation 400) is collected
-      // and the rest of the batch still runs.
-      try {
-        await this.routeFlow.settleStop(routeId, decision.stop_id, settleDto);
-        settled.push({ stop_id: decision.stop_id, result: settleDto.result });
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : 'Error liquidando la parada';
-        this.logger.warn(
-          `[RouteSheetScan] settleStop failed for stop ${decision.stop_id}: ${message}`,
-        );
-        errors.push({ stop_id: decision.stop_id, message });
-      }
+      if (result === 'rejected') settleDto.reason = reason;
+      items.push({ kind: 'settle', stop_id: decision.stop_id, dto: settleDto });
     }
 
-    // 2. Upload the route sheet to S3 (store the KEY, not a presigned URL).
+    // The route totals are Decimal(14,2) too: the sum must fit as well.
+    if (batchCollected > ROUTE_SHEET_MAX_AMOUNT) {
+      invalid.push({
+        stop_id: 0,
+        message: 'La suma de lo cobrado en la planilla excede el máximo permitido.',
+      });
+    }
+
+    if (invalid.length > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.RTSCAN_CONFIRM_INVALID,
+        `No se aplicó ningún cambio. ${invalid
+          .map((e) => (e.stop_id ? `Parada #${e.stop_id}: ${e.message}` : e.message))
+          .join(' | ')}`,
+        { errors: invalid },
+      );
+    }
+
+    // Upload the route sheet to S3 (store the KEY, not a presigned URL).
     const s3Key = await this.s3Service.uploadFile(
       file.buffer,
       `dispatch-routes/planillas/${routeId}/${Date.now()}-${file.originalname}`,
       file.mimetype,
     );
 
-    // 3. Persist scan metadata on the route (store-scoped via updateMany).
-    await this.prisma.dispatch_routes.updateMany({
-      where: { id: routeId, store_id },
-      data: {
-        planilla_pdf_key: s3Key,
-        planilla_scanned_at: new Date(),
-        scan_result: (dto.scan_result as any) ?? undefined,
-        scan_confidence: dto.scan_result?.confidence ?? undefined,
-        updated_at: new Date(),
-      },
-    });
+    let settled: Array<{ stop_id: number; result: string }>;
+    try {
+      settled = await this.routeFlow.settleStopsAtomically(
+        routeId,
+        items,
+        async (tx) => {
+          // Scan metadata, in the SAME transaction as the stops.
+          await tx.dispatch_routes.updateMany({
+            where: { id: routeId, store_id },
+            data: {
+              planilla_pdf_key: s3Key,
+              planilla_scanned_at: new Date(),
+              scan_result: (dto.scan_result as any) ?? undefined,
+              scan_confidence,
+              updated_at: new Date(),
+            },
+          });
+        },
+      );
+    } catch (err) {
+      // Nothing was applied: drop the orphan upload (best effort).
+      await this.s3Service.deleteFile(s3Key).catch(() => undefined);
+      throw err;
+    }
 
-    // 4. Re-read the route in its updated state (same canonical shape the rest
-    //    of the flow returns: stops + reconciliation + derived is_prepaid) so
-    //    the frontend can refresh the detail view without a second round-trip.
+    // Re-read the route in its updated state (same canonical shape the rest of
+    // the flow returns) so the frontend can refresh without a second request.
     const route_updated = await this.dispatchRoutes.findOne(routeId);
 
     this.logger.log(
-      `[RouteSheetScan] Route #${routeId}: settled=${settled.length} skipped=${skipped.length} errors=${errors.length} + planilla persisted (${s3Key})`,
+      `[RouteSheetScan] Route #${routeId}: settled=${settled.length} skipped=${skipped.length} + planilla persisted (${s3Key})`,
     );
 
     return {
@@ -472,9 +558,42 @@ export class RouteSheetScannerService implements OnModuleInit {
       planilla_pdf_key: s3Key,
       settled,
       skipped,
-      errors,
+      errors: [] as Array<{ stop_id: number; message: string }>,
       route: route_updated,
     };
+  }
+
+  /**
+   * Scan confidence → `dispatch_routes.scan_confidence` (`Decimal(5,4)`, max
+   * 9.9999). The model reports a 0-100 percentage (`route_sheet_ocr` prompt,
+   * `normalizeScanResponse`), so it is stored as a 0-1 fraction. Writing the
+   * raw percentage (e.g. 92) overflowed the column with Prisma P2020.
+   * Absent → `undefined` (column untouched). Not a number or outside 0-100 →
+   * `RTSCAN_CONFIRM_INVALID` before anything is written.
+   */
+  private toScanConfidence(value: unknown): number | undefined {
+    if (value === null || value === undefined || value === '') return undefined;
+    const pct = Number(value);
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+      throw new VendixHttpException(
+        ErrorCodes.RTSCAN_CONFIRM_INVALID,
+        'No se aplicó ningún cambio: la confianza del escaneo debe estar entre 0 y 100.',
+      );
+    }
+    return Math.round(pct * 100) / 10000;
+  }
+
+  /** Withholding breakdown as a plain object with only the positive lines. */
+  private cleanBreakdown(
+    breakdown?: { retefuente?: number; reteiva?: number; reteica?: number } | null,
+  ): { retefuente?: number; reteiva?: number; reteica?: number } | undefined {
+    if (!breakdown) return undefined;
+    const out: { retefuente?: number; reteiva?: number; reteica?: number } = {};
+    for (const key of ['retefuente', 'reteiva', 'reteica'] as const) {
+      const v = Number(breakdown[key] || 0);
+      if (v > 0) out[key] = v;
+    }
+    return Object.keys(out).length ? out : undefined;
   }
 
   // ───────────────────────────────────────────────────────────────────────────
