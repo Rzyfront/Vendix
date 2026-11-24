@@ -8,6 +8,7 @@ import {
 import {
   Prisma,
   dispatch_route_status_enum,
+  dispatch_route_stop_status_enum,
 } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { resolveCustomerSnapshotName } from '../../../../common/helpers/customer-display-name.helper';
@@ -110,7 +111,7 @@ interface PreparedStopSettle {
   user_id: number | undefined;
   dto: SettleStopDto;
   stop: SettleStopRecord;
-  from_status: string;
+  from_status: dispatch_route_stop_status_enum;
   stopIsPrepaid: boolean;
   net: number;
   collected: number;
@@ -126,7 +127,7 @@ interface PreparedStopRelease {
   route_id: number;
   stop_id: number;
   user_id: number | undefined;
-  from_status: string;
+  from_status: dispatch_route_stop_status_enum;
   reason: string;
 }
 
@@ -993,7 +994,7 @@ export class RouteFlowService {
       where: {
         id: plan.stop_id,
         route_id: plan.route_id,
-        status: plan.from_status as any,
+        status: plan.from_status,
       },
       data: {
         status: dto.result,
@@ -1065,6 +1066,10 @@ export class RouteFlowService {
    * Post-commit side effects of a settle: payment / refund / withholding events
    * (only for non-prepaid stops, DERIVED prepaid) and the remisión-delivered
    * event that drives the inventory primitive.
+   *
+   * The stop is already committed when this runs: each event is isolated (see
+   * {@link runPostCommit}) so a failing listener neither skips the others nor
+   * turns a committed settle into an error for the user.
    */
   private async emitSettleSideEffects(
     plan: PreparedStopSettle,
@@ -1078,25 +1083,30 @@ export class RouteFlowService {
     // Emit domain events to drive accounting / AR / notifications.
     // Only for non-prepaid stops with actual collection (DERIVED prepaid).
     if (!plan.stopIsPrepaid) {
-      if (plan.paymentInput) {
-        await this.cashSettlement.emitPaymentReceived(plan.paymentInput, {
-          cashMovementHandled: true,
-        });
+      const paymentInput = plan.paymentInput;
+      if (paymentInput) {
+        await this.runPostCommit(plan, 'payment.received', () =>
+          this.cashSettlement.emitPaymentReceived(paymentInput, {
+            cashMovementHandled: true,
+          }),
+        );
       }
       // No hay rama de venta a crédito: una parada entregada está cobrada al
       // 100% (o es prepaga), así que la liquidación nunca genera
       // `accounts_receivable` ni emite `credit_sale.created`.
       if (change > 0) {
-        await this.cashSettlement.emitRefundCompleted({
-          store_id,
-          route_id: id,
-          stop_id: stopId,
-          dispatch_note_id: stop.dispatch_note_id,
-          sales_order_id: stop.dispatch_note.sales_order_id,
-          amount: change,
-          user_id,
-          reason: 'Cambio/devolución en ruta',
-        });
+        await this.runPostCommit(plan, 'refund.completed', () =>
+          this.cashSettlement.emitRefundCompleted({
+            store_id,
+            route_id: id,
+            stop_id: stopId,
+            dispatch_note_id: stop.dispatch_note_id,
+            sales_order_id: stop.dispatch_note.sales_order_id,
+            amount: change,
+            user_id,
+            reason: 'Cambio/devolución en ruta',
+          }),
+        );
       }
       if (withholding > 0) {
         // Withholding suffered by the store: persist withholding_calculations
@@ -1112,18 +1122,20 @@ export class RouteFlowService {
             Number(breakdown.reteiva || 0) +
             Number(breakdown.reteica || 0) >
           0;
-        await this.cashSettlement.emitWithholding({
-          store_id,
-          organization_id: undefined, // resolved in cashSettlement
-          route_id: id,
-          stop_id: stopId,
-          dispatch_note_id: stop.dispatch_note_id,
-          customer_id: stop.dispatch_note.customer_id,
-          sales_order_id: stop.dispatch_note.sales_order_id,
-          net_amount: net,
-          breakdown: hasBreakdown ? breakdown : { retefuente: withholding },
-          user_id,
-        });
+        await this.runPostCommit(plan, 'withholding', () =>
+          this.cashSettlement.emitWithholding({
+            store_id,
+            organization_id: undefined, // resolved in cashSettlement
+            route_id: id,
+            stop_id: stopId,
+            dispatch_note_id: stop.dispatch_note_id,
+            customer_id: stop.dispatch_note.customer_id,
+            sales_order_id: stop.dispatch_note.sales_order_id,
+            net_amount: net,
+            breakdown: hasBreakdown ? breakdown : { retefuente: withholding },
+            user_id,
+          }),
+        );
       }
     }
 
@@ -1131,12 +1143,36 @@ export class RouteFlowService {
     // MUST be after the $transaction so the note's 'delivered' status is already
     // committed when the listener re-reads it.
     if (deliveredEventPayload) {
-      this.eventEmitter.emit('dispatch_note.delivered', deliveredEventPayload);
+      await this.runPostCommit(plan, 'dispatch_note.delivered', () => {
+        this.eventEmitter.emit('dispatch_note.delivered', deliveredEventPayload);
+      });
     }
 
     this.logger.log(
       `Parada #${stopId} liquidada: result=${dto.result} collected=${plan.collected} withholding=${withholding}`,
     );
+  }
+
+  /**
+   * Run ONE post-commit side effect of a settle. The stop is already committed,
+   * so a failure is logged for follow-up instead of propagated (same policy as
+   * the batch in {@link settleStopsAtomically}).
+   */
+  private async runPostCommit(
+    plan: PreparedStopSettle,
+    event: string,
+    fn: () => unknown,
+  ): Promise<void> {
+    try {
+      await fn();
+    } catch (err) {
+      this.logger.error(
+        `Ruta #${plan.route_id} parada #${plan.stop_id}: falló el evento post-commit '${event}' (la parada SÍ quedó liquidada): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        err instanceof Error ? err.stack : undefined,
+      );
+    }
   }
 
   /**
@@ -1207,7 +1243,7 @@ export class RouteFlowService {
       where: {
         id: plan.stop_id,
         route_id: plan.route_id,
-        status: plan.from_status as any,
+        status: plan.from_status,
       },
       data: {
         status: 'released',
