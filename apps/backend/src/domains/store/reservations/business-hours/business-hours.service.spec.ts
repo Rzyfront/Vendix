@@ -253,6 +253,45 @@ describe('BusinessHoursService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('upsertAll rejects a sent day that overlaps the SAVED previous day overnight spill', async () => {
+    const { service, prisma } = withSettings({
+      pos: { business_hours: { monday: { open: '17:00', close: '04:00' } } },
+    });
+    await expect(
+      service.upsertAll(1, {
+        items: [{ day_of_week: 2, start_time: '03:00', end_time: '12:00', is_active: true }],
+      } as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.store_settings.update).not.toHaveBeenCalled();
+  });
+
+  it('upsertAll rejects a sent overnight block that spills over the SAVED next day', async () => {
+    const { service, prisma } = withSettings({
+      pos: { business_hours: { tuesday: { open: '02:00', close: '10:00' } } },
+    });
+    await expect(
+      service.upsertAll(1, {
+        items: [{ day_of_week: 1, start_time: '20:00', end_time: '03:00', is_active: true }],
+      } as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.store_settings.update).not.toHaveBeenCalled();
+  });
+
+  it('upsertAll does not block an edit because of an old problem among days not sent', async () => {
+    const { service, prisma } = withSettings({
+      pos: {
+        business_hours: {
+          friday: { open: '20:00', close: '03:00' },
+          saturday: { open: '02:00', close: '10:00' },
+        },
+      },
+    });
+    await service.upsertAll(1, {
+      items: [{ day_of_week: 1, start_time: '09:00', end_time: '17:00', is_active: true }],
+    } as any);
+    expect(writtenPos(prisma).business_hours.monday).toEqual({ open: '09:00', close: '17:00' });
+  });
+
   it('upsertAll still accepts a plain daytime block', async () => {
     const { service } = buildService();
     await expect(

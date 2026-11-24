@@ -6,6 +6,7 @@ import {
   isClockTime,
   isFullDay,
   isOvernight,
+  spansOverlap,
   toMinutes,
   validateWeeklyBlocks,
   windowSpan,
@@ -133,6 +134,30 @@ export class BusinessHoursService {
             ? `Día ${invalid.day}: la apertura y el cierre son la misma hora; usa 00:00 a 00:00 para abrir las 24 horas`
             : `Día ${invalid.day}: las horas deben tener formato HH:mm`,
       );
+    }
+
+    // A partial payload must not collide with the saved days it does not
+    // send: the previous day's overnight spill vs. the sent day, and the sent
+    // day's spill vs. the saved next day. Problems only among saved days
+    // (not sent) are left as they are so they never block an unrelated edit.
+    const week = await this.loadStoreWindows(storeId);
+    for (const item of dto.items) {
+      week.set(item.day_of_week, item.is_active === false ? [] : blocksOf(item));
+    }
+    for (let day = 0; day <= 6; day++) {
+      const prev = (day + 6) % 7;
+      if (!daysTouched.has(day) && !daysTouched.has(prev)) continue;
+      const valid = (list: ClockWindow[] | undefined) =>
+        (list ?? []).filter((w) => isClockTime(w.start_time) && isClockTime(w.end_time)).map(windowSpan);
+      const spills = valid(week.get(prev))
+        .filter((s) => s.endMin > 1440)
+        .map((s) => ({ startMin: 0, endMin: s.endMin - 1440 }));
+      const own = valid(week.get(day));
+      if (spills.some((s) => own.some((o) => spansOverlap(s, o)))) {
+        throw new BadRequestException(
+          `Día ${day}: el horario se cruza con otro bloque (incluido el que termina de madrugada del día anterior)`,
+        );
+      }
     }
 
     const row = await this.prisma.store_settings.findUnique({
