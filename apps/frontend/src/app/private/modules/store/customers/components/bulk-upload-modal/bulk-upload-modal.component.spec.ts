@@ -2,7 +2,10 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Observable, of, throwError } from 'rxjs';
 
-import { CustomerBulkUploadModalComponent } from './bulk-upload-modal.component';
+import {
+  CustomerBulkUploadModalComponent,
+  detectCustomerRowIssues,
+} from './bulk-upload-modal.component';
 import { CustomersService } from '../../services/customers.service';
 import { BulkUploadLogService } from '../../../bulk-uploads/services/bulk-upload-log.service';
 import { BulkUploadJobService } from '../../../bulk-uploads/services/bulk-upload-job.service';
@@ -380,5 +383,101 @@ describe('CustomerBulkUploadModalComponent — carga durable en servidor (QUI-10
     expect(jobs.forget).not.toHaveBeenCalled();
     expect(component.job()).toBeNull();
     expect(component.currentStep()).toBe(0);
+  });
+});
+
+/**
+ * QUI-1048 — el paso «Verificar» marca, antes de procesar, las filas con
+ * correo de formato inválido y los correos repetidos dentro del archivo.
+ */
+describe('detectCustomerRowIssues (QUI-1048)', () => {
+  it('marca el correo con formato inválido con su fila y motivo', () => {
+    const issues = detectCustomerRowIssues([
+      { row_number: 2, first_name: 'Ana', email: 'ana@x.co' },
+      { row_number: 3, first_name: 'Luis', last_name: 'Gil', email: 'luis@@x' },
+      { row_number: 4, first_name: 'Eva', email: 'eva sin arroba.com' },
+    ]);
+    expect(issues.map((i) => [i.row_number, i.kind])).toEqual([
+      [3, 'invalid_email'],
+      [4, 'invalid_email'],
+    ]);
+    expect(issues[0].name).toBe('Luis Gil');
+    expect(issues[0].message).toBe('correo "luis@@x" con formato inválido');
+  });
+
+  it('marca el correo repetido (sin distinguir mayúsculas ni espacios); la primera aparición es válida', () => {
+    const issues = detectCustomerRowIssues([
+      { row_number: 2, first_name: 'Ana', document_number: '1', email: 'ana@x.co' },
+      { row_number: 3, first_name: 'Otra', document_number: '2', email: ' ANA@X.CO ' },
+    ]);
+    expect(issues.length).toBe(1);
+    expect(issues[0].row_number).toBe(3);
+    expect(issues[0].kind).toBe('duplicate_email');
+    expect(issues[0].message).toBe('correo "ANA@X.CO" repetido en el archivo');
+  });
+
+  it('una ubicación adicional (mismo documento) que repite el correo NO se marca', () => {
+    const issues = detectCustomerRowIssues([
+      { row_number: 2, legal_name: 'ACME', person_type: 'JURIDICA', document_number: '900123456-1', email: 'acme@x.co', address_line_1: 'Cra 1' },
+      { row_number: 3, legal_name: 'ACME', person_type: 'JURIDICA', document_number: '900.123.456', email: 'acme@x.co', address_line_1: 'Cra 2' },
+    ]);
+    expect(issues).toEqual([]);
+  });
+
+  it('el correo vacío no es inválido ni duplicado', () => {
+    const issues = detectCustomerRowIssues([
+      { row_number: 2, first_name: 'Ana', email: '' },
+      { row_number: 3, first_name: 'Luis' },
+      { row_number: 4, first_name: 'Eva', email: '  ' },
+    ]);
+    expect(issues).toEqual([]);
+  });
+});
+
+describe('CustomerBulkUploadModalComponent — Verificar marca filas problemáticas (QUI-1048)', () => {
+  let component: CustomerBulkUploadModalComponent;
+
+  beforeEach(async () => {
+    const jobs = jasmine.createSpyObj<BulkUploadJobService>('BulkUploadJobService', ['findResumable']);
+    jobs.findResumable.and.returnValue(of(null));
+    await TestBed.configureTestingModule({
+      imports: [CustomerBulkUploadModalComponent],
+      providers: [
+        { provide: CustomersService, useValue: {} },
+        { provide: BulkUploadLogService, useValue: {} },
+        { provide: BulkUploadJobService, useValue: jobs },
+        { provide: DialogService, useValue: {} },
+        { provide: ToastService, useValue: {} },
+      ],
+    })
+      .overrideComponent(CustomerBulkUploadModalComponent, { set: { template: '', imports: [] } })
+      .compileComponents();
+    component = TestBed.createComponent(CustomerBulkUploadModalComponent).componentInstance;
+  });
+
+  it('cuenta válidos / con correo inválido / con correo duplicado', () => {
+    component.parsedData.set([
+      { row_number: 2, first_name: 'Ana', document_number: '1', email: 'ana@x.co', address_line_1: 'Cl 1' },
+      { row_number: 3, first_name: 'Ana', document_number: '1', email: 'ana@x.co', address_line_1: 'Cl 2' },
+      { row_number: 4, first_name: 'Luis', document_number: '2', email: 'luis@' },
+      { row_number: 5, first_name: 'Eva', document_number: '3', email: 'ANA@x.co' },
+      { row_number: 6, first_name: 'Sin', document_number: '4', email: '' },
+    ]);
+
+    expect(component.customerGroups().length).toBe(4);
+    expect(component.invalidEmailCount()).toBe(1);
+    expect(component.duplicateEmailCount()).toBe(1);
+    expect(component.problemCustomerCount()).toBe(2);
+    expect(component.validCustomerCount()).toBe(2);
+    expect(component.rowIssues().map((i) => i.row_number)).toEqual([4, 5]);
+  });
+
+  it('sin filas problemáticas todos los clientes son válidos', () => {
+    component.parsedData.set([
+      { row_number: 2, first_name: 'Ana', email: 'ana@x.co' },
+      { row_number: 3, first_name: 'Luis', email: 'luis@x.co' },
+    ]);
+    expect(component.rowIssues()).toEqual([]);
+    expect(component.validCustomerCount()).toBe(2);
   });
 });

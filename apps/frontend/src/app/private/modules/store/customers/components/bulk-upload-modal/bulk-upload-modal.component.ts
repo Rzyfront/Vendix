@@ -97,6 +97,65 @@ function groupCustomerRows(rows: Record<string, any>[]): CustomerGroup[] {
   return [...groups.values()];
 }
 
+/**
+ * Formato de correo coherente con `IsEmail` (validator.js) del backend:
+ * parte local sin espacios ni puntos al borde/seguidos, dominio con TLD.
+ */
+const EMAIL_FORMAT =
+  /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,}$/;
+
+export type CustomerRowIssueKind = 'invalid_email' | 'duplicate_email';
+
+export interface CustomerRowIssue {
+  row_number: number;
+  /** Clave del cliente (la misma de `customerGroups`). */
+  groupKey: string;
+  name: string;
+  kind: CustomerRowIssueKind;
+  message: string;
+}
+
+/**
+ * QUI-1048: filas que el servidor marcará fallidas por el correo, detectadas
+ * antes de procesar. Correo vacío no es inválido (es una advertencia aparte).
+ * Repetido = mismo correo (sin mayúsculas ni espacios) en otro cliente; la
+ * primera aparición vale. Las filas con el mismo documento son ubicaciones
+ * del mismo cliente y pueden repetir su correo.
+ */
+export function detectCustomerRowIssues(rows: Record<string, any>[]): CustomerRowIssue[] {
+  const issues: CustomerRowIssue[] = [];
+  const seenDocs = new Set<string>();
+  const seenEmails = new Set<string>();
+  for (const row of rows) {
+    const docKey = customerDocKey(row);
+    const isContinuation = !!docKey && seenDocs.has(docKey);
+    if (docKey) seenDocs.add(docKey);
+
+    const email = String(row['email'] ?? '').trim();
+    if (!email) continue;
+    const base = {
+      row_number: Number(row['row_number'] ?? 0),
+      groupKey: docKey ?? `row:${row['row_number']}`,
+      name:
+        row['legal_name'] ||
+        [row['first_name'], row['last_name']].filter(Boolean).join(' ') ||
+        'Sin nombre',
+    };
+    if (!EMAIL_FORMAT.test(email)) {
+      issues.push({ ...base, kind: 'invalid_email', message: `correo "${email}" con formato inválido` });
+      continue;
+    }
+    if (isContinuation) continue;
+    const normalized = email.toLowerCase();
+    if (seenEmails.has(normalized)) {
+      issues.push({ ...base, kind: 'duplicate_email', message: `correo "${email}" repetido en el archivo` });
+    } else {
+      seenEmails.add(normalized);
+    }
+  }
+  return issues;
+}
+
 /** Fila del resultado tal como la devuelve el servidor (forma de la página de clientes). */
 interface CustomerUploadRow extends BulkUploadJobResultRow {
   row_number?: number | null;
@@ -240,6 +299,11 @@ interface CustomerUploadResults {
                 @if (totalLocations() > 0) {
                   <p class="text-xs text-green-700">{{ totalLocations() }} ubicaciones en total</p>
                 }
+                @if (rowIssues().length > 0) {
+                  <p class="text-xs text-green-700">
+                    {{ validCustomerCount() }} válidos · {{ invalidEmailCount() }} con correo inválido · {{ duplicateEmailCount() }} con correo duplicado
+                  </p>
+                }
               </div>
             </div>
             <button (click)="goToStep(0)" class="text-xs text-red-500 hover:text-red-700 font-medium">
@@ -290,6 +354,25 @@ interface CustomerUploadResults {
           @if (uploadError()) {
             <div class="bg-red-50 p-3 rounded-lg border border-red-100 text-red-700 text-sm" role="alert">
               {{ uploadError() }}
+            </div>
+          }
+
+          <!-- QUI-1048: filas que fallarán al procesar -->
+          @if (rowIssues().length > 0) {
+            <div class="bg-red-50 p-3 rounded-lg border border-red-100 text-red-800 text-xs" role="alert">
+              <div class="font-medium flex items-center mb-1">
+                <app-icon name="alert-circle" [size]="14" class="mr-1"></app-icon>
+                {{ rowIssues().length }} {{ rowIssues().length === 1 ? 'fila no se cargará' : 'filas no se cargarán' }}
+              </div>
+              <p class="mb-1 text-red-700">Corrige el archivo y vuelve a subirlo, o continúa: estas filas quedarán como fallidas con su motivo.</p>
+              <ul class="list-disc list-inside space-y-0.5">
+                @for (issue of rowIssues().slice(0, 10); track issue.row_number) {
+                  <li>Fila {{ issue.row_number }}: {{ issue.name }} — {{ issue.message }}</li>
+                }
+              </ul>
+              @if (rowIssues().length > 10) {
+                <p class="mt-1 font-medium">… y {{ rowIssues().length - 10 }} más</p>
+              }
             </div>
           }
 
@@ -548,6 +631,7 @@ interface CustomerUploadResults {
             >
               <app-icon name="upload" [size]="16" slot="icon" ></app-icon>
               Cargar {{ customerGroups().length }} Clientes
+              @if (problemCustomerCount() > 0) { ({{ problemCustomerCount() }} con problemas) }
             </app-button>
           }
         </div>
@@ -608,6 +692,23 @@ export class CustomerBulkUploadModalComponent {
   // Una entrada por cliente: filas con el mismo documento = un cliente con N ubicaciones.
   readonly customerGroups = computed<CustomerGroup[]>(() =>
     groupCustomerRows(this.parsedData() ?? []),
+  );
+  // QUI-1048: filas que fallarán por el correo, visibles en «Verificar».
+  readonly rowIssues = computed<CustomerRowIssue[]>(() =>
+    detectCustomerRowIssues(this.parsedData() ?? []),
+  );
+  readonly invalidEmailCount = computed(
+    () => this.rowIssues().filter((i) => i.kind === 'invalid_email').length,
+  );
+  readonly duplicateEmailCount = computed(
+    () => this.rowIssues().filter((i) => i.kind === 'duplicate_email').length,
+  );
+  /** Clientes con al menos una fila problemática. */
+  readonly problemCustomerCount = computed(
+    () => new Set(this.rowIssues().map((i) => i.groupKey)).size,
+  );
+  readonly validCustomerCount = computed(
+    () => this.customerGroups().length - this.problemCustomerCount(),
   );
   readonly totalLocations = computed(() =>
     this.customerGroups().reduce((sum, g) => sum + g.locations.length, 0),
