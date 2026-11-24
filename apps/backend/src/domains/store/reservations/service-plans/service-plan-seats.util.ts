@@ -5,6 +5,10 @@ import { Prisma } from '@prisma/client';
  * de la transacción que cancela o elimina la reserva, en todos los caminos de
  * cancelación (panel, enlace de confirmación, auto-cancelación). Reservas sin
  * salida (servicios normales o plan a fecha libre) no hacen nada. Nunca baja de cero.
+ *
+ * No es idempotente por sí sola: cada llamador la invoca solo después de reclamar
+ * el cambio de estado con un `updateMany` condicional (`count === 1`) en la misma
+ * transacción, así una reserva ya cancelada nunca devuelve cupos dos veces.
  */
 export async function releasePlanSeatsForBookingInTx(
   tx: Prisma.TransactionClient,

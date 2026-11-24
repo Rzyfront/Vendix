@@ -3,9 +3,13 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import * as crypto from 'crypto';
+import { booking_status_enum } from '@prisma/client';
 import { AvailabilityService } from './availability.service';
 import { ServiceAllocationCoordinator } from './service-allocation-coordinator.service';
 import { releasePlanSeatsForBookingInTx } from './service-plans/service-plan-seats.util';
+
+/** Statuses a confirm/cancel link can still act on; any later state is final for the link. */
+const TOKEN_ACTIONABLE_STATUSES: booking_status_enum[] = ['pending', 'confirmed'];
 
 @Injectable()
 export class BookingConfirmationService {
@@ -130,7 +134,13 @@ export class BookingConfirmationService {
           if (!allocation) throw new VendixHttpException(ErrorCodes.STATION_011);
           await tx.service_allocations.update({ where: { id: allocation.id }, data: { state: 'confirmed', expires_at: null, updated_at: new Date() } });
         }
-        await tx.bookings.update({ where: { id: booking.id }, data: { status: 'confirmed', updated_at: new Date() } });
+        // QUI-1060: a link opened after the booking was cancelled (by staff or the
+        // auto-cancel job) must not revive it: its plan seats were already given back.
+        const statusClaim = await tx.bookings.updateMany({
+          where: { id: booking.id, status: { in: TOKEN_ACTIONABLE_STATUSES } },
+          data: { status: 'confirmed', updated_at: new Date() },
+        });
+        if (statusClaim.count !== 1) throw new VendixHttpException(ErrorCodes.BOOK_CONFIRM_003);
       });
       // Double-validation: re-check the slot is still available before
       // confirming. The customer might have clicked the email link hours
@@ -191,12 +201,18 @@ export class BookingConfirmationService {
           data: { used: true, used_at: new Date() },
         });
         if (tokenClaim.count !== 1) throw new VendixHttpException(ErrorCodes.BOOK_CONFIRM_002);
+        // QUI-1060: the status change is claimed with a conditional update, so only the
+        // transaction that really cancels the booking gives its plan seats back. A link
+        // opened after the staff or the auto-cancel job cancelled it changes nothing.
+        const statusClaim = await tx.bookings.updateMany({
+          where: { id: booking.id, status: { in: TOKEN_ACTIONABLE_STATUSES } },
+          data: { status: 'cancelled', updated_at: new Date() },
+        });
+        if (statusClaim.count !== 1) throw new VendixHttpException(ErrorCodes.BOOK_CONFIRM_003);
         if (booking.product?.requires_station) {
           await this.allocationCoordinator!.releaseBooking(tx, booking.store_id, booking.id, 'cancelled');
         }
-        // QUI-1060: a cancelled plan booking gives its seats back to the departure.
         await releasePlanSeatsForBookingInTx(tx, booking.id);
-        await tx.bookings.update({ where: { id: booking.id }, data: { status: 'cancelled', updated_at: new Date() } });
       });
       this.logger.log(`Booking ${booking.id} cancelled via token`);
 

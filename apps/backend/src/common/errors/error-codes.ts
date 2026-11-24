@@ -6050,6 +6050,11 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Token already used',
   },
+  BOOK_CONFIRM_003: {
+    code: 'BOOK_CONFIRM_003',
+    httpStatus: 409,
+    devMessage: 'La reserva ya no admite este cambio: fue cancelada o ya avanzó de estado.',
+  },
   BOOK_CHECKIN_001: {
     code: 'BOOK_CHECKIN_001',
     httpStatus: 400,

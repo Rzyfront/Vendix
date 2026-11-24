@@ -35,14 +35,19 @@ export class BookingConfirmationJob {
         ?.reservations;
       if (!settings?.confirmation?.auto_cancel_if_unconfirmed) continue;
 
-      // QUI-1060: the seats of a plan booking go back with the cancellation.
-      await this.prisma.$transaction(async (tx) => {
-        await releasePlanSeatsForBookingInTx(tx, booking.id);
-        await tx.bookings.update({
-          where: { id: booking.id },
+      // QUI-1060: the seats of a plan booking go back with the cancellation, only
+      // when this run is the one that moves it out of `pending` (it may have been
+      // confirmed or cancelled since the query above).
+      const cancelled = await this.prisma.$transaction(async (tx) => {
+        const claim = await tx.bookings.updateMany({
+          where: { id: booking.id, status: 'pending' },
           data: { status: 'cancelled', updated_at: new Date() },
         });
+        if (claim.count !== 1) return false;
+        await releasePlanSeatsForBookingInTx(tx, booking.id);
+        return true;
       });
+      if (!cancelled) continue;
 
       this.eventEmitter.emit('booking.auto_cancelled', {
         store_id: booking.store_id,
