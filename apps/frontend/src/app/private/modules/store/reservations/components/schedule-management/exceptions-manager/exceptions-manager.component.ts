@@ -13,6 +13,7 @@ import { FormsModule } from '@angular/forms';
 import { finalize } from 'rxjs';
 import { ReservationsService } from '../../../services/reservations.service';
 import { ProviderException } from '../../../interfaces/reservation.interface';
+import { formatTime12 } from '../../../../../../../shared/components/weekly-hours-editor/weekly-hours.util';
 import {
   IconComponent,
   SpinnerComponent,
@@ -71,7 +72,7 @@ export class ExceptionsManagerComponent {
       )
       .subscribe({
         next: (exceptions) => this.exceptions.set(exceptions),
-        error: () => this.toastService.error('Error al cargar excepciones'),
+        error: () => this.toastService.error('No se pudieron cargar las ausencias'),
       });
   }
 
@@ -111,20 +112,20 @@ export class ExceptionsManagerComponent {
       )
       .subscribe({
         next: () => {
-          this.toastService.success('Excepcion creada exitosamente');
+          this.toastService.success('Ausencia guardada');
           this.showForm.set(false);
           this.resetForm();
           this.loadExceptions(this.providerId());
         },
-        error: () => this.toastService.error('Error al crear la excepcion'),
+        error: () => this.toastService.error('No se pudo guardar la ausencia'),
       });
   }
 
   deleteException(exceptionId: number): void {
     this.dialogService
       .confirm({
-        title: 'Eliminar Excepcion',
-        message: '¿Estas seguro de que deseas eliminar esta excepcion?',
+        title: 'Eliminar ausencia',
+        message: '¿Seguro que quieres eliminar esta ausencia?',
         confirmVariant: 'danger',
         confirmText: 'Eliminar',
       })
@@ -135,14 +136,16 @@ export class ExceptionsManagerComponent {
             .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
               next: () => {
-                this.toastService.success('Excepcion eliminada');
+                this.toastService.success('Ausencia eliminada');
                 this.loadExceptions(this.providerId());
               },
-              error: () => this.toastService.error('Error al eliminar la excepcion'),
+              error: () => this.toastService.error('No se pudo eliminar la ausencia'),
             });
         }
       });
   }
+
+  readonly formatTime12 = formatTime12;
 
   formatDate(dateStr: string): string {
     const date = new Date(dateStr + 'T00:00:00');

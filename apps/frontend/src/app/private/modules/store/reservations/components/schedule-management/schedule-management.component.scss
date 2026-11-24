@@ -386,20 +386,69 @@
 }
 
 // Parte 1: selector "horario de la tienda / horario propio" above the weekly editor.
+.schedule-tab {
+  @apply flex flex-col gap-3;
+}
+
 .schedule-source {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  margin-bottom: 0.75rem;
+  @apply flex flex-col gap-2;
+}
 
-  &__link {
-    margin: 0;
-    font-size: var(--fs-xs, 0.75rem);
+.schedule-source__legend {
+  @apply m-0 text-sm font-bold text-text-primary;
+}
 
-    a {
-      color: var(--color-primary);
-      font-weight: 600;
-      text-decoration: underline;
-    }
+.schedule-source__options {
+  @apply grid grid-cols-1 gap-2;
+
+  @media (min-width: 640px) {
+    @apply grid-cols-2;
   }
+}
+
+.schedule-option {
+  @apply flex w-full items-start gap-3 rounded-2xl border border-border bg-surface p-3 text-left transition;
+  @apply hover:border-primary/25 hover:bg-primary/5;
+  @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20;
+  @apply disabled:cursor-wait disabled:opacity-60;
+
+  &--selected {
+    @apply border-primary bg-primary/5 ring-1 ring-primary/25;
+  }
+}
+
+.schedule-option__icon {
+  @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary;
+}
+
+.schedule-option__text {
+  @apply flex min-w-0 flex-1 flex-col gap-0.5;
+}
+
+.schedule-option__title {
+  @apply flex flex-wrap items-center gap-1.5 text-sm font-bold text-text-primary;
+}
+
+.schedule-option__hint {
+  @apply text-xs text-text-secondary;
+}
+
+.schedule-option__check {
+  @apply flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border text-surface;
+
+  .schedule-option--selected & {
+    @apply border-primary bg-primary;
+  }
+}
+
+.schedule-inherited {
+  @apply flex flex-wrap items-center gap-1.5 rounded-xl border border-info/25 bg-info/10 px-3 py-2 text-xs text-text-primary;
+
+  a {
+    @apply font-semibold text-info underline;
+  }
+}
+
+.schedule-exceptions {
+  @apply border-t border-border pt-3;
 }

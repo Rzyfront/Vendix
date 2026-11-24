@@ -421,31 +421,70 @@
 
         <!-- ═══ Tab: Horario ═══ -->
         @if (activeTab() === 'schedule') {
-          <div class="schedule-source" data-testid="provider-schedule-source">
-            <app-setting-toggle
-              label="Usar el horario de la tienda"
-              [description]="usesStoreHours()
-                ? 'Su horario es el de la tienda: si la tienda lo cambia, este cambia solo. Sus excepciones siguen aplicando.'
-                : 'Usa su horario propio, para quien trabaja menos horas o en otro turno.'"
-              [ngModel]="usesStoreHours()"
-              [disabled]="savingScheduleSource()"
-              (changed)="setUsesStoreHours($event)"
-            />
-            @if (usesStoreHours()) {
-              <p class="schedule-source__link">
-                <a [routerLink]="storeHoursRoute" [queryParams]="storeHoursQuery">Editar el horario de la tienda</a>
-              </p>
-            }
-          </div>
-          <app-weekly-schedule-editor
-            [providerId]="p.id"
-            [readOnly]="usesStoreHours()"
-            (scheduleChanged)="onScheduleChanged($event)"/>
-        }
+          <div class="schedule-tab">
+            <div class="schedule-source" data-testid="provider-schedule-source">
+              <p class="schedule-source__legend">¿Qué horario usa {{ getProviderDisplayName(p) }}?</p>
+              <div class="schedule-source__options" role="radiogroup" [attr.aria-label]="'Horario de ' + getProviderDisplayName(p)">
+                <button
+                  type="button"
+                  role="radio"
+                  class="schedule-option"
+                  data-testid="schedule-source-store"
+                  [class.schedule-option--selected]="usesStoreHours()"
+                  [attr.aria-checked]="usesStoreHours()"
+                  [disabled]="savingScheduleSource()"
+                  (click)="setUsesStoreHours(true)"
+                >
+                  <span class="schedule-option__icon"><app-icon name="store" [size]="16"/></span>
+                  <span class="schedule-option__text">
+                    <span class="schedule-option__title">
+                      Horario de la tienda
+                      <app-badge variant="success" size="xsm">Recomendado</app-badge>
+                    </span>
+                    <span class="schedule-option__hint">Atiende cuando la tienda está abierta. Si la tienda cambia su horario, el suyo cambia solo.</span>
+                  </span>
+                  <span class="schedule-option__check" aria-hidden="true">
+                    @if (usesStoreHours()) { <app-icon name="check" [size]="14"/> }
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  class="schedule-option"
+                  data-testid="schedule-source-own"
+                  [class.schedule-option--selected]="!usesStoreHours()"
+                  [attr.aria-checked]="!usesStoreHours()"
+                  [disabled]="savingScheduleSource()"
+                  (click)="setUsesStoreHours(false)"
+                >
+                  <span class="schedule-option__icon"><app-icon name="user-cog" [size]="16"/></span>
+                  <span class="schedule-option__text">
+                    <span class="schedule-option__title">Horario propio</span>
+                    <span class="schedule-option__hint">Para quien trabaja menos horas o en otro turno. Se guarda aparte y no se pierde si vuelves al de la tienda.</span>
+                  </span>
+                  <span class="schedule-option__check" aria-hidden="true">
+                    @if (!usesStoreHours()) { <app-icon name="check" [size]="14"/> }
+                  </span>
+                </button>
+              </div>
+            </div>
 
-        <!-- ═══ Tab: Excepciones ═══ -->
-        @if (activeTab() === 'exceptions') {
-          <app-exceptions-manager [providerId]="p.id"/>
+            @if (usesStoreHours()) {
+              <div class="schedule-inherited">
+                <app-icon name="info" [size]="14"/>
+                <span>Este es el horario de la tienda, solo lectura aquí.</span>
+                <a [routerLink]="storeHoursRoute" [queryParams]="storeHoursQuery" (click)="closeDetailModal()">Editar horario de la tienda</a>
+              </div>
+            }
+            <app-weekly-schedule-editor
+              [providerId]="p.id"
+              [readOnly]="usesStoreHours()"
+              (scheduleChanged)="onScheduleChanged($event)"/>
+
+            <div class="schedule-exceptions">
+              <app-exceptions-manager [providerId]="p.id"/>
+            </div>
+          </div>
         }
       </div>
 

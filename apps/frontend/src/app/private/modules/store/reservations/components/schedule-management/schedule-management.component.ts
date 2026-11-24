@@ -28,7 +28,6 @@ import {
   ModalComponent,
   ScrollableTabsComponent,
   EmptyStateComponent,
-  SettingToggleComponent,
 } from '../../../../../../shared/components';
 import type {
   TableColumn,
@@ -77,7 +76,6 @@ interface BookableService {
     ResponsiveDataViewComponent,
     ScrollableTabsComponent,
     EmptyStateComponent,
-    SettingToggleComponent,
     RouterLink,
     WeeklyScheduleEditorComponent,
     ExceptionsManagerComponent,
@@ -208,8 +206,7 @@ export class ScheduleManagementComponent {
   readonly detailTabs = computed(() => [
     { id: 'services', label: 'Servicios', icon: 'layers' },
     ...(this.hasStations() ? [{ id: 'stations', label: 'Estaciones', icon: 'warehouse' }] : []),
-    { id: 'schedule', label: 'Horario', icon: 'clock' },
-    { id: 'exceptions', label: 'Excepciones', icon: 'calendar-x' },
+    { id: 'schedule', label: 'Horario y ausencias', icon: 'clock' },
   ]);
 
   // Provider table columns
