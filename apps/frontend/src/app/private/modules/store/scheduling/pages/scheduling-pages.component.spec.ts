@@ -226,6 +226,42 @@ describe('Agenda unificada F1 — Agenda', () => {
     );
   });
 
+  it('encabezado de una sola fila: en celular la vista vive dentro de Filtros y no hay texto de ayuda', () => {
+    const api = setup();
+    const fixture = TestBed.createComponent(SchedulingAgendaPageComponent);
+    const page = fixture.componentInstance;
+    page.isMobile.set(false);
+    fixture.detectChanges();
+    let el: HTMLElement = fixture.nativeElement;
+    const toolbar = el.querySelector('[data-testid="agenda-toolbar"]')!;
+    expect(toolbar.querySelector('app-input-buttons')).not.toBeNull();
+    expect(toolbar.querySelector('app-inputsearch')).not.toBeNull();
+    expect(page.filterConfigs().some((f) => f.key === 'vista')).toBeFalse();
+    expect(el.textContent).not.toContain('Filtra por personal');
+
+    page.isMobile.set(true);
+    fixture.detectChanges();
+    el = fixture.nativeElement;
+    expect(el.querySelector('[data-testid="agenda-toolbar"] app-input-buttons')).toBeNull();
+    expect(el.querySelector('[data-testid="agenda-toolbar"] app-inputsearch')).toBeNull();
+    expect(el.querySelector('[data-testid="agenda-search-toggle"]')).not.toBeNull();
+    const view = page.filterConfigs()[0];
+    expect(view.key).toBe('vista');
+    expect(view.countsAsActive).toBeFalse();
+    expect(view.options?.map((o) => o.label)).toEqual(['Mes', 'Día']);
+
+    page.onFilterChange({ vista: 'month', staff_ids: ['3'] });
+    expect(page.view()).toBe('month');
+    expect(page.filterValues()).toEqual({ staff_ids: ['3'] });
+    expect(api.getCalendar.calls.mostRecent().args[0]).toEqual(
+      jasmine.objectContaining({ from: '2026-10-26', to: '2026-12-06', staff_ids: [3] }),
+    );
+
+    page.mobileSearchOpen.set(true);
+    fixture.detectChanges();
+    expect(el.querySelector('[data-testid="agenda-toolbar"] app-inputsearch')).not.toBeNull();
+  });
+
   it('los filtros viajan al calendario sin pisar el rango de la vista', () => {
     const api = setup();
     const page = TestBed.createComponent(SchedulingAgendaPageComponent).componentInstance;

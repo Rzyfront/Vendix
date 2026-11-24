@@ -59,7 +59,11 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { ModuleShellActionsService } from '../../../../../../shared/components/module-tabs-shell/module-shell-actions.service';
 import { agendaUrl } from '../../scheduling-tabs';
 
+/** Key of the mobile view switch inside the filters dropdown (not a data filter). */
+const VIEW_FILTER_KEY = 'vista';
+
 const MONTHS = new Intl.DateTimeFormat('es-CO', { timeZone: 'UTC', month: 'long', year: 'numeric' });
+const SHORT_DAY = new Intl.DateTimeFormat('es-CO', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' });
 const DAY_MONTH = new Intl.DateTimeFormat('es-CO', { timeZone: 'UTC', day: 'numeric', month: 'short' });
 
 function utc(ymd: string): Date {
@@ -103,65 +107,89 @@ function utc(ymd: string): Date {
       }
 
       <app-card [responsive]="true" [padding]="false" overflow="visible">
-        <div class="flex flex-col gap-2 px-2 py-2 md:px-4 md:border-b md:border-border">
-          <!-- M4: una sola fila en escritorio (navegación · búsqueda y filtros · vista);
-               en celular navegación y vista arriba, búsqueda debajo. -->
-          <div class="flex flex-wrap items-center gap-2 md:flex-nowrap" data-testid="agenda-toolbar">
-            <div class="order-1 flex min-w-0 items-center gap-1 md:shrink-0">
+        <!-- Encabezado de UNA sola altura (anotación de Rafael). Escritorio:
+             navegación a la izquierda; búsqueda, filtros y vista a la derecha.
+             Celular: la vista va dentro de Filtros y la búsqueda se abre con
+             la lupa en la misma fila. -->
+        <div
+          class="flex min-h-14 items-center gap-2 px-2 py-2 md:border-b md:border-border md:px-4"
+          data-testid="agenda-toolbar"
+        >
+          @if (!(isMobile() && mobileSearchOpen())) {
+            <div class="flex min-w-0 flex-1 items-center gap-1 md:flex-none md:shrink-0">
               <app-button class="shrink-0" variant="outline" size="sm" (clicked)="goToday()">Hoy</app-button>
-              <app-button variant="ghost" size="sm" ariaLabel="Anterior" (clicked)="move(-1)">
+              <app-button class="shrink-0" variant="ghost" size="sm" ariaLabel="Anterior" (clicked)="move(-1)">
                 <app-icon slot="icon" name="chevron-left" [size]="16" />
               </app-button>
-              <app-button variant="ghost" size="sm" ariaLabel="Siguiente" (clicked)="move(1)">
+              <app-button class="shrink-0" variant="ghost" size="sm" ariaLabel="Siguiente" (clicked)="move(1)">
                 <app-icon slot="icon" name="chevron-right" [size]="16" />
               </app-button>
               <span class="ml-1 min-w-0 truncate text-sm font-bold capitalize text-text-primary md:max-w-[14rem]" [attr.title]="rangeLabel()">{{ rangeLabel() }}</span>
             </div>
-            <div class="order-3 flex w-full items-center gap-2 md:order-2 md:w-auto md:min-w-0 md:flex-1 md:justify-end">
+          }
+          <div class="flex shrink-0 items-center gap-2 md:min-w-0 md:flex-1 md:justify-end" [class.flex-1]="isMobile() && mobileSearchOpen()">
+            @if (!isMobile() || mobileSearchOpen()) {
               <app-inputsearch
-                class="flex-1 md:max-w-xs"
+                class="min-w-0 flex-1 md:max-w-xs"
                 size="sm"
                 placeholder="Buscar número, cliente o servicio..."
                 [debounceTime]="300"
                 [ngModel]="search()"
                 (ngModelChange)="onSearch($event)"
               />
-              <app-options-dropdown
-                [filters]="filterConfigs()"
-                [filterValues]="filterValues()"
-                [actions]="dropdownActions()"
-                [isLoading]="loading()"
-                (filterChange)="onFilterChange($event)"
-                (clearAllFilters)="clearFilters()"
-                (actionClick)="onAction($event)"
-              />
-            </div>
-            <app-input-buttons
-              class="order-2 ml-auto shrink-0 md:order-3 md:ml-0"
-              [options]="viewOptions()"
-              [ngModel]="view()"
-              (ngModelChange)="setView($event)"
-              [hideLabelsOnMobile]="false"
-              [equalWidth]="false"
-              customWrapperClass="!w-auto !mt-0"
-              customContainerClass="!h-9 !rounded-xl"
+              @if (isMobile()) {
+                <app-button variant="ghost" size="sm" ariaLabel="Cerrar búsqueda" (clicked)="mobileSearchOpen.set(false)">
+                  <app-icon slot="icon" name="x" [size]="16" />
+                </app-button>
+              }
+            } @else {
+              <app-button
+                [variant]="search() ? 'outline' : 'ghost'"
+                size="sm"
+                ariaLabel="Buscar"
+                data-testid="agenda-search-toggle"
+                (clicked)="mobileSearchOpen.set(true)"
+              >
+                <app-icon slot="icon" name="search" [size]="16" />
+              </app-button>
+            }
+            <app-options-dropdown
+              [filters]="filterConfigs()"
+              [filterValues]="dropdownValues()"
+              [actions]="dropdownActions()"
+              [isLoading]="loading()"
+              (filterChange)="onFilterChange($event)"
+              (clearAllFilters)="clearFilters()"
+              (actionClick)="onAction($event)"
             />
+            @if (!isMobile()) {
+              <app-input-buttons
+                class="shrink-0"
+                [options]="viewOptions()"
+                [ngModel]="view()"
+                (ngModelChange)="setView($event)"
+                [hideLabelsOnMobile]="false"
+                [equalWidth]="false"
+                customWrapperClass="!w-auto !mt-0"
+                customContainerClass="!h-9 !rounded-xl"
+              />
+            }
           </div>
-          @if (availability().length) {
-            <p class="text-xs text-text-secondary" data-testid="availability-hint">
-              Lo sombreado está fuera del horario del prestador (horario, bloqueos y excepciones de Equipo de servicio).
-            </p>
-          } @else if (hasBookings()) {
-            <p class="text-xs text-text-secondary">
-              Filtra por personal para ver el horario disponible de cada prestador.
-            </p>
-          }
-          @if (truncated()) {
-            <p class="text-xs text-warning">
-              Hay más eventos de los que caben en este rango: usa la vista Semana o Día, o filtra.
-            </p>
-          }
         </div>
+        @if (availability().length || truncated()) {
+          <div class="flex flex-col gap-1 px-2 pt-2 md:px-4">
+            @if (availability().length) {
+              <p class="text-xs text-text-secondary" data-testid="availability-hint">
+                Lo sombreado está fuera del horario del prestador (horario, bloqueos y ausencias).
+              </p>
+            }
+            @if (truncated()) {
+              <p class="text-xs text-warning">
+                Hay más eventos de los que caben en este rango: usa la vista Semana o Día, o filtra.
+              </p>
+            }
+          </div>
+        }
 
         @if (sourcesLoaded() && !hasSources()) {
           <app-empty-state
@@ -242,8 +270,27 @@ export class SchedulingAgendaPageComponent {
   ]);
   readonly hasSources = computed(() => (this.sources()?.types.length ?? 0) > 0);
   readonly hasBookings = computed(() => !!this.sources()?.types.some((t) => t.value === 'booking'));
-  readonly filterConfigs = computed<FilterConfig[]>(() =>
-    buildSchedulingFilters(this.sources(), { withDateRange: false, withShow: false }),
+  /** Celular: la búsqueda se abre en la misma fila del encabezado. */
+  readonly mobileSearchOpen = signal(false);
+  /**
+   * En celular el cambio de vista (Mes/Día) vive dentro de Filtros para que el
+   * encabezado tenga una sola altura. No cuenta como filtro activo.
+   */
+  readonly filterConfigs = computed<FilterConfig[]>(() => {
+    const filters = buildSchedulingFilters(this.sources(), { withDateRange: false, withShow: false });
+    if (!this.isMobile()) return filters;
+    const view: FilterConfig = {
+      key: VIEW_FILTER_KEY,
+      label: 'Vista',
+      type: 'select',
+      options: this.viewOptions().map((o) => ({ value: o.value, label: o.label })),
+      defaultValue: this.effectiveView(),
+      countsAsActive: false,
+    };
+    return [view, ...filters];
+  });
+  readonly dropdownValues = computed<FilterValues>(() =>
+    this.isMobile() ? { ...this.filterValues(), [VIEW_FILTER_KEY]: this.effectiveView() } : this.filterValues(),
   );
   readonly hasScheduled = computed(
     () => !!this.sources()?.types.some((t) => t.value === 'scheduled_order'),
@@ -279,7 +326,7 @@ export class SchedulingAgendaPageComponent {
     const anchor = this.anchor();
     const view = this.effectiveView();
     if (view === 'month') return MONTHS.format(utc(anchor));
-    if (view === 'day') return fullDate(anchor);
+    if (view === 'day') return this.isMobile() ? SHORT_DAY.format(utc(anchor)) : fullDate(anchor);
     const days = weekDays(anchor);
     return `${DAY_MONTH.format(utc(days[0]))} – ${DAY_MONTH.format(utc(days[6]))}`;
   });
@@ -412,7 +459,9 @@ export class SchedulingAgendaPageComponent {
   }
 
   onFilterChange(values: FilterValues): void {
-    this.filterValues.set({ ...values });
+    const { [VIEW_FILTER_KEY]: view, ...filters } = values;
+    if (typeof view === 'string' && view !== this.effectiveView()) this.view.set(view as AgendaView);
+    this.filterValues.set({ ...filters });
     this.load();
   }
 
