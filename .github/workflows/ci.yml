@@ -921,6 +921,7 @@ jobs:
           --include='**/store/scheduling/pages/agenda-shell/agenda-shell.component.spec.ts'
           --include='**/store/scheduling/agenda-access.guard.spec.ts'
           --include='**/store/scheduling/services/scheduling-api.service.spec.ts'
+          --include='**/shared/components/date-range-filter/date-range-filter.component.spec.ts'
           --include='**/app/app-init-boot.spec.ts'
           --include='**/super-admin/ai-engine/ai-engine.component.spec.ts'
           --include='**/planillas-rutas/components/planilla-wizard/planilla-wizard.component.spec.ts'

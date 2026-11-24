@@ -105,15 +105,15 @@ function utc(ymd: string): Date {
       <app-card [responsive]="true" [padding]="false" overflow="visible">
         <div class="flex flex-col gap-2 px-2 py-2 md:px-4 md:py-3 md:border-b md:border-border">
           <div class="flex flex-wrap items-center justify-between gap-2">
-            <div class="flex items-center gap-1">
-              <app-button variant="outline" size="sm" (clicked)="goToday()">Hoy</app-button>
+            <div class="flex min-w-0 items-center gap-1">
+              <app-button class="shrink-0" variant="outline" size="sm" (clicked)="goToday()">Hoy</app-button>
               <app-button variant="ghost" size="sm" ariaLabel="Anterior" (clicked)="move(-1)">
                 <app-icon slot="icon" name="chevron-left" [size]="16" />
               </app-button>
               <app-button variant="ghost" size="sm" ariaLabel="Siguiente" (clicked)="move(1)">
                 <app-icon slot="icon" name="chevron-right" [size]="16" />
               </app-button>
-              <span class="ml-1 text-sm font-bold capitalize text-text-primary">{{ rangeLabel() }}</span>
+              <span class="ml-1 min-w-0 truncate text-sm font-bold capitalize text-text-primary" [attr.title]="rangeLabel()">{{ rangeLabel() }}</span>
             </div>
             <app-input-buttons
               [options]="viewOptions()"

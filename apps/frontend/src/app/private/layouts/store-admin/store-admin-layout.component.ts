@@ -672,12 +672,13 @@ export class StoreAdminLayoutComponent {
     });
 
     // Pedidos programados: la entrada solo aparece si el ajuste está activo
-    // y la tienda es restaurante (QUI-1001: siempre oculto fuera de
-    // restaurante, aunque el ajuste haya quedado activo).
+    // y la industria de la tienda admite `orders_scheduled` (restaurante y
+    // manufactura, #1274). Fuera de esas industrias siempre queda oculta,
+    // aunque el ajuste haya quedado activo (QUI-1001).
     effect(() => {
       this.menuFilterService.scheduledOrdersEnabled.set(
         this.storeSettingsFacade.settings()?.scheduled_orders?.enabled ===
-          true && this.authFacade.isRestaurant(),
+          true && this.menuFilterService.industryAllowsModule('orders_scheduled'),
       );
     });
 

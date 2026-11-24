@@ -1564,15 +1564,26 @@ describe('MenuFilterService — Órdenes: Agenda (agenda-unificada F1)', () => {
     expect(service.openAnyOfKeys(['orders_reservations', 'orders_scheduled'])).toEqual(['orders_reservations']);
   });
 
-  it('N1: manufactura sola con el ajuste encendido no ve pedidos en Agenda (regla QUI-1001 del layout)', async () => {
+  it('N1: manufactura con el ajuste encendido ve pedidos en Agenda (misma industria que orders_scheduled, #1274)', async () => {
     setStore(['manufacturing'], { scheduled_orders: { enabled: true } });
+    expect(service.candidateAnyOfKeys(['orders_reservations', 'orders_scheduled'])).toEqual([
+      'orders_reservations',
+      'orders_scheduled',
+    ]);
+    expect(service.openAnyOfKeys(['orders_reservations', 'orders_scheduled'])).toEqual(['orders_scheduled']);
+    const routes = await childRoutes();
+    expect(routes).toContain('/admin/orders/agenda');
+    // Restaurante con el mismo ajuste también.
+    setStore(['restaurant'], { scheduled_orders: { enabled: true } });
+    expect(service.openAnyOfKeys(['orders_reservations', 'orders_scheduled'])).toEqual(['orders_scheduled']);
+  });
+
+  it('N1b: fuera de restaurante y manufactura el ajuste encendido no abre pedidos (QUI-1001)', async () => {
+    setStore(['retail'], { scheduled_orders: { enabled: true } });
     expect(service.candidateAnyOfKeys(['orders_reservations', 'orders_scheduled'])).toEqual(['orders_reservations']);
     expect(service.openAnyOfKeys(['orders_reservations', 'orders_scheduled'])).toEqual([]);
     const routes = await childRoutes();
     expect(routes).not.toContain('/admin/orders/agenda');
-    // Restaurante con el mismo ajuste sí.
-    setStore(['restaurant'], { scheduled_orders: { enabled: true } });
-    expect(service.openAnyOfKeys(['orders_reservations', 'orders_scheduled'])).toEqual(['orders_scheduled']);
   });
 });
 

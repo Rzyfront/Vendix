@@ -56,7 +56,7 @@ export const AGENDA_SHELL_TABS: StickyHeaderTab[] = [
     SchedulingConfigTabComponent,
   ],
   template: `
-    <div class="w-full overflow-x-hidden md:space-y-4">
+    <div class="w-full overflow-x-clip md:space-y-4">
       <app-sticky-header
         title="Agenda"
         [subtitle]="subtitle()"
