@@ -1,5 +1,6 @@
 import { RequestContextService } from '@common/context/request-context.service';
 import { SchedulingService, SCHEDULING_MAX_WINDOW } from './scheduling.service';
+import { BusinessHoursService } from '../reservations/business-hours/business-hours.service';
 import {
   SchedulingEvent,
   SchedulingEventType,
@@ -83,6 +84,8 @@ describe('SchedulingService (agenda-unificada F1)', () => {
       loadStoreHours: jest.fn().mockResolvedValue(
         new Map([0, 1, 2, 3, 4, 5, 6].map((d) => [d, [{ start_time: '06:00', end_time: '22:00' }]])),
       ),
+      // Lector real del horario efectivo del prestador (Parte 1).
+      loadProviderBlocks: BusinessHoursService.prototype.loadProviderBlocks,
     } as any);
   });
 

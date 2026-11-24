@@ -3,6 +3,7 @@ import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { ServiceSessionsService } from './service-sessions.service';
 import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { rentalBlocksConsumed } from './utils/session-order-lines.util';
+import { BusinessHoursService } from '../reservations/business-hours/business-hours.service';
 
 const field = (id: number, overrides: Record<string, unknown> = {}) => ({
   id,
@@ -524,9 +525,23 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
       prisma.service_allocations = { findMany: jest.fn().mockResolvedValue([{ provider_id: 3, station_id: 9, session_id: 50, booking_id: null }]) };
       prisma.bookings = { findMany: jest.fn().mockResolvedValue([{ provider_id: 4, start_time: '10:15', end_time: '11:00' }]) };
       prisma.service_stations.findMany = jest.fn().mockResolvedValue([{ id: 9, name: 'Bahía 2' }]);
+      // Lector real del horario efectivo del prestador (Parte 1) sobre el prisma simulado.
+      (service as any).businessHours = {
+        prisma,
+        loadStoreWindows: jest.fn().mockResolvedValue(new Map([[2, [{ start_time: '08:00', end_time: '18:00' }]]])),
+        loadProviderBlocks: BusinessHoursService.prototype.loadProviderBlocks,
+      };
     });
 
     afterEach(() => jest.useRealTimers());
+
+    it('Parte 1: quien trabaja en el horario de la tienda está disponible sin horario propio', async () => {
+      prisma.service_providers.findMany.mockResolvedValue([
+        { id: 1, store_id: 3, display_name: 'Sin horario', is_active: true, uses_store_hours: true },
+      ]);
+      const result = await service.assessProviders(3, END, [1]);
+      expect(result[0]).toMatchObject({ display_name: 'Sin horario', status: 'available' });
+    });
 
     it('clasifica sin horario, fuera de turno, ocupado, con reserva y disponible', async () => {
       const result = await service.assessProviders(3, END, [1, 2, 3, 4, 5]);

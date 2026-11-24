@@ -23,6 +23,22 @@ interface PosDayHours {
   blocks?: Array<{ open: string; close: string }>;
 }
 
+/**
+ * One weekly block of a provider's EFFECTIVE schedule (Parte 1): its own
+ * `provider_schedules` row, or a block of the store hours when the provider
+ * works the store hours (`uses_store_hours`). `inherited` = it comes from the
+ * store and is edited in the store hours, never per provider.
+ */
+export interface ProviderWeeklyBlock {
+  provider_id: number;
+  day_of_week: number;
+  block_order: number;
+  start_time: string;
+  end_time: string;
+  is_active: boolean;
+  inherited: boolean;
+}
+
 export interface BusinessHoursDayView {
   day_of_week: number;
   start_time: string | null;
@@ -307,6 +323,75 @@ export class BusinessHoursService {
       const list = out.get(r.day_of_week) ?? [];
       list.push({ start_time: r.start_time, end_time: r.end_time });
       out.set(r.day_of_week, list);
+    }
+    return out;
+  }
+
+  /**
+   * THE reader of a provider's weekly availability (Parte 1, one source of
+   * truth). A provider with `uses_store_hours = true` works the store hours:
+   * its blocks are `loadStoreWindows` of its store, read live (the same
+   * windows the booking reads), so a change of the store hours reaches it
+   * without touching it. Any other provider keeps its own active
+   * `provider_schedules`. Exceptions, bookings and capacity are applied by the
+   * callers exactly as before.
+   *
+   * A provider the query does not return (another store, or a row without the
+   * flag) falls back to its own rows: only an explicit `true` inherits.
+   * `prisma` lets a transaction or an explicit scoped client read it too.
+   */
+  async loadProviderBlocks(
+    providerIds: readonly number[],
+    prisma: StorePrismaService = this.prisma,
+  ): Promise<ProviderWeeklyBlock[]> {
+    const ids = [...new Set(providerIds)].filter((id) => Number.isInteger(id));
+    if (!ids.length) return [];
+    const providers: Array<{ id: number; store_id: number; uses_store_hours: boolean }> =
+      await prisma.service_providers.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, store_id: true, uses_store_hours: true },
+      });
+    const inheriting = (providers ?? []).filter((p) => p.uses_store_hours === true);
+    const inheritingIds = new Set(inheriting.map((p) => p.id));
+    const ownIds = ids.filter((id) => !inheritingIds.has(id));
+
+    const out: ProviderWeeklyBlock[] = [];
+    if (ownIds.length) {
+      const rows = await prisma.provider_schedules.findMany({
+        where: { provider_id: { in: ownIds }, is_active: true },
+        orderBy: [{ day_of_week: 'asc' }, { block_order: 'asc' }],
+      });
+      for (const r of rows ?? []) {
+        out.push({
+          provider_id: r.provider_id,
+          day_of_week: r.day_of_week,
+          block_order: r.block_order ?? 0,
+          start_time: r.start_time,
+          end_time: r.end_time,
+          is_active: true,
+          inherited: false,
+        });
+      }
+    }
+
+    const storeIds = [...new Set(inheriting.map((p) => p.store_id))];
+    for (const storeId of storeIds) {
+      const week = await this.loadStoreWindows(storeId, prisma);
+      for (const provider of inheriting.filter((p) => p.store_id === storeId)) {
+        for (let dow = 0; dow <= 6; dow++) {
+          (week.get(dow) ?? []).forEach((w, index) =>
+            out.push({
+              provider_id: provider.id,
+              day_of_week: dow,
+              block_order: index,
+              start_time: w.start_time,
+              end_time: w.end_time,
+              is_active: true,
+              inherited: true,
+            }),
+          );
+        }
+      }
     }
     return out;
   }

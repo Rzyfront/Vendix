@@ -10,10 +10,14 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { RequestContextService } from '@common/context/request-context.service';
 import { CreateProviderDto } from './dto/create-provider.dto';
 import { UpdateProviderDto } from './dto/update-provider.dto';
+import { BusinessHoursService } from '../business-hours/business-hours.service';
 
 @Injectable()
 export class ProvidersService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly businessHours: BusinessHoursService,
+  ) {}
 
   private get storeId(): number {
     const context = RequestContextService.getContext();
@@ -99,6 +103,14 @@ export class ProvidersService {
       throw new NotFoundException(`Proveedor #${id} no encontrado`);
     }
 
+    // Parte 1: a provider that works the store hours shows the store blocks it
+    // really offers (marked `inherited`), not its saved own rows.
+    if (provider.uses_store_hours === true) {
+      return {
+        ...provider,
+        schedules: await this.businessHours.loadProviderBlocks([provider.id]),
+      };
+    }
     return provider;
   }
 
@@ -259,6 +271,7 @@ export class ProvidersService {
         ...(dto.bio !== undefined && { bio: dto.bio }),
         ...(dto.is_active !== undefined && { is_active: dto.is_active }),
         ...(dto.sort_order !== undefined && { sort_order: dto.sort_order }),
+        ...(dto.uses_store_hours !== undefined && { uses_store_hours: dto.uses_store_hours }),
         updated_at: new Date(),
       } as Prisma.service_providersUncheckedUpdateInput,
       include: this.PROVIDER_INCLUDE,

@@ -11517,6 +11517,8 @@ model service_providers {
   sort_order   Int       @default(0)
   /// Preferred station (not exclusive): booking with this provider tries it first, then falls back to auto-assignment. Must be linked in service_station_providers.
   default_station_id Int?
+  /// true = the weekly availability IS the store hours (settings.pos.business_hours), read live; false = own provider_schedules. Exceptions apply either way.
+  uses_store_hours Boolean @default(true)
   created_at   DateTime? @default(now()) @db.Timestamp(6)
   updated_at   DateTime? @default(now()) @db.Timestamp(6)
 

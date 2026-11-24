@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { BusinessHoursService } from '../business-hours/business-hours.service';
 import { booking_status_enum, Prisma } from '@prisma/client';
 
 export interface ProviderAvailabilityDay {
@@ -58,7 +59,10 @@ export interface ProviderAvailabilityOverview {
  */
 @Injectable()
 export class ProviderAvailabilityService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly businessHours: BusinessHoursService,
+  ) {}
 
   async getOverview(params: {
     date_from: string;
@@ -123,10 +127,8 @@ export class ProviderAvailabilityService {
 
     const providerIds = providers.map((p) => p.id);
 
-    // Load schedules for all providers in one query
-    const schedules = await this.prisma.provider_schedules.findMany({
-      where: { provider_id: { in: providerIds }, is_active: true },
-    });
+    // Effective weekly blocks of every provider (Parte 1: store hours or own)
+    const schedules = await this.businessHours.loadProviderBlocks(providerIds);
     const schedulesByProvider = new Map<
       number,
       typeof schedules

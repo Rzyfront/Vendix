@@ -197,13 +197,9 @@ export class AvailabilityService {
 
     const providerIds = providers.map((p) => p.id);
 
-    // 4. Obtener horarios de todos los proveedores relevantes
-    const schedules = await this.prisma.provider_schedules.findMany({
-      where: {
-        provider_id: { in: providerIds },
-        is_active: true,
-      },
-    });
+    // 4. Horario semanal efectivo de cada proveedor (Parte 1): el de la
+    // tienda si trabaja en él (`uses_store_hours`), o sus bloques propios.
+    const schedules = await this.businessHoursService.loadProviderBlocks(providerIds);
 
     // 5. Obtener excepciones en el rango de fechas
     // S21: a block belongs to the day it starts, so the day before `date_from`
@@ -504,9 +500,7 @@ export class AvailabilityService {
       compatibleProviders.set(station.id, providers.filter((provider) => stationProviderIds.has(provider.id)));
     }
     const providerIds = providers.map((provider) => provider.id);
-    const schedules = await prisma.provider_schedules.findMany({
-      where: { provider_id: { in: providerIds }, is_active: true },
-    });
+    const schedules = await this.businessHoursService.loadProviderBlocks(providerIds, prisma);
     // S21: blocks belong to the day they start; scan one day before and after the range.
     const scanFrom = addDaysToDateString(dateFrom, -1);
     const scanTo = addDaysToDateString(dateTo, 1);
@@ -915,14 +909,11 @@ export class AvailabilityService {
   ): Promise<boolean> {
     const prevDay = (dayOfWeek + 6) % 7;
     const nextDay = (dayOfWeek + 1) % 7;
-    const fetched = await this.prisma.provider_schedules.findMany({
-      where: {
-        provider_id,
-        day_of_week: { in: [dayOfWeek, prevDay, nextDay] },
-        is_active: true,
-      },
-      orderBy: { block_order: 'asc' },
-    });
+    // Effective weekly blocks (Parte 1): the store hours when the provider
+    // works them, its own rows otherwise.
+    const fetched = (await this.businessHoursService.loadProviderBlocks([provider_id]))
+      .filter((row) => [dayOfWeek, prevDay, nextDay].includes(row.day_of_week))
+      .sort((a, b) => a.block_order - b.block_order);
     const rows = fetched.filter((row) => row.day_of_week === dayOfWeek || row.day_of_week === prevDay);
     const nextRows = fetched.filter((row) => row.day_of_week === nextDay);
     const ownBlocks = rows.filter((row) => row.day_of_week === dayOfWeek);
@@ -1226,10 +1217,8 @@ export class AvailabilityService {
       }>;
     }>
   > {
-    // 1. Get the provider's active schedule blocks
-    const schedules = await this.prisma.provider_schedules.findMany({
-      where: { provider_id: providerId, is_active: true },
-    });
+    // 1. The provider's effective weekly blocks (Parte 1: store hours or own)
+    const schedules = await this.businessHoursService.loadProviderBlocks([providerId]);
 
     // Group by day_of_week for quick lookup
     const blocksByDay = new Map<number, typeof schedules>();
@@ -1542,9 +1531,9 @@ export class AvailabilityService {
     if (providers.length === 0) return 0;
     const providerIds = providers.map((p) => p.id);
 
-    const schedules = await db.provider_schedules.findMany({
-      where: { provider_id: { in: providerIds }, day_of_week: dayOfWeek, is_active: true },
-    });
+    const schedules = (await this.businessHoursService.loadProviderBlocks(providerIds, db)).filter(
+      (row) => row.day_of_week === dayOfWeek,
+    );
     if (schedules.length === 0) return 0;
 
     const targetDate = new Date(`${dateStr}T00:00:00.000Z`);

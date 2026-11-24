@@ -1,5 +1,6 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ProviderScheduleService } from './provider-schedule.service';
+import { BusinessHoursService } from '../business-hours/business-hours.service';
 
 /**
  * QUI-968: saving a provider schedule must never answer 500.
@@ -12,6 +13,7 @@ describe('ProviderScheduleService.upsertSchedule (QUI-968)', () => {
     createManyError?: any;
   } = {}) {
     const tx = {
+      service_providers: { update: jest.fn().mockResolvedValue({}) },
       provider_schedules: {
         deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
         createMany: opts.createManyError
@@ -30,9 +32,32 @@ describe('ProviderScheduleService.upsertSchedule (QUI-968)', () => {
       },
       $transaction: jest.fn(async (cb: any) => cb(tx)),
     };
-    const service = new ProviderScheduleService(prisma);
+    const service = new ProviderScheduleService(prisma, {} as BusinessHoursService);
     return { service, prisma, tx };
   }
+
+  it('Parte 1: saving an own schedule stops using the store hours, in the same transaction', async () => {
+    const { service, tx } = buildService();
+    const saved = await service.upsertSchedule(8, [
+      { day_of_week: 1, block_order: 0, start_time: '08:00', end_time: '12:00' },
+    ] as any);
+    expect(tx.service_providers.update).toHaveBeenCalledWith({
+      where: { id: 8 },
+      data: expect.objectContaining({ uses_store_hours: false }),
+    });
+    expect(saved).toEqual([
+      { id: 1, inherited: false },
+      { id: 2, inherited: false },
+    ]);
+  });
+
+  it('Parte 1: an invalid payload leaves the store-hours choice untouched', async () => {
+    const { service, tx } = buildService();
+    await expect(
+      service.upsertSchedule(8, [{ day_of_week: 1, start_time: '9am', end_time: '12:00' }] as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(tx.service_providers.update).not.toHaveBeenCalled();
+  });
 
   it('saves a valid split-shift payload', async () => {
     const { service, tx } = buildService();
@@ -206,5 +231,37 @@ describe('ProviderScheduleService.upsertSchedule (QUI-968)', () => {
       ] as any);
       expect(tx.provider_schedules.createMany).toHaveBeenCalled();
     });
+  });
+});
+
+describe('ProviderScheduleService.getSchedule (Parte 1)', () => {
+  function build(usesStoreHours: boolean | undefined) {
+    const own = [{ id: 1, provider_id: 8, day_of_week: 1, block_order: 0, start_time: '08:00', end_time: '12:00', is_active: true }];
+    const prisma: any = {
+      service_providers: {
+        findFirst: jest.fn().mockResolvedValue({ id: 8, uses_store_hours: usesStoreHours }),
+      },
+      provider_schedules: { findMany: jest.fn().mockResolvedValue(own) },
+    };
+    const inherited = [
+      { provider_id: 8, day_of_week: 5, block_order: 0, start_time: '17:00', end_time: '04:00', is_active: true, inherited: true },
+    ];
+    const hours = { loadProviderBlocks: jest.fn().mockResolvedValue(inherited) };
+    return { service: new ProviderScheduleService(prisma, hours as unknown as BusinessHoursService), prisma, hours, inherited };
+  }
+
+  it('returns the store blocks marked inherited while the provider works the store hours', async () => {
+    const { service, prisma, hours, inherited } = build(true);
+    await expect(service.getSchedule(8)).resolves.toEqual(inherited);
+    expect(hours.loadProviderBlocks).toHaveBeenCalledWith([8]);
+    expect(prisma.provider_schedules.findMany).not.toHaveBeenCalled();
+  });
+
+  it('returns the own rows, marked not inherited, with an own schedule (unchanged rows)', async () => {
+    const { service, hours } = build(false);
+    await expect(service.getSchedule(8)).resolves.toEqual([
+      { id: 1, provider_id: 8, day_of_week: 1, block_order: 0, start_time: '08:00', end_time: '12:00', is_active: true, inherited: false },
+    ]);
+    expect(hours.loadProviderBlocks).not.toHaveBeenCalled();
   });
 });

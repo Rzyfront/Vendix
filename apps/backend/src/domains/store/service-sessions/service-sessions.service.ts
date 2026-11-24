@@ -732,7 +732,7 @@ export class ServiceSessionsService {
 
     const [providers, schedules, exceptions, allocations, bookings] = await Promise.all([
       this.prisma.service_providers.findMany({ where: { id: { in: ids }, store_id: storeId }, select: { id: true, display_name: true, is_active: true } }),
-      this.prisma.provider_schedules.findMany({ where: { provider_id: { in: ids }, is_active: true }, select: { provider_id: true, day_of_week: true, start_time: true, end_time: true } }),
+      this.businessHours.loadProviderBlocks(ids),
       this.prisma.provider_exceptions.findMany({ where: { provider_id: { in: ids }, date: new Date(`${localDate}T00:00:00.000Z`) }, select: { provider_id: true, is_unavailable: true, custom_start_time: true, custom_end_time: true } }),
       this.prisma.service_allocations.findMany({
         where: {
@@ -1390,7 +1390,7 @@ export class ServiceSessionsService {
     const [compatible, activeProvider, schedule, exceptionRows] = await Promise.all([
       this.prisma.service_station_providers.findFirst({ where: { store_id: storeId, station_id: allocation.station_id, provider_id: providerId } }),
       this.prisma.service_providers.findFirst({ where: { id: providerId, store_id: storeId, is_active: true } }),
-      this.prisma.provider_schedules.findMany({ where: { provider_id: providerId, is_active: true }, select: { day_of_week: true, start_time: true, end_time: true } }),
+      this.businessHours.loadProviderBlocks([providerId]),
       this.prisma.provider_exceptions.findMany({ where: { provider_id: providerId }, select: { date: true, is_unavailable: true, custom_start_time: true, custom_end_time: true } }),
     ]);
     const serviceCompatibility = await this.prisma.provider_services.findFirst({ where: { provider_id: providerId, product_id: session.product_id } });

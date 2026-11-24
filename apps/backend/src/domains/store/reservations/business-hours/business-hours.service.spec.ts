@@ -379,4 +379,113 @@ describe('BusinessHoursService', () => {
       expect(windows.size).toBe(0);
     });
   });
+
+
+  describe('loadProviderBlocks — one reader of the provider week (Parte 1)', () => {
+    function build(opts: { providers: any[]; schedules?: any[]; businessHours?: any }) {
+      const prisma: any = {
+        service_providers: { findMany: jest.fn().mockResolvedValue(opts.providers) },
+        provider_schedules: {
+          findMany: jest.fn(({ where }: any) =>
+            Promise.resolve(
+              (opts.schedules ?? []).filter(
+                (r) => where.provider_id.in.includes(r.provider_id) && r.is_active === where.is_active,
+              ),
+            ),
+          ),
+        },
+        store_settings: {
+          findUnique: jest.fn().mockResolvedValue(
+            opts.businessHours ? { settings: { pos: { business_hours: opts.businessHours } } } : null,
+          ),
+        },
+        store_business_hours: { findMany: jest.fn().mockResolvedValue([]) },
+      };
+      return { service: new BusinessHoursService(prisma), prisma };
+    }
+    const nightWeek = {
+      friday: { open: '17:00', close: '04:00' },
+      saturday: { open: '00:00', close: '00:00' },
+      sunday: 'closed',
+    };
+
+    it('gives the store blocks, marked inherited, to a provider that works the store hours', async () => {
+      const { service, prisma } = build({
+        providers: [{ id: 5, store_id: 1, uses_store_hours: true }],
+        schedules: [{ provider_id: 5, day_of_week: 1, block_order: 0, start_time: '08:00', end_time: '12:00', is_active: true }],
+        businessHours: nightWeek,
+      });
+      const blocks = await service.loadProviderBlocks([5]);
+      expect(blocks).toEqual([
+        { provider_id: 5, day_of_week: 5, block_order: 0, start_time: '17:00', end_time: '04:00', is_active: true, inherited: true },
+        { provider_id: 5, day_of_week: 6, block_order: 0, start_time: '00:00', end_time: '00:00', is_active: true, inherited: true },
+      ]);
+      // The saved own rows stay untouched and unread.
+      expect(prisma.provider_schedules.findMany).not.toHaveBeenCalled();
+    });
+
+    it('keeps the own active rows of a provider with its own schedule (unchanged)', async () => {
+      const { service, prisma } = build({
+        providers: [{ id: 6, store_id: 1, uses_store_hours: false }],
+        schedules: [
+          { provider_id: 6, day_of_week: 1, block_order: 0, start_time: '08:00', end_time: '12:00', is_active: true },
+          { provider_id: 6, day_of_week: 2, block_order: 0, start_time: '08:00', end_time: '12:00', is_active: false },
+        ],
+        businessHours: nightWeek,
+      });
+      const blocks = await service.loadProviderBlocks([6]);
+      expect(blocks).toEqual([
+        { provider_id: 6, day_of_week: 1, block_order: 0, start_time: '08:00', end_time: '12:00', is_active: true, inherited: false },
+      ]);
+      expect(prisma.store_settings.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('mixes both kinds in one call and reads the store hours once per store', async () => {
+      const { service, prisma } = build({
+        providers: [
+          { id: 5, store_id: 1, uses_store_hours: true },
+          { id: 7, store_id: 1, uses_store_hours: true },
+          { id: 6, store_id: 1, uses_store_hours: false },
+        ],
+        schedules: [{ provider_id: 6, day_of_week: 1, block_order: 0, start_time: '08:00', end_time: '12:00', is_active: true }],
+        businessHours: { friday: { open: '17:00', close: '04:00' } },
+      });
+      const blocks = await service.loadProviderBlocks([5, 6, 7, 5]);
+      expect(blocks.map((b) => [b.provider_id, b.day_of_week, b.inherited])).toEqual([
+        [6, 1, false],
+        [5, 5, true],
+        [7, 5, true],
+      ]);
+      expect(prisma.store_settings.findUnique).toHaveBeenCalledTimes(1);
+    });
+
+    it('reads the store hours live: a new store week reaches the inheriting provider', async () => {
+      const { service, prisma } = build({
+        providers: [{ id: 5, store_id: 1, uses_store_hours: true }],
+        businessHours: { monday: { open: '09:00', close: '12:00' } },
+      });
+      expect((await service.loadProviderBlocks([5])).map((b) => b.day_of_week)).toEqual([1]);
+      prisma.store_settings.findUnique.mockResolvedValue({
+        settings: { pos: { business_hours: { tuesday: { open: '17:00', close: '04:00' } } } },
+      });
+      expect(await service.loadProviderBlocks([5])).toEqual([
+        expect.objectContaining({ day_of_week: 2, start_time: '17:00', end_time: '04:00', inherited: true }),
+      ]);
+    });
+
+    it('falls back to the own rows when the provider row is not returned (another store)', async () => {
+      const { service, prisma } = build({ providers: [], schedules: [] });
+      await expect(service.loadProviderBlocks([99])).resolves.toEqual([]);
+      expect(prisma.provider_schedules.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { provider_id: { in: [99] }, is_active: true } }),
+      );
+      expect(prisma.store_settings.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('does not query anything for an empty list', async () => {
+      const { service, prisma } = build({ providers: [] });
+      await expect(service.loadProviderBlocks([])).resolves.toEqual([]);
+      expect(prisma.service_providers.findMany).not.toHaveBeenCalled();
+    });
+  });
 });

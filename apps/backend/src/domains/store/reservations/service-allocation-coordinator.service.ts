@@ -189,7 +189,8 @@ export class ServiceAllocationCoordinator {
 
     if (input.providerId) {
       const [schedules, exceptions] = await Promise.all([
-        tx.provider_schedules.findMany({ where: { provider_id: input.providerId, is_active: true }, select: { day_of_week: true, start_time: true, end_time: true } }),
+        // Effective weekly blocks (Parte 1): store hours when the provider works them.
+        this.businessHours.loadProviderBlocks([input.providerId], tx as unknown as StorePrismaService),
         tx.provider_exceptions.findMany({ where: { provider_id: input.providerId, date: { gte: new Date(`${dayBefore}T00:00:00.000Z`), lte: new Date(`${dayAfter}T00:00:00.000Z`) } } }),
       ]);
       // Weekly blocks, replaced per calendar day by that day's exception: an exception on D

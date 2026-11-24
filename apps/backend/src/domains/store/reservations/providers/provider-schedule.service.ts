@@ -9,6 +9,7 @@ import {
   SCHEDULE_TIME_PATTERN,
 } from './dto/upsert-provider-schedule.dto';
 import { CreateProviderExceptionDto } from './dto/create-provider-exception.dto';
+import { BusinessHoursService } from '../business-hours/business-hours.service';
 import {
   isOvernight,
   validateWeeklyBlocks,
@@ -26,13 +27,30 @@ const DAY_NAMES = [
 
 @Injectable()
 export class ProviderScheduleService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly businessHours: BusinessHoursService,
+  ) {}
 
+  /**
+   * The provider's weekly schedule. A provider that works the store hours
+   * (`uses_store_hours`, Parte 1) gets the store blocks it really offers,
+   * each marked `inherited: true` (read-only: they are edited in the store
+   * hours). Otherwise its own rows, as before, marked `inherited: false`.
+   */
   async getSchedule(providerId: number) {
-    return this.prisma.provider_schedules.findMany({
+    const provider = await this.prisma.service_providers.findFirst({
+      where: { id: providerId },
+      select: { id: true, uses_store_hours: true },
+    });
+    if (provider?.uses_store_hours === true) {
+      return this.businessHours.loadProviderBlocks([providerId]);
+    }
+    const rows = await this.prisma.provider_schedules.findMany({
       where: { provider_id: providerId },
       orderBy: [{ day_of_week: 'asc' }, { block_order: 'asc' }],
     });
+    return rows.map((row) => ({ ...row, inherited: false }));
   }
 
   async upsertSchedule(providerId: number, items: ProviderScheduleItemDto[]) {
@@ -50,6 +68,13 @@ export class ProviderScheduleService {
     const rows = this.normalizeScheduleItems(items ?? []);
 
     return this.prisma.$transaction(async (tx: any) => {
+      // Saving an own schedule means the provider no longer works the store
+      // hours (Parte 1). Going back to the store hours never deletes these rows.
+      await tx.service_providers.update({
+        where: { id: providerId },
+        data: { uses_store_hours: false, updated_at: new Date() },
+      });
+
       // Delete existing schedules
       await tx.provider_schedules.deleteMany({
         where: { provider_id: providerId },
@@ -84,10 +109,11 @@ export class ProviderScheduleService {
         }
       }
 
-      return tx.provider_schedules.findMany({
+      const saved = await tx.provider_schedules.findMany({
         where: { provider_id: providerId },
         orderBy: [{ day_of_week: 'asc' }, { block_order: 'asc' }],
       });
+      return saved.map((row: Record<string, unknown>) => ({ ...row, inherited: false }));
     });
   }
 
