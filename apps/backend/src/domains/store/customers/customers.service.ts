@@ -1977,7 +1977,12 @@ export class CustomersService {
     return {
       tags: tags
         .filter((tag) => tag._count.customer_tags > 0)
-        .map(({ _count, ...tag }): { id: number; name: string; color: string | null; group_name: string | null } => tag),
+        .map((tag) => ({
+          id: tag.id as number,
+          name: tag.name as string,
+          color: (tag.color ?? null) as string | null,
+          group_name: (tag.group_name ?? null) as string | null,
+        })),
       segments: segments.map((segment) => ({
         id: segment.id,
         name: segment.name,
