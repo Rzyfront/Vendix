@@ -7382,6 +7382,20 @@ export const ErrorCodes = {
       'La receta no puede activarse porque tiene sub-componentes con cantidad invalida (0 o nula). Corregir antes de activar.',
   },
   /**
+   * QUI-1054 — receta ACTIVA con 0 insumos. `PUT /:id/items` con `items: []`
+   * (o borrar el último insumo) respondia 200 y dejaba la receta activa y
+   * vacia: la resolucion por variante encuentra esa receta exacta, no cae a la
+   * base, y el BOM vacio no descuenta inventario ni costo (venta silenciosa
+   * sin consumo). Se rechaza el estado en vez de desactivar la receta en
+   * silencio, para que el cliente decida.
+   */
+  RECIPE_ITEMS_REQUIRED: {
+    code: 'RECIPE_ITEMS_REQUIRED',
+    httpStatus: 422,
+    devMessage:
+      'Una receta activa no puede quedarse sin insumos: la venta dejaria de descontar inventario y costo. Agregar al menos un insumo o desactivar la receta.',
+  },
+  /**
    * `recipe_items` sólo tiene `component_product_id`: no hay columna de
    * variante. Un insumo con variantes hace que el consumo vaya a la fila BASE
    * del stock —la que en un producto con variantes está vacía—, así que la
