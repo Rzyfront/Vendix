@@ -107,10 +107,15 @@ export class RequestContextService {
   }
 
   /**
-   * Obtiene el request_id actual (X-Request-Id)
+   * Obtiene el request_id actual (X-Request-Id).
+   *
+   * Solo del AsyncLocalStorage, SIN el fallback a `currentContext` de
+   * `getContext()`: ese estático es el último `run(...)` de cualquier petición
+   * o worker, y fuera del ALS devolvía el id de OTRA petición (QUI-1049 P3 /
+   * QUI-1019). Sin contexto es `undefined`, que todos los usos ya toleran.
    */
   static getRequestId(): string | undefined {
-    return this.getContext()?.request_id;
+    return this.asyncLocalStorage.getStore()?.request_id;
   }
 
   /**
