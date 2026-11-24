@@ -27,7 +27,6 @@ import { ButtonComponent } from '../../../../../../../shared/components/button/b
 import {
   PosSettings,
   BusinessHours,
-  BusinessHoursBlock,
   ScaleSettings,
   ScaleDeviceConfig,
   VariableBarcodeFormat,
@@ -38,7 +37,14 @@ import { ToastService } from '../../../../../../../shared/components/toast/toast
 import { DialogService } from '../../../../../../../shared/components/dialog/dialog.service';
 import { VariableBarcodeFormatsModalComponent } from '../variable-barcode-formats-modal.component';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
-import { isClockTime, isOvernight } from '../../../../../../../shared/utils/schedule-window.util';
+import { WeeklyHoursEditorComponent } from '../../../../../../../shared/components/weekly-hours-editor/weekly-hours-editor.component';
+import {
+  WeekHoursDay,
+  summarizeWeek,
+  validateWeek,
+  weekFromPosHours,
+  weekToPosHours,
+} from '../../../../../../../shared/components/weekly-hours-editor/weekly-hours.util';
 import { agendaQueryParams, AGENDA_ROUTE } from '../../../../scheduling/scheduling-tabs';
 
 @Component({
@@ -58,6 +64,7 @@ import { agendaQueryParams, AGENDA_ROUTE } from '../../../../scheduling/scheduli
     IconComponent,
     ButtonComponent,
     VariableBarcodeFormatsModalComponent,
+    WeeklyHoursEditorComponent,
   ],
   templateUrl: './pos-settings-form.component.html',
   styleUrls: ['./pos-settings-form.component.scss'],
@@ -148,6 +155,7 @@ export class PosSettingsForm implements OnInit {
         );
         this.syncDependentControlsState();
         this.syncVariableBarcodeMirrors();
+        this.syncHoursWeek();
       }
     });
   }
@@ -208,27 +216,10 @@ export class PosSettingsForm implements OnInit {
     }),
   });
 
-  daysOfWeek = [
-    { key: 'monday', label: 'Lunes' },
-    { key: 'tuesday', label: 'Martes' },
-    { key: 'wednesday', label: 'Miércoles' },
-    { key: 'thursday', label: 'Jueves' },
-    { key: 'friday', label: 'Viernes' },
-    { key: 'saturday', label: 'Sábado' },
-    { key: 'sunday', label: 'Domingo' },
-  ];
-
-  scheduleModeOptions: SelectorOption[] = [
-    { value: 'continuous', label: 'Continuo' },
-    { value: 'custom', label: 'Personalizado' },
-  ];
-
   tipTypeOptions: SelectorOption[] = [
     { value: 'percentage', label: 'Porcentaje' },
     { value: 'fixed', label: 'Monto fijo' },
   ];
-
-  readonly MAX_BLOCKS_PER_DAY = 5;
 
   // Typed getters for FormControls
   get allowAnonymousSalesControl(): FormControl<boolean> {
@@ -291,10 +282,6 @@ export class PosSettingsForm implements OnInit {
 
   get scheduleModeControl(): FormControl<'continuous' | 'custom'> {
     return this.form.get('schedule_mode') as FormControl<'continuous' | 'custom'>;
-  }
-
-  isCustomMode(): boolean {
-    return this.scheduleModeControl.value === 'custom';
   }
 
   get scaleEnabledControl(): FormControl<boolean> {
@@ -606,206 +593,26 @@ export class PosSettingsForm implements OnInit {
   readonly agendaHoursParams = agendaQueryParams('configuracion', 'horario');
 
   /**
-   * S21: a close at or before the open ends the next day (e.g. 20:00–03:00).
-   * `00:00–00:00` is the explicit 24 h block, not a night shift.
+   * The store schedule edited with the shared weekly editor (same component as
+   * Agenda → Horario de la tienda). Writes `business_hours` and `schedule_mode`
+   * like the API does; a week with problems stays in the editor (shown inline)
+   * and is not written to the form.
    */
-  closesNextDay(open: string, close: string): boolean {
-    return (
-      isClockTime(open) &&
-      isClockTime(close) &&
-      !this.isFullDayRange(open, close) &&
-      isOvernight({ start_time: open, end_time: close })
+  readonly hoursWeek = signal<WeekHoursDay[]>([]);
+  readonly scheduleSummary = computed(() => summarizeWeek(this.hoursWeek()));
+
+  private syncHoursWeek(): void {
+    this.hoursWeek.set(
+      weekFromPosHours(this.form.get('business_hours')?.value, this.scheduleModeControl.value),
     );
   }
 
-  isFullDayRange(open: string, close: string): boolean {
-    return open === '00:00' && close === '00:00';
-  }
-
-  /** Custom mode: the day is one `00:00–00:00` block (open 24 hours). */
-  isCustomDay24h(day: string): boolean {
-    const blocks = this.getDayBlocks(day);
-    return blocks.length === 1 && this.isFullDayRange(blocks[0].open, blocks[0].close);
-  }
-
-  /** Custom mode: «24 horas» on → one 00:00–00:00 block; off → 09:00–18:00. */
-  toggleCustomDay24h(day: string) {
-    const hours = { ...this.form.get('business_hours')?.value };
-    if (!hours?.[day]) return;
-    const blocks = this.isCustomDay24h(day)
-      ? [{ open: '09:00', close: '18:00' }]
-      : [{ open: '00:00', close: '00:00' }];
-    hours[day] = { ...hours[day], open: blocks[0].open, close: blocks[0].close, blocks };
-    this.form.get('business_hours')?.setValue(hours);
+  onHoursWeekChange(week: WeekHoursDay[]): void {
+    this.hoursWeek.set(week);
+    if (validateWeek(week).count > 0) return;
+    const next = weekToPosHours(week, this.scheduleModeControl.value);
+    this.form.get('business_hours')?.setValue(next.business_hours, { emitEvent: false });
+    this.scheduleModeControl.setValue(next.schedule_mode, { emitEvent: false });
     this.onBusinessHoursChange();
-  }
-
-  isDayClosed(day: string): boolean {
-    const hours = this.form.get('business_hours')?.value;
-    return hours?.[day]?.open === 'closed';
-  }
-
-  toggleDayStatus(day: string) {
-    const hours = this.form.get('business_hours')?.value;
-    if (hours?.[day]?.open === 'closed') {
-      hours[day] = { open: '09:00', close: '19:00' };
-    } else {
-      hours[day] = { open: 'closed', close: 'closed' };
-    }
-    this.form.get('business_hours')?.setValue(hours);
-    this.onBusinessHoursChange();
-  }
-
-  onTimeChange(day: string, field: 'open' | 'close', value: string) {
-    const hours = this.form.get('business_hours')?.value;
-    if (hours?.[day]) {
-      hours[day][field] = value;
-      this.form.get('business_hours')?.setValue(hours);
-      this.onBusinessHoursChange();
-    }
-  }
-
-  onScheduleModeChange() {
-    const mode = this.scheduleModeControl.value;
-    const hours = { ...this.form.get('business_hours')?.value };
-    if (!hours) return;
-
-    if (mode === 'custom') {
-      for (const day of this.daysOfWeek) {
-        const dayHours = hours[day.key];
-        if (!dayHours) continue;
-        if (dayHours.open === 'closed') {
-          hours[day.key] = { ...dayHours, blocks: [] };
-        } else {
-          hours[day.key] = {
-            ...dayHours,
-            blocks: [
-              { open: dayHours.open, close: dayHours.close },
-              { open: '14:00', close: '18:00' },
-            ],
-          };
-        }
-      }
-    } else {
-      for (const day of this.daysOfWeek) {
-        const dayHours = hours[day.key];
-        if (!dayHours) continue;
-        const { blocks, ...rest } = dayHours as BusinessHours;
-        if (blocks && blocks.length > 0) {
-          hours[day.key] = { ...rest, open: blocks[0].open, close: blocks[0].close };
-        } else {
-          hours[day.key] = { ...rest };
-        }
-      }
-    }
-
-    this.form.get('business_hours')?.setValue(hours);
-    this.onBusinessHoursChange();
-  }
-
-  getDayBlocks(day: string): BusinessHoursBlock[] {
-    const hours = this.form.get('business_hours')?.value;
-    return hours?.[day]?.blocks ? [...hours[day].blocks] : [];
-  }
-
-  addBlock(day: string) {
-    const hours = { ...this.form.get('business_hours')?.value };
-    if (!hours?.[day]) return;
-
-    const currentBlocks = hours[day].blocks ? [...hours[day].blocks] : [];
-    if (currentBlocks.length >= this.MAX_BLOCKS_PER_DAY) return;
-
-    currentBlocks.push({ open: '09:00', close: '17:00' });
-    hours[day] = { ...hours[day], blocks: currentBlocks };
-    this.form.get('business_hours')?.setValue(hours);
-    this.onBusinessHoursChange();
-  }
-
-  removeBlock(day: string, index: number) {
-    const hours = { ...this.form.get('business_hours')?.value };
-    if (!hours?.[day]?.blocks) return;
-
-    const currentBlocks = [...hours[day].blocks];
-    currentBlocks.splice(index, 1);
-    hours[day] = { ...hours[day], blocks: currentBlocks };
-    this.form.get('business_hours')?.setValue(hours);
-    this.onBusinessHoursChange();
-  }
-
-  onBlockTimeChange(day: string, blockIndex: number, field: 'open' | 'close', value: string) {
-    const hours = { ...this.form.get('business_hours')?.value };
-    if (!hours?.[day]?.blocks?.[blockIndex]) return;
-
-    const currentBlocks = [...hours[day].blocks];
-    currentBlocks[blockIndex] = { ...currentBlocks[blockIndex], [field]: value };
-    hours[day] = { ...hours[day], blocks: currentBlocks };
-    this.form.get('business_hours')?.setValue(hours);
-    this.onBusinessHoursChange();
-  }
-
-  isCustomDayClosed(day: string): boolean {
-    const hours = this.form.get('business_hours')?.value;
-    const blocks = hours?.[day]?.blocks;
-    return !blocks || blocks.length === 0;
-  }
-
-  toggleCustomDayStatus(day: string) {
-    const hours = { ...this.form.get('business_hours')?.value };
-    if (!hours?.[day]) return;
-
-    if (this.isCustomDayClosed(day)) {
-      hours[day] = { ...hours[day], blocks: [{ open: '08:00', close: '12:00' }, { open: '14:00', close: '18:00' }] };
-    } else {
-      hours[day] = { ...hours[day], blocks: [] };
-    }
-    this.form.get('business_hours')?.setValue(hours);
-    this.onBusinessHoursChange();
-  }
-
-  canAddBlock(day: string): boolean {
-    const blocks = this.getDayBlocks(day);
-    return blocks.length < this.MAX_BLOCKS_PER_DAY;
-  }
-
-  /**
-   * Resumen legible de la semana para el encabezado del bloque colapsado, así
-   * el operador sabe qué horario tiene guardado sin abrirlo.
-   *
-   * Es un método y no un `computed`: la fuente es `form.get(...).value`, que no
-   * es señal — un `computed` se evaluaría una sola vez y mostraría siempre el
-   * horario inicial.
-   */
-  scheduleSummary(): string {
-    const isClosed = (key: string) =>
-      this.isCustomMode() ? this.isCustomDayClosed(key) : this.isDayClosed(key);
-
-    const openDays = this.daysOfWeek.filter((day) => !isClosed(day.key));
-    if (openDays.length === 0) return 'Todos los días cerrados';
-
-    const first = openDays[0];
-    const dayHours = this.form.get('business_hours')?.value?.[first.key];
-    const range = this.isCustomMode()
-      ? this.getDayBlocks(first.key)
-          .map((block) =>
-            this.isFullDayRange(block.open, block.close)
-              ? '24 horas'
-              : `${block.open}–${block.close}${this.closesNextDay(block.open, block.close) ? ' (+1 día)' : ''}`,
-          )
-          .join(' y ')
-      : dayHours
-        ? this.isFullDayRange(dayHours.open, dayHours.close)
-          ? '24 horas'
-          : `${dayHours.open}–${dayHours.close}${this.closesNextDay(dayHours.open, dayHours.close) ? ' (+1 día)' : ''}`
-        : '';
-
-    const closedLabels = this.daysOfWeek
-      .filter((day) => isClosed(day.key))
-      .map((day) => day.label);
-
-    const opened = `${openDays.length} ${openDays.length === 1 ? 'día abierto' : 'días abiertos'}`;
-    const sample = range ? ` · ${first.label} ${range}` : '';
-    const closed = closedLabels.length ? ` · Cierra ${closedLabels.join(', ')}` : '';
-
-    return `${opened}${sample}${closed}`;
   }
 }

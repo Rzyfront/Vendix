@@ -776,186 +776,46 @@
           </div>
         </div>
       </div>
-      <div class="mb-4">
-        <app-selector
-          [formControl]="scheduleModeControl"
-          label="Tipo de Horario"
-          [options]="scheduleModeOptions"
-          (valueChange)="onScheduleModeChange()"
-          size="sm"
-        ></app-selector>
-        <p class="field__hint">
-          @if (isCustomMode()) {
-            Personalizado: hasta {{ MAX_BLOCKS_PER_DAY }} bloques por día, para cerrar
-            al mediodía y reabrir en la tarde (por ejemplo 08:00–12:00 y 14:00–18:00).
-          } @else {
-            Continuo: un solo bloque de apertura y cierre por día (por ejemplo
-            09:00–19:00). Cambia a Personalizado si cierras al mediodía.
-          }
-        </p>
-      </div>
-
       <app-expandable-card [(expanded)]="scheduleOpen">
         <div slot="header" class="card-head">
           <app-icon name="clock" size="16"></app-icon>
           <span class="card-head__text">
-            <span class="card-head__title">Horario por día</span>
-            <span class="card-head__sub">{{ scheduleSummary() }}</span>
+            <span class="card-head__title">Horario de la tienda</span>
+            <span class="card-head__sub" data-testid="pos-hours-summary">{{ scheduleSummary() }}</span>
           </span>
         </div>
 
-        <div class="p-4">
-          <!-- Continuous Mode -->
-          @if (!isCustomMode()) {
-            <p class="field__hint field__hint--block" data-testid="agenda-hours-link">
-              Es el mismo horario de atención que usan las reservas y la Agenda. En modo
-              Continuo las horas (turnos de noche y 24 horas incluidos) se editan en
-              @if (showAgendaLink()) {
-                <a class="field__link" [routerLink]="agendaHoursRoute" [queryParams]="agendaHoursParams">Agenda → Configuración → Horario</a>;
-              } @else {
-                Agenda → Configuración → Horario de la tienda;
-              }
-              acá se muestran para que puedas verificarlas. Usa Abrir/Cerrar para marcar
-              los días sin atención.
-            </p>
-            <div class="grid grid-cols-1 gap-3">
-              @for (day of daysOfWeek; track day.key) {
-                <div class="day-row">
-                  <div class="day-row-top">
-                    <span class="day-label">{{ day.label }}</span>
-                    <button
-                      type="button"
-                      (click)="toggleDayStatus(day.key)"
-                      class="day-toggle-btn"
-                      [class.day-toggle-btn--close]="!isDayClosed(day.key)"
-                      [class.day-toggle-btn--open]="isDayClosed(day.key)"
-                    >
-                      {{ isDayClosed(day.key) ? "Abrir" : "Cerrar" }}
-                    </button>
-                  </div>
-                  @if (!isDayClosed(day.key)) {
-                    <div class="day-times">
-                      <div class="time-field">
-                        <label class="time-label">Apertura</label>
-                        <input
-                          type="time"
-                          [value]="form.get('business_hours')?.value[day.key]?.open || ''"
-                          disabled
-                          class="time-input"
-                        />
-                      </div>
-                      <span class="time-separator">—</span>
-                      <div class="time-field">
-                        <label class="time-label">Cierre</label>
-                        <input
-                          type="time"
-                          [value]="form.get('business_hours')?.value[day.key]?.close || ''"
-                          disabled
-                          class="time-input"
-                        />
-                      </div>
-                    </div>
-                    @if (isFullDayRange(form.get('business_hours')?.value[day.key]?.open, form.get('business_hours')?.value[day.key]?.close)) {
-                      <span class="field__hint">Abierto 24 horas</span>
-                    } @else if (closesNextDay(form.get('business_hours')?.value[day.key]?.open, form.get('business_hours')?.value[day.key]?.close)) {
-                      <span class="field__hint">Termina al día siguiente</span>
-                    }
-                  } @else {
-                    <span class="day-closed-label">Cerrado</span>
-                  }
-                </div>
-              }
+        <div class="flex flex-col gap-3 p-3 md:p-4">
+          <!-- Same schedule as Agenda → Configuración → Horario de la tienda -->
+          <div
+            class="flex flex-col gap-3 rounded-2xl border border-info/25 bg-info/10 p-3 sm:flex-row sm:items-center"
+            data-testid="agenda-hours-link"
+          >
+            <app-icon name="link" size="18" class="hidden shrink-0 text-info sm:block"></app-icon>
+            <div class="min-w-0 flex-1 text-sm text-text-primary">
+              <p class="font-bold">Es el mismo horario de la Agenda</p>
+              <p class="text-text-secondary">
+                Es el horario de atención de la tienda: lo usan las reservas, la Agenda y los
+                prestadores que trabajan con el horario de la tienda. Lo que cambies aquí cambia
+                allá, y al revés. Se guarda con «Guardar cambios».
+              </p>
             </div>
-          }
+            @if (showAgendaLink()) {
+              <a
+                class="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-info/25 bg-surface px-3 text-xs font-semibold text-info no-underline transition hover:bg-info/10"
+                [routerLink]="agendaHoursRoute"
+                [queryParams]="agendaHoursParams"
+              >
+                Ver en la Agenda
+                <app-icon name="arrow-right" size="14"></app-icon>
+              </a>
+            }
+          </div>
 
-          <!-- Custom Mode (multi-block per day) -->
-          @if (isCustomMode()) {
-            <p class="field__hint field__hint--block">
-              Cada bloque es una franja en la que el POS acepta cobrar y se ofrecen
-              reservas. Entre un bloque y el siguiente la tienda cuenta como cerrada.
-              Un cierre menor que la apertura (17:00–04:00) termina al día siguiente.
-              @if (showAgendaLink()) {
-                También lo editas en
-                <a class="field__link" [routerLink]="agendaHoursRoute" [queryParams]="agendaHoursParams">Agenda → Configuración → Horario</a>.
-              }
-            </p>
-            <div class="grid grid-cols-1 gap-3">
-              @for (day of daysOfWeek; track day.key) {
-                <div class="day-row">
-                  <div class="day-row-top">
-                    <span class="day-label">{{ day.label }}</span>
-                    @if (!isCustomDayClosed(day.key)) {
-                      <button
-                        type="button"
-                        class="day-toggle-btn"
-                        [class.day-toggle-btn--open]="isCustomDay24h(day.key)"
-                        [attr.aria-pressed]="isCustomDay24h(day.key)"
-                        (click)="toggleCustomDay24h(day.key)"
-                      >
-                        {{ isCustomDay24h(day.key) ? "24 horas ✓" : "24 horas" }}
-                      </button>
-                    }
-                    <button
-                      type="button"
-                      (click)="toggleCustomDayStatus(day.key)"
-                      class="day-toggle-btn"
-                      [class.day-toggle-btn--close]="!isCustomDayClosed(day.key)"
-                      [class.day-toggle-btn--open]="isCustomDayClosed(day.key)"
-                    >
-                      {{ isCustomDayClosed(day.key) ? "Abrir" : "Cerrar" }}
-                    </button>
-                  </div>
-                  @if (!isCustomDayClosed(day.key)) {
-                    <div class="blocks-container">
-                      @for (block of getDayBlocks(day.key); track $index) {
-                        <div class="block-row">
-                          <span class="block-label">Bloque {{ $index + 1 }}</span>
-                          <div class="time-field">
-                            <input
-                              type="time"
-                              [value]="block.open"
-                              (change)="onBlockTimeChange(day.key, $index, 'open', $any($event).target.value)"
-                              class="time-input"
-                            />
-                          </div>
-                          <span class="time-separator">—</span>
-                          <div class="time-field">
-                            <input
-                              type="time"
-                              [value]="block.close"
-                              (change)="onBlockTimeChange(day.key, $index, 'close', $any($event).target.value)"
-                              class="time-input"
-                            />
-                          </div>
-                          @if (closesNextDay(block.open, block.close)) {
-                            <span class="field__hint">Termina al día siguiente</span>
-                          }
-                          @if (getDayBlocks(day.key).length > 1) {
-                            <button
-                              type="button"
-                              class="remove-block-btn"
-                              (click)="removeBlock(day.key, $index)"
-                              title="Eliminar bloque"
-                            >×</button>
-                          }
-                        </div>
-                      }
-                      @if (canAddBlock(day.key)) {
-                        <button
-                          type="button"
-                          class="add-block-btn"
-                          (click)="addBlock(day.key)"
-                          title="Agregar bloque horario"
-                        >+</button>
-                      }
-                    </div>
-                  } @else {
-                    <span class="day-closed-label">Cerrado</span>
-                  }
-                </div>
-              }
-            </div>
-          }
+          <app-weekly-hours-editor
+            [days]="hoursWeek()"
+            (daysChange)="onHoursWeekChange($event)"
+          />
         </div>
       </app-expandable-card>
     </div>
