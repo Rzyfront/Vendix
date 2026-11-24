@@ -288,27 +288,8 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
             </app-button>
           </div>
         }
-        @if (store.stream_progress()) {
-          <p
-            role="status"
-            class="text-sm text-center text-text-secondary"
-          >
-            {{ store.stream_progress() }}
-          </p>
-        }
-        @if (store.is_agent_typing()) {
-          <div class="flex justify-center">
-            <app-button
-              variant="outline"
-              size="sm"
-              [ariaLabel]="threadCopy.stop_aria"
-              (clicked)="store.stopStream()"
-            >
-              <app-icon slot="icon" name="x" [size]="16"></app-icon>
-              {{ threadCopy.stop }}
-            </app-button>
-          </div>
-        }
+        <!-- Progress and «Detener» live only in the composer (presence chip
+             + stop button): a second copy here ate the phone screen. -->
       </div>
     </div>
     <ng-template #compacted_divider>

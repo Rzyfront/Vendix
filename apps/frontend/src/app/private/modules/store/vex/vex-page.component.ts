@@ -24,7 +24,6 @@ import { VexWelcomeComponent } from './components/vex-welcome/vex-welcome.compon
 import { VexChatStore } from './state/vex-chat.store';
 import { VexLogStore } from './state/vex-log.store';
 import { VexPresenceStore } from './state/vex-presence.store';
-import { VexPresenceComponent } from './components/vex-presence/vex-presence.component';
 import { VexMediaDockComponent } from './components/vex-media-dock/vex-media-dock.component';
 import { VexMediaDockService } from './services/vex-media-dock.service';
 import { VexHelpComponent } from './components/vex-help/vex-help.component';
@@ -57,7 +56,6 @@ function isDesktop(): boolean {
     VexThreadComponent,
     VexWelcomeComponent,
     VexTitleEditorComponent,
-    VexPresenceComponent,
     VexHelpComponent,
     VexMediaDockComponent,
     TourModalComponent,
@@ -158,9 +156,8 @@ function isDesktop(): boolean {
                 <app-icon name="pencil" [size]="14" class="shrink-0 opacity-60 group-hover:opacity-100" />
               </button>
             }
-            <span class="inline-flex shrink-0">
-              <vendix-vex-presence variant="header" />
-            </span>
+            <!-- Presence (pensando / voz / silencio) lives only above the
+                 composer: repeating it here broke the header on phones. -->
           </div>
           <app-button
             variant="ghost"
@@ -171,22 +168,6 @@ function isDesktop(): boolean {
           >
             <app-icon slot="icon" name="help-circle" [size]="20"></app-icon>
           </app-button>
-          @if (store.voice_mode()) {
-            <button
-              type="button"
-              class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[rgba(var(--color-primary-rgb),0.14)] border border-[rgba(var(--color-primary-rgb),0.45)] text-[var(--color-primary)] text-xs font-semibold shrink-0 transition-colors hover:bg-[rgba(var(--color-primary-rgb),0.2)]"
-              aria-label="Modo voz activo, clic para desactivar"
-              title="Modo voz activo (respuestas con audio)"
-              (click)="store.toggleVoiceMode()"
-            >
-              <span
-                class="w-2 h-2 rounded-full bg-[var(--color-primary)] animate-pulse"
-                aria-hidden="true"
-              ></span>
-              <app-icon name="audio-lines" [size]="14"></app-icon>
-              <span>Modo voz</span>
-            </button>
-          }
           <button
             type="button"
             class="relative lg:hidden w-10 h-10 rounded-full flex items-center justify-center text-text-secondary hover:text-text-primary"
