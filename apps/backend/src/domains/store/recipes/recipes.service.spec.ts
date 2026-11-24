@@ -663,6 +663,114 @@ describe('RecipesService — cycle detection & explosion', () => {
         }),
       );
     });
+
+    /**
+     * QUI-1054 — una receta ACTIVA con 0 insumos vende sin descontar nada: la
+     * resolución por variante encuentra la receta exacta (existe, así que no
+     * cae a la base) y el BOM vacío no consume inventario ni costo. El
+     * formulario ya exige un insumo; el camino por API (`items: []`) se cierra
+     * acá.
+     */
+    it('rechaza con RECIPE_ITEMS_REQUIRED vaciar una receta ACTIVA', async () => {
+      const service = await buildService({
+        ownRecipe: { 1: 10 },
+        items: { 10: [2] },
+      });
+      items.deleteMany.mockClear();
+
+      await expect(service.replaceItems(10, [])).rejects.toMatchObject({
+        errorCode: 'RECIPE_ITEMS_REQUIRED',
+      });
+
+      // Lo que importa: la receta quedó intacta, sin borrar sus insumos.
+      expect(items.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('permite vaciar una receta INACTIVA (se está editando sin vender)', async () => {
+      const service = await buildService({
+        ownRecipe: { 1: 10 },
+        items: { 10: [2] },
+      });
+      const original = recipes.findFirst.getMockImplementation();
+      recipes.findFirst.mockImplementation((args: any) => {
+        const result = original?.(args);
+        if (args?.where?.id !== undefined) {
+          return Promise.resolve({ ...(result as any), is_active: false });
+        }
+        return result as any;
+      });
+      items.deleteMany.mockClear();
+
+      await service.replaceItems(10, []);
+
+      expect(items.deleteMany).toHaveBeenCalledWith({
+        where: { id: { in: [1] }, recipe_id: 10 },
+      });
+    });
+  });
+
+  describe('removeItem — no dejar activa una receta sin insumos (QUI-1054)', () => {
+    it('rechaza con RECIPE_ITEMS_REQUIRED borrar el último insumo de una receta activa', async () => {
+      const service = await buildService({
+        ownRecipe: { 1: 10 },
+        items: { 10: [2] },
+      });
+      items.findFirst.mockResolvedValue({
+        id: 1,
+        recipe_id: 10,
+        component_product_id: 2,
+      });
+      items.delete.mockClear();
+
+      await expect(service.removeItem(10, 1)).rejects.toMatchObject({
+        errorCode: 'RECIPE_ITEMS_REQUIRED',
+      });
+      expect(items.delete).not.toHaveBeenCalled();
+    });
+
+    it('borra el insumo cuando la receta conserva otros', async () => {
+      const service = await buildService({
+        ownRecipe: { 1: 10 },
+        items: { 10: [2, 3] },
+      });
+      items.findFirst.mockResolvedValue({
+        id: 1,
+        recipe_id: 10,
+        component_product_id: 2,
+      });
+      items.delete.mockClear();
+
+      await expect(service.removeItem(10, 1)).resolves.toEqual({
+        deleted: true,
+      });
+      expect(items.delete).toHaveBeenCalledWith({ where: { id: 1 } });
+    });
+
+    it('borra el último insumo si la receta está INACTIVA', async () => {
+      const service = await buildService({
+        ownRecipe: { 1: 10 },
+        items: { 10: [2] },
+      });
+      const original = recipes.findFirst.getMockImplementation();
+      recipes.findFirst.mockImplementation((args: any) => {
+        const result = original?.(args);
+        if (args?.where?.id !== undefined) {
+          return Promise.resolve({ ...(result as any), is_active: false });
+        }
+        return result as any;
+      });
+      items.findFirst.mockResolvedValue({
+        id: 1,
+        recipe_id: 10,
+        component_product_id: 2,
+      });
+      items.delete.mockClear();
+
+      await expect(service.removeItem(10, 1)).resolves.toEqual({
+        deleted: true,
+      });
+      expect(items.delete).toHaveBeenCalledWith({ where: { id: 1 } });
+    });
   });
 });
 
@@ -1352,6 +1460,19 @@ describe('RecipesService — vigencia + ciclo completo (recetas-kds paso 1)', ()
       expect(err.errorCode).toBe(
         'RECIPE_ACTIVATION_BLOCKED_INVALID_ITEMS',
       );
+      expect(recipes.update).not.toHaveBeenCalled();
+    });
+
+    it('responde RECIPE_ITEMS_REQUIRED al reactivar una receta sin insumos (QUI-1054)', async () => {
+      const { service, recipes } = await buildVigenciaService({
+        recipes: [
+          { id: 10, product_id: 1, product_variant_id: null, is_active: false },
+        ],
+        itemQuantities: [],
+      });
+
+      const err = await catchVendix(() => service.restore(10));
+      expect(err.errorCode).toBe('RECIPE_ITEMS_REQUIRED');
       expect(recipes.update).not.toHaveBeenCalled();
     });
   });
