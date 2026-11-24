@@ -70,6 +70,7 @@ import {
 import { differsByAtLeastCents } from '@money-kernel/money-compare';
 import { formatDurationUnit } from '../../../../../shared/utils/duration-unit.util';
 import { StoreSeoService, productPageSeo } from '../../services/store-seo';
+import { PlanPublicInfoComponent } from '../../components/plan-public-info/plan-public-info.component';
 
 @Component({
   selector: 'app-product-detail',
@@ -93,6 +94,7 @@ import { StoreSeoService, productPageSeo } from '../../services/store-seo';
     SaleUnitSelectorComponent,
     PromotionStackComponent,
     ProductOptionSelectorComponent,
+    PlanPublicInfoComponent,
   ],
   template: `
     <div class="product-detail-page" [attr.data-currency]="currencyCode()">
@@ -250,6 +252,8 @@ import { StoreSeoService, productPageSeo } from '../../services/store-seo';
                 </div>
               }
 
+              <!-- QUI-1060 F2: un plan se cotiza por tamaño de grupo, no por cantidad. -->
+              @if (!isPlan()) {
               <div class="price-section flex flex-col gap-2 my-2">
                 <div class="price-qty-row">
                   <div class="price-line flex items-baseline flex-wrap gap-2">
@@ -395,6 +399,7 @@ import { StoreSeoService, productPageSeo } from '../../services/store-seo';
                   </div>
                 }
               </div>
+              }
 
               <!-- Presentaciones de venta (multitarifa).
                    Por la regla QUI-648 un producto tiene presentaciones O
@@ -486,8 +491,13 @@ import { StoreSeoService, productPageSeo } from '../../services/store-seo';
                 (stateChange)="optionState.set($event)"
               />
 
+              <!-- QUI-1060 F2: ficha del plan; no se compra en línea, se consulta a la tienda. -->
+              @if (isPlan()) {
+                <app-plan-public-info [productId]="p.id" [productName]="p.name" />
+              }
+
               <!-- Purchase Section -->
-              @if (!hideDineInPurchase()) {
+              @if (!hideDineInPurchase() && !isPlan()) {
                 <div class="purchase-box">
                   <div class="buy-now-slot">
                     <app-button
@@ -2502,6 +2512,9 @@ export class ProductDetailComponent implements OnInit {
     const p = this.product();
     return p?.product_type === 'service';
   });
+
+  /** QUI-1060 F2: plan de varios días (se consulta a la tienda, no se compra en línea). */
+  readonly isPlan = computed((): boolean => this.product()?.is_plan === true);
 
   readonly selectedVariantUnavailable = computed((): boolean => {
     const variant = this.selectedVariant();

@@ -1389,6 +1389,8 @@ describe('CatalogService public smart search (D.3)', () => {
         'is_available_now',
         'is_featured',
         'is_on_sale',
+        // QUI-1060 F2: la tarjeta de un plan abre su ficha (booleano, sin datos internos).
+        'is_plan',
         'loose_unit_price',
         'name',
         'next_available',
