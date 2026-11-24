@@ -224,7 +224,11 @@ export class VexBlockService {
       );
     }
     const spec = input.spec ?? {};
-    const errors = this.validate(input.kind, spec, input.data);
+    const dataToPersist =
+      input.kind === 'help_article'
+        ? this.sanitizeHelpArticleForStorage(input.data)
+        : input.data;
+    const errors = this.validate(input.kind, spec, dataToPersist);
     if (errors.length > 0) {
       throw new VendixHttpException(
         ErrorCodes.SYS_VALIDATION_001,
@@ -257,7 +261,7 @@ export class VexBlockService {
         message_id: input.message_id ?? null,
         kind: input.kind,
         spec,
-        data: input.data,
+        data: dataToPersist,
         version: 1,
       },
     });
@@ -504,7 +508,11 @@ export class VexBlockService {
           kind: 'help_article',
           version: row.version,
           spec: { kind: 'help_article' },
-          data: { article: data.article ?? null },
+          data: {
+            article: isRecord(data.article)
+              ? await this.signHelpArticle(data.article)
+              : null,
+          },
         };
       case 'video':
         return {
@@ -1264,7 +1272,8 @@ export class VexBlockService {
     if (
       article.cover_image_url !== undefined &&
       article.cover_image_url !== null &&
-      !this.isHttpUrl(article.cover_image_url)
+      !this.isHttpUrl(article.cover_image_url) &&
+      !this.isSafeCoverKey(article.cover_image_url)
     ) {
       errors.push('data.article.cover_image_url debe ser una URL http(s).');
     }
@@ -1384,6 +1393,75 @@ export class VexBlockService {
   }
 
   // ── reads ─────────────────────────────────────────────────────────────
+
+  private isSafeCoverKey(value: unknown): value is string {
+    if (
+      typeof value !== 'string' ||
+      !value.trim() ||
+      value.length > MAX_LEARNING_URL_CHARS
+    ) {
+      return false;
+    }
+    if (
+      /\s/.test(value) ||
+      value.startsWith('/') ||
+      /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(value)
+    ) {
+      return false;
+    }
+    return isS3Key(value) && isSafeS3Key(value);
+  }
+
+  /**
+   * Strips any own-bucket S3 URLs inside a help article's markdown images (and
+   * cover image) down to their S3 keys before persisting in `ai_ui_blocks`.
+   * Signed URLs are never persisted — fresh read URLs are minted in `toUiBlock`.
+   */
+  private sanitizeHelpArticleForStorage(
+    data: Record<string, any>,
+  ): Record<string, any> {
+    if (!isRecord(data) || !isRecord(data.article)) return data;
+    const article = data.article;
+    const nextArticle: Record<string, any> = { ...article };
+    if (typeof article.content === 'string') {
+      nextArticle.content = this.s3.sanitizeMarkdownContent(article.content);
+    }
+    if (typeof article.cover_image_url === 'string') {
+      const normalized = this.s3.sanitizeForStorage(article.cover_image_url);
+      if (normalized) nextArticle.cover_image_url = normalized;
+    }
+    return { ...data, article: nextArticle };
+  }
+
+  /**
+   * Mints fresh presigned URLs for S3 image keys (or own-bucket S3 URLs) inside
+   * a `help_article` block without mutating the stored row. External valid URLs
+   * are preserved untouched.
+   */
+  private async signHelpArticle(
+    article: Record<string, any>,
+  ): Promise<Record<string, any>> {
+    const next: Record<string, any> = { ...article };
+    if (typeof article.content === 'string' && article.content) {
+      next.content = await this.s3.signMarkdownContent(
+        article.content,
+        BLOCK_LINK_TTL_SECONDS,
+      );
+    }
+    if (typeof article.cover_image_url === 'string' && article.cover_image_url) {
+      try {
+        const signed = await this.s3.signUrl(
+          article.cover_image_url,
+          false,
+          BLOCK_LINK_TTL_SECONDS,
+        );
+        if (signed) next.cover_image_url = signed;
+      } catch {
+        // Leave original value if signing fails (e.g. unsafe key in legacy row)
+      }
+    }
+    return next;
+  }
 
   private async withSignedUrl(
     row: VexBlockRow,
