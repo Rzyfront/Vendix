@@ -935,6 +935,7 @@ jobs:
           --include='**/reports/components/reports-catalog/reports-catalog.component.spec.ts'
           --include='**/reports/hotel-night-audit-access.spec.ts'
           --include='**/analytics/components/analytics-shell/analytics-shell.component.spec.ts'
+          --include='**/reservations/utils/plan-pricing.util.spec.ts'
 
   mobile:
     name: Mobile

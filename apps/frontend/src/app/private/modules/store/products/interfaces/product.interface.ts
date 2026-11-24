@@ -75,6 +75,15 @@ export interface Product {
     | 'per_session'
     | 'package'
     | 'subscription';
+  /** QUI-1060 — datos del modo Plan (solo con `service_pricing_type = 'package'`). */
+  plan_duration_days?: number | null;
+  plan_duration_nights?: number | null;
+  plan_departure_mode?: 'fixed' | 'on_demand' | 'both' | null;
+  plan_min_pax?: number | null;
+  plan_max_pax?: number | null;
+  plan_includes?: string | null;
+  plan_excludes?: string | null;
+  plan_recommendations?: string | null;
   requires_booking?: boolean;
   requires_station?: boolean;
   booking_mode?: 'provider_required' | 'free_booking';
@@ -413,6 +422,15 @@ export interface CreateProductDto {
     | 'per_session'
     | 'package'
     | 'subscription';
+  /** QUI-1060 — datos del modo Plan (solo con `service_pricing_type = 'package'`). */
+  plan_duration_days?: number | null;
+  plan_duration_nights?: number | null;
+  plan_departure_mode?: 'fixed' | 'on_demand' | 'both' | null;
+  plan_min_pax?: number | null;
+  plan_max_pax?: number | null;
+  plan_includes?: string | null;
+  plan_excludes?: string | null;
+  plan_recommendations?: string | null;
   requires_booking?: boolean;
   requires_station?: boolean;
   booking_mode?: 'provider_required' | 'free_booking';
@@ -535,6 +553,15 @@ export interface UpdateProductDto {
     | 'per_session'
     | 'package'
     | 'subscription';
+  /** QUI-1060 — datos del modo Plan (solo con `service_pricing_type = 'package'`). */
+  plan_duration_days?: number | null;
+  plan_duration_nights?: number | null;
+  plan_departure_mode?: 'fixed' | 'on_demand' | 'both' | null;
+  plan_min_pax?: number | null;
+  plan_max_pax?: number | null;
+  plan_includes?: string | null;
+  plan_excludes?: string | null;
+  plan_recommendations?: string | null;
   requires_booking?: boolean;
   booking_mode?: 'provider_required' | 'free_booking';
   buffer_minutes?: number;

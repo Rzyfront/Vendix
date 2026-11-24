@@ -12,6 +12,10 @@ export interface Booking {
   end_date?: string | null;
   /** Booking without an end (D9). */
   is_open_ended?: boolean;
+  /** QUI-1060: plan departure the booking holds seats on, and the group size. */
+  departure_id?: number | null;
+  pax_adults?: number | null;
+  pax_children?: number | null;
   status: BookingStatus;
   channel: string;
   notes?: string;
@@ -202,12 +206,18 @@ export interface CreateBookingDto {
   product_id: number;
   product_variant_id?: number;
   date: string;
+  /** Last day of a multi-day service (unit `day`); plans compute it server-side. */
+  end_date?: string;
   start_time: string;
   end_time: string;
   channel?: string;
   notes?: string;
   provider_id?: number;
   station_id?: number;
+  /** QUI-1060 plan booking: chosen departure and group size. */
+  departure_id?: number;
+  pax_adults?: number;
+  pax_children?: number;
   skip_availability_check?: boolean;
   skip_order_creation?: boolean;
   deposit?: BookingDepositInput;
