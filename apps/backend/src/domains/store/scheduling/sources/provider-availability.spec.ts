@@ -1,8 +1,16 @@
 import {
   AVAILABILITY_MAX_STAFF,
+  clipToStoreHours,
   loadProviderAvailability,
   providerDayAvailability,
 } from './provider-availability';
+
+/** Horario del negocio: todos los días 07:00–20:00 (Map por día de la semana). */
+const OPEN_ALL_DAY = {
+  loadStoreHours: jest.fn().mockResolvedValue(
+    new Map([0, 1, 2, 3, 4, 5, 6].map((d) => [d, [{ start_time: '07:00', end_time: '20:00' }]])),
+  ),
+};
 
 // 2026-11-23 es lunes (day_of_week 1); 2026-11-24 martes; 2026-11-29 domingo.
 const SCHEDULES = [
@@ -73,7 +81,7 @@ describe('Disponibilidad del prestador en la Agenda (requisito F1)', () => {
         ]),
       },
     };
-    const rows = await loadProviderAvailability(prisma as any, [3, 4, 99, 3], '2026-11-23', '2026-11-24');
+    const rows = await loadProviderAvailability(prisma as any, OPEN_ALL_DAY, 7, [3, 4, 99, 3], '2026-11-23', '2026-11-24');
     expect(prisma.provider_schedules.findMany).toHaveBeenCalledTimes(1);
     expect(prisma.provider_exceptions.findMany).toHaveBeenCalledTimes(1);
     expect(prisma.provider_schedules.findMany.mock.calls[0][0].where).toEqual({
@@ -98,13 +106,50 @@ describe('Disponibilidad del prestador en la Agenda (requisito F1)', () => {
       provider_schedules: { findMany: jest.fn() },
       provider_exceptions: { findMany: jest.fn() },
     };
-    expect(await loadProviderAvailability(prisma as any, [99], '2026-11-23', '2026-11-23')).toEqual([]);
+    expect(await loadProviderAvailability(prisma as any, OPEN_ALL_DAY, 7, [99], '2026-11-23', '2026-11-23')).toEqual([]);
     expect(prisma.provider_schedules.findMany).not.toHaveBeenCalled();
     const many = Array.from({ length: AVAILABILITY_MAX_STAFF + 5 }, (_, i) => i + 1);
-    await loadProviderAvailability(prisma as any, many, '2026-11-23', '2026-11-23');
+    await loadProviderAvailability(prisma as any, OPEN_ALL_DAY, 7, many, '2026-11-23', '2026-11-23');
     expect(prisma.service_providers.findMany.mock.calls[1][0].where.id.in).toHaveLength(
       AVAILABILITY_MAX_STAFF,
     );
+  });
+});
+
+describe('Disponibilidad recortada con el horario del negocio (como la reserva)', () => {
+  it('recorta las franjas del prestador con la cobertura del día', () => {
+    expect(
+      clipToStoreHours({ start: '06:00', end: '12:00' }, [{ startMin: 8 * 60, endMin: 18 * 60 }]),
+    ).toEqual([{ start: '08:00', end: '12:00' }]);
+    // Almuerzo del negocio: la franja se parte.
+    expect(
+      clipToStoreHours({ start: '09:00', end: '17:00' }, [
+        { startMin: 8 * 60, endMin: 12 * 60 },
+        { startMin: 14 * 60, endMin: 20 * 60 },
+      ]),
+    ).toEqual([
+      { start: '09:00', end: '12:00' },
+      { start: '14:00', end: '17:00' },
+    ]);
+    // Negocio cerrado: nada disponible.
+    expect(clipToStoreHours({ start: '09:00', end: '17:00' }, [])).toEqual([]);
+  });
+
+  it('un prestador que trabaja cuando la tienda está cerrada no aparece disponible', async () => {
+    const prisma = {
+      service_providers: { findMany: jest.fn().mockResolvedValue([{ id: 3 }]) },
+      provider_schedules: { findMany: jest.fn().mockResolvedValue(SCHEDULES) },
+      provider_exceptions: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    // Lunes 10:00–14:00; martes cerrado.
+    const hours = {
+      loadStoreHours: jest.fn().mockResolvedValue(new Map([[1, [{ start_time: '10:00', end_time: '14:00' }]]])),
+    };
+    const rows = await loadProviderAvailability(prisma as any, hours, 7, [3], '2026-11-23', '2026-11-24');
+    expect(hours.loadStoreHours).toHaveBeenCalledWith(7, prisma);
+    expect(rows[0].windows).toEqual([{ start: '10:00', end: '12:00' }]);
+    expect(rows[1].windows).toEqual([]);
+    expect(rows[1].unavailable).toBe(false);
   });
 });
 

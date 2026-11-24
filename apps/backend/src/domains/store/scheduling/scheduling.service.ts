@@ -11,6 +11,7 @@ import {
 import { BookingSchedulingSource } from './sources/booking-scheduling.source';
 import { ScheduledOrderSchedulingSource } from './sources/scheduled-order-scheduling.source';
 import { loadProviderAvailability } from './sources/provider-availability';
+import { BusinessHoursService } from '../reservations/business-hours/business-hours.service';
 import {
   SCHEDULING_SOURCES,
   SCHEDULING_STATUS_GROUPS,
@@ -66,6 +67,7 @@ export class SchedulingService {
     private readonly prisma: StorePrismaService,
     bookings: BookingSchedulingSource,
     scheduledOrders: ScheduledOrderSchedulingSource,
+    private readonly businessHours: BusinessHoursService,
   ) {
     this.sources = { booking: bookings, scheduled_order: scheduledOrders };
   }
@@ -193,7 +195,14 @@ export class SchedulingService {
     // Reservas). Solo si las reservas están habilitadas para la tienda.
     const availability =
       filters.staff_ids?.length && access.types.includes('booking')
-        ? await loadProviderAvailability(this.prisma, filters.staff_ids, filters.from, filters.to)
+        ? await loadProviderAvailability(
+            this.prisma,
+            this.businessHours,
+            access.store_id,
+            filters.staff_ids,
+            filters.from,
+            filters.to,
+          )
         : [];
     return {
       data: pages

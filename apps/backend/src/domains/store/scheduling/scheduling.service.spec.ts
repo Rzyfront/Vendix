@@ -79,7 +79,11 @@ describe('SchedulingService (agenda-unificada F1)', () => {
       event('scheduled_order', 10, '2026-11-23T15:00:00.000Z'),
       event('scheduled_order', 11, '2026-11-24T13:00:00.000Z'),
     ]);
-    service = new SchedulingService(prisma, bookings as any, orders as any);
+    service = new SchedulingService(prisma, bookings as any, orders as any, {
+      loadStoreHours: jest.fn().mockResolvedValue(
+        new Map([0, 1, 2, 3, 4, 5, 6].map((d) => [d, [{ start_time: '06:00', end_time: '22:00' }]])),
+      ),
+    } as any);
   });
 
   afterEach(() => jest.restoreAllMocks());

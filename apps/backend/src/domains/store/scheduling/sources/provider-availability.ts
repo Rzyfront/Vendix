@@ -1,5 +1,13 @@
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { dateOnlyString } from '../../../../common/utils/store-timezone.util';
+import {
+  ClockWindow,
+  Span,
+  coverageForDate,
+  intersectSpans,
+  windowSpan,
+} from '../../../../common/utils/schedule-window.util';
+import { BusinessHoursService } from '../../reservations/business-hours/business-hours.service';
 
 /**
  * Disponibilidad del prestador en la Agenda (agenda-unificada F1, requisito
@@ -7,7 +15,9 @@ import { dateOnlyString } from '../../../../common/utils/store-timezone.util';
  * `provider-availability.service.ts`): los bloques semanales activos de
  * `provider_schedules` (0 = domingo) definen el horario; una excepción del
  * día con `is_unavailable` lo bloquea entero, y si no, sus horas propias
- * reemplazan las del bloque.
+ * reemplazan las del bloque. Igual que al generar franjas de reserva
+ * (`availability.service.ts:291,317`), el resultado se recorta con el horario
+ * del negocio: fuera de él no hay disponibilidad.
  */
 export interface ProviderDayAvailability {
   staff_id: number;
@@ -20,8 +30,8 @@ export interface ProviderDayAvailability {
   reason: string | null;
 }
 
-/** Tope de prestadores filtrados para calcular su disponibilidad. */
-export const AVAILABILITY_MAX_STAFF = 10;
+/** Tope de prestadores filtrados: el mismo que admite el filtro (`staff_ids`). */
+export const AVAILABILITY_MAX_STAFF = 50;
 
 interface ScheduleRow {
   provider_id: number;
@@ -53,12 +63,37 @@ function enumerateDays(from: string, to: string): string[] {
   return out;
 }
 
-/** Disponibilidad de un prestador en un día. Pura. */
+function clock(minutes: number): string {
+  const m = Math.max(0, Math.min(minutes, 1440));
+  if (m === 1440) return '24:00';
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+}
+
+/**
+ * Recorta una franja `HH:mm` con la cobertura del negocio de ese día (lo que
+ * pasa de medianoche se corta en 24:00, como en la rejilla).
+ */
+export function clipToStoreHours(
+  window: { start: string; end: string },
+  coverage: readonly Span[],
+): { start: string; end: string }[] {
+  const span = windowSpan({ start_time: window.start, end_time: window.end });
+  return intersectSpans(span, [...coverage])
+    .map((s) => ({ startMin: s.startMin, endMin: Math.min(s.endMin, 1440) }))
+    .filter((s) => s.endMin > s.startMin && s.startMin < 1440)
+    .map((s) => ({ start: clock(s.startMin), end: clock(s.endMin) }));
+}
+
+/**
+ * Disponibilidad de un prestador en un día. Pura. `coverage` = horario del
+ * negocio ese día (`coverageForDate`); sin él no se recorta.
+ */
 export function providerDayAvailability(
   staff_id: number,
   date: string,
   schedules: readonly ScheduleRow[],
   exception: ExceptionRow | undefined,
+  coverage?: readonly Span[],
 ): ProviderDayAvailability {
   const [y, m, d] = date.split('-').map(Number);
   const dayOfWeek = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
@@ -72,7 +107,8 @@ export function providerDayAvailability(
     .map((s) => ({
       start: exception?.custom_start_time || s.start_time,
       end: exception?.custom_end_time || s.end_time,
-    }));
+    }))
+    .flatMap((w) => (coverage ? clipToStoreHours(w, coverage) : [w]));
   return { staff_id, date, windows, unavailable: false, reason };
 }
 
@@ -83,6 +119,8 @@ export function providerDayAvailability(
  */
 export async function loadProviderAvailability(
   prisma: StorePrismaService,
+  businessHours: Pick<BusinessHoursService, 'loadStoreHours'>,
+  store_id: number,
   staffIds: readonly number[],
   from: string,
   to: string,
@@ -95,7 +133,7 @@ export async function loadProviderAvailability(
   });
   const ownedIds = owned.map((p) => p.id);
   if (!ownedIds.length) return [];
-  const [schedules, exceptions] = await Promise.all([
+  const [schedules, exceptions, storeHours] = await Promise.all([
     prisma.provider_schedules.findMany({
       where: { provider_id: { in: ownedIds }, is_active: true },
       select: {
@@ -120,15 +158,28 @@ export async function loadProviderAvailability(
         reason: true,
       },
     }),
+    // Mismo horario maestro que usa la reserva (`settings.pos.business_hours`
+    // o la tabla vieja). Sin horario configurado la reserva no ofrece franjas.
+    businessHours.loadStoreHours(store_id, prisma),
   ]);
   const exceptionOf = new Map<string, ExceptionRow>();
   for (const e of exceptions as ExceptionRow[]) {
     exceptionOf.set(`${e.provider_id}:${dateOnlyString(e.date)}`, e);
   }
   const days = enumerateDays(from, to);
+  const coverageOf = (date: string) => {
+    const [y, m, d] = date.split('-').map(Number);
+    return coverageForDate(storeHours as Map<number, ClockWindow[]>, new Date(Date.UTC(y, m - 1, d)).getUTCDay());
+  };
   return ownedIds.flatMap((id) =>
     days.map((date) =>
-      providerDayAvailability(id, date, schedules as ScheduleRow[], exceptionOf.get(`${id}:${date}`)),
+      providerDayAvailability(
+        id,
+        date,
+        schedules as ScheduleRow[],
+        exceptionOf.get(`${id}:${date}`),
+        coverageOf(date),
+      ),
     ),
   );
 }

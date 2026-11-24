@@ -5,6 +5,7 @@ import { SchedulingController } from './scheduling.controller';
 import { SchedulingService } from './scheduling.service';
 import { BookingSchedulingSource } from './sources/booking-scheduling.source';
 import { ScheduledOrderSchedulingSource } from './sources/scheduled-order-scheduling.source';
+import { BusinessHoursService } from '../reservations/business-hours/business-hours.service';
 
 /**
  * Órdenes → Programación y Agenda (agenda-unificada F1): lectura agregada de
@@ -14,6 +15,13 @@ import { ScheduledOrderSchedulingSource } from './sources/scheduled-order-schedu
 @Module({
   imports: [ResponseModule, PrismaModule],
   controllers: [SchedulingController],
-  providers: [SchedulingService, BookingSchedulingSource, ScheduledOrderSchedulingSource],
+  // BusinessHoursService solo depende del Prisma de tienda: el mismo horario
+  // maestro que recorta las franjas de reserva recorta la Agenda.
+  providers: [
+    SchedulingService,
+    BookingSchedulingSource,
+    ScheduledOrderSchedulingSource,
+    BusinessHoursService,
+  ],
 })
 export class SchedulingModule {}
