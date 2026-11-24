@@ -54,6 +54,11 @@ import {
   AnalyticsCategoryId,
   AnalyticsView,
 } from '../../../config/analytics-registry';
+import {
+  isAnalyticsCategoryVisibleForIndustries,
+  isAnalyticsViewVisibleForIndustries,
+} from '../../../config/analytics-industries';
+import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 
 import * as OverviewActions from '../state/overview-summary.actions';
 import * as OverviewSelectors from '../state/overview-summary.selectors';
@@ -93,6 +98,7 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
   private readonly analyticsService = inject(AnalyticsService);
   private readonly analyticsRefresh = inject(AnalyticsRefreshService);
   private readonly toastService = inject(ToastService);
+  private readonly authFacade = inject(AuthFacade);
 // Observables from store
   summary$: Observable<OverviewSummary | null> = this.store.select(
     OverviewSelectors.selectSummary,
@@ -121,7 +127,14 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
   readonly selectedCategory = signal<AnalyticsCategoryId | null>(null);
   readonly searchTerm = signal<string>('');
 
-  readonly categories = ANALYTICS_CATEGORIES;
+  // Agenda unificada F4: solo las categorías y vistas de las industrias de la
+  // tienda (mapa en `config/analytics-industries.ts`).
+  readonly categories = computed(() => {
+    const industries = this.authFacade.storeIndustries();
+    return ANALYTICS_CATEGORIES.filter((c) =>
+      isAnalyticsCategoryVisibleForIndustries(c.id, industries),
+    );
+  });
 
   readonly overviewTabs: StickyHeaderTab[] = [
     { id: 'summary', label: 'Resumen General', icon: 'layout-dashboard', route: '/admin/analytics/overview' },
@@ -140,7 +153,10 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
     const category = this.selectedCategory();
     const search = this.searchTerm().toLowerCase().trim();
 
-    let views = ANALYTICS_VIEWS.filter((v) => v.category !== 'overview');
+    const industries = this.authFacade.storeIndustries();
+    let views = ANALYTICS_VIEWS.filter(
+      (v) => v.category !== 'overview' && isAnalyticsViewVisibleForIndustries(v, industries),
+    );
 
     if (category) {
       views = views.filter((v) => v.category === category);

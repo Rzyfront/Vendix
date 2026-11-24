@@ -1,3 +1,4 @@
+import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, Router, Data } from '@angular/router';
 import { Observable, Subject } from 'rxjs';
@@ -10,6 +11,10 @@ import {
 import { DateRangeSyncService } from '../../../shared/services/date-range-sync.service';
 import { AnalyticsService } from '../../services/analytics.service';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+
+// Agenda unificada F4: las pestañas se filtran por las industrias de la tienda.
+const authStub = { storeIndustries: signal<string[]>(['retail']) };
 
 describe('AnalyticsShellComponent', () => {
   let fixture: ComponentFixture<AnalyticsShellComponent>;
@@ -38,6 +43,7 @@ describe('AnalyticsShellComponent', () => {
         { provide: DateRangeSyncService, useValue: dateRangeSyncSpy },
         { provide: AnalyticsService, useValue: analyticsServiceSpy },
         { provide: ToastService, useValue: toastServiceSpy },
+        { provide: AuthFacade, useValue: authStub },
       ],
     });
 
@@ -120,3 +126,37 @@ describe('AnalyticsShellComponent', () => {
   });
 });
 
+describe('AnalyticsShellComponent — pestañas por industria (agenda unificada F4)', () => {
+  const tabsFor = (industries: string[]): string[] => {
+    authStub.storeIndustries.set(industries);
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: ActivatedRoute,
+          useValue: {
+            data: new Subject<Data>().asObservable(),
+            snapshot: { data: { categoryId: 'inventory' } },
+          },
+        },
+        { provide: DateRangeSyncService, useValue: { dateRange: () => null } },
+        { provide: AnalyticsService, useValue: jasmine.createSpyObj('AnalyticsService', ['invalidateCache']) },
+        { provide: ToastService, useValue: jasmine.createSpyObj('ToastService', ['success']) },
+        { provide: AuthFacade, useValue: authStub },
+      ],
+    });
+    const shell = TestBed.createComponent(AnalyticsShellComponent).componentInstance;
+    return shell.headerTabs().map((tab) => tab.id);
+  };
+
+  afterEach(() => authStub.storeIndustries.set(['retail']));
+
+  it('una tienda solo retail no ve Consumo de insumos', () => {
+    const tabs = tabsFor(['retail']);
+    expect(tabs).not.toContain('inventory_ingredient_consumption');
+    expect(tabs.length).toBe(getViewsByCategory('inventory').length - 1);
+  });
+
+  it('un restaurante sí ve Consumo de insumos', () => {
+    expect(tabsFor(['restaurant'])).toContain('inventory_ingredient_consumption');
+  });
+});

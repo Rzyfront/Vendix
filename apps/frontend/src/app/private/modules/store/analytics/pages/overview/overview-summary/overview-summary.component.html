@@ -197,7 +197,7 @@
         ></app-inputsearch>
 
         <app-analytics-category-chips
-          [categories]="categories"
+          [categories]="categories()"
           [selectedCategory]="selectedCategory()"
           (categoryChange)="onCategoryChange($event)"
         ></app-analytics-category-chips>
