@@ -29,6 +29,8 @@ import {
   activitiesOutsideDuration,
   groupItineraryByDay,
 } from '../../../../../../shared/utils/plan-itinerary.util';
+import { SuppliersService } from '../../../inventory/services/suppliers.service';
+import { Supplier } from '../../../inventory/interfaces/inventory.interface';
 import { ReservationsService } from '../../../reservations/services/reservations.service';
 import {
   PlanActivity,
@@ -45,6 +47,7 @@ interface ActivityDraft {
   description: string;
   owner: OwnerKind;
   provider_id: number | null;
+  supplier_id: number | null;
   supplier_name: string;
   supplier_contact: string;
   cost: number | null;
@@ -59,6 +62,7 @@ const emptyDraft = (day: number): ActivityDraft => ({
   description: '',
   owner: 'none',
   provider_id: null,
+  supplier_id: null,
   supplier_name: '',
   supplier_contact: '',
   cost: null,
@@ -250,16 +254,35 @@ const emptyDraft = (day: number): ActivityDraft => ({
               customWrapperClass="!mt-0"
             ></app-selector>
           } @else if (draft().owner === 'supplier') {
-            <app-input
-              label="Proveedor (tercero)"
-              placeholder="Ej. Transportes del Valle"
-              [ngModel]="draft().supplier_name"
-              (ngModelChange)="patch({ supplier_name: $event ?? '' })"
-              customWrapperClass="!mt-0"
-            ></app-input>
+            @if (supplierOptions().length > 0) {
+              <app-selector
+                label="Proveedor registrado"
+                [options]="supplierOptions()"
+                [ngModel]="draft().supplier_id ?? manualSupplier"
+                (ngModelChange)="selectSupplier($event)"
+                customWrapperClass="!mt-0"
+              ></app-selector>
+            }
+            @if (draft().supplier_id == null) {
+              <app-input
+                label="Proveedor (tercero)"
+                placeholder="Ej. Transportes del Valle"
+                [ngModel]="draft().supplier_name"
+                (ngModelChange)="patch({ supplier_name: $event ?? '' })"
+                customWrapperClass="!mt-0"
+              ></app-input>
+            }
           }
         </div>
-        @if (draft().owner === 'supplier') {
+        @if (draft().owner === 'supplier' && draft().supplier_id != null) {
+          <div class="rounded-lg border border-border p-3 text-xs text-text-secondary space-y-1">
+            <p class="font-medium text-text-primary break-words">{{ selectedSupplierName() }}</p>
+            @for (line of selectedSupplierContact(); track line) {
+              <p class="break-words">{{ line }}</p>
+            }
+          </div>
+        }
+        @if (draft().owner === 'supplier' && draft().supplier_id == null) {
           <app-input
             label="Contacto del proveedor (opcional)"
             placeholder="Teléfono o correo"
@@ -312,6 +335,7 @@ const emptyDraft = (day: number): ActivityDraft => ({
 export class ServicePlanItineraryComponent {
   private readonly plansService = inject(ServicePlansService);
   private readonly reservationsService = inject(ReservationsService);
+  private readonly suppliersService = inject(SuppliersService);
   private readonly dialog = inject(DialogService);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
@@ -335,6 +359,28 @@ export class ServicePlanItineraryComponent {
   private readonly providerNames = computed(
     () => new Map(this.providers().map((p) => [Number(p.value), p.label])),
   );
+
+  /** Valor de «Escribir a mano» en el selector de proveedor registrado. */
+  readonly manualSupplier = 'manual';
+  private readonly suppliers = signal<Supplier[]>([]);
+  readonly supplierOptions = computed<SelectorOption[]>(() => {
+    const list = this.suppliers();
+    if (list.length === 0) return [];
+    return [
+      { value: this.manualSupplier, label: 'Escribir a mano' },
+      ...list.map((sp) => ({ value: sp.id, label: sp.name })),
+    ];
+  });
+  readonly selectedSupplierName = computed(() => {
+    const d = this.draft();
+    return this.suppliers().find((sp) => sp.id === d.supplier_id)?.name ?? d.supplier_name;
+  });
+  readonly selectedSupplierContact = computed<string[]>(() => {
+    const d = this.draft();
+    const sp = this.suppliers().find((x) => x.id === d.supplier_id);
+    if (!sp) return d.supplier_contact ? [d.supplier_contact] : [];
+    return [sp.contact_person, sp.mobile, sp.phone, sp.email].filter((v): v is string => !!v);
+  });
 
   readonly busy = signal(false);
   /** `'new'` = alta en `creatingDay`; un id = edición; null = nada abierto. */
@@ -360,7 +406,7 @@ export class ServicePlanItineraryComponent {
     const d = this.draft();
     if (!d.title.trim()) return 'El título es obligatorio.';
     if (d.owner === 'internal' && d.provider_id == null) return 'Elige quién de tu equipo es responsable.';
-    if (d.owner === 'supplier' && !d.supplier_name.trim()) return 'Escribe el nombre del proveedor.';
+    if (d.owner === 'supplier' && d.supplier_id == null && !d.supplier_name.trim()) return 'Escribe el nombre del proveedor.';
     if (d.cost != null && d.cost < 0) return 'El costo no puede ser negativo.';
     return null;
   });
@@ -378,6 +424,14 @@ export class ServicePlanItineraryComponent {
           ),
         // Sin permiso de reservas solo se pierde la lista: el resto del bloque funciona.
         error: () => this.providers.set([]),
+      });
+    this.suppliersService
+      .getSuppliers({ state: 'active', limit: 100 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => this.suppliers.set(res?.data ?? []),
+        // Sin permiso de proveedores solo queda el texto libre.
+        error: () => this.suppliers.set([]),
       });
   }
 
@@ -407,8 +461,14 @@ export class ServicePlanItineraryComponent {
       start_time: act.start_time ?? '',
       title: act.title,
       description: act.description ?? '',
-      owner: act.provider_id != null ? 'internal' : act.supplier_name ? 'supplier' : 'none',
+      owner:
+        act.provider_id != null
+          ? 'internal'
+          : act.supplier_id != null || act.supplier_name
+            ? 'supplier'
+            : 'none',
       provider_id: act.provider_id,
+      supplier_id: act.supplier_id ?? null,
       supplier_name: act.supplier_name ?? '',
       supplier_contact: act.supplier_contact ?? '',
       cost: act.cost,
@@ -417,6 +477,11 @@ export class ServicePlanItineraryComponent {
     });
     this.creatingDay.set(null);
     this.editing.set(act.id);
+  }
+
+  selectSupplier(value: unknown): void {
+    const id = value === this.manualSupplier ? null : this.toNumber(value);
+    this.patch({ supplier_id: id });
   }
 
   patch(value: Partial<ActivityDraft>): void {
@@ -519,8 +584,9 @@ export class ServicePlanItineraryComponent {
       title: d.title.trim(),
       description: d.description.trim() || null,
       provider_id: d.owner === 'internal' ? d.provider_id : null,
-      supplier_name: d.owner === 'supplier' ? d.supplier_name.trim() || null : null,
-      supplier_contact: d.owner === 'supplier' ? d.supplier_contact.trim() || null : null,
+      supplier_id: d.owner === 'supplier' ? d.supplier_id : null,
+      supplier_name: d.owner === 'supplier' && d.supplier_id == null ? d.supplier_name.trim() || null : null,
+      supplier_contact: d.owner === 'supplier' && d.supplier_id == null ? d.supplier_contact.trim() || null : null,
       cost: d.cost,
       creates_task: d.creates_task,
       is_public: d.is_public,

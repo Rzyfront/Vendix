@@ -241,6 +241,37 @@
         </div>
       }
 
+      <!-- Plan tasks (QUI-1060 F3) -->
+      @if (planTasks().length > 0) {
+        <div class="deposit-block">
+          <div class="deposit-head">
+            <span class="info-label">
+              <app-icon name="check-square" [size]="13"></app-icon>
+              Tareas del plan
+            </span>
+          </div>
+          @for (t of planTasks(); track t.link_id) {
+            <div class="plan-task-row">
+              <div class="plan-task-main">
+                <span class="plan-task-title">{{ t.title }}</span>
+                <span class="deposit-hint">
+                  {{ taskOwnerLabel(t) }}
+                  @if (t.due_at) {
+                    · {{ t.due_at | date:'dd/MM HH:mm' }}
+                  }
+                </span>
+              </div>
+              <div class="plan-task-side">
+                <span class="deposit-badge" [ngClass]="taskStatusClass(t.status)">{{ taskStatusLabel(t.status) }}</span>
+                @if (t.task_id != null) {
+                  <button class="btn-ghost-sm" (click)="openPlanTask(t.task_id)">Ver en CRM</button>
+                }
+              </div>
+            </div>
+          }
+        </div>
+      }
+
       <!-- Prepay ("cobro para reservar"): paid amount, link and in-person payment -->
       @if (canRequestPrepay() || hasPrepayPaid()) {
         <div class="deposit-block">

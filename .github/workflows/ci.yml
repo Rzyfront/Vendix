@@ -938,6 +938,7 @@ jobs:
           --include='**/analytics/components/analytics-shell/analytics-shell.component.spec.ts'
           --include='**/reservations/utils/plan-pricing.util.spec.ts'
           --include='**/reservations/utils/plan-receipt.util.spec.ts'
+          --include='**/reservations/utils/plan-tasks.util.spec.ts'
           --include='**/shared/utils/plan-itinerary.util.spec.ts'
           --include='**/public/service-page/service-page.util.spec.ts'
 

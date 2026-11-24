@@ -18,6 +18,14 @@ import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-h
 import { finalize } from 'rxjs';
 import { environment } from '../../../../../../../environments/environment';
 import { bookingPaymentUrl, bookingSeriesLabel } from '../../utils/booking-display.util';
+import { ServicePlansService, PlanBookingTask } from '../../../products/services/service-plans.service';
+import { isPlanBooking } from '../../utils/plan-receipt.util';
+import {
+  planTaskOwnerLabel,
+  planTaskStatusClass,
+  planTaskStatusLabel,
+  sortPlanTasks,
+} from '../../utils/plan-tasks.util';
 import { windowMinutes } from '../../../../../../shared/utils/schedule-window.util';
 
 @Component({
@@ -39,6 +47,7 @@ export class BookingDetailModalComponent {
   private submissionsService = inject(DataCollectionSubmissionsService);
   private toastService = inject(ToastService);
   private router = inject(Router);
+  private plansService = inject(ServicePlansService);
   private http = inject(HttpClient);
 
   readonly isOpen = input<boolean>(false);
@@ -270,17 +279,48 @@ export class BookingDetailModalComponent {
     return !!dep.decision_due_at || this.hasStarted(b);
   });
 
+  /** QUI-1060 F3: tareas del CRM de una reserva de plan; vacío oculta la sección. */
+  readonly planTasks = signal<PlanBookingTask[]>([]);
+  protected readonly taskStatusLabel = planTaskStatusLabel;
+  protected readonly taskStatusClass = planTaskStatusClass;
+  protected readonly taskOwnerLabel = planTaskOwnerLabel;
+
   private bookingEffect = effect(() => {
     const b = this.booking();
     if (b?.id) {
       this.loadSubmission(b.id);
       this.loadDeposit(b);
+      this.loadPlanTasks(b);
     } else {
+      this.planTasks.set([]);
       this.submission.set(null);
       this.prediagnosisHtml.set('');
       this.deposit.set(null);
     }
   });
+
+  private loadPlanTasks(b: Booking): void {
+    this.planTasks.set([]);
+    if (!isPlanBooking(b)) return;
+    const id = b.id;
+    this.plansService
+      .getBookingTasks(id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (list) => {
+          // Respuesta tardía de otra reserva: se descarta.
+          if (this.booking()?.id !== id) return;
+          this.planTasks.set(sortPlanTasks(list ?? []));
+        },
+        // Sin permiso o error de red: la sección simplemente no aparece.
+        error: () => this.planTasks.set([]),
+      });
+  }
+
+  openPlanTask(taskId: number): void {
+    this.closed.emit();
+    this.router.navigate(['/admin/customers/tasks'], { queryParams: { task: taskId } });
+  }
 
   onOpen(): void {
     const b = this.booking();
