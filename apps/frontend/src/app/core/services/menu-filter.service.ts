@@ -2024,10 +2024,11 @@ export class MenuFilterService {
 
   /**
    * `scheduled_orders.enabled` with the layout's rule (QUI-1001): the entry
-   * exists only for restaurants with the setting on
-   * (`store-admin-layout.component.ts`, `enabled && isRestaurant()`). The
-   * layout hydrates `scheduledOrdersEnabled` once it mounts; guards run
-   * before that, so they apply the same rule to the session settings.
+   * exists only for the `orders_scheduled` industries (restaurant and
+   * manufacturing, #1274) with the setting on
+   * (`store-admin-layout.component.ts`). The layout hydrates
+   * `scheduledOrdersEnabled` once it mounts; guards run before that, so they
+   * apply the same rule to the session settings.
    */
   private scheduledOrdersOn(): boolean {
     if (this.scheduledOrdersEnabled()) return true;
@@ -2035,7 +2036,10 @@ export class MenuFilterService {
       | { scheduled_orders?: { enabled?: boolean } }
       | null
       | undefined;
-    return settings?.scheduled_orders?.enabled === true && this.authFacade.isRestaurant();
+    return (
+      settings?.scheduled_orders?.enabled === true &&
+      this.industryAllowsModule('orders_scheduled')
+    );
   }
 
   /**

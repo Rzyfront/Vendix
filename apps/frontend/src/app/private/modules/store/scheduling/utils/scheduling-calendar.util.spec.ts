@@ -111,6 +111,11 @@ describe('Agenda unificada F1 — cálculo del calendario', () => {
       (f) => f.key,
     );
     expect(keys).toEqual(['status_groups', 'date']);
+    // Programación mira hacia adelante: los presets del periodo llegan al cierre.
+    const date = buildSchedulingFilters(sources, { withDateRange: true, withShow: false }).find(
+      (f) => f.key === 'date',
+    );
+    expect(date?.presetRange).toBe('fullPeriod');
     const both = buildSchedulingFilters(
       {
         ...sources,

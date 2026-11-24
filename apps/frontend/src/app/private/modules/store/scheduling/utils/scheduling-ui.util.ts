@@ -73,7 +73,9 @@ export function buildSchedulingFilters(
     });
   }
   if (options.withDateRange) {
-    filters.push({ key: 'date', label: 'Fecha', type: 'date-range' });
+    // La agenda mira hacia adelante: «Esta semana / mes / año» llegan hasta el
+    // cierre del periodo, no hasta hoy como en reportes.
+    filters.push({ key: 'date', label: 'Fecha', type: 'date-range', presetRange: 'fullPeriod' });
   }
   return filters;
 }

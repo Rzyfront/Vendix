@@ -492,6 +492,25 @@ export class ReservationsController {
     );
   }
 
+  // Cola de atención: ruta estática, declarada ANTES de `@Get(':id')`. Si va
+  // después, NestJS matchea `:id = 'queue'` y ParseIntPipe responde 400.
+  @Get('queue')
+  @Permissions('store:reservations:queue:read')
+  async getQueue(@Query('day') day?: string) {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) {
+      throw new BadRequestException(
+        'No se pudo determinar la tienda del contexto de la solicitud',
+      );
+    }
+    const targetDay = day ?? new Date().toISOString().split('T')[0];
+    const result = await this.appointmentQueueService.computeQueueForStore(
+      storeId,
+      targetDay,
+    );
+    return this.responseService.success(result, 'Cola de reservas obtenida');
+  }
+
   @Get(':id')
   @Permissions('store:reservations:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
@@ -645,23 +664,6 @@ export class ReservationsController {
       result,
       'Solicitud de confirmación enviada al cliente',
     );
-  }
-
-  @Get('queue')
-  @Permissions('store:reservations:queue:read')
-  async getQueue(@Query('day') day?: string) {
-    const storeId = RequestContextService.getStoreId();
-    if (!storeId) {
-      throw new BadRequestException(
-        'No se pudo determinar la tienda del contexto de la solicitud',
-      );
-    }
-    const targetDay = day ?? new Date().toISOString().split('T')[0];
-    const result = await this.appointmentQueueService.computeQueueForStore(
-      storeId,
-      targetDay,
-    );
-    return this.responseService.success(result, 'Cola de reservas obtenida');
   }
 
   @Patch(':id/reschedule')

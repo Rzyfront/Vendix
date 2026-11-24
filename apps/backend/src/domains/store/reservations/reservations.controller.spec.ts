@@ -3,6 +3,8 @@ import { BookingConfirmationService } from './booking-confirmation.service';
 import { AppointmentQueueService } from './appointment-queue/appointment-queue.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { PERMISSIONS_KEY } from '../../auth/decorators/permissions.decorator';
+import { RequestMethod } from '@nestjs/common';
+import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 
 describe('ReservationsController — appointment redesign endpoints (smoke)', () => {
   function buildController() {
@@ -211,5 +213,60 @@ describe('ReservationsController — appointment redesign endpoints (smoke)', ()
     expect(Reflect.getMetadata(PERMISSIONS_KEY, ReservationsController.prototype.prepayPayment)).toEqual([
       'store:reservations:update',
     ]);
+  });
+});
+
+/**
+ * NestJS registra las rutas en el orden en que se declaran los métodos. Una
+ * ruta con parámetro (`:id`) declarada antes que una estática del mismo verbo
+ * y la misma cantidad de segmentos se la traga: `GET queue` llegaba a
+ * `GET :id`, ParseIntPipe respondía 400 y la Cola de atención nunca cargaba.
+ */
+describe('ReservationsController — orden de rutas', () => {
+  type Route = { name: string; method: RequestMethod; segments: string[] };
+
+  function declaredRoutes(): Route[] {
+    const proto = ReservationsController.prototype as unknown as Record<string, unknown>;
+    return Object.getOwnPropertyNames(proto)
+      .filter((name) => name !== 'constructor' && typeof proto[name] === 'function')
+      .map((name) => {
+        const handler = proto[name] as object;
+        const path = Reflect.getMetadata(PATH_METADATA, handler) as string | undefined;
+        if (path === undefined) return null;
+        return {
+          name,
+          method: Reflect.getMetadata(METHOD_METADATA, handler) as RequestMethod,
+          segments: path.split('/').filter(Boolean),
+        };
+      })
+      .filter((route): route is Route => route !== null);
+  }
+
+  /** `earlier` atrapa a `later`: mismo verbo y largo, y cada segmento coincide o es parámetro. */
+  function shadows(earlier: Route, later: Route): boolean {
+    if (earlier.method !== later.method) return false;
+    if (earlier.segments.length !== later.segments.length) return false;
+    return earlier.segments.every(
+      (segment, i) => segment === later.segments[i] || segment.startsWith(':'),
+    );
+  }
+
+  it('ninguna ruta estática queda detrás de una con parámetro', () => {
+    const routes = declaredRoutes();
+    const shadowed: string[] = [];
+    routes.forEach((later, i) => {
+      for (const earlier of routes.slice(0, i)) {
+        if (shadows(earlier, later)) shadowed.push(`${later.name} (detrás de ${earlier.name})`);
+      }
+    });
+    expect(shadowed).toEqual([]);
+  });
+
+  it('GET queue se declara antes que GET :id', () => {
+    const names = declaredRoutes()
+      .filter((r) => r.method === RequestMethod.GET)
+      .map((r) => r.segments.join('/'));
+    expect(names.indexOf('queue')).toBeGreaterThanOrEqual(0);
+    expect(names.indexOf('queue')).toBeLessThan(names.indexOf(':id'));
   });
 });
