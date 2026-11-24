@@ -96,7 +96,7 @@ export function schedulingConfigActions(flags: {
       { label: 'Equipo de servicio', icon: 'user-cog', action: agendaUrl('configuracion', 'equipo') },
       { label: 'Disponibilidad', icon: 'calendar-clock', action: agendaUrl('configuracion', 'disponibilidad') },
       { label: 'Cola de atención', icon: 'users', action: agendaUrl('configuracion', 'cola') },
-      { label: 'Horario del negocio', icon: 'clock', action: agendaUrl('configuracion', 'horario') },
+      { label: 'Horario de la tienda', icon: 'clock', action: agendaUrl('configuracion', 'horario') },
       { label: 'Solicitudes de reagenda', icon: 'inbox', action: '/admin/reservations/reschedule-requests' },
       { label: 'Solicitudes de pago', icon: 'receipt', action: '/admin/reservations/payment-requests' },
       { label: 'Exportar reservas', icon: 'download', action: 'export-bookings' },

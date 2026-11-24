@@ -1,123 +1,64 @@
-<div class="business-hours">
-  <header class="business-hours__header">
-    <h2>
-      <app-icon name="clock"></app-icon>
-      Horario de la tienda
-    </h2>
-    <p class="business-hours__subtitle">
-      Las reservas solo se ofrecen dentro de este horario y ningún prestador puede agendarse fuera de él.
-    </p>
+<section class="flex flex-col gap-3 rounded-2xl border border-border bg-surface p-3 md:p-4" aria-labelledby="store-hours-title">
+  <header class="flex items-start gap-3">
+    <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+      <app-icon name="store" [size]="18" />
+    </span>
+    <div class="min-w-0">
+      <h2 id="store-hours-title" class="text-base font-bold text-text-primary">Horario de la tienda</h2>
+      <p class="text-sm text-text-secondary">
+        Los días y horas en que la tienda atiende. Las reservas solo se ofrecen dentro de este horario.
+      </p>
+    </div>
   </header>
 
-  <div class="business-hours__notice" data-testid="shared-schedule-notice">
-    <app-icon name="info" [size]="16"></app-icon>
-    <p>
-      Es el <strong>mismo horario de atención de la tienda</strong> que ves en
-      <a [routerLink]="salesSettingsRoute">Ajustes → Venta</a>: si lo cambias aquí, cambia allá, y al revés.
-      Para turnos de noche pon un cierre menor que la apertura (17:00 a 04:00 termina al día siguiente)
-      o activa <strong>24 horas</strong>.
-    </p>
-  </div>
-
-  <section class="business-hours__stats">
-    <app-stats title="Días abiertos" [value]="activeDays().toString()" iconName="calendar-check"></app-stats>
-    <app-stats title="Días 24 horas" [value]="fullDays().toString()" iconName="clock"></app-stats>
-    <app-stats title="Días cerrados" [value]="(7 - activeDays()).toString()" iconName="calendar-x"></app-stats>
-  </section>
-
-  @if (loading()) {
-    <div class="business-hours__loading">Cargando horario...</div>
-  } @else {
-    <app-card>
-      <ul class="days">
-        @for (label of dayLabels; track label.dow) {
-          @if (day(label.dow); as d) {
-            <li class="days__row" [class.days__row--closed]="!d.is_active" [attr.data-day]="d.day_of_week">
-              <div class="days__head">
-                <app-toggle
-                  [checked]="d.is_active"
-                  [ariaLabel]="label.label + ': abrir o cerrar'"
-                  (toggled)="toggleDay(d.day_of_week)"
-                />
-                <span class="days__name">{{ label.label }}</span>
-                @if (d.is_active) {
-                  <label class="days__full">
-                    <app-toggle
-                      [checked]="d.is_24h"
-                      [ariaLabel]="label.label + ': abrir 24 horas'"
-                      (toggled)="toggle24h(d.day_of_week)"
-                    />
-                    <span>24 horas</span>
-                  </label>
-                }
-              </div>
-
-              <div class="days__body">
-                @if (!d.is_active) {
-                  <span class="days__closed">Cerrado</span>
-                } @else if (d.is_24h) {
-                  <span class="days__badge">Abierto todo el día (00:00 a 00:00)</span>
-                } @else {
-                  @for (block of d.blocks; track $index; let i = $index) {
-                    <div class="days__block">
-                      <input
-                        type="time"
-                        [attr.aria-label]="label.label + ' apertura bloque ' + (i + 1)"
-                        [value]="block.start_time"
-                        (change)="updateBlock(d.day_of_week, i, 'start_time', $any($event.target).value)"
-                      />
-                      <span class="days__sep">a</span>
-                      <input
-                        type="time"
-                        [attr.aria-label]="label.label + ' cierre bloque ' + (i + 1)"
-                        [value]="block.end_time"
-                        (change)="updateBlock(d.day_of_week, i, 'end_time', $any($event.target).value)"
-                      />
-                      @if (endsNextDay(block)) {
-                        <span class="days__next" data-testid="ends-next-day">Termina al día siguiente</span>
-                      }
-                      @if (d.blocks.length > 1) {
-                        <button
-                          type="button"
-                          class="days__remove"
-                          [attr.aria-label]="'Quitar bloque ' + (i + 1) + ' del ' + label.label"
-                          (click)="removeBlock(d.day_of_week, i)"
-                        >
-                          <app-icon name="x" [size]="14"></app-icon>
-                        </button>
-                      }
-                    </div>
-                  }
-                  @if (d.blocks.length < maxBlocks) {
-                    <button type="button" class="days__add" (click)="addBlock(d.day_of_week)">
-                      <app-icon name="plus" [size]="14"></app-icon>
-                      Agregar bloque
-                    </button>
-                  }
-                }
-              </div>
-            </li>
+  <!-- Same schedule as Ajustes → Venta -->
+  <div
+    class="flex flex-col gap-3 rounded-2xl border border-info/25 bg-info/10 p-3 sm:flex-row sm:items-center"
+    data-testid="shared-schedule-notice"
+  >
+    <app-icon name="link" [size]="18" class="hidden shrink-0 text-info sm:block" />
+    <div class="min-w-0 flex-1 text-sm text-text-primary">
+      <p class="font-bold">Es el mismo horario de Ajustes → Venta</p>
+      <p class="text-text-secondary">
+        Lo que cambies aquí cambia allá, y al revés.
+        @if (inheritingProviders() !== null) {
+          @if (inheritingProviders() === 0) {
+            Ningún prestador usa todavía el horario de la tienda.
+          } @else if (inheritingProviders() === 1) {
+            También es el horario de <strong class="text-text-primary">1 prestador</strong> que usa el horario de la tienda.
+          } @else {
+            También es el horario de <strong class="text-text-primary">{{ inheritingProviders() }} prestadores</strong> que usan el horario de la tienda.
           }
         }
-      </ul>
-    </app-card>
-  }
-
-  <footer class="business-hours__footer">
-    @if (errorMsg()) {
-      <div class="business-hours__error" role="alert">{{ errorMsg() }}</div>
-    }
-    @if (successMsg()) {
-      <div class="business-hours__success" role="status">{{ successMsg() }}</div>
-    }
-    <app-button
-      variant="primary"
-      [loading]="saving()"
-      [disabled]="loading() || saving()"
-      (clicked)="save()"
+      </p>
+    </div>
+    <a
+      [routerLink]="salesSettingsRoute"
+      class="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-info/25 bg-surface px-3 text-xs font-semibold text-info no-underline transition hover:bg-info/10"
+      data-testid="sales-settings-link"
     >
-      <app-icon name="save"></app-icon>
-      Guardar horario
-    </app-button>
-  </footer>
-</div>
+      Ver en Ajustes → Venta
+      <app-icon name="arrow-right" [size]="14" />
+    </a>
+  </div>
+
+  @if (loading()) {
+    <div class="flex justify-center py-8"><app-spinner /></div>
+  } @else {
+    @if (loadError()) {
+      <p class="rounded-xl border border-warning/25 bg-warning/10 p-3 text-sm text-text-primary" role="alert">
+        No se pudo cargar el horario guardado. Revisa tu conexión y vuelve a abrir esta pantalla antes de guardar.
+      </p>
+    }
+    <app-weekly-hours-editor
+      [days]="days()"
+      (daysChange)="onDaysChange($event)"
+      [requireOpenDay]="true"
+      [showSave]="true"
+      [saving]="saving()"
+      [dirty]="dirty()"
+      [saved]="justSaved()"
+      (save)="save($event)"
+    />
+  }
+</section>

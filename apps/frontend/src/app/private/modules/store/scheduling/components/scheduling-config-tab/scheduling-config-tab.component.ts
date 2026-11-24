@@ -21,7 +21,7 @@ export const CONFIG_SECTION_TABS: { id: ConfigSection; label: string; icon: stri
   { id: 'equipo', label: 'Equipo de servicio', icon: 'user-cog' },
   { id: 'disponibilidad', label: 'Disponibilidad', icon: 'calendar-clock' },
   { id: 'cola', label: 'Cola de atención', icon: 'users' },
-  { id: 'horario', label: 'Horario del negocio', icon: 'clock' },
+  { id: 'horario', label: 'Horario de la tienda', icon: 'clock' },
 ];
 
 /**
