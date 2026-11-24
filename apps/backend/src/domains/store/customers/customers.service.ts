@@ -834,6 +834,27 @@ export class CustomersService {
       number: dto.document_number ?? null,
     });
 
+    // QUI-1051 — never create a blank customer. The resolve flow needs at
+    // least one identifier to look up or to name the new row: an email, a
+    // document number, or a non-blank name (first/last or legal name).
+    // Without one, the lookup has nothing to match and `create()` would
+    // persist a nameless row (seen as a "-" in the customers list). The POS
+    // form already blocks this (`canResolve`); this guards direct API calls.
+    const hasName = !!(
+      dto.first_name?.trim() ||
+      dto.last_name?.trim() ||
+      dto.legal_name?.trim()
+    );
+    if (!effectiveEmail && !normalizedDoc.number && !hasName) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        dto.name_only === true
+          ? 'El nombre del cliente es obligatorio'
+          : 'Ingresa un email, un documento o un nombre para continuar',
+        { field: dto.name_only === true ? 'first_name' : 'identifier' },
+      );
+    }
+
     // Match 1 — email first (case-insensitive, org-scoped, archived excluded).
     let existing: any = null;
     let matched_by: 'email' | 'document' | 'name' | null = null;

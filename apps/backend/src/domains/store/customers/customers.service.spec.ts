@@ -655,6 +655,68 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
       expect(mockPrismaService.users.create).toHaveBeenCalledTimes(1);
     });
 
+    describe('QUI-1051 — never creates a blank customer', () => {
+      it.each([
+        ['name_only without any name', { name_only: true }],
+        [
+          'name_only with whitespace-only names',
+          { name_only: true, first_name: '   ', last_name: '   ' },
+        ],
+        ['an empty body', {}],
+        ['only a phone', { phone: '+573001234567' }],
+        ['a whitespace-only document number', { document_type: 'CC', document_number: '  ' }],
+      ])('rejects %s with 422 and creates nothing', async (_label, dto) => {
+        await expect(
+          service.findOrCreateByEmailOrDocument(1, dto as any),
+        ).rejects.toMatchObject({
+          errorCode: 'SYS_VALIDATION_001',
+        });
+        expect(mockPrismaService.users.create).not.toHaveBeenCalled();
+        expect(mockPrismaService.users.findMany).not.toHaveBeenCalled();
+      });
+
+      it('says the name is required when name_only arrives without a name', async () => {
+        await expect(
+          service.findOrCreateByEmailOrDocument(1, {
+            name_only: true,
+            first_name: ' ',
+          } as any),
+        ).rejects.toThrow('El nombre del cliente es obligatorio');
+      });
+
+      it.each([
+        ['only an email', { email: 'solo@x.com' }],
+        ['a document number without type', { document_number: '12345678' }],
+        [
+          'a JURIDICA with only legal_name',
+          { legal_name: 'Acme SAS', person_type: 'JURIDICA' },
+        ],
+      ])('does not reject %s', async (_label, dto) => {
+        mockPrismaService.users.findFirst.mockResolvedValue(null);
+        mockPrismaService.users.findMany.mockResolvedValue([]);
+
+        await service
+          .findOrCreateByEmailOrDocument(1, dto as any)
+          .catch((err) => {
+            expect(err?.errorCode).not.toBe('SYS_VALIDATION_001');
+          });
+        expect(mockPrismaService.stores.findUnique).toHaveBeenCalled();
+      });
+
+      it('still creates a name-only customer when a real name arrives', async () => {
+        mockPrismaService.users.findFirst.mockResolvedValue(null);
+        mockPrismaService.users.findMany.mockResolvedValue([]);
+
+        const result = await service.findOrCreateByEmailOrDocument(1, {
+          name_only: true,
+          first_name: 'Ana',
+        } as any);
+
+        expect(result.was_created).toBe(true);
+        expect(mockPrismaService.users.create).toHaveBeenCalledTimes(1);
+      });
+    });
+
     it('accepts non-canonical document_number on the resolve path (no DocumentNumberMatchesType)', async () => {
       // Regression — the cashier typed `33001521212` (11 digits) for CC,
       // which the strict `@DocumentNumberMatchesType()` on CreateCustomerDto
