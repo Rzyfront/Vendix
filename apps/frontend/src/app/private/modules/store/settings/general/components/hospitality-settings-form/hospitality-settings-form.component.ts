@@ -165,7 +165,7 @@ const OTHER_ORIGIN = '__other__';
         [max]="100"
         step="0.1"
         label="Tarifa Fontur (por mil)"
-        helperText="Se usa para estimar la contribución trimestral en Reportes de hotel → Fontur. Por defecto 2,5 por mil; confírmala con tu contador."
+        helperText="Se usa para estimar la contribución trimestral en Reportes → Hotelería → Fontur. Por defecto 2,5 por mil; confírmala con tu contador."
         size="sm"
         (inputChange)="onFieldChange()"
       ></app-input>
