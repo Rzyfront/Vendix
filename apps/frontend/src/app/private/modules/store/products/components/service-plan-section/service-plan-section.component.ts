@@ -96,7 +96,7 @@ const STATUS_LABELS: Record<PlanDepartureStatus, string> = {
             customWrapperClass="!mt-0"
           ></app-input>
           <app-selector
-            label="Salidas"
+            label="Eventos"
             [options]="departureModeOptions"
             formControlName="plan_departure_mode"
             placeholder="Seleccionar modo"
@@ -141,12 +141,12 @@ const STATUS_LABELS: Record<PlanDepartureStatus, string> = {
 
       @if (!productId()) {
         <p class="text-xs text-text-secondary">
-          Guarda el servicio para cargar tramos de precio y salidas.
+          Guarda el servicio para cargar tramos de precio y eventos.
         </p>
       } @else if (loading()) {
         <div class="flex items-center gap-2 text-sm text-text-secondary">
           <app-spinner size="sm" color="primary"></app-spinner>
-          Cargando tramos y salidas...
+          Cargando tramos y eventos...
         </div>
       } @else {
         <!-- Tramos de precio por tamaño de grupo -->
@@ -210,14 +210,14 @@ const STATUS_LABELS: Record<PlanDepartureStatus, string> = {
           }
         </div>
 
-        <!-- Salidas programadas -->
+        <!-- Eventos programados -->
         @if (showDepartures()) {
           <div class="space-y-3">
-            <h4 class="text-sm font-medium text-text-primary">Salidas programadas</h4>
+            <h4 class="text-sm font-medium text-text-primary">Eventos programados</h4>
 
             <div class="grid grid-cols-1 md:grid-cols-[1fr_1fr_1fr_auto] gap-2 items-end">
               <app-input
-                label="Fecha de salida"
+                label="Fecha del evento"
                 type="date"
                 [min]="todayString"
                 [ngModel]="newDate()"
@@ -250,12 +250,12 @@ const STATUS_LABELS: Record<PlanDepartureStatus, string> = {
                 (clicked)="addDeparture()"
               >
                 <app-icon slot="icon" name="plus" [size]="14"></app-icon>
-                Agregar salida
+                Agregar evento
               </app-button>
             </div>
 
             @if (departures().length === 0) {
-              <p class="text-xs text-text-secondary">No hay salidas próximas.</p>
+              <p class="text-xs text-text-secondary">No hay eventos próximos.</p>
             } @else {
               <div class="overflow-x-auto">
                 <table class="w-full text-sm">
@@ -358,9 +358,9 @@ export class ServicePlanSectionComponent implements OnInit {
   readonly productId = input<number | null>(null);
 
   readonly departureModeOptions: SelectorOption[] = [
-    { value: 'fixed', label: 'Salidas fijas' },
+    { value: 'fixed', label: 'Eventos fijos' },
     { value: 'on_demand', label: 'Fecha libre' },
-    { value: 'both', label: 'Ambas' },
+    { value: 'both', label: 'Ambos' },
   ];
   readonly statusOptions: SelectorOption[] = [
     { value: 'open', label: STATUS_LABELS.open },
@@ -378,7 +378,7 @@ export class ServicePlanSectionComponent implements OnInit {
   readonly savingTiers = signal(false);
   readonly tiersError = computed(() => this.validateTiers(this.tiers()));
 
-  // Salidas
+  // Eventos
   readonly departures = signal<PlanDeparture[]>([]);
   readonly newDate = signal('');
   readonly newCapacity = signal<number | null>(null);
@@ -500,7 +500,7 @@ export class ServicePlanSectionComponent implements OnInit {
       });
   }
 
-  // ---- Salidas ----
+  // ---- Eventos ----
 
   addDeparture(): void {
     const productId = this.productId();
@@ -522,7 +522,7 @@ export class ServicePlanSectionComponent implements OnInit {
           this.newCapacity.set(null);
           this.newOverride.set(null);
           this.savingDeparture.set(false);
-          this.toast.success('Salida agregada');
+          this.toast.success('Evento agregado');
         },
         error: (err) => {
           this.savingDeparture.set(false);
@@ -557,7 +557,7 @@ export class ServicePlanSectionComponent implements OnInit {
           this.departures.set(this.departures().map((d) => (d.id === dep.id ? { ...d, ...updated } : d)));
           this.editingId.set(null);
           this.savingDeparture.set(false);
-          this.toast.success('Salida actualizada');
+          this.toast.success('Evento actualizado');
         },
         error: (err) => {
           this.savingDeparture.set(false);

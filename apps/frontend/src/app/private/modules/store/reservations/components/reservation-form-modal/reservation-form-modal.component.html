@@ -277,7 +277,7 @@
                   size="sm"
                   [variant]="planUseDeparture() ? 'primary' : 'outline'"
                   (clicked)="setPlanUseDeparture(true)"
-                  >Salida programada</app-button
+                  >Evento programado</app-button
                 >
                 <app-button
                   size="sm"
@@ -290,14 +290,14 @@
 
             @if (planUsesDeparture()) {
               @if (departureOptions().length === 0) {
-                <p class="text-xs text-text-secondary mb-3">No hay salidas con cupo disponible.</p>
+                <p class="text-xs text-text-secondary mb-3">No hay eventos con cupo disponible.</p>
               } @else {
                 <app-selector
-                  label="Salida"
+                  label="Evento"
                   [ngModel]="planDepartureId()"
                   (ngModelChange)="selectDeparture($event)"
                   [options]="departureOptions()"
-                  placeholder="Seleccionar salida"
+                  placeholder="Seleccionar evento"
                   [required]="true"
                 ></app-selector>
               }

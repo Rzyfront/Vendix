@@ -716,7 +716,7 @@ export class CreateProductDto {
 
   @ApiPropertyOptional({ enum: ['fixed', 'on_demand', 'both'], nullable: true })
   @IsOptional()
-  @IsIn(['fixed', 'on_demand', 'both'], { message: 'El modo de salida del plan debe ser fijas, a fecha libre o ambas' })
+  @IsIn(['fixed', 'on_demand', 'both'], { message: 'El modo de eventos del plan debe ser fijos, a fecha libre o ambos' })
   plan_departure_mode?: 'fixed' | 'on_demand' | 'both' | null;
 
   @ApiPropertyOptional({ nullable: true, description: 'Mínimo de personas del grupo.' })
@@ -1349,7 +1349,7 @@ export class UpdateProductDto {
 
   @ApiPropertyOptional({ enum: ['fixed', 'on_demand', 'both'], nullable: true })
   @IsOptional()
-  @IsIn(['fixed', 'on_demand', 'both'], { message: 'El modo de salida del plan debe ser fijas, a fecha libre o ambas' })
+  @IsIn(['fixed', 'on_demand', 'both'], { message: 'El modo de eventos del plan debe ser fijos, a fecha libre o ambos' })
   plan_departure_mode?: 'fixed' | 'on_demand' | 'both' | null;
 
   @ApiPropertyOptional({ nullable: true, description: 'Mínimo de personas del grupo.' })
@@ -2328,7 +2328,7 @@ export class UpdateProductWithVariantsDto {
 
   @ApiPropertyOptional({ enum: ['fixed', 'on_demand', 'both'], nullable: true })
   @IsOptional()
-  @IsIn(['fixed', 'on_demand', 'both'], { message: 'El modo de salida del plan debe ser fijas, a fecha libre o ambas' })
+  @IsIn(['fixed', 'on_demand', 'both'], { message: 'El modo de eventos del plan debe ser fijos, a fecha libre o ambos' })
   plan_departure_mode?: 'fixed' | 'on_demand' | 'both' | null;
 
   @ApiPropertyOptional({ nullable: true, description: 'Mínimo de personas del grupo.' })

@@ -269,7 +269,7 @@ describe('ServicePlansService (QUI-1060)', () => {
       const results = await Promise.allSettled([take(), take()]);
       expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
       const rejected = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
-      expect(rejected.reason).toMatchObject({ errorCode: 'SERVICE_PLAN_008', message: 'No quedan cupos suficientes en esta salida: quedan 0 cupos.' });
+      expect(rejected.reason).toMatchObject({ errorCode: 'SERVICE_PLAN_008', message: 'No quedan cupos suficientes en este evento: quedan 0 cupos.' });
       expect(departures.find((d) => d.id === 1)!.seats_sold).toBe(10);
     });
 

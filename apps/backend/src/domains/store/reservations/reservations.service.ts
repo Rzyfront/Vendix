@@ -600,7 +600,7 @@ export class ReservationsService {
       if (planBooking?.departureId != null && this.isSerializationFailure(caught)) {
         err = new VendixHttpException(
           ErrorCodes.SERVICE_PLAN_008,
-          'Otra reserva tomó los cupos de esta salida al mismo tiempo: revisa los cupos y vuelve a intentar.',
+          'Otra reserva tomó los cupos de este evento al mismo tiempo: revisa los cupos y vuelve a intentar.',
         );
       }
       // Compensar la orden pre-creada para preservar el invariante de

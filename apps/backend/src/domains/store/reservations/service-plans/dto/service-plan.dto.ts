@@ -46,20 +46,20 @@ export class ReplacePlanPaxPricesDto {
 }
 
 export class CreatePlanDepartureDto {
-  @IsDateString({}, { message: 'La fecha de salida debe tener formato YYYY-MM-DD' })
+  @IsDateString({}, { message: 'La fecha del evento debe tener formato YYYY-MM-DD' })
   departure_date: string;
 
   @Type(() => Number)
   @IsInt({ message: 'El cupo debe ser un número entero' })
-  @Min(1, { message: 'El cupo de la salida es mínimo 1' })
+  @Min(1, { message: 'El cupo del evento es mínimo 1' })
   @Max(9999)
   capacity: number;
 
   /** Precio del paquete en esta salida; reemplaza al tramo. null/ausente = usa los tramos. */
   @IsOptional()
   @Type(() => Number)
-  @IsNumber({ maxDecimalPlaces: 2 }, { message: 'El precio de la salida debe tener máximo 2 decimales' })
-  @Min(0, { message: 'El precio de la salida no puede ser negativo' })
+  @IsNumber({ maxDecimalPlaces: 2 }, { message: 'El precio del evento debe tener máximo 2 decimales' })
+  @Min(0, { message: 'El precio del evento no puede ser negativo' })
   @Max(9_999_999_999.99)
   price_override?: number | null;
 
@@ -71,25 +71,25 @@ export class CreatePlanDepartureDto {
 
 export class UpdatePlanDepartureDto {
   @IsOptional()
-  @IsDateString({}, { message: 'La fecha de salida debe tener formato YYYY-MM-DD' })
+  @IsDateString({}, { message: 'La fecha del evento debe tener formato YYYY-MM-DD' })
   departure_date?: string;
 
   @IsOptional()
   @Type(() => Number)
   @IsInt({ message: 'El cupo debe ser un número entero' })
-  @Min(1, { message: 'El cupo de la salida es mínimo 1' })
+  @Min(1, { message: 'El cupo del evento es mínimo 1' })
   @Max(9999)
   capacity?: number;
 
   @IsOptional()
   @Type(() => Number)
-  @IsNumber({ maxDecimalPlaces: 2 }, { message: 'El precio de la salida debe tener máximo 2 decimales' })
-  @Min(0, { message: 'El precio de la salida no puede ser negativo' })
+  @IsNumber({ maxDecimalPlaces: 2 }, { message: 'El precio del evento debe tener máximo 2 decimales' })
+  @Min(0, { message: 'El precio del evento no puede ser negativo' })
   @Max(9_999_999_999.99)
   price_override?: number | null;
 
   @IsOptional()
-  @IsIn(['open', 'closed', 'cancelled'], { message: 'El estado de la salida no es válido' })
+  @IsIn(['open', 'closed', 'cancelled'], { message: 'El estado del evento no es válido' })
   status?: 'open' | 'closed' | 'cancelled';
 
   @IsOptional()

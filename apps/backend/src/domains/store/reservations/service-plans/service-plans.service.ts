@@ -325,7 +325,7 @@ export class ServicePlansService {
     const left = Math.max(departure.capacity - departure.seats_sold, 0);
     throw new VendixHttpException(
       ErrorCodes.SERVICE_PLAN_008,
-      `No quedan cupos suficientes en esta salida: ${left === 1 ? 'queda 1 cupo' : `quedan ${left} cupos`}.`,
+      `No quedan cupos suficientes en este evento: ${left === 1 ? 'queda 1 cupo' : `quedan ${left} cupos`}.`,
     );
   }
 

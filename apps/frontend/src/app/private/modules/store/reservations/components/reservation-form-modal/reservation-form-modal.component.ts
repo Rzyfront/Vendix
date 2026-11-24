@@ -187,7 +187,7 @@ export class ReservationFormModalComponent {
   // ---- Plan / paquete (QUI-1060) ----
   readonly planDetail = signal<ServicePlan | null>(null);
   readonly loadingPlan = signal(false);
-  /** Modo `both`: true = salida programada, false = fecha libre. */
+  /** Modo `both`: true = evento programado, false = fecha libre. */
   readonly planUseDeparture = signal(true);
   readonly planDepartureId = signal<number | null>(null);
   readonly paxAdults = signal(1);
@@ -204,7 +204,7 @@ export class ReservationFormModalComponent {
   });
   readonly planDays = computed(() => this.planDetail()?.plan_duration_days ?? 0);
   readonly planMode = computed(() => this.planDetail()?.plan_departure_mode ?? 'on_demand');
-  /** La reserva usa una salida programada (modo fixed, o both con el interruptor en «Salida programada»). */
+  /** La reserva usa un evento programado (modo fixed, o both con el interruptor en «Evento programado»). */
   readonly planUsesDeparture = computed(
     () => this.isPlan() && (this.planMode() === 'fixed' || (this.planMode() === 'both' && this.planUseDeparture())),
   );
@@ -251,7 +251,7 @@ export class ReservationFormModalComponent {
     }
     const departure = this.selectedDeparture();
     if (this.planUsesDeparture() && departure && this.planTotalPax() > departure.seats_available) {
-      return `Solo quedan ${departure.seats_available} ${departure.seats_available === 1 ? 'cupo' : 'cupos'} en esta salida.`;
+      return `Solo quedan ${departure.seats_available} ${departure.seats_available === 1 ? 'cupo' : 'cupos'} en este evento.`;
     }
     return null;
   });
@@ -919,7 +919,7 @@ export class ReservationFormModalComponent {
 
     if (step === 0 && this.isPlan()) {
       if (this.selectedDate() < this.todayString) {
-        this.toastService.warning('No puedes reservar una salida que ya pasó. Elige hoy o una fecha futura.');
+        this.toastService.warning('No puedes reservar un evento que ya pasó. Elige hoy o una fecha futura.');
         return;
       }
       // El plan no usa franja horaria: ocupa los días completos.

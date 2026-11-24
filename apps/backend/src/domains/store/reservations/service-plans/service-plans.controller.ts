@@ -47,7 +47,7 @@ export class ServicePlansController {
     @Body() dto: CreatePlanDepartureDto,
   ) {
     const departure = await this.servicePlans.createDeparture(productId, dto);
-    return this.responseService.success(departure, 'Salida creada');
+    return this.responseService.success(departure, 'Evento creado');
   }
 
   @Patch(':productId/departures/:departureId')
@@ -58,6 +58,6 @@ export class ServicePlansController {
     @Body() dto: UpdatePlanDepartureDto,
   ) {
     const departure = await this.servicePlans.updateDeparture(productId, departureId, dto);
-    return this.responseService.success(departure, 'Salida actualizada');
+    return this.responseService.success(departure, 'Evento actualizado');
   }
 }
