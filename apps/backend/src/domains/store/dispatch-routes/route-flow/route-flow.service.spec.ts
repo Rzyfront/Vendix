@@ -76,6 +76,7 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
       dispatch_route_stops: {
         findFirst: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn(),
         // `findMany` is now called by `refreshRouteTotals` (added in the
         // live-totals fix) to recompute the parent aggregates after each
         // settle/release. Return an empty list by default; individual tests
@@ -141,10 +142,8 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
     );
 
     // Stub history/stop update so the transaction body resolves.
-    prismaMock.dispatch_route_stops.update.mockImplementation((args: any) => ({
-      id: STOP_ID,
-      ...args.data,
-    }));
+    // Conditional write (status guard): one row matched by default.
+    prismaMock.dispatch_route_stops.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.dispatch_route_stop_history.create.mockResolvedValue({});
   });
 
@@ -180,9 +179,10 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
     expect(cashSettlementMock.emitWithholding).not.toHaveBeenCalled();
 
     // The stop is updated with the right result/amounts.
-    expect(prismaMock.dispatch_route_stops.update).toHaveBeenCalledWith(
+    expect(prismaMock.dispatch_route_stops.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: STOP_ID },
+        // Only while the stop is still in the validated status.
+        where: { id: STOP_ID, route_id: ROUTE_ID, status: 'in_progress' },
         data: expect.objectContaining({
           status: 'delivered',
           result: 'delivered',
@@ -195,7 +195,7 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
     // su `@default(0)`. Este assert es el guardián de esa regla — si vuelve a
     // aparecer en el payload, alguien reintrodujo el crédito.
     const stopUpdateData =
-      prismaMock.dispatch_route_stops.update.mock.calls[0][0].data;
+      prismaMock.dispatch_route_stops.updateMany.mock.calls[0][0].data;
     expect(stopUpdateData).not.toHaveProperty('credit_amount');
   });
 
@@ -214,7 +214,7 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
     ).rejects.toBeInstanceOf(VendixHttpException);
 
     // The stop is never updated and no credit-sale / payment is emitted.
-    expect(prismaMock.dispatch_route_stops.update).not.toHaveBeenCalled();
+    expect(prismaMock.dispatch_route_stops.updateMany).not.toHaveBeenCalled();
     expect(cashSettlementMock.emitCreditSale).not.toHaveBeenCalled();
     expect(cashSettlementMock.emitPaymentReceived).not.toHaveBeenCalled();
   });
@@ -245,7 +245,7 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
       }),
     );
 
-    expect(prismaMock.dispatch_route_stops.update).toHaveBeenCalledWith(
+    expect(prismaMock.dispatch_route_stops.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ withholding_amount: 15 }),
       }),
@@ -299,7 +299,7 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
     expect(cashSettlementMock.emitWithholding).not.toHaveBeenCalled();
 
     // The stop is still updated (settlement recorded) even when prepaid.
-    expect(prismaMock.dispatch_route_stops.update).toHaveBeenCalledWith(
+    expect(prismaMock.dispatch_route_stops.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ status: 'delivered' }),
       }),
@@ -335,7 +335,7 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
 
     expect(cashSettlementMock.emitPaymentReceived).not.toHaveBeenCalled();
     expect(cashSettlementMock.emitWithholding).not.toHaveBeenCalled();
-    expect(prismaMock.dispatch_route_stops.update).toHaveBeenCalledWith(
+    expect(prismaMock.dispatch_route_stops.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           status: 'delivered',
@@ -366,7 +366,7 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
       } as any),
     ).rejects.toThrow(/debe cubrir el saldo pendiente/);
 
-    expect(prismaMock.dispatch_route_stops.update).not.toHaveBeenCalled();
+    expect(prismaMock.dispatch_route_stops.updateMany).not.toHaveBeenCalled();
   });
 
   // ── d4) Retenedor + prepago: sin retención que practicar ───────────────
@@ -581,7 +581,7 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
         payment_method: 'cash',
       } as any);
 
-      expect(prismaMock.dispatch_route_stops.update).toHaveBeenCalledWith(
+      expect(prismaMock.dispatch_route_stops.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ status: 'delivered', collected_amount: 50 }),
         }),
@@ -590,7 +590,7 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
         expect.objectContaining({ stop_id: STOP_ID, amount: 50 }),
         { cashMovementHandled: true },
       );
-      const stopUpdateData = prismaMock.dispatch_route_stops.update.mock.calls[0][0].data;
+      const stopUpdateData = prismaMock.dispatch_route_stops.updateMany.mock.calls[0][0].data;
       expect(stopUpdateData).not.toHaveProperty('credit_amount');
     });
 
@@ -599,7 +599,7 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
 
       await service.settleStop(ROUTE_ID, STOP_ID, { result: 'delivered', collected_amount: 0 } as any);
 
-      expect(prismaMock.dispatch_route_stops.update).toHaveBeenCalledWith(
+      expect(prismaMock.dispatch_route_stops.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ status: 'delivered' }) }),
       );
       expect(cashSettlementMock.emitPaymentReceived).not.toHaveBeenCalled();
@@ -627,7 +627,7 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
       await expect(
         service.settleStop(ROUTE_ID, STOP_ID, { result: 'delivered', collected_amount: 50 } as any),
       ).rejects.toMatchObject({ errorCode: 'DISPATCH_ROUTE_COLLECTION_MISMATCH' });
-      expect(prismaMock.dispatch_route_stops.update).not.toHaveBeenCalled();
+      expect(prismaMock.dispatch_route_stops.updateMany).not.toHaveBeenCalled();
       expect(cashSettlementMock.emitPaymentReceived).not.toHaveBeenCalled();
     });
 
@@ -645,7 +645,7 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
       await expect(
         service.settleStop(ROUTE_ID, STOP_ID, { result: 'delivered', collected_amount: 50 } as any),
       ).rejects.toThrow(/contra entrega o a cr[eé]dito libre/);
-      expect(prismaMock.dispatch_route_stops.update).not.toHaveBeenCalled();
+      expect(prismaMock.dispatch_route_stops.updateMany).not.toHaveBeenCalled();
     });
 
     it('contra entrega con sobre-recaudo: 400 COLLECTION_MISMATCH', async () => {
@@ -687,7 +687,7 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
 
       await service.settleStop(ROUTE_ID, STOP_ID, { result: 'delivered', collected_amount: 0 } as any);
 
-      expect(prismaMock.dispatch_route_stops.update).toHaveBeenCalled();
+      expect(prismaMock.dispatch_route_stops.updateMany).toHaveBeenCalled();
       expect(cashSettlementMock.emitPaymentReceived).not.toHaveBeenCalled();
     });
 
@@ -697,7 +697,7 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
       await expect(
         service.settleStop(ROUTE_ID, STOP_ID, { result: 'delivered', collected_amount: 10 } as any),
       ).rejects.toMatchObject({ errorCode: 'DISPATCH_ROUTE_STOP_ALREADY_PAID' });
-      expect(prismaMock.dispatch_route_stops.update).not.toHaveBeenCalled();
+      expect(prismaMock.dispatch_route_stops.updateMany).not.toHaveBeenCalled();
     });
 
     it('crédito libre con recaudo total: delivered y pago emitido', async () => {
@@ -1053,8 +1053,203 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
         const err: any = await call(service).catch((e) => e);
         expect(err).toBeInstanceOf(BadRequestException);
         expect(err.message).toContain(`'${status}'`);
-        expect(prismaMock.dispatch_route_stops.update).not.toHaveBeenCalled();
+        expect(prismaMock.dispatch_route_stops.updateMany).not.toHaveBeenCalled();
       },
     );
+  });
+  describe('prepagada: nunca se cobra, sea cual sea el resultado', () => {
+    // Order already paid → DERIVED prepaid.
+    const prepaidStop = () =>
+      buildStop({
+        dispatch_note: {
+          ...buildStop().dispatch_note,
+          order: { remaining_balance: new Prisma.Decimal(0) },
+        },
+      });
+
+    it.each([['delivered'], ['rejected']])(
+      '%s con recaudo sobre una prepagada → DISPATCH_ROUTE_STOP_ALREADY_PAID sin escribir',
+      async (result) => {
+        prismaMock.dispatch_routes.findFirst.mockResolvedValue(buildRoute());
+        prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(prepaidStop());
+
+        await expect(
+          service.settleStop(ROUTE_ID, STOP_ID, {
+            result,
+            collected_amount: 50,
+          } as any),
+        ).rejects.toMatchObject({ errorCode: 'DISPATCH_ROUTE_STOP_ALREADY_PAID' });
+        expect(prismaMock.dispatch_route_stops.updateMany).not.toHaveBeenCalled();
+        expect(cashSettlementMock.emitPaymentReceived).not.toHaveBeenCalled();
+      },
+    );
+
+    it('prepagada entregada con recaudo 0 se liquida sin evento de pago', async () => {
+      prismaMock.dispatch_routes.findFirst.mockResolvedValue(buildRoute());
+      prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(prepaidStop());
+
+      await service.settleStop(ROUTE_ID, STOP_ID, {
+        result: 'delivered',
+        collected_amount: 0,
+        payment_method: 'prepaid',
+      } as any);
+
+      expect(prismaMock.dispatch_route_stops.updateMany).toHaveBeenCalledTimes(1);
+      expect(cashSettlementMock.emitPaymentReceived).not.toHaveBeenCalled();
+    });
+  });
+
+  it('rechazo con motivo: el motivo queda en el historial (mismo campo que la liberación)', async () => {
+    prismaMock.dispatch_routes.findFirst.mockResolvedValue(buildRoute());
+    prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(buildStop());
+
+    await service.settleStop(ROUTE_ID, STOP_ID, {
+      result: 'rejected',
+      collected_amount: 0,
+      reason: 'Local cerrado',
+    } as any);
+
+    expect(prismaMock.dispatch_route_stop_history.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: 'settle',
+        to_status: 'rejected',
+        reason: 'Local cerrado',
+      }),
+    });
+  });
+
+  describe('settleStopsAtomically — carga con IA, todo o nada', () => {
+    const stopsById: Record<number, any> = {};
+    beforeEach(() => {
+      stopsById[55] = buildStop({ id: 55 });
+      stopsById[56] = buildStop({ id: 56, dispatch_note_id: 901 });
+      prismaMock.dispatch_routes.findFirst.mockResolvedValue(buildRoute());
+      prismaMock.dispatch_route_stops.findFirst.mockImplementation(
+        (args: any) => stopsById[args.where.id] ?? null,
+      );
+    });
+
+    it('valida todo antes de escribir: una parada inválida → 400 y nada aplicado', async () => {
+      const extra = jest.fn();
+      await expect(
+        service.settleStopsAtomically(
+          ROUTE_ID,
+          [
+            { kind: 'settle', stop_id: 55, dto: { result: 'delivered', collected_amount: 200 } as any },
+            // Cobro corto en contra entrega → COLLECTION_MISMATCH.
+            { kind: 'settle', stop_id: 56, dto: { result: 'delivered', collected_amount: 10 } as any },
+          ],
+          extra,
+        ),
+      ).rejects.toMatchObject({ errorCode: 'DISPATCH_ROUTE_BATCH_INVALID' });
+
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+      expect(prismaMock.dispatch_route_stops.updateMany).not.toHaveBeenCalled();
+      expect(extra).not.toHaveBeenCalled();
+      expect(cashSettlementMock.emitPaymentReceived).not.toHaveBeenCalled();
+    });
+
+    it('fallo a mitad de la transacción: se propaga, sin eventos post-commit', async () => {
+      // Real rollback is Postgres; here we assert the writes share ONE
+      // transaction and that a mid-batch failure emits nothing.
+      const extra = jest.fn().mockRejectedValue(new Error('P2020'));
+      await expect(
+        service.settleStopsAtomically(
+          ROUTE_ID,
+          [
+            { kind: 'settle', stop_id: 55, dto: { result: 'delivered', collected_amount: 200 } as any },
+            { kind: 'release', stop_id: 56, reason: 'Reprogramada' },
+          ],
+          extra,
+        ),
+      ).rejects.toThrow('P2020');
+
+      expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+      expect(cashSettlementMock.emitPaymentReceived).not.toHaveBeenCalled();
+      expect(eventEmitterMock.emit).not.toHaveBeenCalled();
+    });
+
+    it('todo en UNA transacción y eventos solo después del commit', async () => {
+      const extra = jest.fn().mockResolvedValue(undefined);
+      const settled = await service.settleStopsAtomically(
+        ROUTE_ID,
+        [
+          { kind: 'settle', stop_id: 55, dto: { result: 'delivered', collected_amount: 200, payment_method: 'cash' } as any },
+          { kind: 'release', stop_id: 56, reason: 'Reprogramada' },
+        ],
+        extra,
+      );
+
+      expect(settled).toEqual([
+        { stop_id: 55, result: 'delivered' },
+        { stop_id: 56, result: 'released' },
+      ]);
+      expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+      expect(extra).toHaveBeenCalledTimes(1);
+      expect(prismaMock.dispatch_route_stop_history.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          stop_id: 56,
+          action: 'release',
+          to_status: 'released',
+          reason: 'Reprogramada',
+        }),
+      });
+      expect(cashSettlementMock.emitPaymentReceived).toHaveBeenCalledTimes(1);
+      expect(eventEmitterMock.emit).toHaveBeenCalledWith(
+        'dispatch_note.delivered',
+        expect.objectContaining({ dispatch_note_id: 900 }),
+      );
+    });
+    it('stop_id repetido en el lote → 400 sin transacción ni eventos', async () => {
+      await expect(
+        service.settleStopsAtomically(ROUTE_ID, [
+          { kind: 'settle', stop_id: 55, dto: { result: 'delivered', collected_amount: 200 } as any },
+          { kind: 'settle', stop_id: 55, dto: { result: 'delivered', collected_amount: 200 } as any },
+        ]),
+      ).rejects.toMatchObject({ errorCode: 'DISPATCH_ROUTE_BATCH_INVALID' });
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+      expect(cashSettlementMock.emitPaymentReceived).not.toHaveBeenCalled();
+    });
+
+    it('concurrencia: si la parada cambió de estado (count 0) se revierte todo sin eventos', async () => {
+      prismaMock.dispatch_route_stops.updateMany
+        .mockResolvedValueOnce({ count: 1 })
+        .mockResolvedValueOnce({ count: 0 });
+      const extra = jest.fn();
+      await expect(
+        service.settleStopsAtomically(
+          ROUTE_ID,
+          [
+            { kind: 'settle', stop_id: 55, dto: { result: 'delivered', collected_amount: 200 } as any },
+            { kind: 'settle', stop_id: 56, dto: { result: 'delivered', collected_amount: 200 } as any },
+          ],
+          extra,
+        ),
+      ).rejects.toMatchObject({ errorCode: 'DISPATCH_ROUTE_STOP_ALREADY_SETTLED' });
+      expect(extra).not.toHaveBeenCalled();
+      expect(cashSettlementMock.emitPaymentReceived).not.toHaveBeenCalled();
+      expect(eventEmitterMock.emit).not.toHaveBeenCalled();
+    });
+
+    it('un error inesperado al validar (no HTTP) se propaga tal cual', async () => {
+      prismaMock.dispatch_route_stops.findFirst.mockRejectedValueOnce(new Error('db down'));
+      await expect(
+        service.settleStopsAtomically(ROUTE_ID, [
+          { kind: 'settle', stop_id: 55, dto: { result: 'delivered', collected_amount: 200 } as any },
+        ]),
+      ).rejects.toThrow('db down');
+    });
+
+    it('un evento post-commit que falla no impide los de las demás paradas', async () => {
+      cashSettlementMock.emitPaymentReceived
+        .mockRejectedValueOnce(new Error('bus caído'))
+        .mockResolvedValueOnce(undefined);
+      const settled = await service.settleStopsAtomically(ROUTE_ID, [
+        { kind: 'settle', stop_id: 55, dto: { result: 'delivered', collected_amount: 200, payment_method: 'cash' } as any },
+        { kind: 'settle', stop_id: 56, dto: { result: 'delivered', collected_amount: 200, payment_method: 'cash' } as any },
+      ]);
+      expect(settled).toHaveLength(2);
+      expect(cashSettlementMock.emitPaymentReceived).toHaveBeenCalledTimes(2);
+    });
   });
 });

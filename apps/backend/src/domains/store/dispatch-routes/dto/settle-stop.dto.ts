@@ -97,4 +97,14 @@ export class SettleStopDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  /**
+   * Motivo del rechazo. Se guarda en `dispatch_route_stop_history.reason`, el
+   * mismo campo que usa la liberación. Opcional en la liquidación manual; la
+   * carga con IA lo exige para rechazar.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
 }
