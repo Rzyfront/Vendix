@@ -156,3 +156,18 @@ export function schedulingRelatedLinks(flags: {
   }
   return links;
 }
+
+/** Botón «Reagendas (n)» de la cabecera: lleva a la cola de solicitudes. */
+export function rescheduleRequestsAction(count: number, visible: boolean): StickyHeaderActionButton {
+  return {
+    id: '/admin/reservations/reschedule-requests',
+    label: count > 0 ? `Reagendas (${count})` : 'Reagendas',
+    icon: 'inbox',
+    variant: 'outline',
+    visible,
+    title:
+      count > 0
+        ? `Tienes ${count} solicitud(es) de reagenda pendiente(s)`
+        : 'No hay solicitudes de reagenda pendientes',
+  };
+}

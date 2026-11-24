@@ -11,7 +11,7 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
-import { finalize } from 'rxjs';
+import { Subscription, finalize } from 'rxjs';
 import {
   ButtonComponent,
   CardComponent,
@@ -46,8 +46,11 @@ import {
   shiftAnchor,
   weekDays,
 } from '../../utils/scheduling-calendar.util';
+import { ProductionSseService } from '../../../restaurant-ops/production/services/production-sse.service';
+import { RescheduleRequestsCounterService } from '../../services/reschedule-requests-counter.service';
 import {
   PROVIDER_CONFIG_HEADER_ACTIONS,
+  rescheduleRequestsAction,
   buildSchedulingFilters,
   schedulingConfigActions,
 } from '../../utils/scheduling-ui.util';
@@ -177,6 +180,8 @@ function utc(ymd: string): Date {
               [today]="today()"
               [events]="events()"
               [availability]="availability()"
+              [slotClickable]="hasBookings()"
+              (slotClick)="onSlotClick($event)"
               (eventClick)="host().open($event)"
               (dayClick)="openDay($event)"
             />
@@ -197,6 +202,9 @@ export class SchedulingAgendaPageComponent {
   private readonly destroyRef = inject(DestroyRef);
   readonly host = viewChild.required(SchedulingRecordHostComponent);
   private readonly shellActions = inject(ModuleShellActionsService);
+  private readonly sse = inject(ProductionSseService);
+  private readonly reschedules = inject(RescheduleRequestsCounterService);
+  private loadSub: Subscription | null = null;
 
   /** Montada como pestaña Calendario de Agenda: sin cabecera propia. */
   readonly embedded = input(false);
@@ -241,6 +249,7 @@ export class SchedulingAgendaPageComponent {
   );
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
     ...PROVIDER_CONFIG_HEADER_ACTIONS.map((a) => ({ ...a, visible: this.hasBookings() })),
+    rescheduleRequestsAction(this.reschedules.count(), this.hasBookings()),
     {
       id: 'list',
       label: 'Ver programación',
@@ -295,6 +304,7 @@ export class SchedulingAgendaPageComponent {
           this.today.set(sources.today);
           this.anchor.set(sources.today);
           this.sourcesLoaded.set(true);
+          this.startLiveSources();
           this.load();
         },
         error: () => {
@@ -304,7 +314,13 @@ export class SchedulingAgendaPageComponent {
       });
   }
 
-  load(): void {
+  /**
+   * Recarga el rango visible cancelando la petición anterior (anterior /
+   * siguiente rápido no deja que una respuesta vieja pise la nueva).
+   * `silent`: recarga en segundo plano (tiempo real), sin spinner ni toast.
+   */
+  load(silent = false): void {
+    this.loadSub?.unsubscribe();
     if (!this.hasSources()) {
       this.events.set([]);
       return;
@@ -317,8 +333,8 @@ export class SchedulingAgendaPageComponent {
       status_groups: query.status_groups,
       staff_ids: query.staff_ids,
     };
-    this.loading.set(true);
-    this.api
+    if (!silent) this.loading.set(true);
+    this.loadSub = this.api
       .getCalendar({ ...filters, search: this.search() || undefined, ...range })
       .pipe(
         takeUntilDestroyed(this.destroyRef),
@@ -330,8 +346,32 @@ export class SchedulingAgendaPageComponent {
           this.availability.set(res.availability ?? []);
           this.truncated.set(res.truncated);
         },
-        error: () => this.toast.error('No se pudo cargar la agenda'),
+        error: () => {
+          if (!silent) this.toast.error('No se pudo cargar la agenda');
+        },
       });
+  }
+
+  /** Tiempo real de pedidos (SSE de producción) y conteo de reagendas. */
+  private startLiveSources(): void {
+    if (this.hasScheduled() && this.sse.canStream()) {
+      this.sse.listen(this.destroyRef, () => this.load(true));
+    }
+    if (this.hasBookings()) this.reschedules.watch(this.destroyRef);
+  }
+
+  /**
+   * Reservar tocando un hueco (Semana/Día), como el calendario viejo de
+   * Reservas: abre la reserva rápida con día y hora prellenados. El modal
+   * valida la disponibilidad del prestador y de la tienda.
+   */
+  onSlotClick(slot: { date: string; time: string }): void {
+    if (!this.hasBookings()) return;
+    if (slot.date < this.today()) {
+      this.toast.warning('No puedes agendar en un día que ya pasó.');
+      return;
+    }
+    this.host().createBookingAt(slot.date, slot.time);
   }
 
   setView(view: string): void {

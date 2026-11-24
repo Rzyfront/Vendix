@@ -6,6 +6,7 @@ import { ReservationsService } from '../../../reservations/services/reservations
 import { Booking } from '../../../reservations/interfaces/reservation.interface';
 import { BookingDetailModalComponent } from '../../../reservations/components/booking-detail-modal/booking-detail-modal.component';
 import { ReservationFormModalComponent } from '../../../reservations/components/reservation-form-modal/reservation-form-modal.component';
+import { QuickBookFromSlotModalComponent } from '../../../reservations/components/calendar/quick-book-from-slot-modal/quick-book-from-slot-modal.component';
 import { ScheduleDetailModalComponent } from '../../../scheduled-orders/components/schedule-detail-modal/schedule-detail-modal.component';
 import { ScheduledOrderRescheduleModalComponent } from '../scheduled-order-reschedule-modal/scheduled-order-reschedule-modal.component';
 import { SchedulingEvent } from '../../interfaces/scheduling.interface';
@@ -23,6 +24,7 @@ import { SchedulingEvent } from '../../interfaces/scheduling.interface';
   imports: [
     BookingDetailModalComponent,
     ReservationFormModalComponent,
+    QuickBookFromSlotModalComponent,
     ScheduleDetailModalComponent,
     ScheduledOrderRescheduleModalComponent,
   ],
@@ -51,6 +53,16 @@ import { SchedulingEvent } from '../../interfaces/scheduling.interface';
       />
     }
 
+    @defer (when slotOpen()) {
+      <app-quick-book-from-slot-modal
+        [isOpen]="slotOpen()"
+        [prefilledDate]="slotDate()"
+        [prefilledTime]="slotTime()"
+        (closed)="slotOpen.set(false)"
+        (created)="onSlotCreated()"
+      />
+    }
+
     <app-schedule-detail-modal [(isOpen)]="scheduleOpen" [scheduleId]="scheduleId()" />
 
     @if (rescheduleEvent(); as ev) {
@@ -74,6 +86,9 @@ export class SchedulingRecordHostComponent {
   readonly booking = signal<Booking | null>(null);
   readonly bookingOpen = signal(false);
   readonly createOpen = signal(false);
+  readonly slotOpen = signal(false);
+  readonly slotDate = signal('');
+  readonly slotTime = signal('');
   readonly scheduleOpen = signal(false);
   readonly scheduleId = signal<number | null>(null);
   readonly rescheduleEvent = signal<SchedulingEvent | null>(null);
@@ -100,6 +115,13 @@ export class SchedulingRecordHostComponent {
 
   createBooking(): void {
     this.createOpen.set(true);
+  }
+
+  /** Reserva rápida con día y hora prellenados (hueco del calendario). */
+  createBookingAt(date: string, time: string): void {
+    this.slotDate.set(date);
+    this.slotTime.set(time);
+    this.slotOpen.set(true);
   }
 
   rescheduleScheduledOrder(event: SchedulingEvent): void {
@@ -162,6 +184,12 @@ export class SchedulingRecordHostComponent {
   afterChange(message?: string): void {
     this.bookingOpen.set(false);
     if (message) this.toast.success(message);
+    this.changed.emit();
+  }
+
+  /** El modal de reserva rápida ya avisa «Reserva creada». */
+  onSlotCreated(): void {
+    this.slotOpen.set(false);
     this.changed.emit();
   }
 

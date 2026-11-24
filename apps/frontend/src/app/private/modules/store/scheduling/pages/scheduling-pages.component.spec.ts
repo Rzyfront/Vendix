@@ -13,6 +13,9 @@ import { SchedulingAgendaPageComponent } from './scheduling-agenda-page/scheduli
 import type { SchedulingEvent, SchedulingSources } from '../interfaces/scheduling.interface';
 import { agendaUrl } from '../scheduling-tabs';
 import { ModuleShellActionsService } from '../../../../../shared/components/module-tabs-shell/module-shell-actions.service';
+import { ProductionSseService } from '../../restaurant-ops/production/services/production-sse.service';
+import { RescheduleRequestsCounterService } from '../services/reschedule-requests-counter.service';
+import { EventCalendarComponent } from '../components/event-calendar/event-calendar.component';
 
 /** Sustituye los modales de las fuentes: aquí solo importa la pantalla. */
 @Component({ selector: 'app-scheduling-record-host', standalone: true, template: '' })
@@ -20,6 +23,7 @@ class RecordHostStub {
   readonly changed = output<void>();
   open = jasmine.createSpy('open');
   createBooking = jasmine.createSpy('createBooking');
+  createBookingAt = jasmine.createSpy('createBookingAt');
   rescheduleScheduledOrder = jasmine.createSpy('rescheduleScheduledOrder');
 }
 
@@ -68,7 +72,12 @@ const EVENT: SchedulingEvent = {
   detail: 'Corte de cabello',
 };
 
+let sse: { canStream: jasmine.Spy; listen: jasmine.Spy };
+let counter: { count: ReturnType<typeof signal<number>>; watch: jasmine.Spy };
+
 function setup(sources: SchedulingSources = SOURCES) {
+  sse = { canStream: jasmine.createSpy('canStream').and.returnValue(true), listen: jasmine.createSpy('listen') };
+  counter = { count: signal(3), watch: jasmine.createSpy('watch') };
   const api = {
     getSources: jasmine.createSpy('getSources').and.returnValue(of(sources)),
     getEvents: jasmine
@@ -97,9 +106,16 @@ function setup(sources: SchedulingSources = SOURCES) {
       { provide: SchedulingApiService, useValue: api },
       {
         provide: AuthFacade,
-        useValue: { isServiceIndustry: signal(true), hasPermission: () => true },
+        useValue: {
+          isServiceIndustry: signal(true),
+          hasPermission: () => true,
+          // Sin permiso de producción: el SSE no se abre en las pruebas.
+          hasAnyPermission: () => false,
+        },
       },
       { provide: StoreSettingsFacade, useValue: { timezone: signal('America/Bogota') } },
+      { provide: ProductionSseService, useValue: sse },
+      { provide: RescheduleRequestsCounterService, useValue: counter },
     ],
   });
   for (const page of [SchedulingListPageComponent, SchedulingAgendaPageComponent]) {
@@ -273,5 +289,76 @@ describe('Agenda unificada F1 — pestañas embebidas', () => {
     TestBed.flushEffects();
     expect(cal.nativeElement.querySelector('app-sticky-header')).toBeNull();
     expect(shell.buttons().filter((b) => b.visible !== false).map((b) => b.id)).not.toContain('list');
+  });
+});
+
+describe('Agenda unificada F1 — lo que se portó de las pantallas viejas', () => {
+  for (const [name, page] of [
+    ['Programación', SchedulingListPageComponent],
+    ['Calendario', SchedulingAgendaPageComponent],
+  ] as const) {
+    it(`${name}: pedidos en vivo por SSE (recarga en silencio) y botón «Reagendas (n)»`, () => {
+      const api = setup();
+      const fixture = TestBed.createComponent(page as any);
+      const cmp = fixture.componentInstance as any;
+      expect(sse.listen).toHaveBeenCalledTimes(1);
+      expect(counter.watch).toHaveBeenCalledTimes(1);
+      const calls = (page === SchedulingListPageComponent ? api.getEvents : api.getCalendar).calls.count();
+      sse.listen.calls.mostRecent().args[1]();
+      expect((page === SchedulingListPageComponent ? api.getEvents : api.getCalendar).calls.count()).toBe(calls + 1);
+      expect(cmp.loading()).toBeFalse();
+      const button = cmp.headerActions().find((a: any) => a.id === '/admin/reservations/reschedule-requests');
+      expect(button?.label).toBe('Reagendas (3)');
+      expect(button?.visible).toBeTrue();
+    });
+  }
+
+  it('sin pedidos no abre el SSE; sin reservas no cuenta reagendas', () => {
+    setup({ ...SOURCES, types: [{ value: 'booking', label: 'Reserva de servicio' }] });
+    TestBed.createComponent(SchedulingListPageComponent);
+    expect(sse.listen).not.toHaveBeenCalled();
+    expect(counter.watch).toHaveBeenCalled();
+    TestBed.resetTestingModule();
+    setup({ ...SOURCES, types: [{ value: 'scheduled_order', label: 'Pedido programado' }], staff: [] });
+    TestBed.createComponent(SchedulingAgendaPageComponent);
+    expect(counter.watch).not.toHaveBeenCalled();
+  });
+
+  it('Calendario: tocar un hueco futuro abre la reserva rápida con día y hora; uno pasado no', () => {
+    setup();
+    const fixture = TestBed.createComponent(SchedulingAgendaPageComponent);
+    fixture.componentInstance.isMobile.set(false);
+    fixture.detectChanges();
+    // `viewChild.required` busca la clase real; el stub se inyecta a mano.
+    const host = { createBookingAt: jasmine.createSpy('createBookingAt') };
+    (fixture.componentInstance as any).host = () => host;
+    fixture.componentInstance.onSlotClick({ date: '2026-11-26', time: '10:30' });
+    expect(host.createBookingAt).toHaveBeenCalledWith('2026-11-26', '10:30');
+    fixture.componentInstance.onSlotClick({ date: '2026-11-24', time: '10:30' });
+    expect(host.createBookingAt).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Agenda unificada F1 — hueco tocado en el calendario', () => {
+  it('convierte la altura del clic en la hora del hueco (múltiplo de 30 min) y no cuenta clics en eventos', () => {
+    TestBed.configureTestingModule({});
+    const fixture = TestBed.createComponent(EventCalendarComponent);
+    fixture.componentRef.setInput('view', 'day');
+    fixture.componentRef.setInput('anchor', '2026-11-26');
+    fixture.componentRef.setInput('slotClickable', true);
+    const cmp = fixture.componentInstance;
+    const emitted: Array<{ date: string; time: string }> = [];
+    cmp.slotClick.subscribe((slot) => emitted.push(slot));
+    const column = { getBoundingClientRect: () => ({ top: 0, height: 840 }) };
+    const plain = document.createElement('div');
+    // Franja por defecto 07:00–21:00 (840 min): 220 px → 10:40 → 10:30.
+    cmp.onGridClick({ clientY: 220, target: plain, currentTarget: column } as unknown as MouseEvent, '2026-11-26');
+    expect(emitted).toEqual([{ date: '2026-11-26', time: '10:30' }]);
+    const button = document.createElement('button');
+    cmp.onGridClick({ clientY: 220, target: button, currentTarget: column } as unknown as MouseEvent, '2026-11-26');
+    expect(emitted.length).toBe(1);
+    fixture.componentRef.setInput('slotClickable', false);
+    cmp.onGridClick({ clientY: 220, target: plain, currentTarget: column } as unknown as MouseEvent, '2026-11-26');
+    expect(emitted.length).toBe(1);
   });
 });

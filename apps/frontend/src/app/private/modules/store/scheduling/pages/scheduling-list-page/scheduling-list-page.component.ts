@@ -11,7 +11,7 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
-import { finalize } from 'rxjs';
+import { Subscription, finalize } from 'rxjs';
 import {
   CardComponent,
   DropdownAction,
@@ -44,9 +44,12 @@ import {
 } from '../../interfaces/scheduling.interface';
 import { SchedulingApiService } from '../../services/scheduling-api.service';
 import { filterValuesToQuery } from '../../utils/scheduling-calendar.util';
+import { ProductionSseService } from '../../../restaurant-ops/production/services/production-sse.service';
+import { RescheduleRequestsCounterService } from '../../services/reschedule-requests-counter.service';
 import {
   PROVIDER_CONFIG_HEADER_ACTIONS,
   STATUS_GROUP_COLOR,
+  rescheduleRequestsAction,
   buildSchedulingFilters,
   schedulingConfigActions,
 } from '../../utils/scheduling-ui.util';
@@ -182,6 +185,9 @@ export class SchedulingListPageComponent {
   private readonly destroyRef = inject(DestroyRef);
   private readonly host = viewChild.required(SchedulingRecordHostComponent);
   private readonly shellActions = inject(ModuleShellActionsService);
+  private readonly sse = inject(ProductionSseService);
+  private readonly reschedules = inject(RescheduleRequestsCounterService);
+  private loadSub: Subscription | null = null;
 
   /** Montada como pestaña de Agenda: sin cabecera propia. */
   readonly embedded = input(false);
@@ -227,6 +233,7 @@ export class SchedulingListPageComponent {
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
     ...PROVIDER_CONFIG_HEADER_ACTIONS.map((a) => ({ ...a, visible: this.hasBookings() })),
+    rescheduleRequestsAction(this.reschedules.count(), this.hasBookings()),
     {
       id: 'agenda',
       label: 'Ver calendario',
@@ -353,6 +360,7 @@ export class SchedulingListPageComponent {
         next: (sources) => {
           this.sources.set(sources);
           this.sourcesLoaded.set(true);
+          this.startLiveSources();
           this.load();
         },
         error: () => {
@@ -362,15 +370,21 @@ export class SchedulingListPageComponent {
       });
   }
 
-  load(): void {
+  /**
+   * Recarga la página actual. Cancela la petición anterior (navegar rápido
+   * por filtros o páginas no deja que una respuesta vieja pise la nueva).
+   * `silent`: recarga en segundo plano (tiempo real), sin spinner ni toast.
+   */
+  load(silent = false): void {
     const sources = this.sources();
+    this.loadSub?.unsubscribe();
     if (!sources?.types.length) {
       this.rows.set([]);
       this.totalItems.set(0);
       return;
     }
-    this.loading.set(true);
-    this.api
+    if (!silent) this.loading.set(true);
+    this.loadSub = this.api
       .getEvents(this.query(sources))
       .pipe(
         takeUntilDestroyed(this.destroyRef),
@@ -382,8 +396,22 @@ export class SchedulingListPageComponent {
           this.totalItems.set(res.meta?.total ?? res.data.length);
           this.truncated.set(!!res.meta?.truncated);
         },
-        error: () => this.toast.error('No se pudo cargar la programación'),
+        error: () => {
+          if (!silent) this.toast.error('No se pudo cargar la programación');
+        },
       });
+  }
+
+  /**
+   * Lo que antes hacían las pantallas viejas: los pedidos se actualizan solos
+   * cuando cambia su producción (SSE de producción) y el botón de reagendas
+   * lleva el conteo de pendientes.
+   */
+  private startLiveSources(): void {
+    if (this.hasScheduled() && this.sse.canStream()) {
+      this.sse.listen(this.destroyRef, () => this.load(true));
+    }
+    if (this.hasBookings()) this.reschedules.watch(this.destroyRef);
   }
 
   /** «Próximos» (desde hoy, cronológico) salvo que elijan fechas o «Todo». */

@@ -10,8 +10,6 @@ import { SchedulingConfigTabComponent } from '../../components/scheduling-config
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { SchedulingApiService } from '../../services/scheduling-api.service';
 import { SCHEDULING_AGENDA_ROUTES } from '../../scheduling.routes';
-import { SCHEDULED_ORDERS_ROUTES } from '../../../scheduled-orders/scheduled-orders.routes';
-import { agendaTabRedirect } from '../../../../../../routes/private/store_admin.routes';
 import type { SchedulingSources } from '../../interfaces/scheduling.interface';
 
 @Component({ selector: 'app-scheduling-agenda-page', standalone: true, template: 'CALENDARIO' })
@@ -28,18 +26,9 @@ class ConfigStub {
   readonly sectionChange = output<string>();
 }
 
-/** Rutas mínimas que reproducen las de store_admin (Agenda + URLs viejas). */
+/** Solo la ruta de Agenda: las redirecciones reales se prueban en `store-admin-rutas-routes.spec.ts`. */
 function routes() {
-  return [
-    { path: 'admin/orders/agenda', loadChildren: () => SCHEDULING_AGENDA_ROUTES },
-    { path: 'admin/orders/scheduling', pathMatch: 'full' as const, redirectTo: () => agendaTabRedirect('programacion') },
-    { path: 'admin/reservations', pathMatch: 'full' as const, redirectTo: () => agendaTabRedirect('calendario') },
-    { path: 'admin/reservations/schedules', redirectTo: () => agendaTabRedirect('configuracion', 'equipo') },
-    { path: 'admin/reservations/availability', redirectTo: () => agendaTabRedirect('configuracion', 'disponibilidad') },
-    { path: 'admin/reservations/queue', redirectTo: () => agendaTabRedirect('configuracion', 'cola') },
-    { path: 'admin/reservations/business-hours', redirectTo: () => agendaTabRedirect('configuracion', 'horario') },
-    { path: 'admin/scheduled-orders', loadChildren: () => SCHEDULED_ORDERS_ROUTES },
-  ];
+  return [{ path: 'admin/orders/agenda', loadChildren: () => SCHEDULING_AGENDA_ROUTES }];
 }
 
 async function open(url: string) {
@@ -89,21 +78,6 @@ describe('Agenda unificada F1 — módulo Agenda con pestañas', () => {
     expect(harness.routeNativeElement?.textContent).toContain('CONFIG disponibilidad');
   });
 
-  const REDIRECTS: Array<[string, string]> = [
-    ['/admin/reservations', '/admin/orders/agenda?tab=calendario'],
-    ['/admin/scheduled-orders', '/admin/orders/agenda?tab=calendario'],
-    ['/admin/orders/scheduling', '/admin/orders/agenda?tab=programacion'],
-    ['/admin/reservations/schedules', '/admin/orders/agenda?tab=configuracion&seccion=equipo'],
-    ['/admin/reservations/availability', '/admin/orders/agenda?tab=configuracion&seccion=disponibilidad'],
-    ['/admin/reservations/queue', '/admin/orders/agenda?tab=configuracion&seccion=cola'],
-    ['/admin/reservations/business-hours', '/admin/orders/agenda?tab=configuracion&seccion=horario'],
-  ];
-  for (const [from, to] of REDIRECTS) {
-    it(`la URL vieja ${from} redirige a ${to}`, async () => {
-      const { router } = await open(from);
-      expect(router.url).toBe(to);
-    });
-  }
 });
 
 describe('Agenda unificada F1 — pestaña Configuración', () => {

@@ -182,7 +182,12 @@ const MONTH_CELL_LIMIT = 3;
           </div>
           <div class="grid flex-1" [style.grid-template-columns]="'repeat(' + days().length + ', minmax(0, 1fr))'">
             @for (day of days(); track day) {
-              <div class="time-grid border-l border-border">
+              <div
+                class="time-grid border-l border-border"
+                [class.cursor-pointer]="slotClickable()"
+                [attr.data-day]="day"
+                (click)="onGridClick($event, day)"
+              >
                 @for (h of hours(); track h; let i = $index) {
                   <div class="hour-line" [style.top.%]="(i / hours().length) * 100"></div>
                 }
@@ -240,7 +245,11 @@ export class EventCalendarComponent {
   /** Disponibilidad de los prestadores filtrados (vacío = no se pinta). */
   readonly availability = input<readonly ProviderDayAvailability[]>([]);
 
+  /** Permite tocar un hueco de Semana/Día para reservar ahí. */
+  readonly slotClickable = input(false);
   readonly eventClick = output<SchedulingEvent>();
+  /** Hueco tocado: día y hora local (múltiplo de 30 min). */
+  readonly slotClick = output<{ date: string; time: string }>();
   readonly dayClick = output<string>();
 
   readonly cellLimit = MONTH_CELL_LIMIT;
@@ -286,6 +295,21 @@ export class EventCalendarComponent {
     for (const day of this.days()) map.set(day, layoutDay(byDay.get(day) ?? [], range));
     return map;
   });
+
+  /** Hora del hueco tocado según la altura del clic (los eventos no cuentan). */
+  onGridClick(event: MouseEvent, day: string): void {
+    if (!this.slotClickable()) return;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('button')) return;
+    const column = event.currentTarget as HTMLElement;
+    const rect = column.getBoundingClientRect();
+    if (!rect.height) return;
+    const { start, end } = this.range();
+    const ratio = Math.min(Math.max((event.clientY - rect.top) / rect.height, 0), 0.9999);
+    const minutes = Math.floor((start + ratio * (end - start)) / 30) * 30;
+    const time = `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+    this.slotClick.emit({ date: day, time });
+  }
 
   /** «No disponible: motivo» o «Sin horario» para el día del prestador. */
   availabilityLabel(day: string): string | null {
