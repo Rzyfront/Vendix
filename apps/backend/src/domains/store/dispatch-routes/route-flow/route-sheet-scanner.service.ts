@@ -336,6 +336,24 @@ export class RouteSheetScannerService implements OnModuleInit {
     // Out-of-range confidence → 400 here, never a P2020 inside the write.
     const scan_confidence = this.toScanConfidence(dto.scan_result?.confidence);
 
+    // Each stop may appear once: two rows pointing at the same stop would
+    // settle it twice (double payment). 400 before touching anything.
+    const seen = new Set<number>();
+    const duplicated = new Set<number>();
+    for (const decision of dto.stops) {
+      if (seen.has(decision.stop_id)) duplicated.add(decision.stop_id);
+      seen.add(decision.stop_id);
+    }
+    if (duplicated.size > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.RTSCAN_CONFIRM_INVALID,
+        `No se aplicó ningún cambio: la parada ${[...duplicated]
+          .map((id) => `#${id}`)
+          .join(', ')} aparece en más de una fila. Deja una sola fila por parada.`,
+        { duplicated_stop_ids: [...duplicated] },
+      );
+    }
+
     const route = await this.prisma.dispatch_routes.findFirst({
       where: { id: routeId, store_id },
       select: { id: true },

@@ -262,10 +262,21 @@ export class RouteFlowController {
       scan_result: scanRaw ?? undefined,
     });
     const errors = validateSync(dto, { whitelist: true });
-    if (errors.length > 0) {
+    const messages = this.flattenValidation(errors);
+    // `scan_result` is the raw AI answer (kept as JSON); only its confidence is
+    // written to a column (`scan_confidence`, a 0-100 percentage stored 0-1).
+    const confidence = (dto.scan_result as { confidence?: unknown } | undefined)
+      ?.confidence;
+    if (confidence !== undefined && confidence !== null && confidence !== '') {
+      const pct = Number(confidence);
+      if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+        messages.push('scan_result.confidence: debe estar entre 0 y 100');
+      }
+    }
+    if (messages.length > 0) {
       throw new VendixHttpException(
         ErrorCodes.RTSCAN_CONFIRM_INVALID,
-        `No se aplicó ningún cambio: ${this.flattenValidation(errors).join('; ')}`,
+        `No se aplicó ningún cambio: ${messages.join('; ')}`,
       );
     }
     return dto;

@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  HttpException,
   Logger,
 } from '@nestjs/common';
 import {
@@ -984,8 +985,16 @@ export class RouteFlowService {
     plan: PreparedStopSettle,
   ) {
     const { dto, stop } = plan;
-    const updated_stop = await tx.dispatch_route_stops.update({
-      where: { id: plan.stop_id },
+    // Conditional write: only if the stop is STILL in the status validated by
+    // `prepareSettle`. A concurrent settle (another tab, the manual flow, a
+    // repeated stop_id in a batch) leaves count 0 → ALREADY_SETTLED, which
+    // aborts the transaction (nothing applied, no second payment).
+    const guard = await tx.dispatch_route_stops.updateMany({
+      where: {
+        id: plan.stop_id,
+        route_id: plan.route_id,
+        status: plan.from_status as any,
+      },
       data: {
         status: dto.result,
         result: dto.result,
@@ -1000,6 +1009,10 @@ export class RouteFlowService {
         settled_by_user_id: plan.user_id,
         updated_at: new Date(),
       },
+    });
+    if (guard.count === 0) this.throwStopChanged(plan.stop_id);
+    const updated_stop = await tx.dispatch_route_stops.findFirst({
+      where: { id: plan.stop_id },
     });
 
     await tx.dispatch_route_stop_history.create({
@@ -1173,19 +1186,39 @@ export class RouteFlowService {
     };
   }
 
+  /**
+   * The stop is no longer in the status that was validated (settled or
+   * released meanwhile). Thrown INSIDE the transaction so it rolls back.
+   */
+  private throwStopChanged(stopId: number): never {
+    throw new VendixHttpException(
+      ErrorCodes.DISPATCH_ROUTE_STOP_ALREADY_SETTLED,
+      `La parada #${stopId} cambió de estado mientras se liquidaba (ya fue liquidada o liberada). No se aplicó ningún cambio; recarga la planilla.`,
+    );
+  }
+
   /** Writes of a prepared release, inside the caller's transaction. */
   private async applyReleaseInTx(
     tx: Prisma.TransactionClient,
     plan: PreparedStopRelease,
   ) {
-    const updated_stop = await tx.dispatch_route_stops.update({
-      where: { id: plan.stop_id },
+    // Same conditional write as the settle (see applySettleInTx).
+    const guard = await tx.dispatch_route_stops.updateMany({
+      where: {
+        id: plan.stop_id,
+        route_id: plan.route_id,
+        status: plan.from_status as any,
+      },
       data: {
         status: 'released',
         result: 'released',
         released_at: new Date(),
         updated_at: new Date(),
       },
+    });
+    if (guard.count === 0) this.throwStopChanged(plan.stop_id);
+    const updated_stop = await tx.dispatch_route_stops.findFirst({
+      where: { id: plan.stop_id },
     });
     await tx.dispatch_route_stop_history.create({
       data: {
@@ -1227,6 +1260,25 @@ export class RouteFlowService {
     const user_id = RequestContextService.getContext()?.user_id;
     const route = await this.getRoute(id, store_id);
 
+    // A stop may appear ONCE: a repeated stop_id would be settled twice (two
+    // payments, two `dispatch_note.delivered`). The conditional write also
+    // stops it inside the tx; this gives the clear 400 before writing.
+    const seen = new Set<number>();
+    const duplicated = new Set<number>();
+    for (const item of items) {
+      if (seen.has(item.stop_id)) duplicated.add(item.stop_id);
+      seen.add(item.stop_id);
+    }
+    if (duplicated.size > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.DISPATCH_ROUTE_BATCH_INVALID,
+        `No se aplicó ningún cambio: la parada ${[...duplicated]
+          .map((id) => `#${id}`)
+          .join(', ')} viene repetida en el lote.`,
+        { duplicated_stop_ids: [...duplicated] },
+      );
+    }
+
     const plans: Array<PreparedStopSettle | PreparedStopRelease> = [];
     const errors: Array<{ stop_id: number; message: string }> = [];
     for (const item of items) {
@@ -1247,11 +1299,10 @@ export class RouteFlowService {
           if (prepared.kind !== 'idempotent') plans.push(prepared);
         }
       } catch (err) {
-        errors.push({
-          stop_id: item.stop_id,
-          message:
-            err instanceof Error ? err.message : 'Error validando la parada',
-        });
+        // Only business validation errors (4xx) are collected per stop; an
+        // unexpected failure (DB down, bug) propagates as it is.
+        if (!(err instanceof HttpException)) throw err;
+        errors.push({ stop_id: item.stop_id, message: err.message });
       }
     }
 
@@ -1285,11 +1336,23 @@ export class RouteFlowService {
       { timeout: 60_000, maxWait: 10_000 },
     );
 
-    // Post-commit side effects, in the same order as the writes.
+    // Post-commit side effects, in the same order as the writes. The stops
+    // are already committed: one failing emit must not skip the events of the
+    // others (nor turn a committed confirm into an error), so each is isolated
+    // and logged for follow-up.
     for (let i = 0; i < plans.length; i++) {
       const plan = plans[i];
       if (plan.kind === 'settle') {
-        await this.emitSettleSideEffects(plan, delivered[i]);
+        try {
+          await this.emitSettleSideEffects(plan, delivered[i]);
+        } catch (err) {
+          this.logger.error(
+            `[settleStopsAtomically] Ruta #${id} parada #${plan.stop_id}: falló un evento post-commit (la parada SÍ quedó liquidada): ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+            err instanceof Error ? err.stack : undefined,
+          );
+        }
       } else {
         this.logger.log(
           `Parada #${plan.stop_id} liberada para reasignación: ${plan.reason}`,
