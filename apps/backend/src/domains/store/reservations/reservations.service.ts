@@ -10,6 +10,7 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { RequestContextService } from '@common/context/request-context.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { booking_status_enum, booking_mode_enum, Prisma } from '@prisma/client';
+import { getSettledOrderAmount } from '../payments/services/payment-validator.service';
 import {
   addDaysToDateString,
   bookingEndDateFor,
@@ -148,8 +149,16 @@ export class ReservationsService {
     created_by: {
       select: { id: true, first_name: true, last_name: true },
     },
+    // QUI-1063 — the booking's order as the detail shows it (total, paid, balance).
     order: {
-      select: { id: true, order_number: true },
+      select: {
+        id: true,
+        order_number: true,
+        state: true,
+        grand_total: true,
+        total_paid: true,
+        remaining_balance: true,
+      },
     },
     // S19: position badge "Serie i/n" (i comes from bookings.series_index).
     series: {
@@ -698,6 +707,13 @@ export class ReservationsService {
         }
         throw error;
       }
+    }
+
+    // QUI-1063 — the order created here for the booking is charged through
+    // the normal flow: its pending balance is its total (the schema default
+    // 0 made it look settled). An order the POS/storefront brought is theirs.
+    if (booking?.order_id && !dto.order_id && !dto.skip_order_creation) {
+      if (await this.openBookingOrderBalance(booking.order_id)) booking = await this.findOne(booking.id);
     }
 
     // 7. Marcar la mesa como reservada si se asignó una tabla
@@ -1337,6 +1353,8 @@ export class ReservationsService {
     // No money to decide: the open "cobro para reservar" request (and its Wompi link) goes with the booking.
     if (!closed) await this.cancelOpenPrepayRequests(id);
     const booking = closed ? await this.findOne(id) : await this.transition(id, 'cancelled');
+    // QUI-1063 — its unpaid order leaves the charge queue as "Cancelada".
+    await this.releaseBookingOrder(id, 'Reserva cancelada');
     // A retention closes the booking as a no-show and already announced it.
     if (closed?.emitted) return booking;
     this.eventEmitter.emit('booking.cancelled', {
@@ -1354,6 +1372,95 @@ export class ReservationsService {
       start_time: booking.start_time,
     });
     return booking;
+  }
+
+  /**
+   * QUI-1063 — pending balance of an order born for a booking = its total
+   * minus what is already settled (credit orders keep their own plan).
+   * The booking is already committed: a failure is logged, never thrown.
+   * Returns whether it wrote the balance.
+   */
+  private async openBookingOrderBalance(orderId: number): Promise<boolean> {
+    try {
+      return await this.writeBookingOrderBalance(orderId);
+    } catch (error: unknown) {
+      this.logger.error(
+        `Order ${orderId}: opening the booking balance failed: ${error instanceof Error ? error.message : error}`,
+      );
+      return false;
+    }
+  }
+
+  private async writeBookingOrderBalance(orderId: number): Promise<boolean> {
+    const order = await this.prisma.orders.findFirst({
+      where: { id: orderId },
+      select: {
+        id: true,
+        state: true,
+        grand_total: true,
+        payment_form: true,
+        remaining_balance: true,
+        payments: { select: { amount: true, state: true } },
+      },
+    });
+    if (!order || order.payment_form === '2') return false;
+    if (!['created', 'pending_payment', 'draft'].includes(order.state)) return false;
+    const balance = Prisma.Decimal.max(
+      0,
+      new Prisma.Decimal(order.grand_total).toDecimalPlaces(2).minus(getSettledOrderAmount(order)),
+    ).toDecimalPlaces(2);
+    if (balance.equals(order.remaining_balance ?? 0)) return false;
+    await this.prisma.orders.update({
+      where: { id: order.id },
+      data: { remaining_balance: balance, updated_at: new Date() },
+    });
+    return true;
+  }
+
+  /**
+   * QUI-1063 — a cancelled / no-show booking: its order is cancelled (it
+   * stays in Orders as "Cancelada", stock and allocation released by the
+   * order flow) only when nothing was paid on it, nothing is pending on a
+   * gateway and no other live booking shares it. Otherwise money or another
+   * booking is involved and the desk decides from the order. Never fails
+   * the booking change: an error is logged.
+   */
+  private async releaseBookingOrder(bookingId: number, reason: string): Promise<void> {
+    try {
+      const booking = await this.prisma.bookings.findFirst({
+        where: { id: bookingId },
+        select: { order_id: true, status: true },
+      });
+      if (!booking?.order_id || !['cancelled', 'no_show'].includes(booking.status)) return;
+      const order = await this.prisma.orders.findFirst({
+        where: { id: booking.order_id },
+        select: {
+          id: true,
+          state: true,
+          service_session_id: true,
+          payments: { select: { amount: true, state: true } },
+        },
+      });
+      if (!order || !['created', 'pending_payment', 'draft'].includes(order.state)) return;
+      if (order.service_session_id != null) return;
+      const paid = Number(getSettledOrderAmount(order)) > 0;
+      const pending = order.payments.some((p) => p.state === 'pending');
+      const sharedWith = await this.prisma.bookings.count({
+        where: { order_id: order.id, id: { not: bookingId }, status: { notIn: ['cancelled', 'no_show'] } },
+      });
+      if (paid || pending || sharedWith > 0) {
+        this.logger.warn(
+          `Booking ${bookingId}: order ${order.id} kept (paid=${paid}, pending=${pending}, shared=${sharedWith})`,
+        );
+        return;
+      }
+      await this.ordersService.update(order.id, { state: 'cancelled' } as any);
+      this.logger.log(`Booking ${bookingId}: order ${order.id} cancelled (${reason})`);
+    } catch (error: unknown) {
+      this.logger.error(
+        `Booking ${bookingId}: cancelling its order failed: ${error instanceof Error ? error.message : error}`,
+      );
+    }
   }
 
   /** Cancels the booking's open prepay request and deactivates its Wompi link; a no-op without one. */
@@ -1396,6 +1503,7 @@ export class ReservationsService {
     // With a deposit balance the booking stays confirmed until the administrator decides (S17).
     if (await this.reservationDeposits?.deferNoShowIfDeposit(id)) return this.findOneDetail(id);
     const booking = await this.transition(id, 'no_show');
+    await this.releaseBookingOrder(id, 'Reserva no se presentó');
     this.eventEmitter.emit('booking.no_show', {
       store_id: booking.store_id,
       booking_id: booking.id,
@@ -1429,6 +1537,7 @@ export class ReservationsService {
     // A booking with a deposit balance is never archived by a job: it waits for the administrator's decision.
     if (await this.reservationDeposits?.deferNoShowIfDeposit(id)) return 'deferred';
     await this.transition(id, 'no_show');
+    await this.releaseBookingOrder(id, 'Reserva no se presentó');
     return 'archived';
   }
 
