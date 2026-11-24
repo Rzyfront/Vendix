@@ -991,10 +991,6 @@ export class ProductsService {
   }
 
   /**
-   * Validates and normalizes product data based on product_type.
-   * Services cannot have physical attributes (weight, inventory, serial numbers).
-   */
-  /**
    * QUI-1060 modo Plan: noches ≤ días y mínimo de personas ≤ máximo, sobre el valor
    * efectivo (lo enviado o, al editar, lo guardado).
    */
@@ -1028,6 +1024,10 @@ export class ProductsService {
     }
   }
 
+  /**
+   * Validates and normalizes product data based on product_type.
+   * Services cannot have physical attributes (weight, inventory, serial numbers).
+   */
   private validateByProductType(dto: Record<string, any>): void {
     if (dto.product_type !== ProductType.SERVICE) return;
 
