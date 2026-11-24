@@ -100,6 +100,17 @@ describe('QUI-1024: URLs del módulo Rutas', () => {
     expect(leaf(router).routeConfig?.path).toBe('rutas/:id/recorrido');
   });
 
+  it('las variantes planillas-rutas y planillas-de-ruta también redirigen a rutas', async () => {
+    for (const url of ['/admin/orders/planillas-rutas', '/admin/orders/planillas-de-ruta']) {
+      await router.navigateByUrl(url);
+      expect(router.url).withContext(url).toBe('/admin/orders/rutas');
+      expect(leaf(router).routeConfig?.path).withContext(url).toBe('rutas');
+    }
+
+    await router.navigateByUrl('/admin/orders/planillas-de-ruta?prefillNotes=7,8');
+    expect(router.url).toBe('/admin/orders/rutas?prefillNotes=7,8');
+  });
+
   it('el detalle de orden sigue resolviendo por :id', async () => {
     await router.navigateByUrl('/admin/orders/1234');
     expect(leaf(router).routeConfig?.path).toBe(':id');
