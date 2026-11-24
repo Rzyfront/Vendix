@@ -2138,6 +2138,14 @@ export class BreadcrumbService {
       parent: 'Configuración',
       icon: 'file-text',
     },
+    // QUI-1049 P2: sin esta entrada la página caía en el breadcrumb por
+    // defecto ("Panel Principal / Dashboard").
+    {
+      path: '/admin/settings/bulk-uploads',
+      title: 'Historial de cargas',
+      parent: 'Configuración',
+      icon: 'history',
+    },
   ];
 
   constructor(private router: Router) {
