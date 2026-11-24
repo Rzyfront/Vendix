@@ -3,7 +3,7 @@
 --
 -- DATA IMPACT:
 --   Tabla mutada:  ai_engine_applications (solo la columna `system_prompt`)
---   Sentencias:    3 UPDATE, todos con WHERE key = 'vex_assistant' y una guarda
+--   Sentencias:    5 UPDATE, todos con WHERE key = 'vex_assistant' y una guarda
 --                  propia sobre el texto:
 --                    1. párrafo «Cómo trabajas» (lote)      -> guarda: existe
 --                       'de nuevo un cambio a la vez'
@@ -11,24 +11,31 @@
 --                       la frase vieja completa
 --                    3. sección nueva «## Qué puedes hacer»  -> guarda: la
 --                       sección NO existe y sí existe '## Con quién hablas'
+--                    4. regla «## Cifras» (cálculos)      -> guarda: NO existe
+--                       'herramienta de aritmética exacta sobre los datos' y
+--                       sí la frase vieja
+--                    5. frase «No navegas pantallas…»    -> guarda: NO existe
+--                       'No operas la interfaz por la persona' y sí la vieja
 --   Filas:         como máximo 1 (la misma) por sentencia. Verificar antes del
 --                  deploy con
 --                    SELECT count(*) FROM ai_engine_applications
 --                    WHERE key = 'vex_assistant'
 --                      AND position('de nuevo un cambio a la vez' IN system_prompt) > 0
---                      AND position('## Qué puedes hacer' IN system_prompt) = 0;
+--                      AND position('## Qué puedes hacer' IN system_prompt) = 0
+--                      AND position('herramienta de aritmética exacta sobre los datos' IN system_prompt) = 0
+--                      AND position('No operas la interfaz por la persona' IN system_prompt) = 0;
 --                  Si devuelve 0, revisar a mano: alguna sentencia será no-op.
 --   Verificado en producción (2026-11-24, solo lectura): la fila id 27
---                  `vex_assistant` contiene las tres anclas byte a byte;
+--                  `vex_assistant` contiene las cinco anclas byte a byte;
 --                  prompt de 2882 caracteres, md5 a918c91a014f1364babbd480ec4e409d.
---                  Tras la migración: 5548 caracteres,
---                  md5 d29243cae29c62c129a3362a4b563cbb.
+--                  Tras la migración: 5933 caracteres (6020 bytes),
+--                  md5 6f66a6d25266d0da32f378399a9edd0d.
 --   Reversible:    SÍ, con el bloque «REVERSIÓN» del final de este archivo
 --                  (los textos anteriores están transcritos literales). Aun
 --                  así, snapshot de prod antes del deploy.
---   Idempotente:   SÍ. Tras la primera ejecución las anclas 1 y 2 ya no existen
---                  y la sección 3 ya existe, así que una segunda ejecución no
---                  cambia nada.
+--   Idempotente:   SÍ. Tras la primera ejecución las anclas 1 y 2 ya no existen,
+--                  la sección 3 ya existe y los textos nuevos de 4 y 5 ya
+--                  están, así que una segunda ejecución no cambia nada.
 --   Sin DELETE, sin DROP, sin CASCADE, sin TRUNCATE. Tabla de configuración.
 --   Approval: instrucción del dueño en chat 2026-11-24 ("hazla con base a ver
 --             la db de prod ... haz la migra bien y sube todo a develop") y
@@ -60,6 +67,17 @@
 --   por áreas, sin nombres internos de herramientas (llegan por descubrimiento)
 --   y sin repetir la regla de lote; lo que depende del plan o del rol se dice
 --   así. Inventario con archivo de origen: cuerpo del PR #1363.
+--
+-- Qué corrige (4, cifras):
+--   «Todo número viene de una herramienta» hacía que Vex se negara a sacar un
+--   margen o un porcentaje. Ahora los cálculos salen de la herramienta de
+--   aritmética exacta (`compute`, núcleo de Vex) y se muestra la operación.
+--
+-- Qué corrige (5, enseñar):
+--   «No navegas pantallas ni das instrucciones de clics» chocaba con «Enseñar
+--   Vendix» de la sección nueva. Queda: no opera la interfaz por la persona,
+--   pero si le preguntan cómo se hace algo responde con la guía, el artículo o
+--   el video del centro de ayuda.
 
 -- 1. Párrafo «Cómo trabajas»: cambios múltiples en un solo lote.
 UPDATE ai_engine_applications
@@ -112,14 +130,29 @@ UPDATE ai_engine_applications
 SET system_prompt = replace(
   system_prompt,
   $cif_old$Nunca inventas cifras: todo número que afirmes viene de una herramienta que acabas de ejecutar en este turno.$cif_old$,
-  $cif_new$Nunca inventas cifras: todo número que afirmes viene de una herramienta que acabas de ejecutar en este turno. Los cálculos que te pidan (márgenes, porcentajes, totales, promedios, conversiones, proyecciones simples) hazlos con la herramienta de aritmética exacta sobre los datos leídos o los que te dé la persona, y muestra la operación; nunca calcules de memoria.$cif_new$
+  $cif_new$Nunca inventas cifras: todo número que afirmes viene de una herramienta que acabas de ejecutar en este turno. Los cálculos que te pidan (márgenes, porcentajes, totales, promedios, proyecciones simples, conversiones con la tasa que dé la persona) hazlos con la herramienta de aritmética exacta sobre los datos leídos o los que te dé la persona, y muestra la operación; nunca calcules de memoria.$cif_new$
 )
 WHERE key = 'vex_assistant'
   AND position('herramienta de aritmética exacta sobre los datos' IN system_prompt) = 0
   AND position($cif_old$Nunca inventas cifras: todo número que afirmes viene de una herramienta que acabas de ejecutar en este turno.$cif_old$ IN system_prompt) > 0;
 
+-- 5. Enseñar sin operar la interfaz: «No navegas pantallas ni das
+-- instrucciones de clics» chocaba con «Enseñar Vendix». Guarda: la frase
+-- nueva no existe y la vieja sí.
+UPDATE ai_engine_applications
+SET system_prompt = replace(
+  system_prompt,
+  $nav_old$No navegas pantallas ni das instrucciones de clics: no tienes comandos de interfaz. Todo lo haces con herramientas de negocio sobre los datos reales.$nav_old$,
+  $nav_new$No operas la interfaz por la persona: no tienes comandos de pantalla y todo lo haces con herramientas de negocio sobre los datos reales. Si te preguntan cómo se hace algo en Vendix, respóndelo con la guía, el artículo o el video del centro de ayuda.$nav_new$
+)
+WHERE key = 'vex_assistant'
+  AND position('No operas la interfaz por la persona' IN system_prompt) = 0
+  AND position($nav_old$No navegas pantallas ni das instrucciones de clics: no tienes comandos de interfaz. Todo lo haces con herramientas de negocio sobre los datos reales.$nav_old$ IN system_prompt) > 0;
+
 -- REVERSIÓN (no se ejecuta; correr a mano, en este orden, si hay que volver
 -- al texto anterior). Cada sentencia es el replace() inverso de la suya:
+--   5. UPDATE ai_engine_applications SET system_prompt = replace(system_prompt,
+--        <texto $nav_new$>, <texto $nav_old$>) WHERE key = 'vex_assistant';
 --   4. UPDATE ai_engine_applications SET system_prompt = replace(system_prompt,
 --        <texto $cif_new$>, <texto $cif_old$>) WHERE key = 'vex_assistant';
 --   3. UPDATE ai_engine_applications SET system_prompt = replace(system_prompt,
