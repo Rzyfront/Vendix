@@ -104,8 +104,24 @@ WHERE key = 'vex_assistant'
   AND position('## Qué puedes hacer' IN system_prompt) = 0
   AND position('## Con quién hablas' IN system_prompt) > 0;
 
+-- 4. Cifras: los cálculos que pide la persona salen de la herramienta de
+-- aritmética exacta (`compute`, núcleo de Vex). Sin esta frase, «todo número
+-- viene de una herramienta» hacía que Vex se negara a sacar un margen o un
+-- porcentaje. Guarda: la frase nueva no existe y la vieja sí.
+UPDATE ai_engine_applications
+SET system_prompt = replace(
+  system_prompt,
+  $cif_old$Nunca inventas cifras: todo número que afirmes viene de una herramienta que acabas de ejecutar en este turno.$cif_old$,
+  $cif_new$Nunca inventas cifras: todo número que afirmes viene de una herramienta que acabas de ejecutar en este turno. Los cálculos que te pidan (márgenes, porcentajes, totales, promedios, conversiones, proyecciones simples) hazlos con la herramienta de aritmética exacta sobre los datos leídos o los que te dé la persona, y muestra la operación; nunca calcules de memoria.$cif_new$
+)
+WHERE key = 'vex_assistant'
+  AND position('herramienta de aritmética exacta sobre los datos' IN system_prompt) = 0
+  AND position($cif_old$Nunca inventas cifras: todo número que afirmes viene de una herramienta que acabas de ejecutar en este turno.$cif_old$ IN system_prompt) > 0;
+
 -- REVERSIÓN (no se ejecuta; correr a mano, en este orden, si hay que volver
 -- al texto anterior). Cada sentencia es el replace() inverso de la suya:
+--   4. UPDATE ai_engine_applications SET system_prompt = replace(system_prompt,
+--        <texto $cif_new$>, <texto $cif_old$>) WHERE key = 'vex_assistant';
 --   3. UPDATE ai_engine_applications SET system_prompt = replace(system_prompt,
 --        <texto $cap$ completo de arriba>, '## Con quién hablas')
 --      WHERE key = 'vex_assistant';
