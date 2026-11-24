@@ -780,6 +780,24 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
         expect(mockPrismaService.users.create).not.toHaveBeenCalled();
       });
 
+      it('filtra por nombre Y apellido cuando el cajero escribe los dos', async () => {
+        mockPrismaService.$queryRaw.mockResolvedValue([]);
+
+        await service.findOrCreateByEmailOrDocument(1, {
+          name_only: true,
+          first_name: 'Ana Lucia',
+          last_name: 'Gomez',
+        } as any);
+
+        const call = (mockPrismaService.$queryRaw as jest.Mock).mock.calls[0][0];
+        const sqlText = (call.strings as string[]).join(' ? ').toLowerCase();
+
+        expect(sqlText).toContain('btrim(u.first_name)');
+        expect(sqlText).toContain('btrim(u.last_name)');
+        expect(call.values).toContain('Ana Lucia');
+        expect(call.values).toContain('Gomez');
+      });
+
       it('crea el cliente cuando no hay coincidencias', async () => {
         mockPrismaService.$queryRaw.mockResolvedValue([]);
 
