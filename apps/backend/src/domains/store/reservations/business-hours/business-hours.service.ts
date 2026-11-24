@@ -139,7 +139,8 @@ export class BusinessHoursService {
       where: { store_id: storeId },
       select: { settings: true },
     });
-    const settings = (isRecord(row?.settings) ? row.settings : null) as Record<string, any> | null;
+    const rawSettings: unknown = row?.settings;
+    const settings = isRecord(rawSettings) ? (rawSettings as Record<string, any>) : null;
     const pos: Record<string, any> = isRecord(settings?.pos) ? { ...settings.pos } : {};
 
     // Days not in the payload keep what the booking reads today; a store that
