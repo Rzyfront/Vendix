@@ -1543,7 +1543,7 @@ export function createReservationsTools(
             type: 'string',
             enum: PROVIDER_ACTIONS,
             description:
-              'create/update: alta y edición de proveedor. assign_service/remove_service: vínculo proveedor↔servicio. set_schedule: reemplaza el horario semanal. add_exception/remove_exception: días no disponibles. set_business_hours: reemplaza el calendario maestro de la tienda.',
+              'create/update: alta y edición de proveedor. assign_service/remove_service: vínculo proveedor↔servicio. set_schedule: reemplaza el horario semanal propio (el proveedor deja de usar el horario de la tienda). add_exception/remove_exception: días no disponibles. set_business_hours: reemplaza el calendario maestro de la tienda.',
           },
           provider_id: {
             type: 'number',
@@ -1572,6 +1572,11 @@ export function createReservationsTools(
           sort_order: {
             type: 'number',
             description: 'Orden en listados (solo update).',
+          },
+          uses_store_hours: {
+            type: 'boolean',
+            description:
+              'true = el proveedor trabaja en el horario de la tienda (lo hereda en vivo); false = usa su horario propio (set_schedule). Cambiarlo no borra el horario propio guardado (solo update).',
           },
           product_id: {
             type: 'number',
@@ -1721,6 +1726,9 @@ export function createReservationsTools(
             ...(args.sort_order !== undefined && args.sort_order !== null
               ? { sort_order: Number(args.sort_order) }
               : {}),
+            ...(args.uses_store_hours !== undefined && args.uses_store_hours !== null
+              ? { uses_store_hours: args.uses_store_hours === true }
+              : {}),
           });
           if (!validated.ok) {
             return {
@@ -1737,6 +1745,7 @@ export function createReservationsTools(
             bio: 'Presentación',
             is_active: 'Activo',
             sort_order: 'Orden',
+            uses_store_hours: 'Usa el horario de la tienda',
           };
           const changes = Object.keys(labels)
             .filter(
@@ -1754,7 +1763,7 @@ export function createReservationsTools(
               target: `Editar ${providerName(provider)}`,
               changes: [],
               message:
-                'No hay nada que cambiar: pasa al menos uno de display_name, avatar_url, bio, is_active o sort_order.',
+                'No hay nada que cambiar: pasa al menos uno de display_name, avatar_url, bio, is_active, sort_order o uses_store_hours.',
             };
           }
           return {
@@ -2092,6 +2101,9 @@ export function createReservationsTools(
               ...(args.sort_order !== undefined && args.sort_order !== null
                 ? { sort_order: Number(args.sort_order) }
                 : {}),
+              ...(args.uses_store_hours !== undefined && args.uses_store_hours !== null
+                ? { uses_store_hours: args.uses_store_hours === true }
+                : {}),
             });
             if (!validated.ok) {
               return JSON.stringify({
@@ -2101,14 +2113,14 @@ export function createReservationsTools(
             }
             const dto = validated.dto as Record<string, any>;
             if (
-              !['display_name', 'avatar_url', 'bio', 'is_active', 'sort_order'].some(
+              !['display_name', 'avatar_url', 'bio', 'is_active', 'sort_order', 'uses_store_hours'].some(
                 (field) => dto[field] !== undefined && dto[field] !== null,
               )
             ) {
               return JSON.stringify({
                 error: 'No hay nada que cambiar.',
                 next_step:
-                  'Pasa al menos uno de display_name, avatar_url, bio, is_active o sort_order.',
+                  'Pasa al menos uno de display_name, avatar_url, bio, is_active, sort_order o uses_store_hours.',
               });
             }
             const updated: any = await providersService.update(
