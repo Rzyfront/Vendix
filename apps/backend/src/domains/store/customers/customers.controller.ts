@@ -26,6 +26,28 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
 import { AddressesService } from '../addresses/addresses.service';
 import { CreateCustomerLocationDto } from '../addresses/dto';
+import {
+  CrmSegmentQueryService,
+  MANUAL_SEGMENT_FILTER,
+} from './crm/segments/crm-segment-query.service';
+
+
+/** `1,2,3` → `[1,2,3]`; ids invalidos se descartan en vez de romper el listado. */
+const MAX_FILTER_IDS = 50;
+const INT4_MAX = 2_147_483_647;
+
+function parseIdList(raw: string | undefined): number[] {
+  if (!raw) return [];
+  const ids = new Set<number>();
+  for (const part of raw.split(',')) {
+    const id = Number(part.trim());
+    // Fuera de int4 Postgres rechaza el bind y el listado daria 500.
+    if (!Number.isInteger(id) || id < 1 || id > INT4_MAX) continue;
+    ids.add(id);
+    if (ids.size >= MAX_FILTER_IDS) break;
+  }
+  return [...ids];
+}
 
 @Controller('store/customers')
 @UseGuards(RolesGuard, PermissionsGuard)
@@ -36,6 +58,7 @@ export class CustomersController {
     private readonly externalIdentityLookupService: ExternalIdentityLookupService,
     private readonly responseService: ResponseService,
     private readonly addressesService: AddressesService,
+    private readonly segmentQuery: CrmSegmentQueryService,
   ) {}
 
   @Post()
@@ -95,17 +118,80 @@ export class CustomersController {
     @Query('limit') limit?: string,
     @Query('state_province') stateProvince?: string,
     @Query('city') city?: string,
+    @Query('tag_ids') tagIds?: string,
+    @Query('segment_ids') segmentIds?: string,
   ) {
     if (!req.user.store_id) throw new Error('Store context required');
     const pageNum = page ? parseInt(page, 10) : 1;
     const limitNum = limit ? parseInt(limit, 10) : 20;
-    return this.customersService.findAll(req.user.store_id, {
+    return this.resolveFiltersAndList(req.user.store_id, {
       search,
       page: pageNum,
       limit: limitNum,
       state_province: stateProvince,
       city,
+      tag_ids: parseIdList(tagIds),
+      segment_ids: parseIdList(segmentIds),
     });
+  }
+
+  /**
+   * Valores vivos de los filtros del listado: solo las etiquetas con al menos
+   * un cliente y los segmentos que pueden devolver clientes. Vacio = el
+   * frontend no pinta ese filtro.
+   */
+  @Get('filter-options')
+  @Permissions('store:customers:read')
+  filterOptions(@Req() req: AuthenticatedRequest) {
+    if (!req.user.store_id) throw new Error('Store context required');
+    return this.customersService.filterOptions(req.user.store_id);
+  }
+
+  /**
+   * Traduce los ids de segmento a clientes con el compilador de reglas del CRM
+   * (misma evaluacion que campanas y segmentos) y delega el listado. Varios
+   * segmentos se unen: basta con cumplir uno.
+   */
+  private async resolveFiltersAndList(
+    storeId: number,
+    query: {
+      search?: string;
+      page: number;
+      limit: number;
+      state_province?: string;
+      city?: string;
+      tag_ids: number[];
+      segment_ids: number[];
+    },
+  ) {
+    const { segment_ids: segmentIds, ...rest } = query;
+    if (segmentIds.length === 0) {
+      return this.customersService.findAll(storeId, rest);
+    }
+
+    const saved = await this.prismaSegments(storeId, segmentIds);
+    const ids = new Set<number>();
+    const now = new Date();
+    for (const segment of saved) {
+      const resolved = await this.segmentQuery.resolveSaved(segment, now);
+      for (const id of await this.segmentQuery.memberIds(resolved)) {
+        ids.add(id);
+      }
+    }
+    return this.customersService.findAll(storeId, {
+      ...rest,
+      customer_ids: [...ids],
+    });
+  }
+
+  /** Segmentos DE ESTA tienda; un id ajeno se ignora, nunca se evalua. */
+  private async prismaSegments(storeId: number, segmentIds: number[]) {
+    const rows = await this.customersService.segmentsOfStore(storeId, segmentIds);
+    return rows.map((row) => ({
+      id: row.id,
+      filter: row.filter ?? MANUAL_SEGMENT_FILTER,
+      is_dynamic: row.is_dynamic,
+    }));
   }
 
   @Get('lookup')

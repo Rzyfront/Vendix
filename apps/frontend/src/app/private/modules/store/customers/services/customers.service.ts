@@ -12,6 +12,7 @@ import {
     UpdateCustomerRequest,
     CustomerStats,
     CustomerFilters,
+    CustomerFilterOptions,
     ExternalCustomerLookupResult,
     PersonType,
     TaxRegime,
@@ -195,8 +196,22 @@ export class CustomersService {
         if (filters?.city) {
             params = params.set('city', filters.city);
         }
+        if (filters?.tag_id) {
+            params = params.set('tag_ids', String(filters.tag_id));
+        }
+        if (filters?.segment_id) {
+            params = params.set('segment_ids', String(filters.segment_id));
+        }
 
         return this.http.get<PaginatedResponse<Customer>>(this.apiUrl, { params });
+    }
+
+    /**
+     * Segmentos y etiquetas que existen en la tienda. Si una lista viene vacia
+     * el listado no pinta ese filtro.
+     */
+    getFilterOptions(): Observable<CustomerFilterOptions> {
+        return this.http.get<CustomerFilterOptions>(`${this.apiUrl}/filter-options`);
     }
 
     getCustomer(id: number): Observable<Customer> {

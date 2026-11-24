@@ -168,4 +168,14 @@ export interface CustomerFilters {
     state?: 'active' | 'inactive';
     sort_by?: string;
     sort_order?: 'asc' | 'desc';
+    /** Etiqueta del CRM; solo las que existen en la tienda llegan al selector. */
+    tag_id?: number;
+    /** Segmento del CRM; el backend lo evalua con sus reglas. */
+    segment_id?: number;
+}
+
+/** Opciones vivas de los filtros del listado (segmento y etiqueta). */
+export interface CustomerFilterOptions {
+    tags: Array<{ id: number; name: string; color?: string | null; group_name?: string | null }>;
+    segments: Array<{ id: number; name: string; count?: number | null }>;
 }
