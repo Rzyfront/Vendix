@@ -14,6 +14,7 @@ import {
   ConfirmationModalComponent,
   CustomerSelectComponent,
   CustomerSelectOption,
+  DialogService,
   IconComponent,
   InputComponent,
   ModalComponent,
@@ -60,6 +61,7 @@ import {
 } from './station-clock.util';
 import { stationTypeLabel } from './station-type-labels';
 import { CATALOG_FETCH_LIMIT, CATALOG_INITIAL_LIMIT, CATALOG_SEARCH_LIMIT, mergeById } from './catalog-search.util';
+import { CheckinDefaults, hasCheckinCapturedData } from './checkin-draft.util';
 
 import { environment } from '../../../../../../../environments/environment';
 import { DataCollectionTemplatesService } from '../../../data-collection/services/data-collection-templates.service';
@@ -384,6 +386,7 @@ export class ServiceStationsPageComponent implements OnInit {
   );
   private readonly storeSettings = inject(StoreSettingsFacade);
   private readonly toastService = inject(ToastService);
+  private readonly dialogService = inject(DialogService);
   private readonly currencyService = inject(CurrencyFormatService);
   readonly currencyCode = this.currencyService.currencyCode;
 
@@ -523,6 +526,59 @@ export class ServiceStationsPageComponent implements OnInit {
   /** Anticipo del ingreso (S4): monto, medio y request_id; null mientras la estación no lo pide. */
   readonly checkinDeposit = signal<OpenSessionDepositValue | null>(null);
   private checkinLineSeq = 0;
+  /** Estación, servicio y minutos con los que abrió el ingreso: cambiarlos cuenta como dato capturado. */
+  private checkinOpenedDefaults: CheckinDefaults | null = null;
+
+  /**
+   * QUI-1059: cerrar «Nuevo ingreso» por Esc, X o Cancelar pide confirmación si
+   * hay datos capturados; sin datos cierra directo. El guardado exitoso cierra
+   * con `showCheckinModal.set(false)` y no pasa por aquí. El anticipo no cuenta:
+   * se precarga solo desde la estación.
+   */
+  readonly canCloseCheckin = (): Promise<boolean> => {
+    const captured = hasCheckinCapturedData({
+      texts: [
+        this.checkinVehicleName(),
+        this.checkinPlate(),
+        this.checkinMileage(),
+        this.checkinDeviceModel(),
+        this.checkinImei(),
+        this.checkinReportedIssue(),
+        this.checkinUnlockCode(),
+        this.checkinAccessories(),
+        this.checkinStylePreference(),
+        this.checkinAllergies(),
+        this.checkinCustomerName(),
+        this.checkinCustomerDoc(),
+        this.checkinCustomerPhone(),
+        this.checkinCustomerEmail(),
+        this.checkinNotes(),
+      ],
+      hasCustomer: !!this.checkinCustomer(),
+      providerId: this.checkinProviderId(),
+      budgetAmount: this.checkinBudgetAmount(),
+      lineCount: this.checkinLines().length,
+      intakeValues: this.checkinIntakeValues(),
+      current: this.currentCheckinDefaults(),
+      opened: this.checkinOpenedDefaults,
+    });
+    if (!captured) return Promise.resolve(true);
+    return this.dialogService.confirm({
+      title: 'Descartar ingreso',
+      message: '¿Descartar lo capturado? Los datos de este ingreso se perderán.',
+      confirmText: 'Descartar',
+      cancelText: 'Seguir editando',
+      confirmVariant: 'danger',
+    });
+  };
+
+  private currentCheckinDefaults(): CheckinDefaults {
+    return {
+      stationId: this.checkinStationId(),
+      productId: this.checkinProductId(),
+      durationMinutes: this.checkinDurationMinutes(),
+    };
+  }
 
   // access_url recién emitido por sesión; viaja a la página de la atención al abrirla
   readonly lastAccessUrlBySession = signal<Map<number, string>>(new Map());
@@ -1544,6 +1600,7 @@ export class ServiceStationsPageComponent implements OnInit {
     // QUI-1030: el selector de líneas busca en el servidor; al abrir trae los primeros.
     this.onCheckinProductSearch('');
 
+    this.checkinOpenedDefaults = this.currentCheckinDefaults();
     this.showCheckinModal.set(true);
   }
 
