@@ -103,9 +103,11 @@ function utc(ymd: string): Date {
       }
 
       <app-card [responsive]="true" [padding]="false" overflow="visible">
-        <div class="flex flex-col gap-2 px-2 py-2 md:px-4 md:py-3 md:border-b md:border-border">
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <div class="flex min-w-0 items-center gap-1">
+        <div class="flex flex-col gap-2 px-2 py-2 md:px-4 md:border-b md:border-border">
+          <!-- M4: una sola fila en escritorio (navegación · búsqueda y filtros · vista);
+               en celular navegación y vista arriba, búsqueda debajo. -->
+          <div class="flex flex-wrap items-center gap-2 md:flex-nowrap" data-testid="agenda-toolbar">
+            <div class="order-1 flex min-w-0 items-center gap-1 md:shrink-0">
               <app-button class="shrink-0" variant="outline" size="sm" (clicked)="goToday()">Hoy</app-button>
               <app-button variant="ghost" size="sm" ariaLabel="Anterior" (clicked)="move(-1)">
                 <app-icon slot="icon" name="chevron-left" [size]="16" />
@@ -113,9 +115,29 @@ function utc(ymd: string): Date {
               <app-button variant="ghost" size="sm" ariaLabel="Siguiente" (clicked)="move(1)">
                 <app-icon slot="icon" name="chevron-right" [size]="16" />
               </app-button>
-              <span class="ml-1 min-w-0 truncate text-sm font-bold capitalize text-text-primary" [attr.title]="rangeLabel()">{{ rangeLabel() }}</span>
+              <span class="ml-1 min-w-0 truncate text-sm font-bold capitalize text-text-primary md:max-w-[14rem]" [attr.title]="rangeLabel()">{{ rangeLabel() }}</span>
+            </div>
+            <div class="order-3 flex w-full items-center gap-2 md:order-2 md:w-auto md:min-w-0 md:flex-1 md:justify-end">
+              <app-inputsearch
+                class="flex-1 md:max-w-xs"
+                size="sm"
+                placeholder="Buscar número, cliente o servicio..."
+                [debounceTime]="300"
+                [ngModel]="search()"
+                (ngModelChange)="onSearch($event)"
+              />
+              <app-options-dropdown
+                [filters]="filterConfigs()"
+                [filterValues]="filterValues()"
+                [actions]="dropdownActions()"
+                [isLoading]="loading()"
+                (filterChange)="onFilterChange($event)"
+                (clearAllFilters)="clearFilters()"
+                (actionClick)="onAction($event)"
+              />
             </div>
             <app-input-buttons
+              class="order-2 ml-auto shrink-0 md:order-3 md:ml-0"
               [options]="viewOptions()"
               [ngModel]="view()"
               (ngModelChange)="setView($event)"
@@ -123,25 +145,6 @@ function utc(ymd: string): Date {
               [equalWidth]="false"
               customWrapperClass="!w-auto !mt-0"
               customContainerClass="!h-9 !rounded-xl"
-            />
-          </div>
-          <div class="flex w-full items-center gap-2">
-            <app-inputsearch
-              class="flex-1 md:max-w-xs"
-              size="sm"
-              placeholder="Buscar número, cliente o servicio..."
-              [debounceTime]="300"
-              [ngModel]="search()"
-              (ngModelChange)="onSearch($event)"
-            />
-            <app-options-dropdown
-              [filters]="filterConfigs()"
-              [filterValues]="filterValues()"
-              [actions]="dropdownActions()"
-              [isLoading]="loading()"
-              (filterChange)="onFilterChange($event)"
-              (clearAllFilters)="clearFilters()"
-              (actionClick)="onAction($event)"
             />
           </div>
           @if (availability().length) {
@@ -180,6 +183,8 @@ function utc(ymd: string): Date {
               [today]="today()"
               [events]="events()"
               [availability]="availability()"
+              [timezone]="timezone()"
+              [focusToken]="focusToken()"
               [slotClickable]="hasBookings()"
               (slotClick)="onSlotClick($event)"
               (eventClick)="host().open($event)"
@@ -218,6 +223,10 @@ export class SchedulingAgendaPageComponent {
   readonly search = signal('');
   readonly filterValues = signal<FilterValues>({});
   readonly today = signal(storeToday(this.settings.timezone()));
+  /** Zona de la tienda para la línea de «ahora» (la de `sources` manda). */
+  readonly timezone = computed(() => this.sources()?.timezone || this.settings.timezone());
+  /** «Hoy» vuelve a enfocar la hora actual aunque la semana no cambie. */
+  readonly focusToken = signal(0);
   readonly anchor = signal(this.today());
   readonly view = signal<AgendaView>('week');
   readonly isMobile = signal(false);
@@ -387,6 +396,7 @@ export class SchedulingAgendaPageComponent {
 
   goToday(): void {
     this.anchor.set(this.today());
+    this.focusToken.update((n) => n + 1);
     this.load();
   }
 
