@@ -33,7 +33,13 @@ describe('AnalyticsShellComponent', () => {
   });
 
   beforeEach(() => {
-    dateRangeSyncSpy = { dateRange: jasmine.createSpy('dateRange').and.returnValue(null) };
+    // El servicio siempre expone un rango (la página lo inicializa); con `null`
+    // «Ver Reportes» fallaba en `dateRangeToQueryParams`.
+    dateRangeSyncSpy = {
+      dateRange: jasmine
+        .createSpy('dateRange')
+        .and.returnValue({ start_date: '2026-11-01', end_date: '2026-11-23', preset: 'thisMonth' }),
+    };
     analyticsServiceSpy = jasmine.createSpyObj('AnalyticsService', ['invalidateCache']);
     toastServiceSpy = jasmine.createSpyObj('ToastService', ['success', 'error', 'info', 'warning']);
 

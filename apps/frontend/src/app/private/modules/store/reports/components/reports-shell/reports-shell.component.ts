@@ -8,7 +8,10 @@ import {
   getCategoryById,
   getReportsByCategory,
 } from '../../config/report-registry';
-import { isReportVisibleForIndustries } from '../../config/report-industries';
+import {
+  isReportCategoryAllowedForPanel,
+  isReportVisibleForIndustries,
+} from '../../config/report-industries';
 import { selectDateRange } from '../../state/reports.selectors';
 import { ReportsActions } from '../../state/reports.actions';
 import { dateRangeToQueryParams, queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
@@ -42,6 +45,14 @@ export class ReportsShellComponent {
   private readonly dateRange = toSignal(this.store.select(selectDateRange), { initialValue: getDefaultDateRange() });
 
   constructor() {
+    // Agenda unificada F4: las páginas de Hotelería no usan el store de
+    // Reportes. Se limpia el reporte seleccionado para que Vexi no exporte el
+    // último reporte genérico abierto creyendo que es el de la pantalla, y no
+    // se sincroniza un rango de fechas que esas páginas no leen.
+    if (this.SELF_REFRESHING_CATEGORIES.has(this.route.snapshot.data['categoryId'])) {
+      this.store.dispatch(ReportsActions.clearReport());
+      return;
+    }
     const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
     if (urlRange) {
       this.store.dispatch(ReportsActions.setDateRange({ dateRange: urlRange }));
@@ -95,6 +106,13 @@ export class ReportsShellComponent {
 
     const isModuleCategory = categoryId === 'accounting';
     const industries = this.authFacade.storeIndustries();
+    // Sin la key de panel de la categoría (p. ej. Hotelería sin
+    // `hospitality_reservations`) no hay pestañas: el guard ya la saca de aquí.
+    const panelAccess = {
+      isOwner: this.authFacade.isOwner(),
+      visibleModules: this.authFacade.visibleModules(),
+    };
+    if (!isReportCategoryAllowedForPanel(categoryId, panelAccess)) return [];
 
     return getReportsByCategory(categoryId)
       .filter(report => !isModuleCategory || this.reportsWithModuleView.has(report.id))

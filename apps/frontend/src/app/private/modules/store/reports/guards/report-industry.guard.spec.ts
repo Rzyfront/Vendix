@@ -58,11 +58,21 @@ const ROUTES: Routes = [
 ];
 
 describe('Reportes por industria — guard y ruta vieja de hotel (agenda unificada F4)', () => {
-  const authStub = { storeIndustries: signal<string[]>(['retail']) };
+  // Panel de un gerente con Reportes y hotelería; los casos de rol lo cambian.
+  const MANAGER_PANEL = ['reports', 'hospitality', 'hospitality_reservations', 'reports_dispatch'];
+  const authStub = {
+    storeIndustries: signal<string[]>(['retail']),
+    storeSettings: signal<unknown>({ general: {} }),
+    visibleModules: signal<string[]>(MANAGER_PANEL),
+    isOwner: signal(false),
+  };
   let router: Router;
 
   beforeEach(() => {
     authStub.storeIndustries.set(['retail']);
+    authStub.storeSettings.set({ general: {} });
+    authStub.visibleModules.set(MANAGER_PANEL);
+    authStub.isOwner.set(false);
     TestBed.configureTestingModule({
       providers: [provideRouter(ROUTES), { provide: AuthFacade, useValue: authStub }],
     });
@@ -91,8 +101,38 @@ describe('Reportes por industria — guard y ruta vieja de hotel (agenda unifica
     expect(router.url).toBe(REPORTS_FALLBACK_URL);
   });
 
-  it('sin industrias cargadas deja pasar (el backend autoriza)', async () => {
+  it('sin ajustes de tienda ni industrias del login aún cargados deja pasar (el backend autoriza)', async () => {
     authStub.storeIndustries.set([]);
+    authStub.storeSettings.set(null);
+    await router.navigateByUrl('/admin/reports/hospitality');
+    expect(router.url).toBe(HOSPITALITY_REPORTS_URL);
+  });
+
+  it('con los ajustes cargados, una tienda sin industrias se lee como retail y no abre Hotelería', async () => {
+    authStub.storeIndustries.set([]);
+    await router.navigateByUrl('/admin/reports/hospitality');
+    expect(router.url).toBe(REPORTS_FALLBACK_URL);
+  });
+
+  it('un rol con Reportes pero sin hotelería (sin hospitality_reservations) no abre Hotelería', async () => {
+    authStub.storeIndustries.set(['hospitality']);
+    authStub.visibleModules.set(['reports', 'pos']);
+    await router.navigateByUrl('/admin/reports/hospitality/hotel-performance');
+    expect(router.url).toBe(REPORTS_FALLBACK_URL);
+  });
+
+  it('la recepcionista (hotelería sin la key reports) abre Cierre del día', async () => {
+    authStub.storeIndustries.set(['hospitality']);
+    // Preset `receptionist` de lodging-roles: sin `reports`.
+    authStub.visibleModules.set(['hospitality', 'hospitality_rooms', 'hospitality_reservations', 'pos', 'orders']);
+    await router.navigateByUrl('/admin/reports/hospitality/hotel-night-audit');
+    expect(router.url).toBe('/admin/reports/hospitality/hotel-night-audit');
+  });
+
+  it('el owner abre Hotelería aunque su panel no liste la key', async () => {
+    authStub.storeIndustries.set(['hospitality']);
+    authStub.visibleModules.set(['reports']);
+    authStub.isOwner.set(true);
     await router.navigateByUrl('/admin/reports/hospitality');
     expect(router.url).toBe(HOSPITALITY_REPORTS_URL);
   });

@@ -19,6 +19,7 @@ import {
   REPORT_DEFINITIONS,
 } from '../../config/report-registry';
 import {
+  isReportCategoryAllowedForPanel,
   isReportCategoryVisibleForIndustries,
   isReportVisibleForIndustries,
 } from '../../config/report-industries';
@@ -70,17 +71,28 @@ export class ReportsCatalogComponent {
 
   /**
    * Agenda unificada F4: el catálogo solo muestra los reportes y categorías de
-   * las industrias activas de la tienda (mapa en `report-industries.ts`), sea
-   * cual sea la lista que pase el padre.
+   * las industrias activas de la tienda (mapa en `report-industries.ts`) y de
+   * las keys de panel del rol (`panelUiKey` de la categoría), sea cual sea la
+   * lista que pase el padre.
    */
   private readonly authFacade = inject(AuthFacade);
 
   readonly visibleCategories = computed(() => {
     const industries = this.authFacade.storeIndustries();
-    return this.categories().filter((c) =>
-      isReportCategoryVisibleForIndustries(c.id, industries),
+    const access = {
+      isOwner: this.authFacade.isOwner(),
+      visibleModules: this.authFacade.visibleModules(),
+    };
+    return this.categories().filter(
+      (c) =>
+        isReportCategoryVisibleForIndustries(c.id, industries) &&
+        isReportCategoryAllowedForPanel(c.id, access, this.categories()),
     );
   });
+
+  private readonly visibleCategoryIds = computed(
+    () => new Set(this.visibleCategories().map((c) => c.id)),
+  );
 
   readonly selectedCategory = signal<ReportCategoryId | null>(null);
   readonly searchTerm = signal<string>('');
@@ -122,9 +134,11 @@ export class ReportsCatalogComponent {
   private readonly availableReports = computed(() => {
     const current = this.normalize(this.router.url);
     const industries = this.authFacade.storeIndustries();
+    const categories = this.visibleCategoryIds();
     return this.reports().filter(
       (r) =>
         this.normalize(r.route) !== current &&
+        categories.has(r.category) &&
         isReportVisibleForIndustries(r, industries),
     );
   });

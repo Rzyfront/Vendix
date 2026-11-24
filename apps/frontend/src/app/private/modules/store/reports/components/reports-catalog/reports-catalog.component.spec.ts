@@ -10,10 +10,21 @@ import { ReportsCatalogComponent } from './reports-catalog.component';
  * Se leen las señales sin pintar la plantilla.
  */
 describe('ReportsCatalogComponent — reportes por industria', () => {
-  const authStub = { storeIndustries: signal<string[]>(['retail']) };
+  const authStub = {
+    storeIndustries: signal<string[]>(['retail']),
+    visibleModules: signal<string[]>([]),
+    isOwner: signal(false),
+  };
+  const MANAGER_PANEL = ['reports', 'hospitality', 'hospitality_reservations', 'reports_dispatch'];
 
-  const create = (industries: string[]) => {
+  const create = (
+    industries: string[],
+    visibleModules: string[] = MANAGER_PANEL,
+    isOwner = false,
+  ) => {
     authStub.storeIndustries.set(industries);
+    authStub.visibleModules.set(visibleModules);
+    authStub.isOwner.set(isOwner);
     TestBed.configureTestingModule({
       imports: [ReportsCatalogComponent],
       providers: [provideRouter([]), { provide: AuthFacade, useValue: authStub }],
@@ -45,5 +56,24 @@ describe('ReportsCatalogComponent — reportes por industria', () => {
     const hotel = create(['hospitality']);
     expect(hotel.filteredReports().some((r) => r.id === 'sales-summary')).toBeTrue();
     expect(hotel.filteredReports().some((r) => r.id === 'cash-sessions')).toBeTrue();
+  });
+
+  it('en un hotel, un rol con Reportes pero sin hospitality_reservations no ve Hotelería', () => {
+    const catalog = create(['hospitality'], ['reports', 'pos']);
+    expect(catalog.visibleCategories().map((c) => c.id)).not.toContain('hospitality');
+    expect(catalog.filteredReports().some((r) => r.category === 'hospitality')).toBeFalse();
+    expect(catalog.totalAvailable()).toBe(catalog.filteredReports().length);
+    // Lo transversal sigue.
+    expect(catalog.filteredReports().some((r) => r.id === 'sales-summary')).toBeTrue();
+  });
+
+  it('el owner ve Hotelería aunque su panel no liste la key', () => {
+    const catalog = create(['hospitality'], ['reports'], true);
+    expect(catalog.categoryCount('hospitality')).toBe(5);
+  });
+
+  it('Despachos también respeta su key de panel (reports_dispatch), como su entrada del menú', () => {
+    const catalog = create(['retail'], ['reports']);
+    expect(catalog.visibleCategories().map((c) => c.id)).not.toContain('dispatch');
   });
 });

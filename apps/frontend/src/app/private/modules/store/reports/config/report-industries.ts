@@ -99,6 +99,27 @@ export function isReportCategoryVisibleForIndustries(
   );
 }
 
+/**
+ * Capa de panel del usuario (`panel_ui`): una categoría con `panelUiKey`
+ * (Hotelería → `hospitality_reservations`, Despachos → `reports_dispatch`)
+ * solo se pinta si el rol tiene esa key, igual que su entrada del menú. Así un
+ * rol con `reports` pero sin hotelería no ve tarjetas que el backend responde
+ * con 403. El owner ve todo (bypass de `user_panel_ui`, como el menú).
+ */
+export interface ReportPanelAccess {
+  isOwner: boolean;
+  visibleModules: readonly string[];
+}
+
+export function isReportCategoryAllowedForPanel(
+  categoryId: ReportCategoryId,
+  access: ReportPanelAccess,
+  categories: readonly ReportCategory[] = REPORT_CATEGORIES,
+): boolean {
+  const key = categories.find((c) => c.id === categoryId)?.panelUiKey;
+  return !key || access.isOwner || access.visibleModules.includes(key);
+}
+
 /** Categorías que aplican a la tienda, en el orden del registro. */
 export function reportCategoriesForIndustries(
   industries: readonly string[] | null | undefined,

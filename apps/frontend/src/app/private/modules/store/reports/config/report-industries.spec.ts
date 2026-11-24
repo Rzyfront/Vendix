@@ -1,5 +1,6 @@
 import { REPORT_DEFINITIONS } from './report-registry';
 import {
+  isReportCategoryAllowedForPanel,
   isReportCategoryVisibleForIndustries,
   isReportVisibleForIndustries,
   reportCategoriesForIndustries,
@@ -86,5 +87,15 @@ describe('report-industries (agenda unificada F4)', () => {
   it('una tienda sin industrias se lee como retail (igual que el menú)', () => {
     expect(ids([])).toEqual(ids(['retail']));
     expect(ids(null)).toEqual(ids(['retail']));
+  });
+
+  it('la capa de panel exige la key de la categoría salvo al owner; sin key no filtra', () => {
+    const noHotel = { isOwner: false, visibleModules: ['reports'] };
+    expect(isReportCategoryAllowedForPanel('hospitality', noHotel)).toBeFalse();
+    expect(isReportCategoryAllowedForPanel('sales', noHotel)).toBeTrue();
+    expect(
+      isReportCategoryAllowedForPanel('hospitality', { isOwner: false, visibleModules: ['hospitality_reservations'] }),
+    ).toBeTrue();
+    expect(isReportCategoryAllowedForPanel('hospitality', { isOwner: true, visibleModules: [] })).toBeTrue();
   });
 });
