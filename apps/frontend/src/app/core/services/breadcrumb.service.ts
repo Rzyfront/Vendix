@@ -1120,12 +1120,6 @@ export class BreadcrumbService {
       icon: 'sparkles',
     },
     {
-      path: '/admin/hospitality/reports',
-      title: 'Reportes de hotel',
-      parent: 'Hotelería',
-      icon: 'chart-line',
-    },
-    {
       path: '/admin/hospitality/compliance',
       title: 'Cumplimiento',
       parent: 'Hotelería',

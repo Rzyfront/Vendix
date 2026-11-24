@@ -112,7 +112,7 @@ export const STORE_ADMIN_MENU_ITEMS: readonly MenuItem[] = [
     // hospitality_rooms). R1: only daily operation, in front-desk order;
     // settings left the group: iCal → Configuración → General → Hotelería
     // (R2), VAT-exempt services → Configuración → General → Facturación (R3);
-    // the loose reports stay reachable by URL until R4.
+    // hotel reports live in Reportes → Hotelería (agenda F4).
     // Agenda F2: hotel reservations are the main tab of Recepción
     // (?tab=reservations); the old "Reservas de hotel" entry left the menu.
     label: 'Hotelería',
@@ -153,10 +153,13 @@ export const STORE_ADMIN_MENU_ITEMS: readonly MenuItem[] = [
         panelUiKey: 'hospitality_rooms',
       },
       {
-        // R4 — one entry for the four hotel reports, shown as tabs.
-        label: 'Reportes de hotel',
-        icon: 'chart-line',
-        route: '/admin/hospitality/reports',
+        // Agenda F4 — the hotel reports moved to Reportes → Hotelería, but the
+        // night audit is daily operation (close the day, no-shows) that the
+        // receptionist runs without the `reports` key: it keeps its entry
+        // here, on the hotel key, and opens the report in its new home.
+        label: 'Cierre del día',
+        icon: 'moon',
+        route: '/admin/reports/hospitality/hotel-night-audit',
         panelUiKey: 'hospitality_reservations',
       },
       {
@@ -698,6 +701,16 @@ export const STORE_ADMIN_MENU_ITEMS: readonly MenuItem[] = [
         // this explicit panelUiKey disambiguates it in
         // filterItemsRecursive's Case 2 (menu-filter.service.ts).
         panelUiKey: 'reports_dispatch',
+      },
+      {
+        // Agenda F4 — hotel reports (left the Hotelería group). Same key as
+        // Recepción: hidden outside the `hospitality` industry and for roles
+        // without hotel reservations; the label "Hotelería" alone would map
+        // to the parent `hospitality` key, so the explicit key wins.
+        label: 'Hotelería',
+        icon: 'hotel',
+        route: '/admin/reports/hospitality',
+        panelUiKey: 'hospitality_reservations',
       },
     ],
   },

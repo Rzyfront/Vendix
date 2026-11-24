@@ -29,6 +29,10 @@ import { storeUsersReducer } from '../../private/modules/store/settings/users/st
 import { StoreUsersEffects } from '../../private/modules/store/settings/users/state/effects/store-users.effects';
 import { layawayReducer } from '../../private/modules/store/layaway/state/reducers/layaway.reducer';
 import { LayawayEffects } from '../../private/modules/store/layaway/state/effects/layaway.effects';
+import {
+  hospitalityLegacyTabRedirect,
+  hospitalityReportsLegacyRedirect,
+} from '../../private/modules/store/reports/hospitality-legacy-redirect';
 
 /** `admin/vex` y `admin/vex/c/:id`: misma ruta, el id llega como parámetro. */
 export function vexRouteMatcher(segments: UrlSegment[]): UrlMatchResult | null {
@@ -1255,13 +1259,11 @@ export const storeAdminRoutes: Routes = [
             children: [],
           },
           {
-            // R4 — "Reportes de hotel": the four hotel reports as tabs (?tab=);
-            // same panel_ui key as Reservas.
+            // Agenda F4 — hotel reports moved to Reportes → Hotelería; the old
+            // URL (and its ?tab=) opens the matching report there.
             path: 'reports',
-            loadComponent: () =>
-              import(
-                '../../private/modules/store/hospitality/reports/pages/reports-page/reports-page.component'
-              ).then((c) => c.HospitalityReportsPageComponent),
+            pathMatch: 'full',
+            redirectTo: hospitalityReportsLegacyRedirect,
           },
           {
             // H4.1/H4.2 — "Cumplimiento": TRA and SIRE (foreign guests) as tabs.
@@ -1325,38 +1327,26 @@ export const storeAdminRoutes: Routes = [
                 fragment: 'section-ical',
               }),
           },
-          // R4 — the loose report URLs open their tab in Reportes de hotel.
+          // R4 / agenda F4 — the loose report URLs open their report in Reportes → Hotelería.
           {
             path: 'night-audit',
             pathMatch: 'full',
-            redirectTo: () =>
-              inject(Router).createUrlTree(['/admin/hospitality/reports'], {
-                queryParams: { tab: 'night-audit' },
-              }),
+            redirectTo: hospitalityLegacyTabRedirect('night-audit'),
           },
           {
             path: 'performance',
             pathMatch: 'full',
-            redirectTo: () =>
-              inject(Router).createUrlTree(['/admin/hospitality/reports'], {
-                queryParams: { tab: 'performance' },
-              }),
+            redirectTo: hospitalityLegacyTabRedirect('performance'),
           },
           {
             path: 'pickup',
             pathMatch: 'full',
-            redirectTo: () =>
-              inject(Router).createUrlTree(['/admin/hospitality/reports'], {
-                queryParams: { tab: 'pickup' },
-              }),
+            redirectTo: hospitalityLegacyTabRedirect('pickup'),
           },
           {
             path: 'cancellations',
             pathMatch: 'full',
-            redirectTo: () =>
-              inject(Router).createUrlTree(['/admin/hospitality/reports'], {
-                queryParams: { tab: 'cancellations' },
-              }),
+            redirectTo: hospitalityLegacyTabRedirect('cancellations'),
           },
           {
             // R3 — "Servicios exentos" lives in Configuración → General → Facturación.
