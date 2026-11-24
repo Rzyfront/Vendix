@@ -136,6 +136,16 @@ class PlanActivityFieldsDto {
   @Min(1)
   provider_id?: number | null;
 
+  /**
+   * Tercero elegido de los proveedores registrados (activos) de la tienda. Excluye a
+   * `provider_id`; el servidor copia su nombre y contacto en `supplier_*`.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'El proveedor no es válido' })
+  @Min(1)
+  supplier_id?: number | null;
+
   /** Tercero que presta la actividad. Excluye a `provider_id`. */
   @IsOptional()
   @Transform(trimOrNull)

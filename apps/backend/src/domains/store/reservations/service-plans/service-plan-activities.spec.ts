@@ -99,6 +99,26 @@ function buildDb() {
       return { ...b, product: product ? { ...product } : null };
     }),
   };
+  // Proveedores: el cliente real los filtra por organización (scope org); se simula igual.
+  const suppliers: Row[] = [
+    { id: 40, organization_id: 1, store_id: null, state: 'active', name: 'Lanchas del Pacífico', contact_person: 'Ana', mobile: '300 111 2233', phone: null, email: 'ana@lanchas.co' },
+    { id: 41, organization_id: 1, store_id: 1, state: 'inactive', name: 'Buses Viejos', contact_person: null, mobile: null, phone: null, email: null },
+    { id: 42, organization_id: 1, store_id: 2, state: 'active', name: 'De la otra tienda', contact_person: null, mobile: null, phone: null, email: null },
+    { id: 43, organization_id: 2, store_id: null, state: 'active', name: 'De otra organización', contact_person: null, mobile: null, phone: null, email: null },
+    { id: 44, organization_id: 1, store_id: 1, state: 'active', name: 'Guías Locales', contact_person: null, mobile: null, phone: '601 555', email: null },
+  ];
+  prisma.suppliers = {
+    findFirst: jest.fn(async ({ where }: Row) => {
+      const found = suppliers.find(
+        (s) =>
+          s.organization_id === 1 &&
+          s.id === where.id &&
+          (where.state === undefined || s.state === where.state) &&
+          (!where.OR || where.OR.some((c: Row) => s.store_id === c.store_id)),
+      );
+      return found ? { ...found } : null;
+    }),
+  };
   prisma.$transaction = jest.fn(async (cb: (tx: any) => unknown) => cb(prisma));
 
   return { prisma, activities, products, service: new ServicePlansService(prisma) };
@@ -147,6 +167,43 @@ describe('Itinerario del plan (QUI-1060 F2)', () => {
       await expectCode(service.updateActivity(10, third.id, { provider_id: 5 }), 'SERVICE_PLAN_020');
       const switched = await service.updateActivity(10, third.id, { provider_id: 5, supplier_name: null, supplier_contact: null });
       expect(switched).toMatchObject({ provider_id: 5, supplier_name: null, supplier_contact: null });
+    });
+
+    it('tercero elegido de los proveedores registrados: copia nombre y contacto', async () => {
+      const { service } = buildDb();
+      const act = await service.createActivity(10, { day_number: 2, title: 'Traslado en lancha', supplier_id: 40 });
+      expect(act).toMatchObject({
+        supplier_id: 40,
+        provider_id: null,
+        supplier_name: 'Lanchas del Pacífico',
+        supplier_contact: 'Ana · 300 111 2233 · ana@lanchas.co',
+      });
+      // Un proveedor de la tienda (no solo de la organización) también vale.
+      const own = await service.updateActivity(10, act.id, { supplier_id: 44, supplier_name: null, supplier_contact: null });
+      expect(own).toMatchObject({ supplier_id: 44, supplier_name: 'Guías Locales', supplier_contact: '601 555' });
+      // Volver a texto libre suelta el proveedor registrado.
+      const free = await service.updateActivity(10, act.id, { supplier_id: null, supplier_name: 'Otro', supplier_contact: null });
+      expect(free).toMatchObject({ supplier_id: null, supplier_name: 'Otro' });
+    });
+
+    it('proveedor registrado: XOR con interno y solo activos de esta tienda u organización', async () => {
+      const { service } = buildDb();
+      await expectCode(
+        service.createActivity(10, { day_number: 1, title: 'Lancha', provider_id: 5, supplier_id: 40 }),
+        'SERVICE_PLAN_020',
+      );
+      await expectCode(service.createActivity(10, { day_number: 1, title: 'Bus', supplier_id: 41 }), 'SERVICE_PLAN_027');
+      await expectCode(service.createActivity(10, { day_number: 1, title: 'Bus', supplier_id: 42 }), 'SERVICE_PLAN_027');
+      await expectCode(service.createActivity(10, { day_number: 1, title: 'Bus', supplier_id: 43 }), 'SERVICE_PLAN_027');
+      const withSupplier = await service.createActivity(10, { day_number: 1, title: 'Lancha', supplier_id: 40 });
+      await expectCode(service.updateActivity(10, withSupplier.id, { provider_id: 5 }), 'SERVICE_PLAN_020');
+      const switched = await service.updateActivity(10, withSupplier.id, {
+        provider_id: 5,
+        supplier_id: null,
+        supplier_name: null,
+        supplier_contact: null,
+      });
+      expect(switched).toMatchObject({ provider_id: 5, supplier_id: null, supplier_name: null });
     });
 
     it('rechaza un responsable de otra tienda', async () => {
