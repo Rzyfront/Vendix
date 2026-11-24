@@ -1,4 +1,5 @@
-import { ValidationError } from 'class-validator';
+import { plainToInstance, type ClassConstructor } from 'class-transformer';
+import { validate, ValidationError } from 'class-validator';
 
 /**
  * Error canónico para UNA fila de una carga masiva (clientes, productos,
@@ -234,4 +235,72 @@ export function flattenBulkValidationErrors(
 
   walk(errors);
   return out;
+}
+
+/** Opciones por fila equivalentes al `ValidationPipe` global (QUI-1047). */
+const BULK_ROW_VALIDATOR_OPTIONS = {
+  whitelist: true,
+  forbidNonWhitelisted: true,
+} as const;
+
+/** Resultado de validar UNA fila de una carga masiva fuera del pipe global. */
+export interface BulkRowValidation<T> {
+  /** Fila transformada al DTO (válida solo si `errors` está vacío). */
+  item: T;
+  /** Número de fila del Excel (`row_number`) o 0 si no se conoce. */
+  row: number;
+  /** Errores de la fila; vacío = fila válida. */
+  errors: BulkRowError[];
+}
+
+/**
+ * QUI-1047 — valida una fila de carga masiva contra su DTO, con las mismas
+ * reglas del pipe global (`whitelist` + `forbidNonWhitelisted`), para marcar
+ * la fila como fallida en vez de rechazar el archivo entero. Un campo que no
+ * es de la plantilla (p. ej. `store_id`) deja la fila fallida.
+ */
+export async function validateBulkRow<T extends object>(
+  cls: ClassConstructor<T>,
+  raw: unknown,
+): Promise<BulkRowValidation<T>> {
+  const candidate = (raw as { row_number?: unknown } | null)?.row_number;
+  const row =
+    typeof candidate === 'number' && candidate > 0 ? candidate : 0;
+
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return {
+      item: raw as T,
+      row,
+      errors: [
+        {
+          row,
+          column: 'General',
+          field: 'general',
+          value: raw ?? null,
+          message: 'La fila no tiene un formato válido',
+          code: 'validation',
+          suggestion: 'Vuelve a descargar la plantilla y copia los datos en ella.',
+        },
+      ],
+    };
+  }
+
+  const item = plainToInstance(cls, raw, { enableImplicitConversion: true });
+  const validationErrors = await validate(item, BULK_ROW_VALIDATOR_OPTIONS);
+  const errors = flattenBulkValidationErrors(validationErrors).map(
+    (error): BulkRowError => {
+      const constraint = error.code;
+      const base: BulkRowError = { ...error, row, code: 'validation' };
+      if (constraint === 'whitelistValidation') {
+        return {
+          ...base,
+          message: `La columna "${error.field}" no está permitida en la plantilla`,
+          suggestion:
+            'Elimina esa columna del archivo y usa solo las columnas de la plantilla.',
+        };
+      }
+      return base;
+    },
+  );
+  return { item, row, errors };
 }
