@@ -677,6 +677,9 @@ export class S3Service {
    * @param basePath - S3 base path of the tenant (see `S3PathHelper`)
    * @param variant - PWA icon variant to produce
    * @param backgroundColor - opaque hex background, e.g. '#2F6F4E'
+   * @param version - PWA icon version (hash of logo + color). When given, the
+   *   derived PNG lives under `branding/pwa/{version}/`, so a new logo can
+   *   never reuse the PNG derived from the previous one.
    * @throws PwaIconDerivationError when the icon cannot be produced
    */
   async getOrCreatePwaIcon(
@@ -684,6 +687,7 @@ export class S3Service {
     basePath: string,
     variant: PwaIconVariant,
     backgroundColor: string,
+    version?: string,
   ): Promise<Buffer> {
     const spec: PwaIconSpec | undefined = PWA_ICON_SPECS[variant];
     if (!spec) {
@@ -693,7 +697,15 @@ export class S3Service {
     }
 
     const background = this.normalizePwaBackground(backgroundColor);
-    const derivedKey = `${this.s3PathHelper.buildPwaIconPath(basePath)}/${variant}.png`;
+    if (version !== undefined && !/^[a-z0-9]{1,32}$/.test(version)) {
+      throw new PwaIconDerivationError(
+        `Invalid PWA icon version for ${variant}`,
+      );
+    }
+    const pwaPath = this.s3PathHelper.buildPwaIconPath(basePath);
+    const derivedKey = version
+      ? `${pwaPath}/${version}/${variant}.png`
+      : `${pwaPath}/${variant}.png`;
     this.validateS3Key(derivedKey);
 
     const cached = await this.readCachedPwaIcon(derivedKey);

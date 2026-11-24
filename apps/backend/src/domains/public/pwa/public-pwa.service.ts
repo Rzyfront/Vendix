@@ -258,18 +258,19 @@ export class PublicPwaService {
       const source = await this.resolveTenantLogoSource(context);
 
       if (source) {
+        const themeColor = this.resolveThemeColor(context);
+        // The derived PNG is stored under its version, so the bytes always
+        // match the version advertised by the manifest (same logo + color).
+        const version = pwaIconVersion(source.logo_key, themeColor);
         const buffer = await this.s3Service.getOrCreatePwaIcon(
           source.logo_key,
           source.base_path,
           variant,
-          this.resolveThemeColor(context),
+          themeColor,
+          version,
         );
 
         if (buffer?.length) {
-          const version = pwaIconVersion(
-            source.logo_key,
-            this.resolveThemeColor(context),
-          );
           await this.cache.set(
             cacheKey,
             { b64: buffer.toString('base64'), v: version } satisfies CachedPwaIcon,

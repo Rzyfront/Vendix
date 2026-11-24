@@ -308,7 +308,8 @@ jobs:
       - name: Jest — ícono dinámico del manifest
         working-directory: apps/backend
         run: >-
-          npx jest --ci --runInBand --runTestsByPath
+          npx jest --ci --runInBand --config jest.isolated.config.js
+          --runTestsByPath
           src/domains/public/pwa/public-pwa.manifest-guard.spec.ts
           src/domains/public/pwa/public-pwa.service.spec.ts
 

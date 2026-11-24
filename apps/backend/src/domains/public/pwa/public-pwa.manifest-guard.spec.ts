@@ -132,6 +132,21 @@ describe('PWA Manifest Guard — ícono dinámico por tienda', () => {
     );
   });
 
+  it('el PNG derivado se guarda bajo su versión: un logo nuevo nunca reusa el ícono viejo', async () => {
+    build(LOGO);
+    await service.resolveIconBuffer('shop.test', 'icon-192');
+    const version = pwaIconVersion(LOGO, await themeOf());
+    const s3 = (service as any).s3Service;
+
+    expect(s3.getOrCreatePwaIcon).toHaveBeenCalledWith(
+      LOGO,
+      expect.any(String),
+      'icon-192',
+      expect.any(String),
+      version,
+    );
+  });
+
   it('el ícono de respaldo de Vendix NUNCA se cachea como inmutable', async () => {
     build(null);
     const icon = await service.resolveIconBuffer('shop.test', 'icon-512');
