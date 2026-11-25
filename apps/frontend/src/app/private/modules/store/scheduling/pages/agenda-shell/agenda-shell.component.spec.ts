@@ -103,36 +103,22 @@ describe('Agenda unificada F1 — pestaña Configuración', () => {
     // Sin detectChanges: las pantallas de Reservas se prueban en su módulo; aquí solo el acceso.
   }
 
-  it('da acceso a cada pantalla de configuración y a las demás de Reservas y Pedidos', () => {
+  it('configura las secciones de Agenda sin repetir las pantallas que ya viven en el menú de Acciones', () => {
     setup(SOURCES);
     const fixture = TestBed.createComponent(SchedulingConfigTabComponent);
     fixture.componentRef.setInput('section', 'equipo');
     const tab = fixture.componentInstance;
     expect(tab.sectionTabs.map((t) => t.id)).toEqual(['equipo', 'disponibilidad', 'cola', 'horario']);
     expect(tab.hasBookings()).toBeTrue();
-    const routes = tab.links().map((l) => l.route);
-    for (const route of [
-      '/admin/reservations/reschedule-requests',
-      '/admin/reservations/payment-requests',
-      '/admin/settings/general/reservas',
-      '/admin/reservations/reminders',
-      '/admin/services/stations',
-      '/admin/scheduled-orders/day',
-      '/admin/scheduled-orders/production',
-      '/admin/settings/general/venta',
-    ]) {
-      expect(routes).withContext(route).toContain(route);
-    }
+    // La rejilla «Otras pantallas» se retiró: esas rutas ya están en el menú de acciones de Agenda.
+    expect((tab as unknown as { links?: unknown }).links).toBeUndefined();
   });
 
-  it('sin reservas habilitadas no ofrece configurar prestadores, pero sí las pantallas de pedidos', () => {
+  it('sin reservas habilitadas no ofrece configurar prestadores', () => {
     setup({ ...SOURCES, types: [{ value: 'scheduled_order', label: 'Pedido programado' }] });
     const fixture = TestBed.createComponent(SchedulingConfigTabComponent);
     fixture.componentRef.setInput('section', 'equipo');
     const tab = fixture.componentInstance;
     expect(tab.hasBookings()).toBeFalse();
-    const routes = tab.links().map((l) => l.route);
-    expect(routes).not.toContain('/admin/reservations/payment-requests');
-    expect(routes).toContain('/admin/scheduled-orders/day');
   });
 });
