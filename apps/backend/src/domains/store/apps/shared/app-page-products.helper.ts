@@ -307,7 +307,13 @@ export async function resolvePreviewProductCards(
       const saleUnit = defaultSaleUnits.get(row.id) ?? null;
       const base = baseFinals.get(row.id) ?? { finalPrice: 0, regularFinalPrice: 0 };
       const promo = promotionsByProductId.get(row.id) ?? null;
+      // La promoción plana es un precio de PRODUCTO, no de variante. Si el
+      // producto expone variantes, aplicarla dejaría la tarjeta más barata que
+      // cualquier variante y el precio subiría al elegir una. Se omite en ese
+      // caso, igual que en `mapEcommerceProductToItem` (misma regla en los dos).
+      const hasExposedVariants = !saleUnit && (row.product_variants?.length ?? 0) > 0;
       const hasFlatPromo =
+        !hasExposedVariants &&
         promo !== null &&
         promo.is_quantity_tiered !== true &&
         Number.isFinite(promo.promotional_price) &&
@@ -316,10 +322,11 @@ export async function resolvePreviewProductCards(
 
       const finalPrice = hasFlatPromo ? promo.promotional_price : base.finalPrice;
       const regularFinalPrice = hasFlatPromo ? base.finalPrice : base.regularFinalPrice;
+      // Misma regla que el público: `is_on_sale` es la fuente de verdad; no se
+      // exige `sale_price > 0` (una tienda puede marcar la oferta sin precio
+      // rebajado y el público lo pintaría en verde).
       const isOnSale =
-        hasFlatPromo ||
-        regularFinalPrice > finalPrice ||
-        Boolean(row.is_on_sale && Number(row.sale_price ?? 0) > 0);
+        hasFlatPromo || regularFinalPrice > finalPrice || Boolean(row.is_on_sale);
 
       const imageUrl =
         (await deps.s3.signUrl(row.product_images?.[0]?.image_url ?? undefined)) ?? null;
@@ -335,7 +342,17 @@ export async function resolvePreviewProductCards(
           track_inventory: Boolean(row.track_inventory),
           product_tax_assignments: row.product_tax_assignments ?? [],
         };
-        for (const v of row.product_variants ?? []) {
+        const variantRows = row.product_variants ?? [];
+        // Firmar las URLs de todas las variantes en paralelo: hasta 24 por
+        // producto y 50 productos por bloque si se hiciera en serie.
+        const signedVariantImages = await Promise.all(
+          variantRows.map((v) =>
+            v.product_images?.image_url
+              ? deps.s3.signUrl(v.product_images.image_url)
+              : Promise.resolve(null),
+          ),
+        );
+        for (const [index, v] of variantRows.entries()) {
           const variantInput = {
             id: v.id,
             price_override: v.price_override,
@@ -353,9 +370,7 @@ export async function resolvePreviewProductCards(
             variantInput,
             null,
           );
-          const variantImage = v.product_images?.image_url
-            ? ((await deps.s3.signUrl(v.product_images.image_url)) ?? null)
-            : null;
+          const variantImage = signedVariantImages[index] ?? null;
           variants.push({
             id: v.id,
             name: v.name?.trim() || v.sku || `Variante ${v.id}`,

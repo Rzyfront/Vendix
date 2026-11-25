@@ -96,7 +96,8 @@ export class CatalogQueryDto {
   /** Lista CSV de IDs de productos (máx. 50 para evitar respuestas gigantes en el endpoint público). */
   @IsOptional()
   @IsString()
-  @MaxLength(600)
+  // Sin `@MaxLength`: el tope real es la cantidad de ids (50). Un largo fijo en
+  // caracteres rechazaría 50 ids válidos si son largos (11+ dígitos).
   @ValidateBy({
     name: 'maxCatalogIds',
     validator: {

@@ -245,5 +245,81 @@ describe('app-page-products.helper', () => {
         is_on_sale: false,
       });
     });
+
+    it('ignora la promoción plana cuando el producto expone variantes (el precio no debe subir al elegir una)', async () => {
+      const rowWithVariants: PreviewProductRow = {
+        id: 30,
+        slug: 'camisa',
+        name: 'Camisa',
+        base_price: '80000.00',
+        is_on_sale: false,
+        product_categories: [],
+        product_tax_assignments: [],
+        product_variants: [
+          { id: 301, name: 'S', sku: 'C-S', price_override: '85000.00', is_on_sale: false },
+          { id: 302, name: 'M', sku: 'C-M', price_override: '90000.00', is_on_sale: false },
+        ],
+      };
+
+      const promotionEngine = {
+        findActiveAutoPromotionsForProducts: jest.fn().mockResolvedValue(
+          new Map([
+            [
+              30,
+              {
+                id: 3,
+                name: 'Promo camisa',
+                type: 'fixed',
+                scope: 'product',
+                promotional_price: 60000,
+                badge_label: '-20.000',
+                priority: 1,
+              },
+            ],
+          ]),
+        ),
+      };
+
+      const { cardsById } = await resolvePreviewProductCards([rowWithVariants], {
+        prisma: {},
+        s3,
+        storefrontPrice,
+        promotionEngine: promotionEngine as any,
+      });
+
+      const card = cardsById.get(30)!;
+      // La promo es de producto, no de variante: si se aplicara, la tarjeta
+      // quedaría en 60.000 y al elegir la variante S subiría a 87.550.
+      expect(card.final_price).toBe(80000);
+      expect(card.is_on_sale).toBe(false);
+      expect(card.variants.map((v) => v.final_price)).toEqual([85000, 90000]);
+    });
+
+    it('marca is_on_sale con solo el flag, aunque no haya sale_price (misma regla que el público)', async () => {
+      const rowOnSale: PreviewProductRow = {
+        id: 40,
+        slug: 'gorra',
+        name: 'Gorra',
+        base_price: '30000.00',
+        sale_price: null,
+        is_on_sale: true,
+        product_categories: [],
+        product_tax_assignments: [],
+        product_variants: [],
+      };
+
+      const { cardsById } = await resolvePreviewProductCards([rowOnSale], {
+        prisma: {},
+        s3,
+        storefrontPrice,
+        promotionEngine: null,
+      });
+
+      expect(cardsById.get(40)).toMatchObject({
+        final_price: 30000,
+        regular_final_price: 30000,
+        is_on_sale: true,
+      });
+    });
   });
 });

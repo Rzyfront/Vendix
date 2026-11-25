@@ -104,18 +104,6 @@ export function blockShowVariants(props: Record<string, unknown>): boolean {
  */
 export function mapEcommerceProductToItem(product: EcommerceProduct): AppPageProductItem {
   const baseFinal = finiteNumber(product.final_price, 0);
-  const promo = product.active_promotion ?? null;
-  const promoPrice = promo ? Number(promo.promotional_price) : NaN;
-  const hasFlatPromo =
-    promo !== null &&
-    promo.is_quantity_tiered !== true &&
-    Number.isFinite(promoPrice) &&
-    promoPrice > 0 &&
-    promoPrice < baseFinal;
-
-  const finalPrice = hasFlatPromo ? promoPrice : baseFinal;
-  const regularFinalPrice = hasFlatPromo ? baseFinal : (product.regular_final_price ?? null);
-
   const variants: AppPageProductVariant[] = (product.variants ?? []).map((v: ProductVariantDetail) => ({
     id: v.id,
     name: v.name?.trim() || v.sku || `Variante ${v.id}`,
@@ -127,6 +115,22 @@ export function mapEcommerceProductToItem(product: EcommerceProduct): AppPagePro
     is_available: v.is_available !== false,
   }));
 
+  const promo = product.active_promotion ?? null;
+  const promoPrice = promo ? Number(promo.promotional_price) : NaN;
+  // La promoción plana es un precio de PRODUCTO: si el producto expone
+  // variantes, aplicarla dejaría la tarjeta más barata que cualquier variante y
+  // el precio subiría al elegir una. Misma regla que `resolvePreviewProductCards`.
+  const hasFlatPromo =
+    variants.length === 0 &&
+    promo !== null &&
+    promo.is_quantity_tiered !== true &&
+    Number.isFinite(promoPrice) &&
+    promoPrice > 0 &&
+    promoPrice < baseFinal;
+
+  const finalPrice = hasFlatPromo ? promoPrice : baseFinal;
+  const regularFinalPrice = hasFlatPromo ? baseFinal : (product.regular_final_price ?? null);
+
   return {
     id: product.id,
     slug: product.slug,
@@ -134,6 +138,7 @@ export function mapEcommerceProductToItem(product: EcommerceProduct): AppPagePro
     image_url: safeUrl(product.image_url ?? undefined),
     final_price: finalPrice,
     regular_final_price: regularFinalPrice,
+    // Misma regla que el preview: `is_on_sale` manda, sin exigir `sale_price`.
     is_on_sale: hasFlatPromo || Boolean(product.is_on_sale),
     variants,
   };

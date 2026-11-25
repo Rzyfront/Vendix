@@ -100,7 +100,11 @@ export class ProductPageViewComponent {
   /** Whether the featured product's own route is shown (not cart, checkout or orders). */
   readonly featuredRoute = input(true);
   readonly blockIds = input(false);
-  /** IDs automáticos (complementos) para bloques `products` en modo `auto`. */
+  /**
+   * IDs automáticos para bloques `products` en modo `auto`: los 8 productos
+   * recientes que resuelve el servidor (no son los complementos, que tienen su
+   * propio bloque y su propio componente).
+   */
   readonly autoProductIds = input<readonly number[]>([]);
   /** Productos resueltos para la vista previa del editor (sin peticiones HTTP). */
   readonly previewProducts = input<readonly AppPageProductItem[] | null>(null);

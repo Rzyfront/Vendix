@@ -218,11 +218,14 @@ import { safeUrl } from './app-page-view.util';
                 @let active = isVariantSelected(item.id, variant.id);
                 <button
                   type="button"
-                  class="rounded-lg border py-1 text-xs font-medium transition-colors"
+                  class="rounded-lg border py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 disabled:line-through"
                   [class]="(layout === 'list' ? 'px-2.5 ' : 'px-2 ') + (active
                     ? 'ap-accent-bg border-transparent'
                     : 'border-border bg-surface text-text-primary hover:bg-surface-secondary')"
                   [attr.aria-pressed]="active"
+                  [attr.aria-disabled]="variant.is_available === false"
+                  [disabled]="variant.is_available === false"
+                  [attr.title]="variant.is_available === false ? 'Variante agotada' : null"
                   [attr.data-variant-id]="variant.id"
                   [attr.data-testid]="'variant-option-' + variant.id"
                   (click)="selectVariant(item.id, variant.id, $event)"
@@ -262,12 +265,11 @@ export class AppPageProductsViewComponent {
   readonly effectiveLayout = computed<AppProductsLayout>(() => this.layout() ?? 'grid');
 
   readonly effectiveIds = computed<number[]>(() => {
-    const raw =
-      this.selection() === 'manual'
-        ? this.productIds()
-        : this.autoProductIds().length > 0
-          ? this.autoProductIds()
-          : this.productIds();
+    // En automático los `product_ids` guardados no cuentan: si el usuario cambia
+    // de manual a automático quedan en el documento y la página pública los
+    // usaría sin querer (la vista previa, en cambio, carga los recientes). El
+    // bloque automático se resuelve solo con lo que manda el servidor.
+    const raw = this.selection() === 'manual' ? this.productIds() : this.autoProductIds();
     const seen = new Set<number>();
     const out: number[] = [];
     for (const id of raw) {

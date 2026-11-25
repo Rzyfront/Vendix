@@ -235,4 +235,28 @@ describe('AppPageProductsViewComponent', () => {
     expect(catalogSpy.getProducts).toHaveBeenCalledWith({ limit: 8, include_variants: false });
     expect(el().querySelectorAll('[data-testid="product-block-card"]').length).toBe(1);
   });
+
+  it('en modo auto ignora product_ids viejos y pide los recientes (igual que la vista previa)', async () => {
+    catalogSpy.getProducts.and.returnValue(
+      of({
+        success: true,
+        data: [{ id: 9, slug: 'reciente', name: 'Reciente', final_price: 12000, image_url: null } as unknown as EcommerceProduct],
+        meta: { total: 1, page: 1, limit: 8, total_pages: 1 },
+      }),
+    );
+
+    fixture = TestBed.createComponent(AppPageProductsViewComponent);
+    fixture.componentRef.setInput('selection', 'auto');
+    fixture.componentRef.setInput('productIds', [5, 6, 7]);
+    fixture.componentRef.setInput('allowCatalogFallback', true);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    // Los ids manuales quedan en el documento al cambiar a automático: no deben usarse.
+    expect(catalogSpy.getProducts).toHaveBeenCalledWith({ limit: 8, include_variants: false });
+    expect(catalogSpy.getProducts).not.toHaveBeenCalledWith(
+      jasmine.objectContaining({ ids: jasmine.any(String) }),
+    );
+  });
 });
