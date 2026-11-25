@@ -7,6 +7,18 @@ import {
   isBankAccountAvailableInStore,
   resolveBankAccountPolicy,
 } from './bank-account-availability.helper';
+import { RequestContext } from '../context/request-context.service';
+
+type PolicyContext = Pick<
+  RequestContext,
+  'is_super_admin' | 'is_owner' | 'roles' | 'app_type'
+>;
+
+const ctx = (overrides: Partial<PolicyContext>): PolicyContext => ({
+  is_super_admin: false,
+  is_owner: false,
+  ...overrides,
+});
 
 describe('bank-account-availability.helper (QUI-1061)', () => {
   describe('bankAccountAvailableInStoreWhere', () => {
@@ -75,14 +87,18 @@ describe('bank-account-availability.helper (QUI-1061)', () => {
 
   describe('policy & permissions', () => {
     it('recognizes owner, super_admin, ORG_ADMIN and admin role as org managers', () => {
-      expect(canManageOrganizationBankAccounts({ is_owner: true })).toBe(true);
-      expect(canManageOrganizationBankAccounts({ is_super_admin: true })).toBe(
+      expect(canManageOrganizationBankAccounts(ctx({ is_owner: true }))).toBe(
         true,
       );
-      expect(canManageOrganizationBankAccounts({ app_type: 'ORG_ADMIN' })).toBe(
+      expect(
+        canManageOrganizationBankAccounts(ctx({ is_super_admin: true })),
+      ).toBe(true);
+      expect(
+        canManageOrganizationBankAccounts(ctx({ app_type: 'ORG_ADMIN' })),
+      ).toBe(true);
+      expect(canManageOrganizationBankAccounts(ctx({ roles: ['admin'] }))).toBe(
         true,
       );
-      expect(canManageOrganizationBankAccounts({ roles: ['admin'] })).toBe(true);
       expect(
         canManageOrganizationBankAccounts({
           is_owner: false,
@@ -101,14 +117,14 @@ describe('bank-account-availability.helper (QUI-1061)', () => {
       const orgPolicy = await resolveBankAccountPolicy(fiscalScopeService, {
         organization_id: 1,
         store_id: 10,
-        context: { is_owner: true },
+        context: ctx({ is_owner: true }),
       });
       const storeAdminPolicy = await resolveBankAccountPolicy(
         fiscalScopeService,
         {
           organization_id: 1,
           store_id: 10,
-          context: { is_owner: false, roles: ['store_admin'] },
+          context: ctx({ is_owner: false, roles: ['store_admin'] }),
         },
       );
 
