@@ -318,6 +318,37 @@ describe('VexDesignChatPanelComponent (F4)', () => {
     expect(discarded[0].document.hero?.title).toBe('Portada inicial');
     expect((el().querySelectorAll('[data-testid="vex-design-discard"]')[0] as HTMLButtonElement).disabled).toBe(false);
   });
+
+  it('no ofrece aplicar una propuesta que el borrador ya dejó atras', () => {
+    fixture.componentInstance.sendPrompt('Cambia el tema');
+    fixture.detectChanges();
+    stream$.next({
+      type: 'design_draft',
+      app_kind: 'product_page',
+      op: 'set_theme',
+      document: darkHeroDraft(),
+      summary: 'Cambio 1',
+      touched_block_id: 'hero',
+      history_depth: 1,
+      can_discard: true,
+    });
+    stream$.next({ type: 'done' });
+    stream$.complete();
+    fixture.detectChanges();
+
+    expect(el().querySelector('[data-testid="vex-design-apply"]')).not.toBeNull();
+
+    // Una edición manual del borrador deja la propuesta sin efecto posible:
+    // aplicarla reemplazaría lo que el dueño acaba de cambiar.
+    fixture.componentRef.setInput('draft', {
+      ...baseDraft(),
+      hero: { ...baseDraft().hero, title: 'Editado a mano' },
+    } as AppPageDocument);
+    fixture.detectChanges();
+
+    expect(el().querySelector('[data-testid="vex-design-apply"]')).toBeNull();
+    expect(el().querySelector('[data-testid="vex-design-stale"]')).not.toBeNull();
+  });
 });
 
 @Component({
