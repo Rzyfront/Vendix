@@ -506,7 +506,13 @@ export class ReservationsController {
   private parseQueueDay(day?: string): string | undefined {
     if (day == null || day.trim() === '') return undefined;
     const value = day.trim();
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(value))) {
+    // `Date.parse('2026-02-31')` no es NaN: se acepta y la consulta se correría
+    // al 3 de marzo. La ida y vuelta confirma que el día existe de verdad.
+    const parsed = new Date(`${value}T00:00:00.000Z`);
+    const roundTrip = Number.isNaN(parsed.getTime())
+      ? ''
+      : parsed.toISOString().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || roundTrip !== value) {
       throw new BadRequestException('El día debe venir como YYYY-MM-DD');
     }
     return value;

@@ -206,10 +206,12 @@ export class AgendaQueueBoardComponent implements OnInit, OnDestroy {
    * del apellido (no el nombre completo, que expone datos personales).
    */
   publicName(row: QueueBoardRow): string {
-    const parts = row.customer_name.trim().split(/\s+/).filter(Boolean);
-    const first = parts[0] ?? '';
-    const last = parts.length > 1 ? parts[parts.length - 1] : '';
-    return last ? `${first} ${last[0].toUpperCase()}.` : first;
+    // El backend manda las partes del nombre: no se parte la cadena en el front
+    // (con "Ana María Díaz Pérez" el último apellido no es el que se muestra).
+    const first = (row.customer_first_name ?? row.customer_name).trim().split(/\s+/)[0] ?? '';
+    const last = (row.customer_last_name ?? '').trim();
+    if (last) return `${first} ${last[0].toUpperCase()}.`;
+    return first || row.customer_name;
   }
 
   initials(row: QueueBoardRow): string {

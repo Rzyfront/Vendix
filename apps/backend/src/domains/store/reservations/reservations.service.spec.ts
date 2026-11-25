@@ -110,11 +110,16 @@ describe('ReservationsService — state machine (appointments redesign)', () => 
     await expect(service.markArriving(1)).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('markAttending only allows arriving → attending', async () => {
-    const { service, bookings } = buildService();
-    bookings.push({ id: 1, status: 'arriving' });
+  it('markAttending only allows arriving → attending y recarga la cola', async () => {
+    const { service, bookings, emits } = buildService();
+    bookings.push({ id: 1, status: 'arriving', date: new Date('2026-07-18T00:00:00Z') });
     await service.markAttending(1);
     expect(bookings[0].status).toBe('attending');
+    // Entrar a atención saca a la persona de la cola: posiciones y aviso al
+    // siguiente se recalculan igual que en el check-in.
+    expect(emits.find((e) => e.name === 'booking.arrival_recorded')?.payload.date).toBe(
+      '2026-07-18',
+    );
   });
 
   it('markAttending rejects confirmed → attending (must go through arriving)', async () => {

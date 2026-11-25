@@ -189,12 +189,34 @@ describe('AppointmentQueueService', () => {
       arrival_at: new Date('2026-07-18T09:55:00Z'),
       created_at: new Date('2026-07-18T08:00:00Z'),
     };
+    // La entrada va al revés del resultado esperado: si el desempate no
+    // existiera, el sort estable dejaría 21 primero.
     const { service } = buildService([
-      { ...base, id: 20, priority: 0 },
       { ...base, id: 21, priority: 5 },
+      { ...base, id: 20, priority: 0 },
     ]);
     const ranked = await service.computeQueueForStore(1, '2026-07-18');
     expect(ranked.map((r) => r.booking_id)).toEqual([20, 21]);
+  });
+
+  it('desempata por orden de llegada (created_at) cuando score y prioridad empatan', async () => {
+    const base = {
+      booking_number: 'BKG',
+      customer_id: 100,
+      provider_id: 1,
+      date: new Date('2026-07-18T00:00:00Z'),
+      end_date: null,
+      start_time: '05:00',
+      end_time: '06:00',
+      arrival_at: new Date('2026-07-18T09:55:00Z'),
+      priority: 0,
+    };
+    const { service } = buildService([
+      { ...base, id: 41, created_at: new Date('2026-07-18T08:30:00Z') },
+      { ...base, id: 40, created_at: new Date('2026-07-18T08:00:00Z') },
+    ]);
+    const ranked = await service.computeQueueForStore(1, '2026-07-18');
+    expect(ranked.map((r) => r.booking_id)).toEqual([40, 41]);
   });
 
   it('deja fuera a quien ya está en atención y ordena por cercanía a su hora', async () => {

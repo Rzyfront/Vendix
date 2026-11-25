@@ -153,6 +153,9 @@ export interface QueueBoardRow {
   booking_id: number;
   booking_number: string;
   customer_name: string;
+  /** Partes del nombre: el monitor público usa primer nombre + inicial. */
+  customer_first_name: string | null;
+  customer_last_name: string | null;
   service_name: string | null;
   provider_name: string | null;
   status: 'confirmed' | 'arriving' | 'attending';

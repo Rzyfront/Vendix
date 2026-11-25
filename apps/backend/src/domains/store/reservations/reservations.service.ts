@@ -2405,7 +2405,21 @@ export class ReservationsService {
    * panel to flag "this customer is next, call them up to the chair".
    */
   async markAttending(id: number) {
-    return this.transition(id, 'attending');
+    const updated = await this.transition(id, 'attending');
+    // Quien entra a atención sale de la cola: hay que recalcular posiciones y
+    // avisar al nuevo primero (antes solo se hacía en el check-in, así que el
+    // monitor y la notificación podían quedar desfasados).
+    if (updated?.date) {
+      const isoDay = updated.date instanceof Date
+        ? updated.date.toISOString().split('T')[0]
+        : String(updated.date).split('T')[0];
+      this.eventEmitter.emit('booking.arrival_recorded', {
+        store_id: updated.store_id,
+        booking_id: updated.id,
+        date: isoDay,
+      });
+    }
+    return updated;
   }
 
   // --- Helpers privados ---

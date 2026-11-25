@@ -4,11 +4,30 @@ import { NotificationsService } from '../../notifications/notifications.service'
 import { bookingInterval } from '@common/utils/schedule-window.util';
 import { localDateString, resolveStoreTimezone } from '@common/utils/store-timezone.util';
 
+/** Claves del orden de la cola viva: cercanía a la hora, prioridad manual y FIFO. */
+export interface QueueOrderKey {
+  score: number;
+  priority: number;
+  created_at: Date;
+}
+
+/** Único comparador de la cola: lo usan el ranking persistido y el tablero. */
+export function compareQueueOrder(a: QueueOrderKey, b: QueueOrderKey): number {
+  const scoreA = Number.isFinite(a.score) ? a.score : Number.POSITIVE_INFINITY;
+  const scoreB = Number.isFinite(b.score) ? b.score : Number.POSITIVE_INFINITY;
+  if (scoreA !== scoreB) return scoreA - scoreB;
+  if (a.priority !== b.priority) return a.priority - b.priority;
+  return a.created_at.getTime() - b.created_at.getTime();
+}
+
 /** Fila del tablero de la pestaña Cola (agenda-unificada, 2026-11-24). */
 export interface QueueBoardRow {
   booking_id: number;
   booking_number: string;
   customer_name: string;
+  /** Partes del nombre para el monitor público (primer nombre + inicial). */
+  customer_first_name: string | null;
+  customer_last_name: string | null;
   service_name: string | null;
   provider_name: string | null;
   status: 'confirmed' | 'arriving' | 'attending';
@@ -140,12 +159,7 @@ export class AppointmentQueueService {
         };
       })
       .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
-      .sort(
-        (a, b) =>
-          a.score - b.score ||
-          a.priority - b.priority ||
-          a.created_at.getTime() - b.created_at.getTime(),
-      )
+      .sort(compareQueueOrder)
       .map(({ created_at: _createdAt, ...entry }) => entry);
   }
 
@@ -187,6 +201,8 @@ export class AppointmentQueueService {
       booking_id: row.id,
       booking_number: row.booking_number,
       customer_name: customerName,
+      customer_first_name: row.customer?.first_name ?? null,
+      customer_last_name: row.customer?.last_name ?? null,
       service_name: row.product?.name ?? null,
       provider_name: providerName,
       status: row.status as QueueBoardRow['status'],
@@ -249,6 +265,7 @@ export class AppointmentQueueService {
         end_time: true,
         arrival_at: true,
         priority: true,
+        created_at: true,
         customer: { select: { first_name: true, last_name: true } },
         product: { select: { name: true } },
         provider: {
@@ -262,13 +279,30 @@ export class AppointmentQueueService {
       orderBy: [{ start_time: 'asc' }, { priority: 'asc' }, { created_at: 'asc' }],
     });
 
-    const board = rows.map((row) => this.boardRow(row, timezone, now));
+    // `waiting` se ordena con el MISMO comparador que la cola viva, sobre las
+    // filas ya cargadas: el monitor y la notificación no pueden discrepar, y el
+    // polling no repite la consulta.
+    const orderOf = new Map<number, QueueOrderKey>();
+    const board = rows.map((row) => {
+      const entry = this.boardRow(row, timezone, now);
+      if (entry.status === 'arriving' && entry.arrival_at) {
+        orderOf.set(entry.booking_id, {
+          score: Math.abs(
+            entry.starts_at.getTime() - new Date(entry.arrival_at).getTime(),
+          ),
+          priority: entry.priority,
+          created_at: row.created_at ?? new Date(0),
+        });
+      }
+      return entry;
+    });
 
-    // El orden de `waiting` NO se recalcula aquí: se reusa la cola viva, que es
-    // la que además persiste posiciones y avisa al siguiente. Así el monitor y
-    // la notificación no pueden mostrar personas distintas.
-    const ranking = await this.computeQueueForStore(storeId, targetDay);
-    const rankOf = new Map(ranking.map((entry, index) => [entry.booking_id, index]));
+    const orderKey = (row: QueueBoardRow): QueueOrderKey =>
+      orderOf.get(row.booking_id) ?? {
+        score: Number.POSITIVE_INFINITY,
+        priority: row.priority,
+        created_at: new Date(0),
+      };
 
     return {
       day: targetDay,
@@ -276,11 +310,7 @@ export class AppointmentQueueService {
       in_service: board.filter((r) => r.status === 'attending'),
       waiting: board
         .filter((r) => r.status === 'arriving')
-        .sort(
-          (a, b) =>
-            (rankOf.get(a.booking_id) ?? Number.MAX_SAFE_INTEGER) -
-            (rankOf.get(b.booking_id) ?? Number.MAX_SAFE_INTEGER),
-        ),
+        .sort((a, b) => compareQueueOrder(orderKey(a), orderKey(b))),
       // Confirmadas que todavía no empiezan (status `confirmed` = no iniciada):
       // incluye las que ya pasaron de hora sin check-in, que es justo lo que la
       // recepción necesita ver para reaccionar.
@@ -300,6 +330,20 @@ export class AppointmentQueueService {
     isoDay: string,
   ): Promise<{ updated: number; promoted: number | null }> {
     const ranked = await this.computeQueueForStore(storeId, isoDay);
+
+    // Quien salió de la cola (pasó a atención, se atendió o se canceló) no debe
+    // conservar su posición vieja: se limpia antes de escribir las nuevas.
+    const day = new Date(`${isoDay.slice(0, 10)}T00:00:00.000Z`);
+    await this.prisma.bookings.updateMany({
+      where: {
+        store_id: storeId,
+        date: day,
+        queue_position: { not: null },
+        id: { notIn: ranked.map((entry) => entry.booking_id) },
+      },
+      data: { queue_position: null },
+    });
+
     if (ranked.length === 0) return { updated: 0, promoted: null };
 
     // Persist positions. Use `updateMany` with composite-key detection is

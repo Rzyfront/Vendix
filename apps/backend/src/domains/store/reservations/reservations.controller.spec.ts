@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { ReservationsController } from './reservations.controller';
 import { BookingConfirmationService } from './booking-confirmation.service';
 import { AppointmentQueueService } from './appointment-queue/appointment-queue.service';
@@ -158,16 +159,21 @@ describe('ReservationsController — appointment redesign endpoints (smoke)', ()
     }
   });
 
-  it('rechaza un ?day que no sea YYYY-MM-DD', async () => {
-    const { controller } = buildController();
+  it('rechaza un ?day que no sea una fecha real YYYY-MM-DD', async () => {
+    const { controller, appointmentQueueService } = buildController();
     const storeIdSpy = jest
       .spyOn(RequestContextService, 'getStoreId')
       .mockReturnValue(1);
     try {
-      await expect(controller.getQueueBoard('foo')).rejects.toThrow();
+      await expect(controller.getQueueBoard('foo')).rejects.toBeInstanceOf(BadRequestException);
+      // `Date.parse('2026-02-31')` no es NaN, pero ese día no existe.
+      await expect(controller.getQueueBoard('2026-02-31')).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
     } finally {
       storeIdSpy.mockRestore();
     }
+    expect(appointmentQueueService.dayBoard).not.toHaveBeenCalled();
   });
 
   it('GET :id returns the booking detail with its deposit block', async () => {
