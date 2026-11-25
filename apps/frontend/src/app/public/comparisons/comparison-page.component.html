@@ -1,0 +1,106 @@
+<a class="skip-link" [routerLink]="[]" fragment="comparison-content">Saltar al contenido</a>
+<header class="guide-header">
+  <a routerLink="/" class="guide-brand"><img src="/vlogo-128.png" alt="" width="32" height="32" />Vendix</a>
+  <nav aria-label="Navegación principal">
+    <a routerLink="/pricing">Planes y precios</a>
+    <a routerLink="/ayuda">Centro de ayuda</a>
+  </nav>
+</header>
+<main id="comparison-content" class="guide-content">
+  @if (!published) {
+    <p class="preview-label">Borrador para revisión · Sin publicar</p>
+  }
+  <p class="guide-category">Comparativa</p>
+  <h1>Software POS con facturación electrónica en Colombia: cómo se comparan los planes</h1>
+
+  <aside class="comparison-disclosure" aria-label="Quién publica esta comparativa">
+    <p>
+      <strong>Publicado por Vendix.</strong> Vendix es uno de los productos de esta tabla. Para que
+      puedas verificarlo, usamos el mismo criterio con todos, incluido Vendix, y citamos la página
+      oficial de precios de cada proveedor.
+    </p>
+    <p>
+      <strong>Precios consultados el {{ checkedAt }}</strong> en la web oficial de cada proveedor.
+      Los precios cambian: confirma en el enlace antes de decidir.
+    </p>
+    <p>
+      ¿Encontraste un dato desactualizado? Escríbenos a
+      <a href="mailto:admin@vendix.online">admin&#64;vendix.online</a> y lo corregimos.
+    </p>
+  </aside>
+
+  <section class="article-section" aria-labelledby="metodo">
+    <h2 id="metodo">Cómo comparamos</h2>
+    <ul>
+      @for (item of method; track item) {
+        <li>{{ item }}</li>
+      }
+    </ul>
+  </section>
+
+  <section class="article-section" aria-labelledby="tabla">
+    <h2 id="tabla">El primer plan de cada proveedor que incluye factura electrónica DIAN</h2>
+    <div class="comparison-scroll" role="region" aria-labelledby="tabla" tabindex="0">
+      <table class="comparison-table">
+        <thead>
+          <tr>
+            <th scope="col">Proveedor</th>
+            <th scope="col">Plan</th>
+            <th scope="col">Precio publicado</th>
+            <th scope="col">Facturas electrónicas</th>
+            <th scope="col">Bodegas o sedes</th>
+            <th scope="col">Restaurante (mesas o comandas)</th>
+            <th scope="col">Prueba gratis</th>
+            <th scope="col">Fuente</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (row of rows; track row.provider) {
+            <tr [class.comparison-row--vendix]="row.isVendix">
+              <th scope="row">{{ row.provider }}</th>
+              <td>{{ row.plan }}</td>
+              <td>{{ row.price }}</td>
+              <td>{{ row.invoices }}</td>
+              <td>{{ row.locations }}</td>
+              <td>{{ row.restaurant }}</td>
+              <td>{{ row.trial }}</td>
+              <td><a [href]="row.sourceUrl" target="_blank" rel="noopener nofollow">Página oficial</a></td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+    <p class="comparison-note">
+      * La factura electrónica depende de que tu comercio tenga certificado digital y resolución de
+      numeración, y el tiempo de habilitación lo pone la DIAN.
+    </p>
+  </section>
+
+  <section class="article-section" aria-labelledby="no-dice">
+    <h2 id="no-dice">Lo que la tabla no te dice</h2>
+    <ul>
+      @for (item of caveats; track item) {
+        <li>{{ item }}</li>
+      }
+    </ul>
+  </section>
+
+  <section class="article-section" aria-labelledby="cuando">
+    <h2 id="cuando">¿Cuándo conviene Vendix?</h2>
+    <p>
+      Si además del POS quieres tienda en línea, inventario y, en restaurantes, mesas y comandas a
+      cocina en la misma cuenta, prueba Vendix 14 días sin tarjeta.
+    </p>
+    <p>Si para tu negocio pesa más:</p>
+    <ul>
+      <li>el precio de entrada más bajo;</li>
+      <li>un cupo de facturas exacto;</li>
+      <li>una contabilidad que ya usas,</li>
+    </ul>
+    <p>revisa también los otros planes de la tabla.</p>
+    <div class="comparison-ctas">
+      <a class="comparison-cta comparison-cta--primary" routerLink="/pricing">Ver planes de Vendix</a>
+      <a class="comparison-cta" routerLink="/auth/register">Probar 14 días gratis</a>
+    </div>
+  </section>
+</main>
