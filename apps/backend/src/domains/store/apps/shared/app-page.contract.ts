@@ -74,6 +74,31 @@ export const APP_THEME_COLOR_KEYS = [
   'accent_color',
 ] as const;
 
+/** Apps sections — catálogos cerrados de variantes y apariencia por sección. */
+export const APP_HERO_VARIANTS = ['centered', 'image_right', 'background'] as const;
+export const APP_HERO_HEIGHTS = ['auto', 'compact', 'full'] as const;
+export const APP_GALLERY_VARIANTS = ['grid', 'carousel', 'mosaic'] as const;
+export const APP_GALLERY_ASPECT_RATIOS = ['1:1', '4:3', '16:9'] as const;
+export const APP_HIGHLIGHTS_VARIANTS = ['cards', 'list', 'band'] as const;
+export const APP_HIGHLIGHTS_ICONS = [
+  'sparkles',
+  'star',
+  'check',
+  'shield-check',
+  'truck',
+  'clock',
+  'heart',
+  'award',
+  'zap',
+  'flame',
+  'gift',
+  'map-pin',
+  'crown',
+  'thumbs-up',
+] as const;
+export const APP_BLOCK_SPACINGS = ['compact', 'normal', 'spacious'] as const;
+export const APP_TEXT_ALIGNS = ['left', 'center', 'right'] as const;
+
 /**
  * Mode each app has today, before F2, when it has no saved page: the product
  * page sells, the service page and the booking page book and also sell their
@@ -93,6 +118,7 @@ export const DEFAULT_APP_MODE: Record<PageAppKind, AppPageMode> = {
 type ScalarField =
   | { kind: 'text'; max: number }
   | { kind: 'url' }
+  | { kind: 'color' }
   | { kind: 'bool' }
   | { kind: 'int'; min: number; max: number }
   | { kind: 'enum'; values: readonly string[] };
@@ -107,9 +133,24 @@ type FieldsSpec = Record<string, FieldSpec>;
 
 const text = (max: number): ScalarField => ({ kind: 'text', max });
 const url: ScalarField = { kind: 'url' };
+const color: ScalarField = { kind: 'color' };
 const bool: ScalarField = { kind: 'bool' };
 const int = (min: number, max: number): ScalarField => ({ kind: 'int', min, max });
 const oneOf = (values: readonly string[]): ScalarField => ({ kind: 'enum', values });
+
+/** Apariencia opcional común a cualquier bloque de Product Page, Service Page y Booking. */
+const BLOCK_APPEARANCE: FieldsSpec = {
+  background_color: color,
+  background_image_url: url,
+  overlay_opacity: int(0, 80),
+  spacing: oneOf(APP_BLOCK_SPACINGS),
+  align: oneOf(APP_TEXT_ALIGNS),
+};
+
+const withBlockStyle = (spec: FieldsSpec): FieldsSpec => ({
+  ...spec,
+  ...BLOCK_APPEARANCE,
+});
 
 const TITLE = text(80);
 const SUBTITLE = text(200);
@@ -126,15 +167,35 @@ const FAQ: FieldsSpec = {
 const GALLERY: FieldsSpec = {
   title: TITLE,
   image_urls: { kind: 'url_list', max: 12 },
+  variant: oneOf(APP_GALLERY_VARIANTS),
+  columns: int(2, 4),
+  aspect_ratio: oneOf(APP_GALLERY_ASPECT_RATIOS),
 };
 
-/** Title + text cards (benefits, highlights). */
+/** Tarjetas simples (usadas por store_home sin tocar su contrato actual). */
 const CARDS: FieldsSpec = {
   title: TITLE,
   items: {
     kind: 'list',
     max: 6,
     item: { title: text(60), text: text(240) },
+  },
+};
+
+/** Destacados / beneficios configurables con variantes, imagen, icono y color de acento. */
+const HIGHLIGHTS: FieldsSpec = {
+  title: TITLE,
+  variant: oneOf(APP_HIGHLIGHTS_VARIANTS),
+  accent_color: color,
+  items: {
+    kind: 'list',
+    max: 6,
+    item: {
+      title: text(60),
+      text: text(240),
+      image_url: url,
+      icon: oneOf(APP_HIGHLIGHTS_ICONS),
+    },
   },
 };
 
@@ -169,6 +230,7 @@ const CTA: FieldsSpec = {
   title: TITLE,
   text: text(300),
   button_label: text(40),
+  image_url: url,
 };
 
 /**
@@ -180,40 +242,43 @@ const CTA: FieldsSpec = {
 export const APP_PAGE_BLOCKS: Record<PageAppKind, Record<string, FieldsSpec>> =
   {
     product_page: {
-      /** "Por qué elegirlo": short benefit cards under the product. */
-      benefits: CARDS,
-      how_it_works: STEPS,
-      specifications: {
+      /** "Por qué elegirlo": tarjetas configurables (tarjetas, lista o banda). */
+      benefits: withBlockStyle(HIGHLIGHTS),
+      /** Destacados con imagen, icono y color de acento. */
+      highlights: withBlockStyle(HIGHLIGHTS),
+      how_it_works: withBlockStyle(STEPS),
+      specifications: withBlockStyle({
         title: TITLE,
         items: {
           kind: 'list',
           max: 24,
           item: { label: text(60), value: text(200) },
         },
-      },
-      gallery: GALLERY,
-      testimonials: TESTIMONIALS,
+      }),
+      gallery: withBlockStyle(GALLERY),
+      testimonials: withBlockStyle(TESTIMONIALS),
       /** Existing: "Complementa tu compra". */
-      complements: { title: TITLE },
-      shipping_warranty: {
+      complements: withBlockStyle({ title: TITLE }),
+      shipping_warranty: withBlockStyle({
         title: TITLE,
         shipping: text(500),
         warranty: text(500),
         returns: text(500),
-      },
-      faq: FAQ,
-      cta: CTA,
+      }),
+      faq: withBlockStyle(FAQ),
+      cta: withBlockStyle(CTA),
     },
     service_page: {
       /** Existing: the service list (cards with duration and price). */
-      services: {
+      services: withBlockStyle({
         title: TITLE,
         subtitle: SUBTITLE,
         show_duration: bool,
         show_price: bool,
-      },
-      how_it_works: STEPS,
-      team: {
+      }),
+      highlights: withBlockStyle(HIGHLIGHTS),
+      how_it_works: withBlockStyle(STEPS),
+      team: withBlockStyle({
         title: TITLE,
         items: {
           kind: 'list',
@@ -225,47 +290,48 @@ export const APP_PAGE_BLOCKS: Record<PageAppKind, Record<string, FieldsSpec>> =
             photo_url: url,
           },
         },
-      },
-      policies: {
+      }),
+      policies: withBlockStyle({
         title: TITLE,
         deposit: text(500),
         cancellation: text(800),
         reminders: text(500),
-      },
-      gallery: GALLERY,
-      testimonials: TESTIMONIALS,
-      faq: FAQ,
+      }),
+      gallery: withBlockStyle(GALLERY),
+      testimonials: withBlockStyle(TESTIMONIALS),
+      faq: withBlockStyle(FAQ),
       /** Existing: the secondary "también puedes comprar" products. */
-      products: { title: TITLE },
-      cta: CTA,
+      products: withBlockStyle({ title: TITLE }),
+      cta: withBlockStyle(CTA),
     },
     booking: {
       /** Existing: the PMS search (dates, guests) and the room types with rate. */
-      search: { title: TITLE, subtitle: SUBTITLE },
-      amenities: {
+      search: withBlockStyle({ title: TITLE, subtitle: SUBTITLE }),
+      highlights: withBlockStyle(HIGHLIGHTS),
+      amenities: withBlockStyle({
         title: TITLE,
         items: { kind: 'text_list', max: 24, itemMax: 60 },
-      },
-      policies: {
+      }),
+      policies: withBlockStyle({
         title: TITLE,
         check_in: text(40),
         check_out: text(40),
         cancellation: text(800),
         house_rules: text(800),
-      },
-      gallery: GALLERY,
-      testimonials: TESTIMONIALS,
-      location: {
+      }),
+      gallery: withBlockStyle(GALLERY),
+      testimonials: withBlockStyle(TESTIMONIALS),
+      location: withBlockStyle({
         title: TITLE,
         address: text(200),
         text: text(500),
         map_url: url,
-      },
-      faq: FAQ,
+      }),
+      faq: withBlockStyle(FAQ),
       /** Existing: the online check-in note. */
-      checkin_info: { text: text(300) },
+      checkin_info: withBlockStyle({ text: text(300) }),
       /** Existing: the "para tu estadía" products. */
-      products: { title: TITLE },
+      products: withBlockStyle({ title: TITLE }),
     },
     store_home: {
       /**
@@ -295,6 +361,11 @@ const HERO: FieldsSpec = {
   subtitle: text(300),
   image_url: url,
   button_label: text(40),
+  variant: oneOf(APP_HERO_VARIANTS),
+  background_image_url: url,
+  overlay_opacity: int(0, 80),
+  height: oneOf(APP_HERO_HEIGHTS),
+  align: oneOf(APP_TEXT_ALIGNS),
 };
 
 const BRAND: FieldsSpec = {
@@ -429,6 +500,11 @@ export interface AppPageDocument {
     subtitle?: string;
     image_url?: string;
     button_label?: string;
+    variant?: (typeof APP_HERO_VARIANTS)[number];
+    background_image_url?: string;
+    overlay_opacity?: number;
+    height?: (typeof APP_HERO_HEIGHTS)[number];
+    align?: (typeof APP_TEXT_ALIGNS)[number];
   };
   blocks: AppPageBlock[];
 }
@@ -511,6 +587,10 @@ function cleanScalar(
   }
   if (spec.kind === 'url') {
     if (!isHttpsUrl(trimmed)) errors.push(`${path} debe ser una URL https.`);
+    return trimmed;
+  }
+  if (spec.kind === 'color') {
+    if (!HEX_COLOR_RE.test(trimmed)) errors.push(`${path} debe ser un color #RRGGBB.`);
     return trimmed;
   }
   if (trimmed.length > spec.max) {

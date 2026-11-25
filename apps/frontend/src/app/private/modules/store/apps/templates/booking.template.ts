@@ -3,6 +3,7 @@ import {
   AppPageTemplate,
   faqFields,
   galleryFields,
+  highlightsFields,
   subtitleField,
   testimonialsFields,
   titleField,
@@ -29,6 +30,13 @@ export const BOOKING_TEMPLATE: AppPageTemplate = {
       icon: 'calendar-search',
       existing: true,
       fields: [titleField(), subtitleField()],
+    },
+    {
+      type: 'highlights',
+      label: 'Destacados',
+      description: 'Razones para elegir tu alojamiento, con imagen, icono y color de acento.',
+      icon: 'sparkles',
+      fields: highlightsFields('Destacado'),
     },
     {
       type: 'amenities',

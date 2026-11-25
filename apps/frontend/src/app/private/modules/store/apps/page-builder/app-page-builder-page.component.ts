@@ -159,7 +159,7 @@ function snapshot(value: unknown): string {
                 />
               </aside>
               <section class="min-h-0 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] lg:h-full" aria-label="Campos de la sección">
-                <app-builder-inspector [catalog]="adapter().catalog" [block]="selectedBlock()" (propChange)="setProp($event)" />
+                <app-builder-inspector [catalog]="adapter().catalog" [block]="selectedBlock()" [appKind]="adapter().kind" (propChange)="setProp($event)" />
               </section>
             }
             <section class="min-h-[32rem] overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-background)] lg:h-full"

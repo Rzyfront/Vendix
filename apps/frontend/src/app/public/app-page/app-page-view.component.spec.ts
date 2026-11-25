@@ -254,4 +254,198 @@ describe('AppPageViewComponent (apps-f2 T3)', () => {
       expect(rendered[0]).toBe('specifications');
     });
   });
+
+  describe('section variants and block appearance (apps-sections)', () => {
+    it('hero renders each layout variant, background image with overlay, height and alignment', () => {
+      const centered = render({
+        schema_version: 1,
+        hero: {
+          title: 'Centrado',
+          variant: 'centered',
+          height: 'compact',
+          align: 'center',
+          image_url: 'https://cdn.x.co/hero.jpg',
+        },
+        blocks: [],
+      });
+      const centeredHero = centered.querySelector('[data-testid="app-page-hero"]') as HTMLElement;
+      expect(centeredHero.classList.contains('ap-hero--centered')).toBeTrue();
+      expect(centeredHero.classList.contains('ap-hero--compact')).toBeTrue();
+      expect(centeredHero.getAttribute('data-hero-align')).toBe('center');
+      expect(centered.querySelector('[data-testid="hero-image"]')).not.toBeNull();
+
+      const imageRight = render({
+        schema_version: 1,
+        hero: {
+          title: 'Derecha',
+          variant: 'image_right',
+          image_url: 'https://cdn.x.co/side.jpg',
+        },
+        blocks: [],
+      });
+      const rightHero = imageRight.querySelector('[data-testid="app-page-hero"]') as HTMLElement;
+      expect(rightHero.classList.contains('ap-hero--image-right')).toBeTrue();
+      expect(imageRight.querySelector('[data-testid="hero-image"]')).not.toBeNull();
+
+      const background = render({
+        schema_version: 1,
+        hero: {
+          title: 'Fondo con velo',
+          variant: 'background',
+          background_image_url: 'https://cdn.x.co/bg.jpg',
+          overlay_opacity: 60,
+          height: 'full',
+          align: 'right',
+        },
+        blocks: [],
+      });
+      const bgHero = background.querySelector('[data-testid="app-page-hero"]') as HTMLElement;
+      expect(bgHero.classList.contains('ap-hero--background')).toBeTrue();
+      expect(bgHero.classList.contains('ap-hero--full')).toBeTrue();
+      expect(bgHero.style.backgroundImage).toContain('https://cdn.x.co/bg.jpg');
+      expect(background.querySelector('[data-testid="hero-image"]')).toBeNull();
+      const overlay = background.querySelector('[data-testid="hero-overlay"]') as HTMLElement;
+      expect(overlay).not.toBeNull();
+      expect(overlay.style.backgroundColor).toBe('rgba(0, 0, 0, 0.6)');
+    });
+
+    it('gallery renders grid (columns + aspect), carousel (multiple images + controls) and mosaic', () => {
+      const photos = ['https://cdn.x.co/1.jpg', 'https://cdn.x.co/2.jpg', 'https://cdn.x.co/3.jpg'];
+
+      const grid = render({
+        schema_version: 1,
+        blocks: [
+          {
+            id: 'g1',
+            type: 'gallery',
+            enabled: true,
+            props: { title: 'Grid', variant: 'grid', columns: 4, aspect_ratio: '16:9', image_urls: photos },
+          },
+        ],
+      });
+      const gridWrap = grid.querySelector('[data-testid="gallery-grid"]') as HTMLElement;
+      expect(gridWrap.classList.contains('ap-gallery--grid')).toBeTrue();
+      expect(gridWrap.classList.contains('md:grid-cols-4')).toBeTrue();
+      const gridImgs = Array.from(gridWrap.querySelectorAll('img'));
+      expect(gridImgs.length).toBe(3);
+      expect(gridImgs[0].classList.contains('aspect-video')).toBeTrue();
+
+      const carousel = render({
+        schema_version: 1,
+        blocks: [
+          {
+            id: 'g2',
+            type: 'gallery',
+            enabled: true,
+            props: { title: 'Carrusel', variant: 'carousel', columns: 2, aspect_ratio: '4:3', image_urls: photos },
+          },
+        ],
+      });
+      const carouselWrap = carousel.querySelector('[data-testid="gallery-carousel"]') as HTMLElement;
+      expect(carouselWrap.classList.contains('ap-gallery--carousel')).toBeTrue();
+      expect(carousel.querySelectorAll('[data-testid="gallery-carousel-track"] img').length).toBe(3);
+      expect(carousel.querySelector('[data-testid="gallery-carousel-prev"]')).not.toBeNull();
+      expect(carousel.querySelector('[data-testid="gallery-carousel-next"]')).not.toBeNull();
+
+      const mosaic = render({
+        schema_version: 1,
+        blocks: [
+          {
+            id: 'g3',
+            type: 'gallery',
+            enabled: true,
+            props: { title: 'Mosaico', variant: 'mosaic', image_urls: photos },
+          },
+        ],
+      });
+      const mosaicWrap = mosaic.querySelector('[data-testid="gallery-mosaic"]') as HTMLElement;
+      expect(mosaicWrap.classList.contains('ap-gallery--mosaic')).toBeTrue();
+      const mosaicImgs = Array.from(mosaicWrap.querySelectorAll('img'));
+      expect(mosaicImgs[0].classList.contains('md:row-span-2')).toBeTrue();
+    });
+
+    it('highlights renders cards, list and band variants with item image, icon and accent color', () => {
+      const items = [
+        { title: 'Envío', text: 'Rápido', image_url: 'https://cdn.x.co/h1.jpg', icon: 'truck' },
+        { title: 'Garantía', text: '1 año', icon: 'shield-check' },
+      ];
+
+      for (const variant of ['cards', 'list', 'band'] as const) {
+        const el = render(
+          {
+            schema_version: 1,
+            blocks: [
+              {
+                id: `hl_${variant}`,
+                type: 'highlights',
+                enabled: true,
+                props: { title: 'Destacados', variant, accent_color: '#10B981', items },
+              },
+            ],
+          },
+          { kind: 'service_page' },
+        );
+        const container = el.querySelector(`[data-highlights-variant="${variant}"]`) as HTMLElement;
+        expect(container).withContext(variant).not.toBeNull();
+        expect(container.classList.contains(`ap-highlights--${variant}`)).toBeTrue();
+        expect(el.querySelector('[data-testid="highlight-image"]')).not.toBeNull();
+        expect(el.querySelector('[data-testid="highlight-icon"]')).not.toBeNull();
+      }
+    });
+
+    it('applies common block appearance (background color/image+overlay, spacing, align) and cta image', () => {
+      const el = render({
+        schema_version: 1,
+        blocks: [
+          {
+            id: 'faq1',
+            type: 'faq',
+            enabled: true,
+            props: {
+              title: 'Dudas',
+              background_color: '#F1F5F9',
+              background_image_url: 'https://cdn.x.co/section-bg.jpg',
+              overlay_opacity: 50,
+              spacing: 'spacious',
+              align: 'center',
+              items: [{ question: '¿Cómo funciona?', answer: 'Muy fácil.' }],
+            },
+          },
+          {
+            id: 'cta1',
+            type: 'cta',
+            enabled: true,
+            props: { title: 'Actúa', button_label: 'Ir', image_url: 'https://cdn.x.co/cta.jpg' },
+          },
+        ],
+      });
+
+      const section = el.querySelector('section[data-block="faq"]') as HTMLElement;
+      expect(section.classList.contains('ap-section--bg')).toBeTrue();
+      expect(section.classList.contains('ap-spacing--spacious')).toBeTrue();
+      expect(section.classList.contains('text-center')).toBeTrue();
+      expect(section.style.backgroundColor).toBe('rgb(241, 245, 249)');
+      expect(section.style.backgroundImage).toContain('https://cdn.x.co/section-bg.jpg');
+      const overlay = section.querySelector('[data-testid="block-overlay"]') as HTMLElement;
+      expect(overlay.style.backgroundColor).toBe('rgba(0, 0, 0, 0.5)');
+
+      const ctaImg = el.querySelector('[data-testid="cta-image"]') as HTMLImageElement;
+      expect(ctaImg).not.toBeNull();
+      expect(ctaImg.src).toBe('https://cdn.x.co/cta.jpg');
+    });
+
+    it('leaves legacy documents without new tokens unchanged in structure and attributes', () => {
+      const el = render(page());
+      const hero = el.querySelector('[data-testid="app-page-hero"]') as HTMLElement;
+      expect(hero.hasAttribute('data-hero-variant')).toBeFalse();
+      expect(hero.hasAttribute('data-hero-height')).toBeFalse();
+      expect(hero.hasAttribute('data-hero-align')).toBeFalse();
+      expect(el.querySelector('[data-testid="hero-overlay"]')).toBeNull();
+      expect(el.querySelector('[data-testid="block-overlay"]')).toBeNull();
+      const firstSection = el.querySelector('section[data-block]') as HTMLElement;
+      expect(firstSection.classList.contains('ap-section--bg')).toBeFalse();
+      expect(firstSection.hasAttribute('data-spacing')).toBeFalse();
+      expect(firstSection.hasAttribute('data-align')).toBeFalse();
+    });
+  });
 });
