@@ -83,12 +83,12 @@ import { StatementImportModalComponent } from './statement-import-modal.componen
       <!-- Scope ORGANIZATION read-only notice for store admins -->
       @if (isOrgScope() && !canCreateAccount()) {
         <div
-          class="mb-3 flex items-start gap-2.5 rounded-xl border border-[var(--color-info)]/30 bg-[var(--color-info-light)] px-4 py-3 text-xs text-text-primary"
+          class="mb-3 flex items-start gap-2.5 rounded-xl border border-info/30 bg-info-light px-4 py-3 text-xs text-text-primary"
         >
           <app-icon
             name="info"
             [size]="16"
-            class="mt-0.5 shrink-0 text-[var(--color-info)]"
+            class="mt-0.5 shrink-0 text-info"
           ></app-icon>
           <div>
             <span class="font-semibold">Cuentas administradas por la organización:</span>
@@ -159,14 +159,16 @@ import { StatementImportModalComponent } from './statement-import-modal.componen
                 [debounceTime]="300"
                 (searchChange)="onSearch($event)"
               ></app-inputsearch>
-              <app-button
-                variant="outline"
-                size="sm"
-                (clicked)="openImportModal()"
-              >
-                <app-icon name="upload" [size]="16" slot="icon"></app-icon>
-                <span class="hidden sm:inline">Importar</span>
-              </app-button>
+              @if (canImportStatements()) {
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  (clicked)="openImportModal()"
+                >
+                  <app-icon name="upload" [size]="16" slot="icon"></app-icon>
+                  <span class="hidden sm:inline">Importar</span>
+                </app-button>
+              }
               <app-button
                 variant="outline"
                 size="sm"
@@ -409,7 +411,7 @@ import { StatementImportModalComponent } from './statement-import-modal.componen
       <vendix-statement-import-modal
         [isOpen]="isImportModalOpen()"
         (isOpenChange)="isImportModalOpen.set($event)"
-        [bankAccounts]="accounts()"
+        [bankAccounts]="editableAccounts()"
         (importComplete)="loadAccounts()"
       ></vendix-statement-import-modal>
     </div>
@@ -424,6 +426,7 @@ export class BankAccountsComponent {
 
   accounts = signal<BankAccount[]>([]);
   scopeContext = signal<BankAccountScopeContext | null>(null);
+  scopeContextFailed = signal(false);
   loading = signal(false);
   searchTerm = signal('');
   isFormModalOpen = signal(false);
@@ -435,7 +438,15 @@ export class BankAccountsComponent {
   );
 
   canCreateAccount = computed(
-    () => this.scopeContext()?.can_manage_accounts ?? true,
+    () => this.scopeContext()?.can_manage_accounts ?? this.scopeContextFailed(),
+  );
+
+  editableAccounts = computed(() =>
+    this.accounts().filter((a) => a.can_edit !== false),
+  );
+
+  canImportStatements = computed(
+    () => this.canCreateAccount() || this.editableAccounts().length > 0,
   );
 
   duplicateWarnings = computed(
@@ -477,10 +488,12 @@ export class BankAccountsComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
+          this.scopeContextFailed.set(false);
           this.scopeContext.set(res.data || null);
         },
         error: () => {
-          // Conservador: si el endpoint falla, no bloquea el listado.
+          // Conservador: si el endpoint falla, no bloquea el listado ni la creación.
+          this.scopeContextFailed.set(true);
         },
       });
 
@@ -550,6 +563,7 @@ export class BankAccountsComponent {
   }
 
   openImportModal(): void {
+    if (!this.canImportStatements()) return;
     this.isImportModalOpen.set(true);
   }
 

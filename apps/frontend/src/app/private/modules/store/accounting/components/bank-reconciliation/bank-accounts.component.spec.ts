@@ -3,7 +3,7 @@ import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideStore } from '@ngrx/store';
-import { of } from 'rxjs';
+import { of, Subject } from 'rxjs';
 import { BankAccountsComponent } from './bank-accounts.component';
 import { BankAccountFormModalComponent } from './bank-account-form-modal.component';
 import { BankReconciliationService } from '../../services/bank-reconciliation.service';
@@ -195,12 +195,51 @@ describe('BankAccountsComponent & BankAccountFormModalComponent (QUI-1061)', () 
     const cmp = TestBed.createComponent(BankAccountsComponent).componentInstance;
     expect(cmp.isOrgScope()).toBeTrue();
     expect(cmp.canCreateAccount()).toBeFalse();
+    expect(cmp.canImportStatements()).toBeFalse();
+    expect(cmp.editableAccounts()).toEqual([]);
 
     cmp.openCreateModal();
     expect(cmp.isFormModalOpen()).toBeFalse();
 
+    cmp.openImportModal();
+    expect(cmp.isImportModalOpen()).toBeFalse();
+
     cmp.editAccount(cmp.accounts()[0]);
     expect(cmp.isFormModalOpen()).toBeFalse();
+  });
+
+  it('keeps canCreateAccount false while scopeContext is loading (avoids button flicker)', () => {
+    const scopeSubject = new Subject<{ success: boolean; data: BankAccountScopeContext }>();
+    setup(
+      {
+        fiscal_scope: 'ORGANIZATION',
+        can_manage_accounts: false,
+        can_manage_organization_accounts: false,
+        current_store_id: 10,
+        stores: [],
+        duplicate_number_warnings: [],
+      },
+      [],
+    );
+    reconciliationStub.getBankAccountScopeContext.and.returnValue(
+      scopeSubject.asObservable(),
+    );
+
+    const cmp = TestBed.createComponent(BankAccountsComponent).componentInstance;
+    expect(cmp.canCreateAccount()).toBeFalse();
+
+    scopeSubject.next({
+      success: true,
+      data: {
+        fiscal_scope: 'STORE',
+        can_manage_accounts: true,
+        can_manage_organization_accounts: false,
+        current_store_id: 10,
+        stores: [],
+        duplicate_number_warnings: [],
+      },
+    });
+    expect(cmp.canCreateAccount()).toBeTrue();
   });
 
   it('form modal sends available_in_all_stores and store_ids in scope ORGANIZATION and blocks empty store selection', () => {
