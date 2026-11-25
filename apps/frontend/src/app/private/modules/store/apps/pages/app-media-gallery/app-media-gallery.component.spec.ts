@@ -47,6 +47,17 @@ describe('AppMediaGalleryComponent', () => {
     return TestBed.createComponent(AppMediaGalleryComponent).componentInstance;
   }
 
+  const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+
+  afterEach(() => {
+    // No dejar el portapapeles parcheado: otras specs lo espían con spyOnProperty.
+    if (originalClipboard) {
+      Object.defineProperty(navigator, 'clipboard', originalClipboard);
+    } else {
+      delete (navigator as { clipboard?: unknown }).clipboard;
+    }
+  });
+
   it('copia el enlace estable del medio, no una firma', async () => {
     const writeText = jasmine.createSpy('writeText').and.returnValue(Promise.resolve());
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
@@ -78,18 +89,21 @@ describe('AppMediaGalleryComponent', () => {
     expect(remove).not.toHaveBeenCalled();
   });
 
-  it('la búsqueda sigue funcionando después de un error', async () => {
-    list.and.returnValues(
-      throwError(() => new Error('boom')),
-      of({ data: [item({ id: 9, alt: 'Otra' })], total: 1, page: 1, limit: 24 }),
-    );
+  it('la cadena de búsqueda sobrevive a un error', async () => {
+    list.and.returnValue(throwError(() => new Error('boom')));
     const component = setup();
     const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
     // La app corre sin zone.js: se espera el debounce con timers reales.
     await wait(320);
-    component.onSearch('fachada');
+    component.onSearch('primera');
     await wait(320);
-    expect(component.items().map((row) => row.id)).toEqual([9]);
+    expect(component.loading()).toBe(false);
+    const callsAfterError = list.calls.count();
+    // Si el catchError hubiera cerrado la cadena, esta segunda búsqueda no
+    // llegaría al servicio.
+    component.onSearch('segunda');
+    await wait(320);
+    expect(list.calls.count()).toBe(callsAfterError + 1);
     expect(component.loading()).toBe(false);
   });
 });
