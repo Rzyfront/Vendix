@@ -42,7 +42,7 @@
       </div>
 
       <!-- Filtros: en móvil dentro del desplegable, en escritorio siempre -->
-      <div id="bulk-customer-filters" [class]="filtersContainerClass">
+      <div id="bulk-customer-filters" [class]="filtersContainerClass()">
         <app-selector
           size="sm"
           [options]="stateOptions"

@@ -259,6 +259,8 @@ export class CustomersBulkEditPageComponent {
 
   /** Permiso de edición de clientes: la vista es afordancia, el backend manda. */
   readonly canEditCustomers = computed<boolean>(() =>
+    this.authFacade.isOwner() ||
+    this.authFacade.isAdmin() ||
     this.authFacade.hasPermission('store:customers:update'),
   );
 
@@ -344,7 +346,7 @@ export class CustomersBulkEditPageComponent {
   /** Tarifas de CLIENTE activas de la tienda (nunca unidades de venta). */
   private loadPriceTiers(): void {
     this.priceTiersService
-      .list({ is_active: true, limit: 200 })
+      .list({ is_active: true, kind: 'customer_tier', limit: 200 })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (tiers) =>
@@ -387,7 +389,11 @@ export class CustomersBulkEditPageComponent {
               name: segment.name,
             })),
           );
-          if ((options?.tags ?? []).length > 0) {
+          // El catálogo de ACCIONES sale de `crmService.tags()` (todas las
+          // etiquetas, incluidas las nuevas sin clientes). `options.tags` solo
+          // trae las que ya tienen uso y pisaba el catálogo, ocultando las
+          // recién creadas; aquí solo se usa para los segmentos.
+          if ((options?.tags ?? []).length > 0 && this.tagCatalog().length === 0) {
             this.tagCatalog.set(
               options.tags.map((tag) => ({ id: tag.id, name: tag.name })),
             );

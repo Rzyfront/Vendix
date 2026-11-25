@@ -136,7 +136,7 @@ export class CustomersBulkEditService {
     return this.http
       .get<
         ApiEnvelope<BulkCustomerIdsResult>
-      >(`${this.baseUrl}/ids`, { params: this.buildParams(filters, 1, 1) })
+      >(`${this.baseUrl}/ids`, { params: this.buildParams(filters) })
       .pipe(map((res) => res.data));
   }
 
@@ -291,12 +291,20 @@ export class CustomersBulkEditService {
    */
   private buildParams(
     filters: BulkCustomerFilters,
-    page: number,
-    limit: number,
+    page?: number,
+    limit?: number,
   ): HttpParams {
-    let params = new HttpParams()
-      .set('page', String(page))
-      .set('limit', String(limit));
+    let params = new HttpParams();
+
+    // `page`/`limit` solo van donde el DTO los declara: `/ids` valida con
+    // `BulkCustomerFilterDto`, que no los tiene, y el `forbidNonWhitelisted`
+    // global rechazaría la petición entera con HTTP 400.
+    if (page !== undefined) {
+      params = params.set('page', String(page));
+    }
+    if (limit !== undefined) {
+      params = params.set('limit', String(limit));
+    }
 
     const scalar: Array<keyof BulkCustomerFilters> = [
       'search',

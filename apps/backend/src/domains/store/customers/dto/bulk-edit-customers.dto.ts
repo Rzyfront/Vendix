@@ -347,7 +347,7 @@ export class BulkCustomerListQueryDto extends BulkCustomerFilterDto {
    */
   @ApiPropertyOptional({ type: [Number] })
   @IsOptional()
-  @Transform(({ value }) => parseIdList(value))
+  @Transform(({ value }) => parseIdList(value, MAX_BULK_EDIT_CUSTOMER_IDS))
   @IsArray()
   @IsInt({ each: true })
   ids?: number[];
@@ -370,7 +370,7 @@ export type BulkCustomerFilters = BulkCustomerFilterDto & {
  * de romper el listado, y se corta en `MAX_BULK_CUSTOMER_TAGS` para que un
  * query absurdo no genere un `IN` gigante.
  */
-function parseIdList(value: unknown): number[] {
+function parseIdList(value: unknown, max = MAX_BULK_CUSTOMER_TAGS): number[] {
   const raw = Array.isArray(value)
     ? value
     : typeof value === 'string'
@@ -379,9 +379,10 @@ function parseIdList(value: unknown): number[] {
   const ids = new Set<number>();
   for (const entry of raw) {
     const id = Number(String(entry).trim());
-    if (!Number.isInteger(id) || id < 1) continue;
+    // Fuera del rango `INT4`: Postgres reventaría el `IN` con un 500.
+    if (!Number.isInteger(id) || id < 1 || id > 2_147_483_647) continue;
     ids.add(id);
-    if (ids.size >= MAX_BULK_CUSTOMER_TAGS) break;
+    if (ids.size >= max) break;
   }
   return [...ids];
 }
