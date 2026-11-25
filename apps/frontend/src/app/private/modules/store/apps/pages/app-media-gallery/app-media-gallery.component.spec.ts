@@ -70,7 +70,11 @@ describe('AppMediaGalleryComponent', () => {
   it('cancelar la confirmación no borra nada', () => {
     const component = setup();
     component.remove(item());
+    // Cancelar cierra el modal y descarta el pendiente (lo que hace el output
+    // `cancel` del modal); después, confirmar no borra nada.
+    component.deleteOpen.set(false);
     component.pendingDelete.set(null);
+    component.confirmRemove();
     expect(remove).not.toHaveBeenCalled();
   });
 

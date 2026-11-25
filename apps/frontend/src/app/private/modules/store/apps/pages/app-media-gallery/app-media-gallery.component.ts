@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, computed, inject, signal, viewChild } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
-import { EMPTY, Subject, debounceTime, switchMap, tap } from 'rxjs';
+import { EMPTY, Subject, debounceTime, map, switchMap, tap } from 'rxjs';
 import { catchError } from 'rxjs/operators';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
@@ -166,7 +166,6 @@ export class AppMediaGalleryComponent {
 
   private page = 1;
   private readonly queries = new Subject<{ term: string; page: number; replace: boolean }>();
-  private readonly lastQuery = signal<{ term: string; page: number; replace: boolean } | null>(null);
 
   constructor() {
     this.queries
@@ -175,6 +174,10 @@ export class AppMediaGalleryComponent {
         tap(() => this.loading.set(true)),
         switchMap((query) =>
           this.media.list({ search: query.term, page: query.page, limit: 24 }).pipe(
+            // La consulta viaja con la respuesta: si el usuario cambia de
+            // término mientras llega una página, cada respuesta se aplica con
+            // SU criterio (replace o anexar), no con el último del signal.
+            map((result) => ({ query, result })),
             // Un fallo no puede cerrar la cadena: la galería debe poder volver
             // a buscar o paginar sin recargar la página.
             catchError(() => {
@@ -188,15 +191,12 @@ export class AppMediaGalleryComponent {
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe({
-        next: (result) => {
-          const last = this.lastQuery();
+        next: ({ query, result }) => {
           this.total.set(result.total);
-          this.items.set(last?.replace ? result.data : this.mergeUnique(this.items(), result.data));
+          this.items.set(
+            query.replace ? result.data : this.mergeUnique(this.items(), result.data),
+          );
           this.loading.set(false);
-        },
-        error: () => {
-          this.loading.set(false);
-          this.toast.error('No se pudo cargar la galería');
         },
       });
     this.emit(this.search(), 1, true);
@@ -264,6 +264,9 @@ export class AppMediaGalleryComponent {
         next: () => {
           this.items.set(this.items().filter((row) => row.id !== item.id));
           this.total.update((n) => Math.max(0, n - 1));
+          // El desplazamiento por páginas se corre al borrar: se repide la
+          // página actual para rellenar el hueco.
+          this.emit(this.search(), this.page, false);
         },
         error: () => this.toast.error('No se pudo quitar la foto'),
       });
@@ -291,7 +294,6 @@ export class AppMediaGalleryComponent {
   }
 
   private emit(term: string, page: number, replace: boolean): void {
-    this.lastQuery.set({ term, page, replace });
     this.queries.next({ term, page, replace });
   }
 }
