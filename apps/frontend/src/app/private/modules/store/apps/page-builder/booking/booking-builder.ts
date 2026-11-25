@@ -96,6 +96,7 @@ const META: Record<string, PageBlockMeta> = {
     liveData: 'Tus habitaciones reales con su tarifa y disponibilidad (Hotelería).',
   },
   checkin_info: { category: 'stay', pinned: 'start', removable: false },
+  highlights: { category: 'stay' },
   amenities: { category: 'stay' },
   policies: { category: 'trust' },
   location: { category: 'stay' },

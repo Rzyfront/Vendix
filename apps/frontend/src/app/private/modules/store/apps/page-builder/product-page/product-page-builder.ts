@@ -57,6 +57,7 @@ const CATEGORIES: readonly BuilderCategory[] = [
  */
 const META: Record<string, PageBlockMeta> = {
   benefits: { category: 'product' },
+  highlights: { category: 'product' },
   how_it_works: { category: 'product' },
   specifications: { category: 'product' },
   gallery: { category: 'product' },

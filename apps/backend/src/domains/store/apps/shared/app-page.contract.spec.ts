@@ -419,4 +419,205 @@ describe('app page contract', () => {
       ).toBeNull();
     });
   });
+
+  describe('section variants and appearance (apps-sections)', () => {
+    it('accepts hero variants, gallery layouts, highlights with media/icon/accent, cta image and block appearance', () => {
+      const result = validateAppPage('product_page', {
+        schema_version: 1,
+        hero: {
+          title: 'Producto estrella',
+          variant: 'background',
+          background_image_url: 'https://api.vendix.online/api/public/apps/media/10',
+          overlay_opacity: 45,
+          height: 'full',
+          align: 'center',
+        },
+        blocks: [
+          {
+            id: 'gal',
+            type: 'gallery',
+            props: {
+              title: 'Fotos',
+              variant: 'carousel',
+              columns: 4,
+              aspect_ratio: '16:9',
+              image_urls: [
+                'https://api.vendix.online/api/public/apps/media/1',
+                'https://api.vendix.online/api/public/apps/media/2',
+              ],
+              background_color: '#F8FAFC',
+              spacing: 'spacious',
+              align: 'center',
+            },
+          },
+          {
+            id: 'hl',
+            type: 'highlights',
+            props: {
+              title: 'Destacados',
+              variant: 'band',
+              accent_color: '#0EA5E9',
+              background_image_url: 'https://api.vendix.online/api/public/apps/media/3',
+              overlay_opacity: 0,
+              spacing: 'compact',
+              align: 'left',
+              items: [
+                {
+                  title: 'Envío rápido',
+                  text: 'En 24 horas',
+                  image_url: 'https://api.vendix.online/api/public/apps/media/4',
+                  icon: 'truck',
+                },
+              ],
+            },
+          },
+          {
+            id: 'cta',
+            type: 'cta',
+            props: {
+              title: 'Compra hoy',
+              button_label: 'Comprar',
+              image_url: 'https://api.vendix.online/api/public/apps/media/5',
+            },
+          },
+        ],
+      });
+
+      expect(result.errors).toEqual([]);
+      expect(result.valid).toBe(true);
+      expect(result.value?.hero).toEqual({
+        title: 'Producto estrella',
+        variant: 'background',
+        background_image_url: 'https://api.vendix.online/api/public/apps/media/10',
+        overlay_opacity: 45,
+        height: 'full',
+        align: 'center',
+      });
+      expect(result.value?.blocks[1].props['overlay_opacity']).toBe(0);
+      expect(result.value?.blocks[1].props['accent_color']).toBe('#0EA5E9');
+    });
+
+    it('rejects invalid enums, out-of-range sliders, bad colors and non-https media URLs', () => {
+      const result = validateAppPage('service_page', {
+        schema_version: 1,
+        hero: {
+          title: 'Servicios',
+          variant: 'split',
+          background_image_url: 'http://inseguro.co/bg.jpg',
+          overlay_opacity: 95,
+          height: 'giant',
+          align: 'justify',
+        },
+        blocks: [
+          {
+            id: 'gal',
+            type: 'gallery',
+            props: {
+              variant: 'masonry',
+              columns: 5,
+              aspect_ratio: '21:9',
+              image_urls: ['http://inseguro.co/a.jpg'],
+              background_color: 'azul',
+              spacing: 'huge',
+              align: 'middle',
+            },
+          },
+          {
+            id: 'hl',
+            type: 'highlights',
+            props: {
+              variant: 'pills',
+              accent_color: '#123',
+              overlay_opacity: -5,
+              items: [{ title: 'Uno', image_url: 'ftp://x.co/1.png', icon: 'invalid-icon' }],
+            },
+          },
+        ],
+      });
+
+      expect(result.valid).toBe(false);
+      expect(result.errors).toEqual(
+        expect.arrayContaining([
+          'hero.variant debe ser uno de: centered, image_right, background.',
+          'hero.background_image_url debe ser una URL https.',
+          'hero.overlay_opacity debe ser un entero entre 0 y 80.',
+          'hero.height debe ser uno de: auto, compact, full.',
+          'hero.align debe ser uno de: left, center, right.',
+          'blocks[0].props.variant debe ser uno de: grid, carousel, mosaic.',
+          'blocks[0].props.columns debe ser un entero entre 2 y 4.',
+          'blocks[0].props.aspect_ratio debe ser uno de: 1:1, 4:3, 16:9.',
+          'blocks[0].props.image_urls[0] debe ser una URL https.',
+          'blocks[0].props.background_color debe ser un color #RRGGBB.',
+          'blocks[0].props.spacing debe ser uno de: compact, normal, spacious.',
+          'blocks[0].props.align debe ser uno de: left, center, right.',
+          'blocks[1].props.variant debe ser uno de: cards, list, band.',
+          'blocks[1].props.accent_color debe ser un color #RRGGBB.',
+          'blocks[1].props.overlay_opacity debe ser un entero entre 0 y 80.',
+          'blocks[1].props.items[0].image_url debe ser una URL https.',
+          'blocks[1].props.items[0].icon debe ser uno de: sparkles, star, check, shield-check, truck, clock, heart, award, zap, flame, gift, map-pin, crown, thumbs-up.',
+        ]),
+      );
+    });
+
+    it('keeps store_home blocks and hero isolated from the new section customization props', () => {
+      const okHero = validateAppPage('store_home', {
+        schema_version: 1,
+        hero: {
+          eyebrow: 'Bienvenidos',
+          title: 'Mi tienda',
+          subtitle: 'Todo en un lugar',
+          image_url: 'https://cdn.x.co/home.jpg',
+          button_label: 'Explorar',
+        },
+        blocks: [],
+      });
+      expect(okHero.valid).toBe(true);
+
+      const result = validateAppPage('store_home', {
+        schema_version: 1,
+        hero: {
+          title: 'Mi tienda',
+          variant: 'background',
+          background_image_url: 'https://cdn.x.co/bg.jpg',
+          overlay_opacity: 40,
+          height: 'full',
+          align: 'center',
+        },
+        blocks: [{ id: 'hl', type: 'highlights', props: { variant: 'band', spacing: 'compact' } }],
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors).toEqual(
+        expect.arrayContaining([
+          'hero.variant no es un campo permitido.',
+          'hero.background_image_url no es un campo permitido.',
+          'hero.overlay_opacity no es un campo permitido.',
+          'hero.height no es un campo permitido.',
+          'hero.align no es un campo permitido.',
+          'blocks[0].props.variant no es un campo permitido.',
+          'blocks[0].props.spacing no es un campo permitido.',
+        ]),
+      );
+    });
+
+    it('rejects javascript: and data: URLs in background_image_url (hero and block)', () => {
+      for (const badUrl of ['javascript:alert(1)', 'data:image/svg+xml,<svg onload=alert(1)>']) {
+        const result = validateAppPage('product_page', {
+          schema_version: 1,
+          hero: { title: 'Producto', background_image_url: badUrl },
+          blocks: [
+            {
+              id: 'faq1',
+              type: 'faq',
+              props: { title: 'FAQ', background_image_url: badUrl },
+            },
+          ],
+        });
+        expect(result.valid).toBe(false);
+        expect(result.errors).toEqual([
+          'hero.background_image_url debe ser una URL https.',
+          'blocks[0].props.background_image_url debe ser una URL https.',
+        ]);
+      }
+    });
+  });
 });

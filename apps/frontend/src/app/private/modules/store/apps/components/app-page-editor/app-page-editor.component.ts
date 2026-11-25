@@ -480,9 +480,29 @@ const APP_LABEL: Record<PageAppKind, string> = {
             <input type="number" [class]="inputClass" [attr.min]="def.min" [attr.max]="def.max"
                    [value]="read(target, def.key) ?? ''" (input)="onInt(target, def.key, $event)" />
           }
+          @case ('range') {
+            <input type="number" [class]="inputClass" [attr.min]="def.min" [attr.max]="def.max"
+                   [value]="read(target, def.key) ?? ''" (input)="onInt(target, def.key, $event)" />
+          }
           @case ('url') {
             <input type="url" [class]="inputClass" [attr.placeholder]="def.placeholder ?? 'https://'"
                    [value]="read(target, def.key) ?? ''" (input)="onText(target, def.key, $event)" />
+          }
+          @case ('media') {
+            <input type="url" [class]="inputClass" [attr.placeholder]="def.placeholder ?? 'https://'"
+                   [value]="read(target, def.key) ?? ''" (input)="onText(target, def.key, $event)" />
+          }
+          @case ('color') {
+            <input type="text" [class]="inputClass" maxlength="7" [attr.placeholder]="def.placeholder ?? '#RRGGBB'"
+                   [value]="read(target, def.key) ?? ''" (input)="onText(target, def.key, $event)" />
+          }
+          @case ('select') {
+            <select [class]="inputClass" [value]="read(target, def.key) ?? ''" (change)="onText(target, def.key, $event)">
+              <option value="">{{ def.emptyLabel ?? 'Por defecto' }}</option>
+              @for (opt of def.options; track opt.value) {
+                <option [value]="opt.value" [selected]="read(target, def.key) === opt.value">{{ opt.label }}</option>
+              }
+            </select>
           }
           @default {
             @if (def.multiline) {
@@ -534,6 +554,9 @@ const APP_LABEL: Record<PageAppKind, string> = {
           <ng-container *ngTemplateOutlet="stringList; context: { field: field, i: i, url: false }" />
         }
         @case ('url_list') {
+          <ng-container *ngTemplateOutlet="stringList; context: { field: field, i: i, url: true }" />
+        }
+        @case ('media_list') {
           <ng-container *ngTemplateOutlet="stringList; context: { field: field, i: i, url: true }" />
         }
         @default {

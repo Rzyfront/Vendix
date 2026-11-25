@@ -70,6 +70,7 @@ const META: Record<string, PageBlockMeta> = {
     removable: false,
     liveData: 'Tus servicios que se venden en línea, con su precio y duración.',
   },
+  highlights: { category: 'services' },
   how_it_works: { category: 'services', modes: ['booking', 'both'] },
   team: { category: 'services' },
   policies: { category: 'trust', modes: ['booking', 'both'] },

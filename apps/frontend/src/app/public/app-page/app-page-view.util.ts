@@ -27,6 +27,40 @@ export function safeUrl(value: string | undefined): string | null {
   return value && /^https?:\/\//i.test(value) ? value : null;
 }
 
+/** Convierte una URL segura a `url("...")` escapando caracteres peligrosos para CSS. */
+export function cssBgUrl(value: string | undefined): string | null {
+  const url = safeUrl(value);
+  return url
+    ? `url("${url.replace(/["'()\s\\]/g, (c) => '%' + c.charCodeAt(0).toString(16).padStart(2, '0'))}")`
+    : null;
+}
+
+/** Lee un entero opcional dentro de un rango cerrado; `null` si está ausente o fuera de rango. */
+export function blockInt(props: Record<string, unknown>, key: string, min: number, max: number): number | null {
+  const value = props[key];
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) return null;
+  return value;
+}
+
+/** Lee una opción de un catálogo cerrado; `null` si está ausente o no coincide. */
+export function blockEnum<T extends string>(
+  props: Record<string, unknown>,
+  key: string,
+  allowed: readonly T[],
+): T | null {
+  const value = props[key];
+  return typeof value === 'string' && (allowed as readonly string[]).includes(value) ? (value as T) : null;
+}
+
+/** Opacidad CSS de velo oscuro (0-80 %) sobre una imagen de fondo. */
+export function overlayRgba(opacity: number | undefined | null, fallbackPercent = 40): string {
+  const pct =
+    typeof opacity === 'number' && Number.isFinite(opacity)
+      ? Math.min(80, Math.max(0, Math.round(opacity)))
+      : fallbackPercent;
+  return `rgba(0, 0, 0, ${pct / 100})`;
+}
+
 export function blockText(props: Record<string, unknown>, key: string): string {
   const value = props[key];
   return typeof value === 'string' ? value.trim() : '';
