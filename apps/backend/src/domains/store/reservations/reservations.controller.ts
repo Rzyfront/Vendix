@@ -499,6 +499,19 @@ export class ReservationsController {
 
   // Cola de atención: ruta estática, declarada ANTES de `@Get(':id')`. Si va
   // después, NestJS matchea `:id = 'queue'` y ParseIntPipe responde 400.
+  /**
+   * Día de consulta: `YYYY-MM-DD` o vacío para "hoy en la zona de la tienda"
+   * (lo resuelve el service; nunca la fecha UTC del servidor).
+   */
+  private parseQueueDay(day?: string): string | undefined {
+    if (day == null || day.trim() === '') return undefined;
+    const value = day.trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(value))) {
+      throw new BadRequestException('El día debe venir como YYYY-MM-DD');
+    }
+    return value;
+  }
+
   @Get('queue')
   @Permissions('store:reservations:queue:read')
   async getQueue(@Query('day') day?: string) {
@@ -508,10 +521,9 @@ export class ReservationsController {
         'No se pudo determinar la tienda del contexto de la solicitud',
       );
     }
-    const targetDay = day ?? new Date().toISOString().split('T')[0];
     const result = await this.appointmentQueueService.computeQueueForStore(
       storeId,
-      targetDay,
+      this.parseQueueDay(day),
     );
     return this.responseService.success(result, 'Cola de reservas obtenida');
   }
@@ -527,8 +539,10 @@ export class ReservationsController {
         'No se pudo determinar la tienda del contexto de la solicitud',
       );
     }
-    // Sin `day`, el service resuelve HOY en la zona de la tienda.
-    const result = await this.appointmentQueueService.dayBoard(storeId, day);
+    const result = await this.appointmentQueueService.dayBoard(
+      storeId,
+      this.parseQueueDay(day),
+    );
     return this.responseService.success(result, 'Tablero de la cola obtenido');
   }
 

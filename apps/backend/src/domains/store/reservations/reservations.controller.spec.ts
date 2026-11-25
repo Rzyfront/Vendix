@@ -158,6 +158,18 @@ describe('ReservationsController — appointment redesign endpoints (smoke)', ()
     }
   });
 
+  it('rechaza un ?day que no sea YYYY-MM-DD', async () => {
+    const { controller } = buildController();
+    const storeIdSpy = jest
+      .spyOn(RequestContextService, 'getStoreId')
+      .mockReturnValue(1);
+    try {
+      await expect(controller.getQueueBoard('foo')).rejects.toThrow();
+    } finally {
+      storeIdSpy.mockRestore();
+    }
+  });
+
   it('GET :id returns the booking detail with its deposit block', async () => {
     const { controller, reservationsService, responseService } = buildController();
     await controller.findOne(1);

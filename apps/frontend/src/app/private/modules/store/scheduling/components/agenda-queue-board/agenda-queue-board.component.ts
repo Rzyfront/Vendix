@@ -12,7 +12,11 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { IconComponent, SpinnerComponent } from '../../../../../../shared/components';
+import {
+  IconComponent,
+  SpinnerComponent,
+  ToastService,
+} from '../../../../../../shared/components';
 import { ReservationsService } from '../../../reservations/services/reservations.service';
 import { QueueBoard, QueueBoardRow } from '../../../reservations/interfaces/reservation.interface';
 
@@ -41,6 +45,7 @@ import { QueueBoard, QueueBoardRow } from '../../../reservations/interfaces/rese
 })
 export class AgendaQueueBoardComponent implements OnInit, OnDestroy {
   private readonly reservations = inject(ReservationsService);
+  private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly board = signal<QueueBoard | null>(null);
@@ -53,6 +58,8 @@ export class AgendaQueueBoardComponent implements OnInit, OnDestroy {
   /** Se necesita un nodo real para entrar en pantalla completa. */
   private readonly root = viewChild<ElementRef<HTMLElement>>('root');
   private pollHandle: ReturnType<typeof setInterval> | null = null;
+  /** Secuencia de la última petición: una respuesta vieja no pisa una nueva. */
+  private refreshSeq = 0;
 
   readonly inService = computed(() => this.board()?.in_service ?? []);
   readonly waiting = computed(() => this.board()?.waiting ?? []);
@@ -64,9 +71,14 @@ export class AgendaQueueBoardComponent implements OnInit, OnDestroy {
   );
 
   /** Nombres que siguen después del "siguiente", para el monitor. */
-  readonly following = computed<QueueBoardRow[]>(() =>
-    [...this.waiting().slice(1), ...this.upcoming()].slice(0, 5),
-  );
+  readonly following = computed<QueueBoardRow[]>(() => {
+    const waiting = this.waiting();
+    const upcoming = this.upcoming();
+    // Si el siguiente sale de la sala, la programación entra completa detrás;
+    // si sale de la programación, no se repite en la lista.
+    const rest = waiting.length > 0 ? [...waiting.slice(1), ...upcoming] : upcoming.slice(1);
+    return rest.slice(0, 5);
+  });
 
   readonly dayLabel = computed(() => {
     const day = this.board()?.day;
@@ -102,17 +114,21 @@ export class AgendaQueueBoardComponent implements OnInit, OnDestroy {
 
   refresh(showSpinner = true): void {
     if (showSpinner) this.loading.set(true);
+    const seq = ++this.refreshSeq;
     this.reservations
       .getQueueBoard()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (board) => {
+          // Con la red lenta, una respuesta anterior no debe pisar a la última.
+          if (seq !== this.refreshSeq) return;
           this.board.set(board);
           this.failed.set(false);
           this.loading.set(false);
           this.now.set(Date.now());
         },
         error: () => {
+          if (seq !== this.refreshSeq) return;
           this.failed.set(true);
           this.loading.set(false);
         },
@@ -131,7 +147,11 @@ export class AgendaQueueBoardComponent implements OnInit, OnDestroy {
           this.callingId.set(null);
           this.refresh(false);
         },
-        error: () => this.callingId.set(null),
+        error: () => {
+          this.callingId.set(null);
+          this.toast.error('No se pudo llamar al cliente. Intenta de nuevo.');
+          this.refresh(false);
+        },
       });
   }
 
@@ -179,6 +199,17 @@ export class AgendaQueueBoardComponent implements OnInit, OnDestroy {
     if (row.status === 'attending') return 'En atención';
     if (row.status === 'arriving') return 'En sala';
     return 'Confirmada';
+  }
+
+  /**
+   * Nombre para el monitor a la vista del público: primer nombre y la inicial
+   * del apellido (no el nombre completo, que expone datos personales).
+   */
+  publicName(row: QueueBoardRow): string {
+    const parts = row.customer_name.trim().split(/\s+/).filter(Boolean);
+    const first = parts[0] ?? '';
+    const last = parts.length > 1 ? parts[parts.length - 1] : '';
+    return last ? `${first} ${last[0].toUpperCase()}.` : first;
   }
 
   initials(row: QueueBoardRow): string {

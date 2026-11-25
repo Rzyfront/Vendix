@@ -47,7 +47,7 @@
     <div class="aq-screen">
       <p class="aq-screen-label">Siguiente en atención</p>
       @if (next(); as n) {
-        <p class="aq-screen-name">{{ n.customer_name }}</p>
+        <p class="aq-screen-name">{{ publicName(n) }}</p>
         <p class="aq-screen-meta">
           {{ n.start_time.slice(0, 5) }}
           @if (n.service_name) {
@@ -69,7 +69,7 @@
             @for (row of following(); track row.booking_id) {
               <li>
                 <span class="aq-screen-next-time">{{ row.start_time.slice(0, 5) }}</span>
-                <span class="aq-screen-next-name">{{ row.customer_name }}</span>
+                <span class="aq-screen-next-name">{{ publicName(row) }}</span>
               </li>
             }
           </ol>

@@ -44,7 +44,7 @@ describe('AppointmentQueueService', () => {
       expect.objectContaining({
         where: expect.objectContaining({
           store_id: 1,
-          status: { in: ['arriving', 'attending'] },
+          status: 'arriving',
           arrival_at: { not: null },
         }),
       }),
@@ -158,7 +158,7 @@ describe('AppointmentQueueService', () => {
       expect(board.upcoming[0].provider_name).toBe('María Paz');
       expect(board.upcoming[0].service_name).toBe('Corte');
       expect(board.upcoming[0].minutes_to_start).toBe(120);
-      expect(board.upcoming[0].checked_in).toBeFalse();
+      expect(board.upcoming[0].checked_in).toBe(false);
     });
 
     it('sin día usa HOY en la zona de la tienda, no la fecha UTC', async () => {
@@ -175,6 +175,47 @@ describe('AppointmentQueueService', () => {
       expect(update).not.toHaveBeenCalled();
       expect(transaction).not.toHaveBeenCalled();
     });
+  });
+
+  it('desempata por prioridad cuando dos reservas llegaron con el mismo score', async () => {
+    const base = {
+      booking_number: 'BKG',
+      customer_id: 100,
+      provider_id: 1,
+      date: new Date('2026-07-18T00:00:00Z'),
+      end_date: null,
+      start_time: '05:00',
+      end_time: '06:00',
+      arrival_at: new Date('2026-07-18T09:55:00Z'),
+      created_at: new Date('2026-07-18T08:00:00Z'),
+    };
+    const { service } = buildService([
+      { ...base, id: 20, priority: 0 },
+      { ...base, id: 21, priority: 5 },
+    ]);
+    const ranked = await service.computeQueueForStore(1, '2026-07-18');
+    expect(ranked.map((r) => r.booking_id)).toEqual([20, 21]);
+  });
+
+  it('deja fuera a quien ya está en atención y ordena por cercanía a su hora', async () => {
+    const base = {
+      booking_number: 'BKG',
+      customer_id: 100,
+      provider_id: 1,
+      date: new Date('2026-07-18T00:00:00Z'),
+      end_date: null,
+      start_time: '05:00',
+      end_time: '06:00',
+      priority: 0,
+      created_at: new Date('2026-07-18T08:00:00Z'),
+    };
+    const { service, findMany } = buildService([
+      { ...base, id: 30, status: 'arriving', arrival_at: new Date('2026-07-18T09:40:00Z') },
+      { ...base, id: 31, status: 'arriving', arrival_at: new Date('2026-07-18T09:58:00Z') },
+    ]);
+    const ranked = await service.computeQueueForStore(1, '2026-07-18');
+    expect(findMany.mock.calls[0][0].where.status).toBe('arriving');
+    expect(ranked.map((r) => r.booking_id)).toEqual([31, 30]);
   });
 
   it('persists queue_position in a transaction and notifies the top of the queue', async () => {
