@@ -279,6 +279,30 @@ describe('services.tools · manage_service_plan / get_service_plan', () => {
       );
     });
 
+    it('set_itinerary: editar una actividad a prestador interno limpia el tercero', async () => {
+      const { deps, run } = build();
+      deps.productsService.findOne.mockResolvedValue(PLAN_ROW);
+      deps.servicePlansService.updateActivity.mockResolvedValue({ id: 12 });
+      await run({ action: 'set_itinerary', product_id: 77, activities: [{ activity_id: 12, provider_id: 4 }] });
+      expect(deps.servicePlansService.updateActivity).toHaveBeenCalledWith(
+        77,
+        12,
+        expect.objectContaining({ provider_id: 4, supplier_id: null, supplier_name: null, supplier_contact: null }),
+      );
+    });
+
+    it('assign_activity_provider con solo contacto del tercero quita el prestador interno', async () => {
+      const { deps, run } = build();
+      deps.productsService.findOne.mockResolvedValue(PLAN_ROW);
+      deps.servicePlansService.updateActivity.mockResolvedValue({ id: 12 });
+      await run({ action: 'assign_activity_provider', product_id: 77, activity_id: 12, supplier_contact: '300 000 0000' });
+      expect(deps.servicePlansService.updateActivity).toHaveBeenCalledWith(
+        77,
+        12,
+        expect.objectContaining({ provider_id: null, supplier_contact: '300 000 0000' }),
+      );
+    });
+
     it('assign_activity_provider rechaza prestador y tercero a la vez', async () => {
       const { deps, run } = build();
       deps.productsService.findOne.mockResolvedValue(PLAN_ROW);

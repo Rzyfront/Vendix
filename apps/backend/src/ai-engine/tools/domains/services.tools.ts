@@ -174,6 +174,23 @@ function describeError(error: unknown): string {
 
 const has = (value: unknown) => value !== undefined && value !== null;
 
+/**
+ * Responsable de una actividad: interno (provider_id) XOR tercero (supplier_*).
+ * Elegir uno limpia el otro, como el panel, para que el servicio no rechace por
+ * conservar el responsable anterior (SERVICE_PLAN_020).
+ */
+function normalizeActivityOwner(fields: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...fields };
+  const internal = has(out.provider_id);
+  const external = has(out.supplier_id) || has(out.supplier_name) || has(out.supplier_contact);
+  if (internal && !external) {
+    Object.assign(out, { supplier_id: null, supplier_name: null, supplier_contact: null });
+  } else if (external && !internal) {
+    out.provider_id = null;
+  }
+  return out;
+}
+
 function positiveInt(value: unknown): number | null {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed >= 1 ? parsed : null;
@@ -263,6 +280,8 @@ function tiersLabel(dto: ReplacePlanPaxPricesDto): string {
 
 interface ServiceWrite {
   action: 'create' | 'update';
+  /** false = solo prestadores/tramos: no hay campos del producto que escribir. */
+  hasProductFields: boolean;
   productId: number | null;
   label: string;
   dto: CreateProductDto | UpdateProductDto;
@@ -396,11 +415,19 @@ export function createServiceTools(deps: ServiceToolDeps): RegisteredTool[] {
         );
       }
       plain.service_duration_minutes = Math.round(minutes);
+      // La unidad es solo presentación: minutos directos se muestran en minutos
+      // (solo se toca si la guardada es otra; null ya se lee como minutos).
+      if (current?.service_duration_unit && current.service_duration_unit !== 'minute') {
+        plain.service_duration_unit = 'minute';
+      }
     }
 
     const plan = planProductFields(args.plan);
     if (!plan.ok) return plan;
-    if (args.plan !== undefined && (args.plan === null || typeof args.plan !== 'object')) {
+    if (
+      args.plan !== undefined &&
+      (args.plan === null || typeof args.plan !== 'object' || Array.isArray(args.plan))
+    ) {
       return fail('plan debe ser un objeto: {duration_days, duration_nights?, departure_mode?, min_pax?, max_pax?, pax_prices?}.');
     }
     const hasPlan = Object.keys(plan.value.fields).length > 0 || !!plan.value.paxPrices;
@@ -456,6 +483,21 @@ export function createServiceTools(deps: ServiceToolDeps): RegisteredTool[] {
       }
     }
 
+    // Prestadores que ya atienden el servicio: no son cambio ni falta de prestador.
+    let alreadyAssigned: number[] = [];
+    if (current) {
+      try {
+        alreadyAssigned = ((await providersService.getProvidersForService(current.id)) ?? []).map(
+          (provider: { id: number }) => provider.id,
+        );
+      } catch {
+        alreadyAssigned = [];
+      }
+    }
+    const newProviderNames = providerNames.filter(
+      (_name, index) => !alreadyAssigned.includes(providerIds[index]),
+    );
+
     const changes: ToolPreview['changes'] = Object.keys(SERVICE_FIELD_LABELS)
       .filter((field) => dto[field] !== undefined)
       .filter((field) => !current || current[field] !== dto[field])
@@ -473,12 +515,12 @@ export function createServiceTools(deps: ServiceToolDeps): RegisteredTool[] {
         to: tiersLabel(plan.value.paxPrices),
       });
     }
-    if (providerIds.length) {
+    if (newProviderNames.length) {
       changes.push({
         field: 'provider_ids',
         label: 'Prestadores asignados',
         from: null,
-        to: providerNames.join(', '),
+        to: newProviderNames.join(', '),
       });
     }
     if (action === 'update' && !changes.length) {
@@ -491,17 +533,17 @@ export function createServiceTools(deps: ServiceToolDeps): RegisteredTool[] {
     const warnings: string[] = [];
     const effective = (field: string) =>
       dto[field] !== undefined ? dto[field] : current?.[field];
-    const bookingMode = effective('booking_mode') ?? BookingMode.PROVIDER_REQUIRED;
+    // Sin modo explícito, una estación con tarifa por tiempo queda en reserva
+    // libre (lo decide ProductsService); el resto, con prestador (default de BD).
+    const stationRate =
+      effective('requires_station') === true &&
+      effective('rental_pricing_mode') === 'station_rate';
+    const bookingMode =
+      effective('booking_mode') ??
+      (stationRate ? BookingMode.FREE_BOOKING : BookingMode.PROVIDER_REQUIRED);
     const requiresBooking = effective('requires_booking') === true;
     if (requiresBooking && bookingMode === BookingMode.PROVIDER_REQUIRED) {
-      let assigned = providerIds.length;
-      if (!assigned && current) {
-        try {
-          assigned = ((await providersService.getProvidersForService(current.id)) ?? []).length;
-        } catch {
-          assigned = 0;
-        }
-      }
+      const assigned = new Set([...providerIds, ...alreadyAssigned]).size;
       if (!assigned) {
         warnings.push(
           'El modo de reserva exige prestador y el servicio no tiene ninguno asignado: nadie podrá reservarlo hasta que pases provider_ids (o uses booking_mode free_booking).',
@@ -521,6 +563,7 @@ export function createServiceTools(deps: ServiceToolDeps): RegisteredTool[] {
       ok: true,
       value: {
         action: action as 'create' | 'update',
+        hasProductFields: Object.values(dto).some((value) => value !== undefined),
         productId: current?.id ?? null,
         label: action === 'create' ? `Nuevo servicio: ${name}` : `Editar servicio: ${name}`,
         dto: validated.dto,
@@ -760,16 +803,13 @@ export function createServiceTools(deps: ServiceToolDeps): RegisteredTool[] {
       if (!Object.keys(owner).length) {
         return fail('Pasa provider_id (prestador interno), supplier_id (proveedor registrado) o supplier_name/supplier_contact (tercero). Usa null para quitarlo.');
       }
-      if (has(owner.provider_id) && (has(owner.supplier_id) || has(owner.supplier_name))) {
+      if (
+        has(owner.provider_id) &&
+        (has(owner.supplier_id) || has(owner.supplier_name) || has(owner.supplier_contact))
+      ) {
         return fail('Una actividad tiene un responsable interno (provider_id) o un tercero (supplier_*), no los dos.');
       }
-      // Cambiar de tipo de responsable limpia el otro, como en el panel.
-      if (has(owner.provider_id)) {
-        Object.assign(owner, { supplier_id: null, supplier_name: null, supplier_contact: null });
-      } else if (has(owner.supplier_id) || has(owner.supplier_name)) {
-        owner.provider_id = null;
-      }
-      const validated = toValidatedDto(UpdatePlanActivityDto, owner);
+      const validated = toValidatedDto(UpdatePlanActivityDto, normalizeActivityOwner(owner));
       if (!validated.ok) return fail(validated.message);
       const who = has(owner.provider_id)
         ? `Prestador #${owner.provider_id}`
@@ -820,13 +860,16 @@ export function createServiceTools(deps: ServiceToolDeps): RegisteredTool[] {
         );
       }
       const { activity_id: rawId, ...fields } = row;
-      if (has(fields.provider_id) && (has(fields.supplier_id) || has(fields.supplier_name))) {
+      if (
+        has(fields.provider_id) &&
+        (has(fields.supplier_id) || has(fields.supplier_name) || has(fields.supplier_contact))
+      ) {
         return fail(`Actividad ${index + 1}: tiene prestador interno y tercero a la vez; elige uno.`);
       }
       if (rawId !== undefined) {
         const id = positiveInt(rawId);
         if (!id) return fail(`Actividad ${index + 1}: activity_id inválido "${rawId}".`);
-        const validated = toValidatedDto(UpdatePlanActivityDto, fields);
+        const validated = toValidatedDto(UpdatePlanActivityDto, normalizeActivityOwner(fields));
         if (!validated.ok) return fail(`Actividad ${index + 1}: ${validated.message}`);
         ops.push({ kind: 'update', id, dto: validated.dto });
       } else {
@@ -983,7 +1026,7 @@ export function createServiceTools(deps: ServiceToolDeps): RegisteredTool[] {
           if (write.action === 'create') {
             const created: any = await productsService.create(write.dto as CreateProductDto);
             productId = created?.id ?? null;
-          } else {
+          } else if (write.hasProductFields) {
             await productsService.update(productId as number, write.dto as UpdateProductDto, { lean: true });
           }
         } catch (error) {
@@ -995,12 +1038,14 @@ export function createServiceTools(deps: ServiceToolDeps): RegisteredTool[] {
           return toolError('El servicio se creó pero no se obtuvo su id.', 'Búscalo con find_product.');
         }
         const pending: string[] = [];
+        const failedFields = new Set<string>();
         let tramos: unknown;
         if (write.paxPrices) {
           try {
             tramos = await servicePlansService.replacePaxPrices(productId, write.paxPrices.tiers);
           } catch (error) {
             pending.push(`Precios por grupo no guardados: ${describeError(error)}`);
+            failedFields.add('pax_prices');
           }
         }
         const providers = write.providerIds.length
@@ -1008,12 +1053,15 @@ export function createServiceTools(deps: ServiceToolDeps): RegisteredTool[] {
           : null;
         if (providers?.fallidos.length) {
           pending.push(`${providers.fallidos.length} prestador(es) no se asignaron.`);
+          if (!providers.asignados.length && !providers.ya_asignados.length) failedFields.add('provider_ids');
         }
         return JSON.stringify({
-          summary: `${write.label}: ${write.changes.length} cambio(s) aplicado(s).${pending.length ? ` Pendiente: ${pending.join(' ')}` : ''}`,
+          summary: `${write.label}: ${write.changes.length - failedFields.size} cambio(s) aplicado(s).${pending.length ? ` Pendiente: ${pending.join(' ')}` : ''}`,
           data: {
             product_id: productId,
-            campos: write.changes.map((change) => change.field),
+            campos: write.changes
+              .map((change) => change.field)
+              .filter((field) => !failedFields.has(field)),
             ...(tramos ? { tramos } : {}),
             ...(providers ? { prestadores: providers } : {}),
           },

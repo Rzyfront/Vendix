@@ -2030,6 +2030,12 @@ export function createReservationsTools(
                 to: `${validated.dto.date}${specialHours ? ` ${clockRangeLabel(validated.dto.custom_start_time, validated.dto.custom_end_time)}` : ''}${validated.dto.reason ? ` (${validated.dto.reason})` : ''}`,
               },
             ],
+            ...(specialHours
+              ? {
+                  message:
+                    'El horario especial reemplaza los bloques de ese día; solo aplica si el prestador trabaja ese día de la semana.',
+                }
+              : {}),
             domain: 'reservations',
           };
         }

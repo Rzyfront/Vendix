@@ -263,6 +263,64 @@ describe('services.tools · manage_service', () => {
       expect(answer.data.prestadores).toEqual({ asignados: [], ya_asignados: [3], fallidos: [] });
     });
 
+    it('update con un prestador ya asignado y nada más → nada que cambiar', async () => {
+      const { deps, run } = build();
+      deps.productsService.findOne.mockResolvedValue(SERVICE_ROW);
+      deps.providersService.findOne.mockResolvedValue({ id: 3, display_name: 'Andrés' });
+      deps.providersService.getProvidersForService.mockResolvedValue([{ id: 3 }]);
+      const answer = await run({ action: 'update', product_id: 21, provider_ids: [3] });
+      expect(answer.error).toContain('No hay nada que cambiar');
+      expect(deps.productsService.update).not.toHaveBeenCalled();
+    });
+
+    it('update solo de prestadores no reescribe el producto', async () => {
+      const { deps, run } = build();
+      deps.productsService.findOne.mockResolvedValue(SERVICE_ROW);
+      deps.providersService.findOne.mockResolvedValue({ id: 8, display_name: 'Luz' });
+      deps.providersService.assignService.mockResolvedValue({});
+      const answer = await run({ action: 'update', product_id: 21, provider_ids: [8] });
+      expect(deps.productsService.update).not.toHaveBeenCalled();
+      expect(deps.providersService.assignService).toHaveBeenCalledWith(8, 21);
+      expect(answer.data.campos).toEqual(['provider_ids']);
+    });
+
+    it('duration_minutes guarda la unidad en minutos', async () => {
+      const { deps, run } = build();
+      deps.productsService.findOne.mockResolvedValue({ ...SERVICE_ROW, service_duration_unit: 'day' });
+      await run({ action: 'update', product_id: 21, duration_minutes: 90 });
+      expect(deps.productsService.update.mock.calls[0][1]).toEqual(
+        expect.objectContaining({ service_duration_minutes: 90, service_duration_unit: 'minute' }),
+      );
+    });
+
+    it('estación con tarifa por tiempo sin booking_mode no avisa falta de prestador', async () => {
+      const { preview } = build();
+      const result = await preview({
+        action: 'create',
+        name: 'Cancha sintética',
+        base_price: 0,
+        duration_minutes: 60,
+        requires_station: true,
+        rental_pricing_mode: 'station_rate',
+      });
+      expect(result.status).toBe('ok');
+    });
+
+    it('si fallan los tramos, campos no los reporta como aplicados', async () => {
+      const { deps, run } = build();
+      deps.productsService.create.mockResolvedValue({ id: 90 });
+      deps.servicePlansService.replacePaxPrices.mockRejectedValue(new Error('Los tramos se solapan.'));
+      const answer = await run({
+        action: 'create',
+        name: 'Tour',
+        base_price: 0,
+        booking_mode: 'free_booking',
+        plan: { duration_days: 2, pax_prices: [{ min_pax: 1, max_pax: 4, price: 10 }] },
+      });
+      expect(answer.summary).toContain('Pendiente: Precios por grupo no guardados');
+      expect(answer.data.campos).not.toContain('pax_prices');
+    });
+
     it('update sin cambios reales → error legible, sin escribir', async () => {
       const { deps, run } = build();
       deps.productsService.findOne.mockResolvedValue(SERVICE_ROW);
