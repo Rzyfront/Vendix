@@ -1464,15 +1464,17 @@ onSearchChange(term: string): void {
     return resolved;
   }
 
-  buildConfigForm(schema: any): void {
+  buildConfigForm(schema: any, seedBankAccounts = true): void {
     // QUI-728 — el editor multi-cuenta de `bank_transfer` es una lista
     // dinámica, no el grid genérico que asume inputs planos. Se deja el form
     // vacío (válido) y la UI maneja `custom_config.accounts` vía
     // `bankConfigAccounts`.
     if (this.isBankTransferConfig()) {
-      this.seedBankConfigAccounts(
-        (this.config_method as any)?.default_config,
-      );
+      if (seedBankAccounts) {
+        this.seedBankConfigAccounts(
+          (this.config_method as any)?.default_config,
+        );
+      }
       this.config_fields = [];
       this.config_form = this.fb.group({});
       return;
@@ -1757,7 +1759,7 @@ onSearchChange(term: string): void {
     this.config_method = sys_method;
 
     if (sys_method?.config_schema) {
-      this.buildConfigForm(sys_method.config_schema);
+      this.buildConfigForm(sys_method.config_schema, false);
       // QUI-728 — `bank_transfer` edita `custom_config.accounts` desde la lista
       // dinámica, no desde el form plano.
       if (this.isBankTransferConfig()) {

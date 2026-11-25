@@ -6,6 +6,7 @@ import { provideStore } from '@ngrx/store';
 import { of, Subject } from 'rxjs';
 import { BankAccountsComponent } from './bank-accounts.component';
 import { BankAccountFormModalComponent } from './bank-account-form-modal.component';
+import { ReconciliationListComponent } from './reconciliation-list.component';
 import { BankReconciliationService } from '../../services/bank-reconciliation.service';
 import { AccountingService } from '../../services/accounting.service';
 import { DialogService, ToastService } from '../../../../../../shared/components';
@@ -45,6 +46,7 @@ describe('BankAccountsComponent & BankAccountFormModalComponent (QUI-1061)', () 
       [
         'getBankAccounts',
         'getBankAccountScopeContext',
+        'getReconciliations',
         'createBankAccount',
         'updateBankAccount',
         'deleteBankAccount',
@@ -55,6 +57,9 @@ describe('BankAccountsComponent & BankAccountFormModalComponent (QUI-1061)', () 
     );
     reconciliationStub.getBankAccounts.and.returnValue(
       of({ success: true, data: accounts }),
+    );
+    reconciliationStub.getReconciliations.and.returnValue(
+      of({ success: true, data: [] }),
     );
     reconciliationStub.createBankAccount.and.returnValue(
       of({ success: true, data: makeAccount({ id: 99, store_id: null }) }),
@@ -80,7 +85,11 @@ describe('BankAccountsComponent & BankAccountFormModalComponent (QUI-1061)', () 
     ]);
 
     TestBed.configureTestingModule({
-      imports: [BankAccountsComponent, BankAccountFormModalComponent],
+      imports: [
+        BankAccountsComponent,
+        BankAccountFormModalComponent,
+        ReconciliationListComponent,
+      ],
       providers: [
         provideRouter([]),
         provideHttpClient(),
@@ -286,5 +295,63 @@ describe('BankAccountsComponent & BankAccountFormModalComponent (QUI-1061)', () 
         store_ids: [10],
       }),
     );
+  });
+
+  it('ReconciliationListComponent hides creation/deletion for store-only admins in scope ORGANIZATION and keeps editable legacy accounts selectable', () => {
+    setup(
+      {
+        fiscal_scope: 'ORGANIZATION',
+        can_manage_accounts: false,
+        can_manage_organization_accounts: false,
+        current_store_id: 10,
+        stores: [],
+        duplicate_number_warnings: [],
+      },
+      [makeAccount({ id: 10, store_id: null, can_edit: false })],
+    );
+
+    const cmp = TestBed.createComponent(
+      ReconciliationListComponent,
+    ).componentInstance;
+    expect(cmp.canCreateReconciliation()).toBeFalse();
+    expect(cmp.bankAccountOptions()).toEqual([]);
+    cmp.openCreateModal();
+    expect(cmp.isCreateModalOpen()).toBeFalse();
+    expect(
+      cmp.canDeleteReconciliation({
+        id: 1,
+        bank_account_id: 10,
+        period_start: '2026-11-01',
+        period_end: '2026-11-30',
+        opening_balance: 0,
+        statement_balance: 0,
+        reconciled_balance: 0,
+        difference: 0,
+        status: 'draft',
+        created_at: '2026-11-24T00:00:00Z',
+      }),
+    ).toBeFalse();
+  });
+
+  it('ReconciliationListComponent allows creation/deletion for org admins in scope ORGANIZATION', () => {
+    setup(
+      {
+        fiscal_scope: 'ORGANIZATION',
+        can_manage_accounts: true,
+        can_manage_organization_accounts: true,
+        current_store_id: 10,
+        stores: [],
+        duplicate_number_warnings: [],
+      },
+      [makeAccount({ id: 10, store_id: null, can_edit: true })],
+    );
+
+    const cmp = TestBed.createComponent(
+      ReconciliationListComponent,
+    ).componentInstance;
+    expect(cmp.canCreateReconciliation()).toBeTrue();
+    expect(cmp.bankAccountOptions().length).toBe(1);
+    cmp.openCreateModal();
+    expect(cmp.isCreateModalOpen()).toBeTrue();
   });
 });
