@@ -370,6 +370,49 @@ describe('BusinessHoursService', () => {
       expect(windows.get(1)).toHaveLength(2);
     });
 
+    describe('custom mode day closed with an empty blocks list (old Venta form)', () => {
+      const withCustom = (business_hours: any, schedule_mode = 'custom') => {
+        const built = buildService();
+        built.prisma.store_settings.findUnique.mockResolvedValue({
+          settings: { pos: { schedule_mode, business_hours } },
+        });
+        built.prisma.store_business_hours.findMany.mockResolvedValue([
+          { day_of_week: 0, start_time: '07:00', end_time: '19:00' },
+        ]);
+        return built;
+      };
+
+      it('reads the day as closed, like the shared editor', async () => {
+        const { service } = withCustom({
+          sunday: { open: '08:00', close: '12:00', blocks: [] },
+          monday: { open: '09:00', close: '18:00', blocks: [{ open: '09:00', close: '18:00' }] },
+        });
+        const windows = await service.loadStoreWindows(1);
+        expect(windows.get(0)).toBeUndefined();
+        expect(windows.get(1)).toEqual([{ start_time: '09:00', end_time: '18:00' }]);
+        const hours = await service.loadStoreHours(1);
+        expect(hours.get(0)).toBeUndefined();
+      });
+
+      it('does not fall back to the legacy table when every day was closed', async () => {
+        const { service, prisma } = withCustom({
+          sunday: { open: '08:00', close: '12:00', blocks: [] },
+        });
+        const windows = await service.loadStoreWindows(1);
+        expect(windows.size).toBe(0);
+        expect(prisma.store_business_hours.findMany).not.toHaveBeenCalled();
+      });
+
+      it('keeps open/close when the mode is continuous (regression)', async () => {
+        const { service } = withCustom(
+          { sunday: { open: '08:00', close: '12:00', blocks: [] } },
+          'continuous',
+        );
+        const windows = await service.loadStoreWindows(1);
+        expect(windows.get(0)).toEqual([{ start_time: '08:00', end_time: '12:00' }]);
+      });
+    });
+
     it('still skips inactive days and malformed blocks', async () => {
       const service = withPos({
         monday: { is_active: false, open: '09:00', close: '18:00' },

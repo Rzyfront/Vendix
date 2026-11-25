@@ -306,8 +306,10 @@ export class BusinessHoursService {
     prisma: StorePrismaService = this.prisma,
   ): Promise<Map<number, Array<{ start_time: string; end_time: string }>>> {
     // Try the POS settings JSON first (single source of truth).
-    const fromPos = await this.loadStoreWindowsFromPosSettings(storeId, prisma);
-    if (fromPos.size > 0) return fromPos;
+    const { windows: fromPos, closedByCustom } =
+      await this.loadStoreWindowsFromPosSettings(storeId, prisma);
+    // A week the operator closed in custom mode stays closed (no fallback).
+    if (fromPos.size > 0 || closedByCustom) return fromPos;
 
     // Fallback: legacy store_business_hours table.
     const rows = await prisma.store_business_hours.findMany({
@@ -336,8 +338,10 @@ export class BusinessHoursService {
    * `provider_schedules`. Exceptions, bookings and capacity are applied by the
    * callers exactly as before.
    *
-   * A provider the query does not return (another store, or a row without the
-   * flag) falls back to its own rows: only an explicit `true` inherits.
+   * Only an explicit `true` inherits; any id the query does not return reads
+   * its `provider_schedules` rows. That table has no `store_id` and is not
+   * store-scoped, so tenant isolation relies on the callers passing ids that
+   * come from store-scoped queries (as every caller does, same as before).
    * `prisma` lets a transaction or an explicit scoped client read it too.
    */
   async loadProviderBlocks(
@@ -409,7 +413,10 @@ export class BusinessHoursService {
   private async loadStoreWindowsFromPosSettings(
     storeId: number,
     prisma: StorePrismaService = this.prisma,
-  ): Promise<Map<number, Array<{ start_time: string; end_time: string }>>> {
+  ): Promise<{
+    windows: Map<number, Array<{ start_time: string; end_time: string }>>;
+    closedByCustom: boolean;
+  }> {
     const row = await prisma.store_settings.findUnique({
       where: { store_id: storeId },
       select: { settings: true },
@@ -426,12 +433,17 @@ export class BusinessHoursService {
             }
         >
       | undefined;
-    if (!businessHours) return new Map();
+    if (!businessHours) return { windows: new Map(), closedByCustom: false };
+    // In custom mode the old Venta screen closed a day by emptying `blocks`
+    // and leaving the previous open/close behind; that day is closed (same
+    // reading as the shared editor, `weekFromPosHours`).
+    const customMode = (row?.settings as any)?.pos?.schedule_mode === 'custom';
 
     const out = new Map<
       number,
       Array<{ start_time: string; end_time: string }>
     >();
+    let closedByCustom = false;
     const dowMap: Record<string, number> = {
       sunday: 0,
       monday: 1,
@@ -462,13 +474,17 @@ export class BusinessHoursService {
       }
       const open = (value as any).open as string | undefined;
       const close = (value as any).close as string | undefined;
+      if (customMode && Array.isArray(blocks) && blocks.length === 0) {
+        closedByCustom = true;
+        continue;
+      }
       if (!windows.length) {
         const block = this.normalizeBlock(open, close);
         if (block) windows.push(block);
       }
       if (windows.length) out.set(dow, windows);
     }
-    return out;
+    return { windows: out, closedByCustom };
   }
 
   /**

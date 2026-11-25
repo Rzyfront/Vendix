@@ -196,9 +196,9 @@ const POS_KEYS: Record<number, string> = {
 
 /**
  * Same reading as the API (`loadStoreWindowsFromPosSettings`): `blocks` when it
- * has any, else `open`/`close`; `closed` or invalid → closed. Exception kept
- * from the old Venta screen: in custom mode an empty `blocks` list is shown as
- * closed (that is what the operator closed there).
+ * has any, else `open`/`close`; `closed` or invalid → closed. In custom mode an
+ * empty `blocks` list is closed on both sides (that is how the old Venta screen
+ * closed a day).
  */
 export function weekFromPosHours(
   hours: Record<string, PosDayHours | string | null | undefined> | null | undefined,
