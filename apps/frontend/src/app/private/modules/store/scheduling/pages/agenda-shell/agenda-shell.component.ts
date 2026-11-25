@@ -10,6 +10,7 @@ import { ModuleShellActionsService } from '../../../../../../shared/components/m
 import { SchedulingAgendaPageComponent } from '../scheduling-agenda-page/scheduling-agenda-page.component';
 import { SchedulingListPageComponent } from '../scheduling-list-page/scheduling-list-page.component';
 import { SchedulingConfigTabComponent } from '../../components/scheduling-config-tab/scheduling-config-tab.component';
+import { AgendaQueueBoardComponent } from '../../components/agenda-queue-board/agenda-queue-board.component';
 import {
   AgendaTab,
   ConfigSection,
@@ -31,20 +32,28 @@ export const AGENDA_SHELL_TABS: StickyHeaderTab[] = [
     description: 'Reservas y pedidos programados en una tabla con filtros',
   },
   {
+    id: 'cola',
+    label: 'Cola de atención',
+    shortLabel: 'Cola',
+    icon: 'users',
+    description: 'Quién sigue: en atención, en sala y la programación por iniciar',
+  },
+  {
     id: 'configuracion',
     label: 'Configuración',
     shortLabel: 'Config.',
     icon: 'settings',
-    description: 'Prestadores, horarios, bloqueos, disponibilidad y cola',
+    description: 'Prestadores, horarios, bloqueos y disponibilidad',
   },
 ];
 
 /**
  * Órdenes → Agenda (agenda-unificada F1, estructura de Rafael 2026-11-23).
- * Un solo módulo con tres pestañas en `?tab=`: Calendario (por defecto),
- * Programación (tabla) y Configuración (`?seccion=`). Cada pestaña monta la
- * pantalla ya construida; los botones de la pestaña activa se publican en
- * esta cabecera (`ModuleShellActionsService`).
+ * Un solo módulo con cuatro pestañas en `?tab=`: Calendario (por defecto),
+ * Programación (tabla), Cola de atención (tablero para la recepción y para un
+ * monitor a la vista del público) y Configuración (`?seccion=`). Cada pestaña
+ * monta la pantalla ya construida; los botones de la pestaña activa se
+ * publican en esta cabecera (`ModuleShellActionsService`).
  */
 @Component({
   selector: 'app-agenda-shell',
@@ -54,6 +63,7 @@ export const AGENDA_SHELL_TABS: StickyHeaderTab[] = [
     SchedulingAgendaPageComponent,
     SchedulingListPageComponent,
     SchedulingConfigTabComponent,
+    AgendaQueueBoardComponent,
   ],
   template: `
     <div class="w-full overflow-x-clip md:space-y-4">
@@ -78,6 +88,9 @@ export const AGENDA_SHELL_TABS: StickyHeaderTab[] = [
           @case ('programacion') {
             <app-scheduling-list-page [embedded]="true" />
           }
+          @case ('cola') {
+            <app-agenda-queue-board />
+          }
           @case ('configuracion') {
             <app-scheduling-config-tab [section]="section()" (sectionChange)="onSection($event)" />
           }
@@ -98,7 +111,15 @@ export class AgendaShellComponent {
   private readonly params = toSignal(this.route.queryParamMap.pipe(map((p) => p)), {
     initialValue: this.route.snapshot.queryParamMap,
   });
-  readonly tab = computed<AgendaTab>(() => toAgendaTab(this.params().get('tab')));
+  readonly tab = computed<AgendaTab>(() => {
+    const params = this.params();
+    // La cola era una sección de Configuración: los enlaces viejos siguen
+    // llegando con `?tab=configuracion&seccion=cola` y deben abrir la pestaña.
+    if (params.get('tab') === 'configuracion' && params.get('seccion') === 'cola') {
+      return 'cola';
+    }
+    return toAgendaTab(params.get('tab'));
+  });
   readonly section = computed<ConfigSection>(() => toConfigSection(this.params().get('seccion')));
   readonly tabLabel = computed(() => this.tabs.find((t) => t.id === this.tab())?.label ?? '');
   readonly subtitle = computed(() => this.tabs.find((t) => t.id === this.tab())?.description ?? '');
@@ -107,7 +128,12 @@ export class AgendaShellComponent {
     // La entrada del menú abre la URL sin `?tab=`: se escribe la pestaña por
     // defecto (o se corrige una desconocida) sin agregar historial.
     if (this.route.snapshot.queryParamMap.get('tab') !== this.tab()) {
-      this.select({ tab: this.tab() }, true);
+      // Al normalizar también se limpia `seccion`: la URL vieja de la cola
+      // (`?tab=configuracion&seccion=cola`) queda en `?tab=cola`.
+      this.select(
+        { tab: this.tab(), seccion: this.tab() === 'configuracion' ? this.section() : null },
+        true,
+      );
     }
   }
 

@@ -499,6 +499,25 @@ export class ReservationsController {
 
   // Cola de atención: ruta estática, declarada ANTES de `@Get(':id')`. Si va
   // después, NestJS matchea `:id = 'queue'` y ParseIntPipe responde 400.
+  /**
+   * Día de consulta: `YYYY-MM-DD` o vacío para "hoy en la zona de la tienda"
+   * (lo resuelve el service; nunca la fecha UTC del servidor).
+   */
+  private parseQueueDay(day?: string): string | undefined {
+    if (day == null || day.trim() === '') return undefined;
+    const value = day.trim();
+    // `Date.parse('2026-02-31')` no es NaN: se acepta y la consulta se correría
+    // al 3 de marzo. La ida y vuelta confirma que el día existe de verdad.
+    const parsed = new Date(`${value}T00:00:00.000Z`);
+    const roundTrip = Number.isNaN(parsed.getTime())
+      ? ''
+      : parsed.toISOString().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || roundTrip !== value) {
+      throw new BadRequestException('El día debe venir como YYYY-MM-DD');
+    }
+    return value;
+  }
+
   @Get('queue')
   @Permissions('store:reservations:queue:read')
   async getQueue(@Query('day') day?: string) {
@@ -508,12 +527,29 @@ export class ReservationsController {
         'No se pudo determinar la tienda del contexto de la solicitud',
       );
     }
-    const targetDay = day ?? new Date().toISOString().split('T')[0];
     const result = await this.appointmentQueueService.computeQueueForStore(
       storeId,
-      targetDay,
+      this.parseQueueDay(day),
     );
     return this.responseService.success(result, 'Cola de reservas obtenida');
+  }
+
+  // Tablero de la pestaña Cola: en atención, en sala (check-in) y la programación
+  // confirmada que todavía no empieza. Solo lectura, sin mover posiciones.
+  @Get('queue/board')
+  @Permissions('store:reservations:queue:read')
+  async getQueueBoard(@Query('day') day?: string) {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) {
+      throw new BadRequestException(
+        'No se pudo determinar la tienda del contexto de la solicitud',
+      );
+    }
+    const result = await this.appointmentQueueService.dayBoard(
+      storeId,
+      this.parseQueueDay(day),
+    );
+    return this.responseService.success(result, 'Tablero de la cola obtenido');
   }
 
   @Get(':id')
