@@ -44,6 +44,7 @@ describe('StorePaymentMethodsService', () => {
     store_payment_methods: {
       findMany: jest.fn(),
       findFirst: jest.fn(),
+      findUnique: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
@@ -356,6 +357,41 @@ describe('StorePaymentMethodsService', () => {
         errorCode: ErrorCodes.BANK_ACCOUNT_NOT_ASSIGNED_TO_STORE.code,
       });
       expect(mockPrismaService.store_payment_methods.create).not.toHaveBeenCalled();
+    });
+
+    it('getEnabledForStore and findOne preserve record properties (e.g. id) for non-bank_transfer methods such as Wompi', async () => {
+      const wompiRecord = {
+        id: 42,
+        store_id: 20,
+        display_name: 'Wompi',
+        state: 'enabled',
+        custom_config: { public_key: 'pub_test_123' },
+        system_payment_method: {
+          id: 7,
+          name: 'Wompi',
+          type: 'wompi',
+          is_active: true,
+        },
+      };
+      mockPrismaService.store_payment_methods.findMany.mockResolvedValue([
+        wompiRecord,
+      ]);
+      mockPrismaService.store_payment_methods.findUnique.mockResolvedValue(
+        wompiRecord,
+      );
+
+      const enabled = await service.getEnabledForStore();
+      const wompiMethod = enabled.find(
+        (m) => m.system_payment_method?.type === 'wompi',
+      );
+      expect(wompiMethod).toBeDefined();
+      const enabledId: number = wompiMethod!.id;
+      expect(enabledId).toBe(42);
+
+      const single = await service.findOne(42);
+      const singleId: number = single.id;
+      expect(singleId).toBe(42);
+      expect(single.display_name).toBe('Wompi');
     });
   });
 });

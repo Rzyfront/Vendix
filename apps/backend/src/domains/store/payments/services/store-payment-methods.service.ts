@@ -615,6 +615,7 @@ export class StorePaymentMethodsService {
       store_id?: number;
       custom_config: any;
       system_payment_method?: { type?: string | null } | null;
+      [key: string]: any;
     },
   >(methods: T[]): Promise<T[]> {
     const accountIds = new Set<number>();

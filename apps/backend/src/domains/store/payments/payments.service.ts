@@ -8048,6 +8048,7 @@ export class PaymentsService {
     T extends {
       custom_config: any;
       system_payment_method?: { type?: string | null } | null;
+      [key: string]: any;
     },
   >(
     methods: T[],
