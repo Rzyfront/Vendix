@@ -41,6 +41,12 @@ describe('ImplementationPageComponent (SEO-OPS-19)', () => {
     expect(MARKETING_PAGES.implementation.canonicalPath).toBe('/implementacion');
   });
 
+  it('does not show the draft label now that the page is published', () => {
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector('.preview-label')).toBeNull();
+    expect(el.textContent ?? '').not.toContain('Borrador para revisión');
+  });
+
   it('sends the WhatsApp CTA without personal data', () => {
     expect(IMPLEMENTATION_WHATSAPP_URL.startsWith('https://wa.me/573234668500?text=')).toBeTrue();
     const links = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('a[href^="https://wa.me/"]'));
