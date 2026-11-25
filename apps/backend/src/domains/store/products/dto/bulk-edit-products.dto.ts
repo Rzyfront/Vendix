@@ -218,9 +218,11 @@ export type BulkEditItemStatus = 'ok' | 'warning' | 'error';
  * - `variants`: reescribe la matriz de variantes del producto.
  * - `name`, `description`: no tiene sentido darle el mismo nombre o la misma
  *   descripción a N productos.
- * - `category_ids`, `brand_id`, `enabled_price_tier_ids`:
+ * - `category_ids`, `brand_id`:
  *   son relacionales y requieren semántica de añadir / quitar / reemplazar;
  *   fuera del alcance de esta iteración.
+ * - `enabled_price_tier_ids`: NO viaja crudo; se edita con la acción
+ *   relacional `price_tier_action` (añadir / quitar / reemplazar).
  */
 export enum RelationalActionMode {
   ADD = 'add',
@@ -260,12 +262,45 @@ export class BulkRelationalTaxActionDto {
   tax_inclusive_map?: Record<string, boolean>;
 }
 
+/**
+ * Acción relacional sobre las tarifas (`product_price_tier_assignments`).
+ *
+ * Mismo shape que la de impuestos, sin mapa. La resolución por producto es
+ * compartida entre preview y apply (`resolveBulkPriceTierTarget`):
+ * - ADD: unión con las tarifas actuales.
+ * - REMOVE: diferencia; ids que el producto no tiene no son error.
+ * - REPLACE: exactamente `ids`.
+ *
+ * Duplicados, tarifas inexistentes, de otra tienda o inactivas (en ADD y
+ * REPLACE) ⇒ 400 PROD_VALIDATE_001 para TODO el lote (ver el servicio).
+ */
+export class BulkRelationalPriceTierActionDto {
+  @IsEnum(RelationalActionMode, {
+    message: 'El modo de operación debe ser add, remove o replace',
+  })
+  mode: RelationalActionMode;
+
+  @IsArray()
+  @ArrayNotEmpty({
+    message: 'Debes seleccionar al menos una tarifa',
+  })
+  @IsInt({ each: true })
+  @Type(() => Number)
+  ids: number[];
+}
+
 export class BulkEditableChangesDto {
   // ===== Impuestos =====
   @IsOptional()
   @ValidateNested()
   @Type(() => BulkRelationalTaxActionDto)
   tax_category_action?: BulkRelationalTaxActionDto;
+
+  // ===== Tarifas (multi-tarifa) =====
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => BulkRelationalPriceTierActionDto)
+  price_tier_action?: BulkRelationalPriceTierActionDto;
 
   // ===== Tipo y estado =====
   @IsOptional()
@@ -578,6 +613,9 @@ export class BulkEditPreviewResultDto {
   ok: number;
   warnings: number;
   errors: number;
+  /** Productos (no en error) cuyo conjunto de tarifas o flag multi-tarifa
+   *  cambiaría. Solo viaja con `price_tier_action`. */
+  price_tier_changes?: number;
   items: BulkEditPreviewItemDto[];
 }
 
@@ -594,6 +632,9 @@ export class BulkEditResultDto {
   total: number;
   successful: number;
   failed: number;
+  /** Productos actualizados con éxito cuyo conjunto de tarifas o flag
+   *  multi-tarifa cambió. Misma cifra que `preview.price_tier_changes`. */
+  price_tier_changes?: number;
   results: BulkEditResultItemDto[];
 }
 

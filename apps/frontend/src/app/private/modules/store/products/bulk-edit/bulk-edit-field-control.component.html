@@ -142,6 +142,76 @@
           </p>
         }
 
+        @case ('price-tier-action') {
+          <div class="space-y-3" [formGroupName]="field().key">
+            @if (priceTiersLoaded() && options().length === 0) {
+              <div
+                class="rounded-lg border border-border bg-surface p-3 text-[11px] leading-relaxed text-text-secondary"
+                role="status"
+              >
+                <div class="flex items-start gap-1.5">
+                  <app-icon name="info" [size]="13" class="mt-0.5 shrink-0" />
+                  <span>
+                    Tu tienda aún no tiene tarifas activas.
+                    <a
+                      routerLink="/admin/price-tiers"
+                      class="font-semibold text-primary underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                    >Crear tarifas</a>
+                  </span>
+                </div>
+              </div>
+            } @else {
+              <app-input-buttons
+                formControlName="mode"
+                label="Modo de operación"
+                [options]="taxActionModeOptions"
+              />
+
+              @switch (taxActionMode) {
+                @case ('add') {
+                  <div class="rounded-lg border border-blue-200 bg-blue-50/80 p-2.5 text-[11px] leading-relaxed text-blue-700">
+                    <div class="flex items-start gap-1.5">
+                      <app-icon name="info" [size]="13" class="mt-0.5 shrink-0" />
+                      <span><b>Añadir:</b> Las tarifas seleccionadas se sumarán a los productos que no las tengan, sin quitar sus otras tarifas.</span>
+                    </div>
+                  </div>
+                }
+                @case ('remove') {
+                  <div class="rounded-lg border border-amber-200 bg-amber-50/80 p-2.5 text-[11px] leading-relaxed text-amber-700">
+                    <div class="flex items-start gap-1.5">
+                      <app-icon name="alert-triangle" [size]="13" class="mt-0.5 shrink-0" />
+                      <span><b>Quitar:</b> Se quitarán solo las tarifas seleccionadas en los productos que las tengan. Si un producto queda sin tarifas, multi-tarifa sigue como estaba.</span>
+                    </div>
+                  </div>
+                }
+                @case ('replace') {
+                  <div class="rounded-lg border border-rose-200 bg-rose-50/80 p-2.5 text-[11px] leading-relaxed text-rose-700">
+                    <div class="flex items-start gap-1.5">
+                      <app-icon name="alert-circle" [size]="13" class="mt-0.5 shrink-0" />
+                      <span><b>Reemplazar:</b> Los productos quedarán exactamente con las tarifas seleccionadas; las demás se quitan.</span>
+                    </div>
+                  </div>
+                }
+              }
+
+              <div>
+                <app-multi-selector
+                  formControlName="ids"
+                  [label]="'Tarifas a ' + (taxActionMode === 'remove' ? 'quitar' : (taxActionMode === 'add' ? 'añadir' : 'asignar'))"
+                  [options]="multiSelectorTaxOptions()"
+                  placeholder="Selecciona una o varias tarifas..."
+                  size="sm"
+                />
+                @if (taxActionMode !== 'remove') {
+                  <p class="mt-1.5 text-[10px] leading-tight text-text-secondary">
+                    Asignar tarifas aquí ya activa multi-tarifa en los productos del lote.
+                  </p>
+                }
+              </div>
+            }
+          </div>
+        }
+
         @case ('tax-action') {
           <div class="space-y-3" [formGroupName]="field().key">
             <div>

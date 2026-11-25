@@ -19,6 +19,7 @@ import {
   BulkEditResultDto,
   BulkEditResultItemDto,
   BulkEditableChangesDto,
+  BulkRelationalPriceTierActionDto,
   BulkRelationalTaxActionDto,
   PROD_TAXMAP_001,
   RelationalActionMode,
@@ -42,12 +43,29 @@ import {
   PROD_TAX_COMBO_001,
   type ProductTaxComboCategory,
 } from './services/product-tax-combination.util';
+import {
+  BulkPriceTierPlan,
+  planBulkPriceTierUpdate,
+} from './services/bulk-price-tier-action.util';
 
 const PURCHASE_FACTOR_DERIVED_MESSAGE =
   'El factor de compra de este producto lo calcula el catálogo de unidades; cambia las unidades en vez del factor.';
 
 const KDS_ONLY_PREPARED_MESSAGE =
   'La estación de cocina solo aplica a platos preparados.';
+
+/** Mismo texto que `assertTiersAllowed()` (tiers-variants-exclusive.util). */
+const tiersOverVariantsMessage = (total: number): string =>
+  `Este producto tiene ${total} variante${total === 1 ? '' : 's'}. ` +
+  'Multi-tarifa y variantes son excluyentes: elimina las variantes para ' +
+  'poder venderlo en varias presentaciones.';
+
+/** Contexto de LOTE de la acción de tarifas: catálogo validado y scoped. */
+interface BulkPriceTierContext {
+  action: BulkRelationalPriceTierActionDto;
+  catalogById: Map<number, { name: string }>;
+  explicitFlag: boolean | undefined;
+}
 
 const TRACK_INVENTORY_WITH_VARIANTS_MESSAGE =
   "Este producto maneja variantes: cambia 'Controla inventario' desde el editor del producto para decidir qué pasa con el stock";
@@ -274,6 +292,12 @@ export class ProductsBulkEditService {
       products.filter((product) => product.state !== ProductState.ARCHIVED),
     );
 
+    // Tarifas: validación de LOTE (falla rápido) + lecturas del estado actual.
+    const bulkTiers = await this.resolveBulkPriceTierContext(dto.changes);
+    const tierState = bulkTiers
+      ? await this.loadPriceTierState(editableIds, true)
+      : null;
+
     const taxAction = dto.changes.tax_category_action;
     // F-017/F-009 — contexto del lote: reglas por modo + scope tienda (mismo
     // predicado que el create unitario) + catálogo para heredar. Preview y
@@ -335,6 +359,7 @@ export class ProductsBulkEditService {
     }
 
     // --- Clasificación ----------------------------------------------------
+    const tierChangedIds = new Set<number>();
     const items: BulkEditPreviewItemDto[] = ids.map((id) => {
       const product = productById.get(id);
 
@@ -356,12 +381,49 @@ export class ProductsBulkEditService {
         };
       }
 
-      const effective = this.resolveEffectiveChanges(
+      const resolved = this.resolveEffectiveChanges(
         batch,
         product,
         ingredientCapableStores,
       );
+      // Plan de tarifas con el MISMO resolvedor que apply(). Si el sanitizer
+      // de insumo / naturaleza neutralizó las tarifas, `update()` las anula
+      // igual: no se anuncia cambio de tarifas.
+      const tierPlan =
+        bulkTiers && tierState
+          ? this.planPriceTiersFor(
+              bulkTiers,
+              resolved.payload,
+              tierState,
+              product.id,
+              product.has_multiple_price_tiers === true,
+            )
+          : null;
+      const effective: EffectiveChanges = tierPlan?.enablesFlag
+        ? {
+            ...resolved,
+            payload: { ...resolved.payload, has_multiple_price_tiers: true },
+          }
+        : resolved;
       const changes = this.buildDiff(product, effective.payload);
+
+      if (bulkTiers && tierState && tierPlan?.setChanged) {
+        const currentIds = tierState.assigned.get(product.id) ?? [];
+        const nameOf = (tid: number) =>
+          tierState.names.get(tid) ??
+          bulkTiers.catalogById.get(tid)?.name ??
+          `Tarifa ${tid}`;
+        changes.push({
+          field: 'price_tiers',
+          current: [...currentIds]
+            .sort((a, b) => a - b)
+            .map((tid) => ({ id: tid, name: nameOf(tid) })),
+          next: tierPlan.targetIds.map((tid) => ({
+            id: tid,
+            name: nameOf(tid),
+          })),
+        });
+      }
 
       // Estado fiscal siguiente según el MISMO resolvedor que usa apply().
       let nextTaxIds: number[] = [];
@@ -426,6 +488,20 @@ export class ProductsBulkEditService {
         return { ...base, status: 'error', ...failure };
       }
 
+      // Multi-tarifa ⊕ variantes: `update()` rechaza encender el flag sobre un
+      // producto con variantes (`assertTiersAllowed`). Mismo código y texto.
+      if (tierState && effective.payload.has_multiple_price_tiers === true) {
+        const variantCount = tierState.variantCounts.get(product.id) ?? 0;
+        if (product.has_multiple_price_tiers !== true && variantCount > 0) {
+          return {
+            ...base,
+            status: 'error',
+            code: ErrorCodes.PRODUCT_TIERS_VARIANTS_EXCLUSIVE.code,
+            message: tiersOverVariantsMessage(variantCount),
+          };
+        }
+      }
+
       // P1-4 — el conjunto fiscal SIGUIENTE debe ser una combinación legal.
       // Mismo validador que `update()` (que es quien realmente rechaza en el
       // apply, fila por fila): el preview anuncia la fila como error en vez
@@ -468,6 +544,14 @@ export class ProductsBulkEditService {
         }
       }
 
+      if (tierPlan?.setChanged && tierPlan.targetIds.length === 0) {
+        warnings.push(
+          'El producto quedará sin tarifas asignadas; multi-tarifa se mantiene como está.',
+        );
+      }
+
+      if (tierPlan?.changed) tierChangedIds.add(product.id);
+
       if (warnings.length > 0) {
         return { ...base, status: 'warning', message: warnings.join(' ') };
       }
@@ -480,6 +564,11 @@ export class ProductsBulkEditService {
       ok: items.filter((item) => item.status === 'ok').length,
       warnings: items.filter((item) => item.status === 'warning').length,
       errors: items.filter((item) => item.status === 'error').length,
+      ...(bulkTiers && {
+        price_tier_changes: items.filter(
+          (item) => item.status !== 'error' && tierChangedIds.has(item.id),
+        ).length,
+      }),
       items,
     };
   }
@@ -507,6 +596,11 @@ export class ProductsBulkEditService {
         track_inventory: true,
         stock_uom_id: true,
         purchase_uom_id: true,
+        // Tarifas: mismo cálculo de neutralización y flag que el preview.
+        store_id: true,
+        usage_nature: true,
+        has_multiple_price_tiers: true,
+        state: true,
       },
     });
     // Factor de compra derivable del catálogo ⇒ la fila falla igual que en el
@@ -558,7 +652,37 @@ export class ProductsBulkEditService {
       }
     }
 
-    const { tax_category_action, ...scalarChanges } = dto.changes;
+    // Tarifas: validación de LOTE (falla rápido, igual que el preview) y
+    // estado actual. El payload efectivo por fila replica el del preview para
+    // saber si el sanitizer neutraliza las tarifas (entonces no se envían ni
+    // se cuentan: `update()` las anularía igual).
+    const bulkTiers = await this.resolveBulkPriceTierContext(dto.changes);
+    const tierState = bulkTiers
+      ? await this.loadPriceTierState(
+          rows.map((row) => row.id),
+          false,
+        )
+      : null;
+    const tierBatch = bulkTiers
+      ? this.sanitizeIngredientPayload(this.cloneChanges(dto.changes))
+      : null;
+    const tierIngredientStores = tierBatch
+      ? await this.loadIngredientCapableStores(
+          tierBatch.payload,
+          rows as unknown as ProductRow[],
+        )
+      : new Map<number, boolean>();
+    const rowById = new Map<number, (typeof rows)[number]>(
+      rows.map((row) => [row.id, row]),
+    );
+    let priceTierChanges = 0;
+    const updatedIds: number[] = [];
+
+    const {
+      tax_category_action,
+      price_tier_action,
+      ...scalarChanges
+    } = dto.changes;
     const results: BulkEditResultItemDto[] = [];
 
     // En serie y con try/catch por producto: el fallo de una fila NO aborta las
@@ -601,11 +725,50 @@ export class ProductsBulkEditService {
           }
         }
 
+        let tierPlan: BulkPriceTierPlan | null = null;
+        const row = rowById.get(id);
+        if (bulkTiers && tierState && tierBatch && row) {
+          const resolved = this.resolveEffectiveChanges(
+            tierBatch,
+            row as unknown as ProductRow,
+            tierIngredientStores,
+          );
+          // MISMO plan que el preview: solo se envía lo que cambia.
+          tierPlan = this.planPriceTiersFor(
+            bulkTiers,
+            resolved.payload,
+            tierState,
+            id,
+            row.has_multiple_price_tiers === true,
+          );
+          if (tierPlan) Object.assign(productPayload, tierPlan.payload);
+        }
+
+        // Idempotencia: con la acción de tarifas, un payload vacío significa
+        // que nada cambia en este producto ⇒ no se llama a `update()`.
+        // Producto ausente o archivado: se deja que `update()` lance el
+        // PROD_FIND_001 que el preview ya anunció.
+        if (
+          bulkTiers &&
+          row &&
+          row.state !== ProductState.ARCHIVED &&
+          Object.keys(productPayload).length === 0
+        ) {
+          results.push({
+            id,
+            name: knownNames.get(id) ?? '',
+            status: 'ok',
+          });
+          continue;
+        }
+
         const updated = await this.productsService.update(
           id,
           productPayload,
           { lean: true, skip_embedding_event: true },
         );
+        updatedIds.push(id);
+        if (tierPlan?.changed) priceTierChanges++;
         results.push({
           id,
           name: updated?.name ?? knownNames.get(id) ?? '',
@@ -624,14 +787,13 @@ export class ProductsBulkEditService {
     }
 
     // UN evento por lote, tras el commit de cada producto, solo con los ok.
-    this.emitBulkUpdated(
-      results.filter((r) => r.status === 'ok').map((r) => r.id),
-    );
+    this.emitBulkUpdated(updatedIds);
 
     return {
       total: results.length,
       successful: results.filter((result) => result.status === 'ok').length,
       failed: results.filter((result) => result.status === 'error').length,
+      ...(bulkTiers && { price_tier_changes: priceTierChanges }),
       results,
     };
   }
@@ -1859,6 +2021,149 @@ export class ProductsBulkEditService {
       }
     }
     return { targetIds, nextFlags };
+  }
+
+  // ===========================================================================
+  // Tarifas del lote — resolvedores compartidos preview/apply
+  // ===========================================================================
+
+  /**
+   * Validación de LOTE de `price_tier_action` (una sola lectura de catálogo,
+   * falla rápido con 400 PROD_VALIDATE_001 antes de tocar ningún producto):
+   *
+   * - Sin ids repetidos.
+   * - Toda tarifa existe y es de la tienda del contexto (`store_id` explícito
+   *   además del scope automático de `StorePrismaService`).
+   * - ADD / REPLACE: toda tarifa debe estar activa. REMOVE acepta inactivas:
+   *   quitar una tarifa desactivada es limpieza legítima.
+   * - `has_multiple_price_tiers: false` explícito junto con ADD / REPLACE es
+   *   contradictorio (asignar tarifas las activa) ⇒ 400.
+   */
+  private async resolveBulkPriceTierContext(
+    changes: BulkEditableChangesDto,
+  ): Promise<BulkPriceTierContext | null> {
+    const action = changes.price_tier_action;
+    if (!action) return null;
+
+    if (new Set(action.ids).size !== action.ids.length) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_VALIDATE_001,
+        'La lista de tarifas tiene ids repetidos',
+      );
+    }
+
+    const explicitFlag = changes.has_multiple_price_tiers;
+    if (explicitFlag === false && action.mode !== RelationalActionMode.REMOVE) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_VALIDATE_001,
+        'No puedes asignar tarifas y desactivar multi-tarifa en el mismo cambio',
+      );
+    }
+
+    const storeId = RequestContextService.getStoreId();
+    const catalog = await this.prisma.price_tiers.findMany({
+      where: { id: { in: action.ids }, store_id: storeId ?? -1 },
+      select: { id: true, name: true, is_active: true },
+    });
+
+    if (catalog.length !== action.ids.length) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_VALIDATE_001,
+        'Una o más tarifas seleccionadas no existen o no pertenecen a la tienda',
+      );
+    }
+
+    if (action.mode !== RelationalActionMode.REMOVE) {
+      const inactive = catalog.filter((tier) => !tier.is_active);
+      if (inactive.length > 0) {
+        throw new VendixHttpException(
+          ErrorCodes.PROD_VALIDATE_001,
+          `Estas tarifas están inactivas y no se pueden asignar: ${inactive
+            .map((tier) => tier.name)
+            .join(', ')}`,
+        );
+      }
+    }
+
+    return {
+      action,
+      catalogById: new Map(
+        catalog.map((tier) => [tier.id, { name: tier.name }]),
+      ),
+      explicitFlag,
+    };
+  }
+
+  /**
+   * Estado actual de tarifas de los productos del lote. `products` ya viene
+   * filtrado por tienda; los assignments se leen por `product_id` de esos
+   * productos, así que nunca salen de la tienda del contexto.
+   */
+  private async loadPriceTierState(
+    productIds: number[],
+    withVariants: boolean,
+  ): Promise<{
+    assigned: Map<number, number[]>;
+    names: Map<number, string>;
+    variantCounts: Map<number, number>;
+  }> {
+    const assigned = new Map<number, number[]>();
+    const names = new Map<number, string>();
+    const variantCounts = new Map<number, number>();
+    if (productIds.length === 0) return { assigned, names, variantCounts };
+
+    const assignments =
+      await this.prisma.product_price_tier_assignments.findMany({
+        where: { product_id: { in: productIds } },
+        select: {
+          product_id: true,
+          price_tier_id: true,
+          price_tier: { select: { name: true } },
+        },
+      });
+    for (const a of assignments) {
+      const list = assigned.get(a.product_id) ?? [];
+      list.push(a.price_tier_id);
+      assigned.set(a.product_id, list);
+      if (a.price_tier?.name) names.set(a.price_tier_id, a.price_tier.name);
+    }
+
+    if (withVariants) {
+      const variants = await this.prisma.product_variants.findMany({
+        where: { product_id: { in: productIds } },
+        select: { product_id: true },
+      });
+      for (const v of variants) {
+        variantCounts.set(
+          v.product_id,
+          (variantCounts.get(v.product_id) ?? 0) + 1,
+        );
+      }
+    }
+
+    return { assigned, names, variantCounts };
+  }
+
+  /**
+   * Plan de tarifas de UN producto a partir de su payload efectivo. `null`
+   * cuando el sanitizer (insumo puro / naturaleza de uso) neutralizó las
+   * tarifas: `update()` las anula igual, así que no se envían ni se cuentan.
+   */
+  private planPriceTiersFor(
+    context: BulkPriceTierContext,
+    effectivePayload: Record<string, any>,
+    state: { assigned: Map<number, number[]> },
+    productId: number,
+    currentFlag: boolean,
+  ): BulkPriceTierPlan | null {
+    if (effectivePayload.enabled_price_tier_ids !== undefined) return null;
+    return planBulkPriceTierUpdate({
+      mode: context.action.mode,
+      ids: context.action.ids,
+      currentIds: state.assigned.get(productId) ?? [],
+      currentFlag,
+      explicitFlag: context.explicitFlag,
+    });
   }
 
   // ===========================================================================
