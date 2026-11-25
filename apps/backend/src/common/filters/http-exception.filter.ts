@@ -14,9 +14,13 @@ import {
   isPrismaBusyError,
 } from '../errors';
 import { RequestContextService } from '../context/request-context.service';
+import {
+  alertIdentityFromRequest,
+  routeKeyOf,
+  safeRouteParams,
+} from '../platform-alerts/platform-alert-sanitize';
 import { redactSensitiveRoute } from '../utils/sensitive-route.util';
 import { getRequestIdFromRequest } from '../middleware/request-id.middleware';
-import { routeKeyOf } from '../platform-alerts/platform-alert-sanitize';
 import type { HttpFailureInput } from '../platform-alerts/platform-alert.service';
 
 /** Lo que el filtro usa del bot de monitoreo (QUI-1010). */
@@ -294,6 +298,9 @@ export class AllExceptionsFilter implements ExceptionFilter {
   ): void {
     if (!this.failures || status < 500) return;
     try {
+      // Identidad explícita (req.user o dominio público): el filtro corre fuera
+      // del ALS del request, y sin esto el bot reportaba «Plataforma (sin tienda)».
+      const who = alertIdentityFromRequest(request);
       this.failures.captureHttpFailure({
         method: request.method,
         route: routeKeyOf(request),
@@ -302,6 +309,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
         error: exception,
         requestId:
           RequestContextService.asyncLocalStorage.getStore()?.request_id ?? null,
+        organizationId: who.organizationId,
+        storeId: who.storeId,
+        userId: who.userId,
+        params: safeRouteParams(request.params as Record<string, unknown>),
       });
     } catch {
       // El aviso nunca cambia la respuesta al cliente.

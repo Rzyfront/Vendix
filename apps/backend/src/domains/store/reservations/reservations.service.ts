@@ -2430,7 +2430,7 @@ export class ReservationsService {
     if (product?.requires_station && !this.allocationCoordinator) {
       throw new VendixHttpException(ErrorCodes.STATION_012);
     }
-    return this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       // QUI-1060: claim the transition with a conditional update on the status read
       // above. A concurrent change (another cancel, the confirmation link, the
       // auto-cancel job) makes this a no-op, so plan seats are given back only once.
@@ -2471,6 +2471,22 @@ export class ReservationsService {
         include: this.BOOKING_INCLUDE,
       }));
     });
+
+    // Quien estaba en la cola y cambia a cualquier estado que la abandona
+    // (atención, en curso, cancelada, no-show) deja de ocupar una posición: hay
+    // que recalcular y avisar al nuevo primero. Antes solo lo hacía el check-in.
+    if (booking.status === 'arriving' && targetStatus !== 'arriving' && updated?.date) {
+      const isoDay = updated.date instanceof Date
+        ? updated.date.toISOString().split('T')[0]
+        : String(updated.date).split('T')[0];
+      this.eventEmitter.emit('booking.arrival_recorded', {
+        store_id: updated.store_id,
+        booking_id: updated.id,
+        date: isoDay,
+      });
+    }
+
+    return updated;
   }
 
   async deleteBooking(id: number) {

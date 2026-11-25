@@ -24,6 +24,35 @@ describe('PerformanceInterceptor — latencia para el bot de monitoreo (QUI-1010
     expect(collector.record).toHaveBeenCalled();
   });
 
+  it('la alerta lleva tienda, organización, usuario y parámetros resueltos del request', async () => {
+    const alerts = { captureSlowRequest: jest.fn() };
+    const interceptor = new PerformanceInterceptor(collector as never, alerts as never);
+    const authContext = {
+      switchToHttp: () => ({
+        getRequest: () => ({
+          url: '/api/store/invoicing/orders/987/emit',
+          method: 'POST',
+          route: { path: '/api/store/invoicing/orders/:orderId/emit' },
+          params: { orderId: '987' },
+          user: { id: 7, organization_id: 82, store_id: 105 },
+        }),
+        getResponse: () => ({ statusCode: 200 }),
+      }),
+      getHandler: () => () => undefined,
+    } as never;
+
+    await lastValueFrom(interceptor.intercept(authContext, { handle: () => of('ok') }));
+
+    expect(alerts.captureSlowRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: 82,
+        storeId: 105,
+        userId: 7,
+        params: { orderId: '987' },
+      }),
+    );
+  });
+
   it('los handlers SSE no cuentan como respuesta lenta', async () => {
     const alerts = { captureSlowRequest: jest.fn() };
     const handler = () => undefined;

@@ -299,9 +299,33 @@ export class BookingDetailModalComponent {
   order = signal<BookingOrderSummary | null>(null);
   /** The detail finished loading, so a missing order is a real "no order". */
   orderLoaded = signal(false);
-  orderStateLabel = computed(() => {
+  /**
+   * Order of a booking with money already on it.
+   *
+   * `remaining_balance` is only refreshed when a payment is applied, so an
+   * order that never received money keeps it at 0 and the block read
+   * "no hay saldo pendiente" on an order nobody had paid. The live figures are
+   * derived from `grand_total − total_paid` (both maintained by every payment
+   * path); the stored column is never read here.
+   */
+  orderTotal = computed(() => this.toNumber(this.order()?.grand_total));
+  orderPaid = computed(() => this.toNumber(this.order()?.total_paid));
+  /** Anulled orders owe nothing: a cancelled/refunded order must not ask to collect. */
+  orderClosed = computed(() => ['cancelled', 'refunded'].includes(this.order()?.state ?? ''));
+  orderPending = computed(() => {
+    if (!this.order() || this.orderClosed()) return 0;
+    const pending = Math.round((this.orderTotal() - this.orderPaid()) * 100) / 100;
+    return pending > 0 ? pending : 0;
+  });
+  /** Fully paid (and not annulled): the block offers "Ver orden" only, no collection. */
+  orderIsPaid = computed(
+    () => !!this.order() && !this.orderClosed() && this.orderTotal() > 0 && this.orderPending() <= 0,
+  );
+  orderBadgeLabel = computed(() => {
     const state = this.order()?.state;
-    return state ? ORDER_STATE_LABELS[state] ?? state : '';
+    if (!state) return '';
+    if (this.orderIsPaid()) return 'Pagada';
+    return ORDER_STATE_LABELS[state] ?? state;
   });
   /** Charges only while the order is still open for edits. */
   canAddCharge = computed(() => {
@@ -741,7 +765,8 @@ export class BookingDetailModalComponent {
   }
 
   protected toNumber(value: number | string | null | undefined): number {
-    return Number(value ?? 0);
+    const parsed = Number(value ?? 0);
+    return Number.isFinite(parsed) ? parsed : 0;
   }
 
   /** Opens the inline "Agregar cargo" form and loads the catalog once. */

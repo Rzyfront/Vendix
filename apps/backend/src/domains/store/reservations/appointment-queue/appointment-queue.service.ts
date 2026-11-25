@@ -2,7 +2,44 @@ import { Injectable, Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { bookingInterval } from '@common/utils/schedule-window.util';
-import { resolveStoreTimezone } from '@common/utils/store-timezone.util';
+import { localDateString, resolveStoreTimezone } from '@common/utils/store-timezone.util';
+
+/** Claves del orden de la cola viva: cercanía a la hora, prioridad manual y FIFO. */
+export interface QueueOrderKey {
+  score: number;
+  priority: number;
+  created_at: Date;
+}
+
+/** Único comparador de la cola: lo usan el ranking persistido y el tablero. */
+export function compareQueueOrder(a: QueueOrderKey, b: QueueOrderKey): number {
+  const scoreA = Number.isFinite(a.score) ? a.score : Number.POSITIVE_INFINITY;
+  const scoreB = Number.isFinite(b.score) ? b.score : Number.POSITIVE_INFINITY;
+  if (scoreA !== scoreB) return scoreA - scoreB;
+  if (a.priority !== b.priority) return a.priority - b.priority;
+  return a.created_at.getTime() - b.created_at.getTime();
+}
+
+/** Fila del tablero de la pestaña Cola (agenda-unificada, 2026-11-24). */
+export interface QueueBoardRow {
+  booking_id: number;
+  booking_number: string;
+  customer_name: string;
+  /** Partes del nombre para el monitor público (primer nombre + inicial). */
+  customer_first_name: string | null;
+  customer_last_name: string | null;
+  service_name: string | null;
+  provider_name: string | null;
+  status: 'confirmed' | 'arriving' | 'attending';
+  checked_in: boolean;
+  start_time: string;
+  end_time: string;
+  starts_at: Date;
+  arrival_at: Date | null;
+  /** Minutos hasta el inicio; negativo si la hora ya pasó. */
+  minutes_to_start: number;
+  priority: number;
+}
 
 /**
  * Smart queue for the reservations redesign.
@@ -39,16 +76,23 @@ export class AppointmentQueueService {
   ) {}
 
   /**
-   * Compute and return the live ranking for the given store on the
-   * given calendar day. The function is pure SQL: the score is
-   * `ABS(target_time - arrival_at)` (ascending) and the tie-breaker is
-   * `priority` (ascending, lower = sooner) and then `created_at`
-   * (ascending, FIFO). Only bookings in `arriving` or `attending`
-   * status participate.
+   * Live ranking of the day: who is waiting, in call order.
+   *
+   * Score is `ABS(start - arrival_at)` (ascending); tie-breakers are `priority`
+   * (lower = sooner) and `created_at` (FIFO). Only `arriving` bookings (checked
+   * in, not being served yet) participate: `attending` is already inside, so it
+   * must not hold a queue position nor receive the "you are next" notice.
+   *
+   * This is the single source of the order: `refreshAndBroadcastQueue` persists
+   * positions from it and the Cola board lists `waiting` with it, so the
+   * monitor and the notification can never disagree.
+   *
+   * Without `isoDay` it ranks today in the store timezone (never the UTC date,
+   * which after 19:00 in Bogotá is already tomorrow).
    */
   async computeQueueForStore(
     storeId: number,
-    isoDay: string,
+    isoDay?: string,
   ): Promise<Array<{
     booking_id: number;
     booking_number: string;
@@ -62,7 +106,9 @@ export class AppointmentQueueService {
   }>> {
     // `bookings` has no `starts_at`: the start is `date` (@db.Date) + `start_time`
     // (HH:mm, store wall clock). Filter by the calendar day and derive the instant.
-    const day = new Date(`${isoDay.slice(0, 10)}T00:00:00.000Z`);
+    const timezone = await resolveStoreTimezone(this.prisma, storeId);
+    const targetDay = (isoDay ?? localDateString(new Date(), timezone)).slice(0, 10);
+    const day = new Date(`${targetDay}T00:00:00.000Z`);
 
     // Pull every candidate in window in one round-trip; sort in app to
     // avoid a Postgres `ABS(timestamp - timestamp)` expression that the
@@ -73,7 +119,7 @@ export class AppointmentQueueService {
       where: {
         store_id: storeId,
         date: day,
-        status: { in: ['arriving', 'attending'] as any },
+        status: 'arriving' as any,
         arrival_at: { not: null },
       },
       select: {
@@ -87,30 +133,191 @@ export class AppointmentQueueService {
         end_time: true,
         arrival_at: true,
         priority: true,
+        created_at: true,
       },
-      orderBy: [{ arrival_at: 'asc' }, { priority: 'asc' }, { created_at: 'asc' }],
     });
 
     if (candidates.length === 0) return [];
 
-    const timezone = await resolveStoreTimezone(this.prisma, storeId);
+    return candidates
+      .map((c) => {
+        // La consulta ya exige `arrival_at`, pero sin él no hay score: se omite
+        // en vez de romper el tablero.
+        if (!c.arrival_at) return null;
+        const starts_at = bookingInterval(c, timezone).startAt;
+        return {
+          booking_id: c.id,
+          booking_number: c.booking_number,
+          customer_id: c.customer_id,
+          provider_id: c.provider_id ?? null,
+          starts_at,
+          target_time: starts_at,
+          arrival_at: c.arrival_at,
+          score: Math.abs(starts_at.getTime() - c.arrival_at.getTime()),
+          priority: c.priority ?? 0,
+          created_at: c.created_at ?? new Date(0),
+        };
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+      .sort(compareQueueOrder)
+      .map(({ created_at: _createdAt, ...entry }) => entry);
+  }
 
-    return candidates.map((c) => {
-      const starts_at = bookingInterval(c, timezone).startAt;
-      return {
-        booking_id: c.id,
-        booking_number: c.booking_number,
-        customer_id: c.customer_id,
-        provider_id: c.provider_id ?? null,
-        starts_at,
-        target_time: starts_at,
-        arrival_at: c.arrival_at!,
-        score: c.arrival_at
-          ? Math.abs(starts_at.getTime() - c.arrival_at.getTime())
-          : Number.POSITIVE_INFINITY,
-        priority: c.priority,
-      };
+  /** Fila del tablero tal como la arma `dayBoard`. */
+  private boardRow(
+    row: {
+      id: number;
+      booking_number: string;
+      status: string;
+      start_time: string;
+      end_time: string;
+      date: Date;
+      end_date: Date | null;
+      arrival_at: Date | null;
+      priority: number | null;
+      customer?: { first_name: string | null; last_name: string | null } | null;
+      product?: { name: string } | null;
+      provider?: {
+        display_name: string | null;
+        employee?: { first_name: string; last_name: string | null } | null;
+        user?: { first_name: string | null; last_name: string | null } | null;
+      } | null;
+    },
+    timezone: string,
+    now: Date,
+  ): QueueBoardRow {
+    const startsAt = bookingInterval(row, timezone).startAt;
+    const employee = row.provider?.employee;
+    const user = row.provider?.user;
+    const providerName =
+      row.provider?.display_name ??
+      (employee ? `${employee.first_name} ${employee.last_name ?? ''}`.trim() : null) ??
+      (user ? `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim() : null) ??
+      null;
+    const customerName =
+      `${row.customer?.first_name ?? ''} ${row.customer?.last_name ?? ''}`.trim() ||
+      `Reserva #${row.booking_number}`;
+    return {
+      booking_id: row.id,
+      booking_number: row.booking_number,
+      customer_name: customerName,
+      customer_first_name: row.customer?.first_name ?? null,
+      customer_last_name: row.customer?.last_name ?? null,
+      service_name: row.product?.name ?? null,
+      provider_name: providerName,
+      status: row.status as QueueBoardRow['status'],
+      checked_in: row.arrival_at != null,
+      start_time: row.start_time,
+      end_time: row.end_time,
+      starts_at: startsAt,
+      arrival_at: row.arrival_at ?? null,
+      minutes_to_start: Math.round((startsAt.getTime() - now.getTime()) / 60_000),
+      priority: row.priority ?? 0,
+    };
+  }
+
+  /**
+   * Tablero del día para la pestaña Cola: todo lo que la recepción necesita ver
+   * de un vistazo, sin tocar `queue_position` ni notificar a nadie.
+   *
+   * - `attending`: ya está en atención.
+   * - `arriving`: hizo check-in y espera (orden de la cola viva, por cercanía a
+   *   su hora, con la prioridad manual como desempate).
+   * - `confirmed`: programación confirmada que todavía no empieza, por hora
+   *   (las de hora ya pasada sin check-in se quedan para que se vean).
+   *
+   * La cola viva (`computeQueueForStore`) sigue siendo la única fuente para
+   * persistir posiciones y avisar al siguiente; este tablero es solo lectura y
+   * agrega lo que aún no ha llegado.
+   */
+  async dayBoard(
+    storeId: number,
+    isoDay?: string,
+    now: Date = new Date(),
+  ): Promise<{
+    day: string;
+    generated_at: Date;
+    in_service: QueueBoardRow[];
+    waiting: QueueBoardRow[];
+    upcoming: QueueBoardRow[];
+  }> {
+    // El día por defecto es HOY en la zona de la tienda: con un `toISOString()`
+    // (UTC) un tablero abierto a las 20:00 de Bogotá mostraba el día siguiente.
+    const timezone = await resolveStoreTimezone(this.prisma, storeId);
+    const targetDay = (isoDay ?? localDateString(now, timezone)).slice(0, 10);
+    const day = new Date(`${targetDay}T00:00:00.000Z`);
+
+    const rows = await this.prisma.bookings.findMany({
+      where: {
+        store_id: storeId,
+        date: day,
+        status: { in: ['confirmed', 'arriving', 'attending'] as any },
+      },
+      select: {
+        id: true,
+        booking_number: true,
+        status: true,
+        customer_id: true,
+        provider_id: true,
+        date: true,
+        end_date: true,
+        start_time: true,
+        end_time: true,
+        arrival_at: true,
+        priority: true,
+        created_at: true,
+        customer: { select: { first_name: true, last_name: true } },
+        product: { select: { name: true } },
+        provider: {
+          select: {
+            display_name: true,
+            employee: { select: { first_name: true, last_name: true } },
+            user: { select: { first_name: true, last_name: true } },
+          },
+        },
+      },
+      orderBy: [{ start_time: 'asc' }, { priority: 'asc' }, { created_at: 'asc' }],
     });
+
+    // `waiting` se ordena con el MISMO comparador que la cola viva, sobre las
+    // filas ya cargadas: el monitor y la notificación no pueden discrepar, y el
+    // polling no repite la consulta.
+    const orderOf = new Map<number, QueueOrderKey>();
+    const board = rows.map((row) => {
+      const entry = this.boardRow(row, timezone, now);
+      if (entry.status === 'arriving' && entry.arrival_at) {
+        orderOf.set(entry.booking_id, {
+          score: Math.abs(
+            entry.starts_at.getTime() - new Date(entry.arrival_at).getTime(),
+          ),
+          priority: entry.priority,
+          created_at: row.created_at ?? new Date(0),
+        });
+      }
+      return entry;
+    });
+
+    const orderKey = (row: QueueBoardRow): QueueOrderKey =>
+      orderOf.get(row.booking_id) ?? {
+        score: Number.POSITIVE_INFINITY,
+        priority: row.priority,
+        created_at: new Date(0),
+      };
+
+    return {
+      day: targetDay,
+      generated_at: now,
+      in_service: board.filter((r) => r.status === 'attending'),
+      waiting: board
+        .filter((r) => r.status === 'arriving')
+        .sort((a, b) => compareQueueOrder(orderKey(a), orderKey(b))),
+      // Confirmadas que todavía no empiezan (status `confirmed` = no iniciada):
+      // incluye las que ya pasaron de hora sin check-in, que es justo lo que la
+      // recepción necesita ver para reaccionar.
+      upcoming: board
+        .filter((r) => r.status === 'confirmed')
+        .sort((a, b) => a.starts_at.getTime() - b.starts_at.getTime()),
+    };
   }
 
   /**
@@ -123,6 +330,29 @@ export class AppointmentQueueService {
     isoDay: string,
   ): Promise<{ updated: number; promoted: number | null }> {
     const ranked = await this.computeQueueForStore(storeId, isoDay);
+
+    // Posición previa de quien quedaría primero: solo se le avisa si de verdad
+    // cambió de lugar (si ya era el 0, el aviso sería un repetido).
+    const previousTop = ranked[0]
+      ? await this.prisma.bookings.findFirst({
+          where: { id: ranked[0].booking_id },
+          select: { queue_position: true },
+        })
+      : null;
+
+    // Quien salió de la cola (pasó a atención, se atendió o se canceló) no debe
+    // conservar su posición vieja: se limpia antes de escribir las nuevas.
+    const day = new Date(`${isoDay.slice(0, 10)}T00:00:00.000Z`);
+    await this.prisma.bookings.updateMany({
+      where: {
+        store_id: storeId,
+        date: day,
+        queue_position: { not: null },
+        id: { notIn: ranked.map((entry) => entry.booking_id) },
+      },
+      data: { queue_position: null },
+    });
+
     if (ranked.length === 0) return { updated: 0, promoted: null };
 
     // Persist positions. Use `updateMany` with composite-key detection is
@@ -138,9 +368,10 @@ export class AppointmentQueueService {
       ),
     );
 
-    // Notify whoever is at the top (rank 0) with `appointment_queued`.
+    // Notify whoever is at the top (rank 0) with `appointment_queued`, only when
+    // it actually moved there.
     const promoted = ranked[0];
-    if (promoted) {
+    if (promoted && (previousTop?.queue_position ?? null) !== 0) {
       try {
         await this.notifications.createAndBroadcast(
           storeId,

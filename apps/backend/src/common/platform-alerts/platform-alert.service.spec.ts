@@ -192,6 +192,116 @@ describe('PlatformAlertService', () => {
     expect(report).not.toHaveBeenCalled();
   });
 
+  it('una respuesta lenta de tienda lleva tienda, usuario, petición y parámetros aunque el ALS esté vacío', async () => {
+    alertContext = fakeContext(NAMES);
+    const service = build();
+
+    service.captureSlowRequest({
+      method: 'POST',
+      route: '/api/store/invoicing/orders/:orderId/emit',
+      durationMs: 60_990,
+      statusCode: 200,
+      organizationId: 82,
+      storeId: 105,
+      userId: 7,
+      requestId: 'req-slow-1',
+      params: { orderId: '987' },
+    });
+    await service.flush();
+
+    const stored = prisma.rows[0] as unknown as {
+      store_id: number;
+      organization_id: number;
+      details: Record<string, unknown>;
+    };
+    expect(stored.store_id).toBe(105);
+    expect(stored.organization_id).toBe(82);
+    expect(stored.details['Parámetros']).toBe('orderId=987');
+    expect(stored.details['Petición (id)']).toBe('req-slow-1');
+    expect(JSON.stringify(stored.details)).toContain('"userId":7');
+    // El mensaje ya resuelve nombres: tienda y ejecutor visibles.
+    const text = send.mock.calls[0][0] as string;
+    expect(text).toContain('Vendix Granizzo');
+    expect(text).toContain('Ana Pérez');
+    expect(text).toContain('orderId=987');
+  });
+
+  it('sin identidad explícita usa el contexto del request (jobs e incidentes)', async () => {
+    const service = build();
+    await RequestContextService.asyncLocalStorage.run(
+      { is_super_admin: false, is_owner: false, store_id: 105, organization_id: 82, user_id: 7 } as never,
+      async () => {
+        service.captureSlowRequest({
+          method: 'GET',
+          route: '/api/store/invoicing/orders/:orderId',
+          durationMs: 60_000,
+          statusCode: 200,
+          organizationId: null,
+          storeId: null,
+          userId: null,
+        });
+      },
+    );
+    await service.flush();
+    expect(prisma.rows[0]).toMatchObject({ store_id: 105, organization_id: 82 });
+  });
+
+  it('una organización explícita sin tienda no hereda la tienda del contexto', async () => {
+    const service = build();
+    await RequestContextService.asyncLocalStorage.run(
+      { is_super_admin: false, is_owner: false, store_id: 105, organization_id: 111 } as never,
+      async () => {
+        service.captureSlowRequest({
+          method: 'GET',
+          route: '/api/store/x',
+          durationMs: 60_000,
+          statusCode: 200,
+          organizationId: 82,
+          storeId: null,
+          userId: null,
+        });
+      },
+    );
+    await service.flush();
+    expect(prisma.rows[0]).toMatchObject({ organization_id: 82, store_id: null });
+  });
+
+  it('la identidad explícita gana sobre el contexto del request', async () => {
+    const service = build();
+    await RequestContextService.asyncLocalStorage.run(
+      { is_super_admin: false, is_owner: false, store_id: 1, organization_id: 2, user_id: 3 } as never,
+      async () => {
+        service.captureSlowRequest({
+          method: 'GET',
+          route: '/api/store/x',
+          durationMs: 60_000,
+          statusCode: 200,
+          organizationId: 82,
+          storeId: 105,
+          userId: 7,
+        });
+      },
+    );
+    await service.flush();
+    expect(prisma.rows[0]).toMatchObject({ store_id: 105, organization_id: 82 });
+  });
+
+  it('un 5xx de tienda usa la identidad explícita del request', async () => {
+    const service = build();
+    service.captureHttpFailure(
+      http500('/api/store/invoicing/orders/:orderId/emit', {
+        organizationId: 82,
+        storeId: 105,
+        userId: 7,
+        params: { orderId: '987' },
+      }),
+    );
+    await service.flush();
+    const stored = prisma.rows[0] as unknown as { store_id: number; details: Record<string, unknown> };
+    expect(stored.store_id).toBe(105);
+    expect(stored.details['Parámetros']).toBe('orderId=987');
+  });
+
   it('falla grave: Telegram + un ticket/correo por PlatformIncidentService, con el número en la alerta', async () => {
     const service = build();
     service.captureHttpFailure(http500());
@@ -387,7 +497,11 @@ describe('PlatformAlertService', () => {
     await expect(service.flush()).resolves.toBeUndefined();
   });
   describe('QUI-1031: contexto legible y «Límite de plan»', () => {
-    /** El trabajo real del ticket: ai-embedding/embed de un producto, tienda 105, sin cupo. */
+    /**
+     * Trabajo con cupo de IA (cola `ai-generation`, feature `async_queue`).
+     * Los embeddings ya no tienen cupo (2026-11-24), así que la alerta de plan
+     * se prueba con una cola que sí lo consume.
+     */
     const quotaJob = (over: Partial<PlatformAlertEvent> = {}, data: Record<string, unknown> = {}): PlatformAlertEvent => {
       const jobData = withJobOrigin(
         { store_id: 105, organization_id: 82, entity_type: 'product', entity_id: 123, ...data },
@@ -396,21 +510,21 @@ describe('PlatformAlertService', () => {
       );
       return {
         source: 'job',
-        process: 'cola ai-embedding · embed',
+        process: 'cola ai-generation · generate',
         errorType: 'job_failed',
         severity: 'warning',
-        title: 'Trabajo fallido en la cola ai-embedding',
+        title: 'Trabajo fallido en la cola ai-generation',
         message: 'Error: AI quota exceeded for this billing period',
-        details: { Cola: 'ai-embedding', Trabajo: 'embed' },
+        details: { Cola: 'ai-generation', Trabajo: 'generate' },
         storeId: 105,
         organizationId: 82,
-        context: jobContext('ai-embedding', { name: 'embed', data: jobData }),
+        context: jobContext('ai-generation', { name: 'generate', data: jobData }),
         occurredAt: new Date('2026-11-10T15:00:00Z'),
         ...over,
       };
     };
 
-    it('el cupo de IA agotado llega como «Límite de plan» informativo, con nombres, módulo, registro, plan y cupo; sin ticket', async () => {
+    it('el cupo de IA agotado llega como «Límite de plan» informativo, con nombres, módulo, plan y cupo; sin ticket', async () => {
       alertContext = fakeContext(NAMES);
       const service = build();
       service.capture(quotaJob());
@@ -429,9 +543,8 @@ describe('PlatformAlertService', () => {
       expect(text).toContain('<b>Tienda:</b> Vendix Granizzo (testbalmes, id 105)');
       expect(text).toContain('<b>Organización:</b> Demo Vendix (id 82)');
       expect(text).toContain('<b>Usuario:</b> Ana Pérez · ana.perez@vendix.test (id 7)');
-      expect(text).toContain('<b>Módulo:</b> Productos');
-      expect(text).toContain('<b>Acción:</b> indexar el producto para la búsqueda con IA');
-      expect(text).toContain('<b>Registro:</b> producto «Kit de freno NKD» (id 123)');
+      expect(text).toContain('<b>Módulo:</b> Motor de IA');
+      expect(text).toContain('<b>Acción:</b> ejecutar una generación de IA en segundo plano');
       expect(text).toContain('<b>Origen:</b> Evento product.updated');
       expect(text).toContain('<b>Plan:</b> Pro (pro) · estado active');
       expect(text).toContain('<b>Cupo:</b> 1.000 de 1.000');
@@ -440,12 +553,10 @@ describe('PlatformAlertService', () => {
       expect(prisma.rows[0].details).toMatchObject({
         _context: {
           userId: 7,
-          module: 'Productos',
-          entityType: 'product',
-          entityId: 123,
+          module: 'Motor de IA',
           category: 'plan_limit',
           planLimitCode: 'SUBSCRIPTION_006',
-          aiFeature: 'rag_embeddings',
+          aiFeature: 'async_queue',
           period: '202611',
         },
         'Error original': 'Error: AI quota exceeded for this billing period',

@@ -139,8 +139,24 @@ describe('Agenda unificada F1 — cálculo del calendario', () => {
     ]);
     const service = schedulingConfigActions({ bookings: true, scheduled: false, service: true });
     expect(service.map((a) => a.action)).toContain('/admin/orders/agenda?tab=configuracion&seccion=equipo');
-    expect(service.map((a) => a.action)).toContain('/admin/orders/agenda?tab=configuracion&seccion=cola');
+    expect(service.map((a) => a.action)).toContain('/admin/orders/agenda?tab=cola');
     expect(service.map((a) => a.action)).toContain('/admin/services/stations');
+
+    // Las pantallas que antes repetía la rejilla «Otras pantallas» siguen
+    // alcanzables desde el menú de acciones de Agenda.
+    const everyScreen = schedulingConfigActions({ bookings: true, scheduled: true, service: true }).map(
+      (a) => a.action,
+    );
+    for (const route of [
+      '/admin/reservations/reschedule-requests',
+      '/admin/reservations/payment-requests',
+      '/admin/reservations/reminders',
+      '/admin/services/stations',
+      '/admin/scheduled-orders/day',
+      '/admin/scheduled-orders/production',
+    ]) {
+      expect(everyScreen).withContext(route).toContain(route);
+    }
   });
 
   it('une la disponibilidad de los prestadores y sombrea lo que queda fuera', () => {

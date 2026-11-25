@@ -4,7 +4,7 @@
   (opened)="onOpen()"
   [dialog]="true"
   title=""
-  size="md"
+  size="lg"
   customClasses="booking-modal-content"
 >
   @if (booking(); as b) {
@@ -183,201 +183,219 @@
       }
 
 
-      <!-- Order block: normal payment flow + extra charges -->
-      @if (order(); as ord) {
-        <div class="deposit-block" data-testid="booking-order-block">
-          <div class="deposit-head">
-            <span class="info-label">
-              <app-icon name="receipt" [size]="13"></app-icon>
-              Orden #{{ ord.order_number }}
-            </span>
-            <span class="deposit-badge">{{ orderStateLabel() }}</span>
-          </div>
-          <div class="deposit-figures">
-            <span>Total <strong>{{ toNumber(ord.grand_total) | currency }}</strong></span>
-            <span>Pagado <strong>{{ toNumber(ord.total_paid) | currency }}</strong></span>
-            <span>Saldo pendiente <strong>{{ toNumber(ord.remaining_balance) | currency }}</strong></span>
-            @if (hasDepositBalance()) {
-              <span>Anticipo disponible <strong>{{ deposit()?.balance | currency }}</strong></span>
-            }
-          </div>
-          <div class="deposit-link-row">
-            <button class="btn-primary-sm" (click)="goToOrder()" data-testid="booking-view-order">Ver orden / Cobrar</button>
-            @if (canAddCharge() && !chargeOpen()) {
-              <button class="btn-ghost-sm" (click)="openCharge()" data-testid="booking-add-charge">Agregar cargo</button>
-            }
-          </div>
-          @if (chargeOpen()) {
-            <div class="deposit-link-row" data-testid="booking-charge-form">
-              <select
-                class="deposit-link-input"
-                aria-label="Producto o servicio"
-                [ngModel]="chargeProductId()"
-                (ngModelChange)="onChargeProductChange($event)"
-              >
-                <option [ngValue]="null">Producto o servicio…</option>
-                @for (p of chargeOptions(); track p.id) {
-                  <option [ngValue]="p.id">{{ p.name }}</option>
-                }
-              </select>
-              <input
-                class="deposit-link-input"
-                style="flex: 0 1 90px"
-                type="number"
-                min="1"
-                aria-label="Cantidad"
-                [ngModel]="chargeQuantity()"
-                (ngModelChange)="onChargeQuantityChange($event)"
-              />
-              <button class="btn-primary-sm" [disabled]="!canSubmitCharge()" (click)="submitCharge()">
-                {{ chargeBusy() ? 'Agregando…' : 'Agregar' }}
-              </button>
-              <button class="btn-ghost-sm" [disabled]="chargeBusy()" (click)="chargeOpen.set(false)">Cancelar</button>
+      <!-- Money sections: order, deposit, plan tasks and prepay. Side by side on
+           wide screens so the modal is not one endless stack (Rafael, 2026-11-24). -->
+      <div class="money-grid">
+        <!-- Order block: normal payment flow + extra charges -->
+        @if (order(); as ord) {
+          <div class="deposit-block" data-testid="booking-order-block">
+            <div class="deposit-head">
+              <span class="info-label">
+                <app-icon name="receipt" [size]="13"></app-icon>
+                Orden #{{ ord.order_number }}
+              </span>
+              <span class="deposit-badge" [ngClass]="orderIsPaid() ? 'paid' : orderClosed() ? 'muted' : ''">{{ orderBadgeLabel() }}</span>
             </div>
-          }
-          @if (!canAddCharge()) {
-            <p class="deposit-hint">No se pueden agregar cargos: la orden ya no admite cambios.</p>
-          }
-        </div>
-      } @else if (orderLoaded()) {
-        <p class="deposit-hint" style="margin: 0 16px 12px" data-testid="booking-no-order">Esta reserva no tiene orden asociada.</p>
-      }
-
-      <!-- Deposit block (S15 / S17) -->
-      @if (deposit(); as dep) {
-        <div class="deposit-block">
-          <div class="deposit-head">
-            <span class="info-label">
-              <app-icon name="wallet" [size]="13"></app-icon>
-              Anticipo
-            </span>
-            @if (dep.balance > 0) {
-              <span class="deposit-badge paid">Pagado</span>
-            } @else if (pendingDepositRequest()) {
-              <span class="deposit-badge pending">Esperando pago</span>
-            }
-          </div>
-          <div class="deposit-figures">
-            @if (dep.required != null) {
-              <span>Requerido <strong>{{ dep.required | currency }}</strong></span>
-            }
-            @if (dep.received > 0 || !hasPrepayPaid()) {
-              <span>Recibido <strong>{{ dep.received | currency }}</strong></span>
-            }
-            @if (dep.balance !== dep.received) {
-              <span>Saldo <strong>{{ dep.balance | currency }}</strong></span>
-            }
-          </div>
-
-          @if (pendingDepositRequest(); as pending) {
-            <p class="deposit-hint">
-              {{ pending.amount | currency }} por pagar.
-              @if (pending.expires_at) {
-                Apartada hasta {{ pending.expires_at | date:'dd/MM HH:mm' }}; si no se paga, se libera.
+            @if (orderTotal() <= 0) {
+              @if (canAddCharge()) {
+                <p class="deposit-hint">La orden todavía no tiene cargos: agrega un producto o servicio para poder cobrarla.</p>
               }
-            </p>
-            @if (depositLinkUrl(); as link) {
-              <div class="deposit-link-row">
-                <input class="deposit-link-input" readonly [value]="link" (focus)="$any($event.target).select()" aria-label="Enlace de pago" />
-                <button class="btn-ghost-sm" (click)="copyDepositLink()"><app-icon name="copy" [size]="14"></app-icon> Copiar</button>
-                <button class="btn-ghost-sm" (click)="shareDepositLink()"><app-icon name="share-2" [size]="14"></app-icon> Compartir</button>
-              </div>
-            }
-            <button class="btn-ghost-sm" [disabled]="depositLinkBusy()" (click)="generateDepositLink()">
-              <app-icon name="refresh-cw" [size]="14"></app-icon>
-              Generar nuevo enlace
-            </button>
-          }
-
-          @if (dep.decision_due_at && hasDepositBalance()) {
-            <p class="deposit-hint warn">El cliente no llegó: decide qué pasa con el anticipo.</p>
-          }
-          @if (canDecideDeposit()) {
-            <button class="btn-ghost-sm" (click)="depositDialog.set('decide')">
-              <app-icon name="wallet" [size]="14"></app-icon>
-              Decidir anticipo
-            </button>
-          }
-        </div>
-      }
-
-      <!-- Plan tasks (QUI-1060 F3) -->
-      @if (planTasks().length > 0) {
-        <div class="deposit-block">
-          <div class="deposit-head">
-            <span class="info-label">
-              <app-icon name="check-square" [size]="13"></app-icon>
-              Tareas del plan
-            </span>
-          </div>
-          @for (t of planTasks(); track t.link_id) {
-            <div class="plan-task-row">
-              <div class="plan-task-main">
-                <span class="plan-task-title">{{ t.title }}</span>
-                <span class="deposit-hint">
-                  {{ taskOwnerLabel(t) }}
-                  @if (t.due_at) {
-                    · {{ t.due_at | date:'dd/MM HH:mm' }}
-                  }
-                </span>
-              </div>
-              <div class="plan-task-side">
-                <span class="deposit-badge" [ngClass]="taskStatusClass(t.status)">{{ taskStatusLabel(t.status) }}</span>
-                @if (t.task_id != null) {
-                  <button class="btn-ghost-sm" (click)="openPlanTask(t.task_id)">Ver en CRM</button>
-                }
-              </div>
-            </div>
-          }
-        </div>
-      }
-
-      <!-- Prepay ("cobro para reservar"): paid amount, link and in-person payment -->
-      @if (canRequestPrepay() || hasPrepayPaid()) {
-        <div class="deposit-block">
-          <div class="deposit-head">
-            <span class="info-label">
-              <app-icon name="credit-card" [size]="13"></app-icon>
-              Cobro para reservar
-            </span>
-            @if (hasPrepayPaid()) {
-              <span class="deposit-badge paid">Pagado</span>
-            }
-          </div>
-          @if (prepay(); as block) {
-            @if (block.paid_amount > 0) {
+            } @else {
               <div class="deposit-figures">
-                <span>Pagado <strong>{{ block.paid_amount | currency }}</strong></span>
-                @if (block.remaining > 0) {
-                  <span>Por cobrar <strong>{{ block.remaining | currency }}</strong></span>
+                <span>Total <strong>{{ orderTotal() | currency }}</strong></span>
+                <span>Pagado <strong>{{ orderPaid() | currency }}</strong></span>
+                @if (orderPending() > 0) {
+                  <span>Saldo pendiente <strong>{{ orderPending() | currency }}</strong></span>
+                } @else if (!orderClosed()) {
+                  <span class="deposit-settled">
+                    <app-icon name="check-circle" [size]="12"></app-icon>
+                    Sin saldo pendiente
+                  </span>
                 }
               </div>
             }
-          }
-          @if (canRequestPrepay()) {
-            @if (prepayLinkUrl(); as link) {
-              @if (prepayAmount() != null) {
-                <p class="deposit-hint">{{ prepayAmount() | currency }} por pagar con este enlace.</p>
+            <div class="deposit-link-row">
+              <button class="btn-primary-sm" (click)="goToOrder()" data-testid="booking-view-order">
+                {{ orderPending() > 0 ? 'Ver orden / Cobrar' : 'Ver orden' }}
+              </button>
+              @if (canAddCharge() && !chargeOpen()) {
+                <button class="btn-ghost-sm" (click)="openCharge()" data-testid="booking-add-charge">Agregar cargo</button>
               }
-              <div class="deposit-link-row">
-                <input class="deposit-link-input" readonly [value]="link" (focus)="$any($event.target).select()" aria-label="Enlace de pago para reservar" />
-                <button class="btn-ghost-sm" (click)="copyPrepayLink()"><app-icon name="copy" [size]="14"></app-icon> Copiar</button>
-                <button class="btn-ghost-sm" (click)="sharePrepayLink()"><app-icon name="share-2" [size]="14"></app-icon> Compartir</button>
+            </div>
+            @if (chargeOpen()) {
+              <div class="deposit-link-row" data-testid="booking-charge-form">
+                <select
+                  class="deposit-link-input"
+                  aria-label="Producto o servicio"
+                  [ngModel]="chargeProductId()"
+                  (ngModelChange)="onChargeProductChange($event)"
+                >
+                  <option [ngValue]="null">Producto o servicio…</option>
+                  @for (p of chargeOptions(); track p.id) {
+                    <option [ngValue]="p.id">{{ p.name }}</option>
+                  }
+                </select>
+                <input
+                  class="deposit-link-input"
+                  style="flex: 0 1 90px"
+                  type="number"
+                  min="1"
+                  aria-label="Cantidad"
+                  [ngModel]="chargeQuantity()"
+                  (ngModelChange)="onChargeQuantityChange($event)"
+                />
+                <button class="btn-primary-sm" [disabled]="!canSubmitCharge()" (click)="submitCharge()">
+                  {{ chargeBusy() ? 'Agregando…' : 'Agregar' }}
+                </button>
+                <button class="btn-ghost-sm" [disabled]="chargeBusy()" (click)="chargeOpen.set(false)">Cancelar</button>
               </div>
             }
-            <button class="btn-ghost-sm" [disabled]="prepayBusy()" (click)="generatePrepayLink()">
-              <app-icon name="link" [size]="14"></app-icon>
-              {{ prepayLinkUrl() ? 'Generar nuevo enlace' : 'Cobrar para reservar' }}
-            </button>
-            @if (prepay() && prepayHasRemaining()) {
-              <button class="btn-ghost-sm" (click)="registerPaymentOpen.set(true)">
-                <app-icon name="banknote" [size]="14"></app-icon>
-                Registrar pago
+            @if (!canAddCharge() && orderPending() > 0) {
+              <p class="deposit-hint">La orden ya no admite cambios: el saldo pendiente se cobra desde el detalle de la orden.</p>
+            }
+          </div>
+        } @else if (orderLoaded()) {
+          <p class="deposit-hint order-missing" data-testid="booking-no-order">Esta reserva no tiene orden asociada.</p>
+        }
+
+        <!-- Deposit block (S15 / S17) -->
+        @if (deposit(); as dep) {
+          <div class="deposit-block">
+            <div class="deposit-head">
+              <span class="info-label">
+                <app-icon name="wallet" [size]="13"></app-icon>
+                Anticipo
+              </span>
+              @if (dep.balance > 0) {
+                <span class="deposit-badge paid">Pagado</span>
+              } @else if (dep.received > 0) {
+                <span class="deposit-badge muted">Aplicado</span>
+              } @else if (pendingDepositRequest()) {
+                <span class="deposit-badge pending">Esperando pago</span>
+              }
+            </div>
+            <div class="deposit-figures">
+              @if (dep.required != null) {
+                <span>Requerido <strong>{{ dep.required | currency }}</strong></span>
+              }
+              @if (dep.received > 0) {
+                <span>Recibido <strong>{{ dep.received | currency }}</strong></span>
+              }
+              @if (dep.balance > 0) {
+                <span>Disponible <strong>{{ dep.balance | currency }}</strong></span>
+              }
+            </div>
+
+            @if (pendingDepositRequest(); as pending) {
+              <p class="deposit-hint">
+                {{ pending.amount | currency }} por pagar.
+                @if (pending.expires_at) {
+                  Apartada hasta {{ pending.expires_at | date:'dd/MM HH:mm' }}; si no se paga, se libera.
+                }
+              </p>
+              @if (depositLinkUrl(); as link) {
+                <div class="deposit-link-row">
+                  <input class="deposit-link-input" readonly [value]="link" (focus)="$any($event.target).select()" aria-label="Enlace de pago" />
+                  <button class="btn-ghost-sm" (click)="copyDepositLink()"><app-icon name="copy" [size]="14"></app-icon> Copiar</button>
+                  <button class="btn-ghost-sm" (click)="shareDepositLink()"><app-icon name="share-2" [size]="14"></app-icon> Compartir</button>
+                </div>
+              }
+              <button class="btn-ghost-sm" [disabled]="depositLinkBusy()" (click)="generateDepositLink()">
+                <app-icon name="refresh-cw" [size]="14"></app-icon>
+                Generar nuevo enlace
               </button>
             }
-          }
-        </div>
-      }
+
+            @if (dep.decision_due_at && hasDepositBalance()) {
+              <p class="deposit-hint warn">El cliente no llegó: decide qué pasa con el anticipo.</p>
+            }
+            @if (canDecideDeposit()) {
+              <button class="btn-ghost-sm" (click)="depositDialog.set('decide')">
+                <app-icon name="wallet" [size]="14"></app-icon>
+                Decidir anticipo
+              </button>
+            }
+          </div>
+        }
+
+        <!-- Plan tasks (QUI-1060 F3) -->
+        @if (planTasks().length > 0) {
+          <div class="deposit-block">
+            <div class="deposit-head">
+              <span class="info-label">
+                <app-icon name="check-square" [size]="13"></app-icon>
+                Tareas del plan
+              </span>
+            </div>
+            @for (t of planTasks(); track t.link_id) {
+              <div class="plan-task-row">
+                <div class="plan-task-main">
+                  <span class="plan-task-title">{{ t.title }}</span>
+                  <span class="deposit-hint">
+                    {{ taskOwnerLabel(t) }}
+                    @if (t.due_at) {
+                      · {{ t.due_at | date:'dd/MM HH:mm' }}
+                    }
+                  </span>
+                </div>
+                <div class="plan-task-side">
+                  <span class="deposit-badge" [ngClass]="taskStatusClass(t.status)">{{ taskStatusLabel(t.status) }}</span>
+                  @if (t.task_id != null) {
+                    <button class="btn-ghost-sm" (click)="openPlanTask(t.task_id)">Ver en CRM</button>
+                  }
+                </div>
+              </div>
+            }
+          </div>
+        }
+
+        <!-- Prepay ("cobro para reservar"): paid amount, link and in-person payment -->
+        @if (canRequestPrepay() || hasPrepayPaid()) {
+          <div class="deposit-block">
+            <div class="deposit-head">
+              <span class="info-label">
+                <app-icon name="credit-card" [size]="13"></app-icon>
+                Cobro para reservar
+              </span>
+              @if (hasPrepayPaid()) {
+                <span class="deposit-badge paid">Pagado</span>
+              }
+            </div>
+            @if (prepay(); as block) {
+              @if (block.paid_amount > 0) {
+                <div class="deposit-figures">
+                  <span>Pagado <strong>{{ block.paid_amount | currency }}</strong></span>
+                  @if (block.remaining > 0) {
+                    <span>Por cobrar <strong>{{ block.remaining | currency }}</strong></span>
+                  }
+                </div>
+              }
+            }
+            @if (canRequestPrepay()) {
+              @if (prepayLinkUrl(); as link) {
+                @if (prepayAmount() != null) {
+                  <p class="deposit-hint">{{ prepayAmount() | currency }} por pagar con este enlace.</p>
+                }
+                <div class="deposit-link-row">
+                  <input class="deposit-link-input" readonly [value]="link" (focus)="$any($event.target).select()" aria-label="Enlace de pago para reservar" />
+                  <button class="btn-ghost-sm" (click)="copyPrepayLink()"><app-icon name="copy" [size]="14"></app-icon> Copiar</button>
+                  <button class="btn-ghost-sm" (click)="sharePrepayLink()"><app-icon name="share-2" [size]="14"></app-icon> Compartir</button>
+                </div>
+              }
+              <button class="btn-ghost-sm" [disabled]="prepayBusy()" (click)="generatePrepayLink()">
+                <app-icon name="link" [size]="14"></app-icon>
+                {{ prepayLinkUrl() ? 'Generar nuevo enlace' : 'Cobrar para reservar' }}
+              </button>
+              @if (prepay() && prepayHasRemaining()) {
+                <button class="btn-ghost-sm" (click)="registerPaymentOpen.set(true)">
+                  <app-icon name="banknote" [size]="14"></app-icon>
+                  Registrar pago
+                </button>
+              }
+            }
+          </div>
+        }
+      </div><!-- /money-grid -->
 
       <!-- Notes section -->
       <div class="notes-section">

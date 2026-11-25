@@ -62,7 +62,8 @@ const PLANS_ROUTE = '/admin/subscription/plans';
 const AI_FEATURE_BY_URL: Array<{ match: RegExp; feature: string }> = [
   { match: /\/store\/ai-chat|\/store\/vexi|\/conversations/i, feature: 'streaming_chat' },
   { match: /\/store\/ai-agents|\/agent/i, feature: 'tool_agents' },
-  { match: /\/embeddings|\/rag|\/documents\/(index|search)/i, feature: 'rag_embeddings' },
+  // Sin entrada para embeddings/RAG: no se cobran ni se topan por tienda
+  // (decisión del dueño, 2026-11-24), así que no hay paywall que inferir.
   { match: /\/ai-queue|\/ocr|\/(receipt|expense)-scan|\/toolbox/i, feature: 'async_queue' },
   { match: /\/voice|\/speech/i, feature: 'realtime_voice' },
   { match: /\/ai-engine\/.*generate|\/copy|\/descriptions/i, feature: 'text_generation' },

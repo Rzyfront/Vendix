@@ -33,7 +33,7 @@ class RecordHostStub {
 const CONFIG_ROUTES = [
   agendaUrl('configuracion', 'equipo'),
   agendaUrl('configuracion', 'disponibilidad'),
-  agendaUrl('configuracion', 'cola'),
+  agendaUrl('cola'),
   agendaUrl('configuracion', 'horario'),
   '/admin/reservations/reschedule-requests',
   '/admin/reservations/payment-requests',

@@ -148,6 +148,36 @@ export type BookingStatus = 'pending' | 'confirmed' | 'arriving' | 'attending' |
  * `arriving` or `attending` status is ranked by ABS(starts_at - arrival_at),
  * with priority + created_at as tiebreakers.
  */
+/** Fila del tablero de la pestaña Cola. */
+export interface QueueBoardRow {
+  booking_id: number;
+  booking_number: string;
+  customer_name: string;
+  /** Partes del nombre: el monitor público usa primer nombre + inicial. */
+  customer_first_name: string | null;
+  customer_last_name: string | null;
+  service_name: string | null;
+  provider_name: string | null;
+  status: 'confirmed' | 'arriving' | 'attending';
+  checked_in: boolean;
+  start_time: string;
+  end_time: string;
+  starts_at: string;
+  arrival_at: string | null;
+  /** Minutos hasta el inicio; negativo si la hora ya pasó. */
+  minutes_to_start: number;
+  priority: number;
+}
+
+/** Tablero del día de la pestaña Cola (solo lectura). */
+export interface QueueBoard {
+  day: string;
+  generated_at: string;
+  in_service: QueueBoardRow[];
+  waiting: QueueBoardRow[];
+  upcoming: QueueBoardRow[];
+}
+
 export interface QueueEntry {
   booking_id: number;
   booking_number: string;

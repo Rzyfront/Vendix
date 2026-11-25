@@ -569,7 +569,8 @@ export const storeAdminRoutes: Routes = [
           {
             path: 'queue',
             pathMatch: 'full',
-            redirectTo: () => agendaTabRedirect('configuracion', 'cola'),
+            // La cola es pestaña propia de Agenda desde 2026-11-24.
+            redirectTo: () => agendaTabRedirect('cola'),
           },
           {
             path: 'business-hours',

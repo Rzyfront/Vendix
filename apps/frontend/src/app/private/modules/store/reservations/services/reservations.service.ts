@@ -21,6 +21,7 @@ import {
   ProviderDateInfo,
   AvailabilityOverviewQuery,
   QueueEntry,
+  QueueBoard,
   BusinessHoursRow,
   CreateRescheduleRequestDto,
   DecideRescheduleRequestDto,
@@ -608,6 +609,18 @@ export class ReservationsService {
     if (day) params = params.set('day', day);
     return this.http.get<any>(`${this.apiUrl}/queue`, { params }).pipe(
       map((response) => response.data || response || []),
+    );
+  }
+
+  /**
+   * Tablero de la pestaña Cola: en atención, en sala (check-in) y la
+   * programación confirmada que aún no empieza.
+   */
+  getQueueBoard(day?: string): Observable<QueueBoard> {
+    let params = new HttpParams();
+    if (day) params = params.set('day', day);
+    return this.http.get<any>(`${this.apiUrl}/queue/board`, { params }).pipe(
+      map((response) => response.data || response),
     );
   }
 

@@ -1,0 +1,233 @@
+<section #root class="aq" [class.aq--fullscreen]="isFullscreen()" aria-label="Cola de atención">
+  @if (!isFullscreen()) {
+    <header class="aq-head">
+      <div class="aq-head-titles">
+        <h2>
+          <app-icon name="users" [size]="18"></app-icon>
+          Cola de atención
+        </h2>
+        <p class="aq-head-sub">
+          {{ dayLabel() }}
+          @if (pendingCount() > 0) {
+            · {{ pendingCount() }} por atender
+          }
+          @if (updatedAt(); as stamp) {
+            · actualizado {{ stamp | date: 'HH:mm' }}
+          }
+        </p>
+      </div>
+      <div class="aq-head-actions">
+        <button class="aq-btn" type="button" (click)="refresh()" [disabled]="loading()">
+          <app-icon name="refresh-cw" [size]="15"></app-icon>
+          Actualizar
+        </button>
+        <button class="aq-btn aq-btn--primary" type="button" (click)="toggleFullscreen()">
+          <app-icon name="fullscreen-enter" [size]="15"></app-icon>
+          Pantalla completa
+        </button>
+      </div>
+    </header>
+  } @else {
+    <button class="aq-fullscreen-exit" type="button" (click)="toggleFullscreen()">
+      <app-icon name="fullscreen-exit" [size]="18"></app-icon>
+      Salir de pantalla completa
+    </button>
+  }
+
+  @if (loading() && !board()) {
+    <div class="aq-loading"><app-spinner size="md" color="primary"></app-spinner></div>
+  } @else if (failed() && !board()) {
+    <div class="aq-empty">
+      <app-icon name="clock" [size]="28"></app-icon>
+      <p>No se pudo cargar la cola.</p>
+      <button class="aq-btn" type="button" (click)="refresh()">Reintentar</button>
+    </div>
+  } @else if (isFullscreen()) {
+    <!-- Monitor para el público: quién sigue, sin acciones internas. -->
+    <div class="aq-screen">
+      <p class="aq-screen-label">Siguiente en atención</p>
+      @if (next(); as n) {
+        <p class="aq-screen-name">{{ publicName(n) }}</p>
+        <p class="aq-screen-meta">
+          {{ n.start_time.slice(0, 5) }}
+          @if (n.service_name) {
+            · {{ n.service_name }}
+          }
+          @if (n.provider_name) {
+            · {{ n.provider_name }}
+          }
+        </p>
+      } @else {
+        <p class="aq-screen-name aq-screen-name--empty">Sin turnos pendientes</p>
+        <p class="aq-screen-meta">Bienvenido, en un momento lo atendemos.</p>
+      }
+
+      @if (following().length > 0) {
+        <div class="aq-screen-next">
+          <p class="aq-screen-next-label">Después</p>
+          <ol>
+            @for (row of following(); track row.booking_id) {
+              <li>
+                <span class="aq-screen-next-time">{{ row.start_time.slice(0, 5) }}</span>
+                <span class="aq-screen-next-name">{{ publicName(row) }}</span>
+              </li>
+            }
+          </ol>
+        </div>
+      }
+
+      <p class="aq-screen-foot">{{ dayLabel() }} · se actualiza solo</p>
+    </div>
+  } @else {
+    <!-- Siguiente -->
+    <div class="aq-hero">
+      <div class="aq-hero-main">
+        <span class="aq-hero-label">
+          <app-icon name="bell" [size]="14"></app-icon>
+          Siguiente en atención
+        </span>
+        @if (next(); as n) {
+          <span class="aq-hero-name">{{ n.customer_name }}</span>
+          <span class="aq-hero-meta">
+            {{ n.start_time.slice(0, 5) }}
+            @if (n.service_name) {
+              · {{ n.service_name }}
+            }
+            @if (n.provider_name) {
+              · {{ n.provider_name }}
+            }
+            · {{ timingLabel(n) }}
+          </span>
+        } @else {
+          <span class="aq-hero-name aq-hero-name--empty">Sin turnos pendientes</span>
+          <span class="aq-hero-meta">
+            Cuando un cliente haga check-in o llegue su hora aparecerá aquí.
+          </span>
+        }
+      </div>
+      @if (next(); as n) {
+        @if (n.checked_in) {
+          <button
+            class="aq-btn aq-btn--primary aq-btn--lg"
+            type="button"
+            [disabled]="callingId() === n.booking_id"
+            (click)="call(n)"
+          >
+            <app-icon name="bell" [size]="16"></app-icon>
+            {{ callingId() === n.booking_id ? 'Llamando…' : 'Llamar' }}
+          </button>
+        }
+      }
+    </div>
+
+    <!-- Tres bloques -->
+    <div class="aq-columns">
+      <section class="aq-col" aria-label="En atención">
+        <header class="aq-col-head">
+          <h3>En atención</h3>
+          <span class="aq-count">{{ inService().length }}</span>
+        </header>
+        @if (inService().length === 0) {
+          <p class="aq-col-empty">Nadie en atención ahora.</p>
+        } @else {
+          <ul class="aq-list">
+            @for (row of inService(); track row.booking_id) {
+              <li class="aq-card aq-card--service">
+                <span class="aq-avatar">{{ initials(row) }}</span>
+                <div class="aq-card-body">
+                  <span class="aq-card-name">{{ row.customer_name }}</span>
+                  <span class="aq-card-meta">
+                    {{ row.start_time.slice(0, 5) }}–{{ row.end_time.slice(0, 5) }}
+                    @if (row.service_name) {
+                      · {{ row.service_name }}
+                    }
+                  </span>
+                  @if (row.provider_name) {
+                    <span class="aq-card-sub">{{ row.provider_name }}</span>
+                  }
+                </div>
+                <span class="aq-chip aq-chip--service">{{ statusLabel(row) }}</span>
+              </li>
+            }
+          </ul>
+        }
+      </section>
+
+      <section class="aq-col" aria-label="En sala">
+        <header class="aq-col-head">
+          <h3>En sala</h3>
+          <span class="aq-count">{{ waiting().length }}</span>
+        </header>
+        @if (waiting().length === 0) {
+          <p class="aq-col-empty">Nadie ha hecho check-in todavía.</p>
+        } @else {
+          <ol class="aq-list aq-list--ordered">
+            @for (row of waiting(); track row.booking_id; let idx = $index) {
+              <li class="aq-card" [class.aq-card--next]="idx === 0">
+                <span class="aq-rank">{{ idx + 1 }}</span>
+                <div class="aq-card-body">
+                  <span class="aq-card-name">{{ row.customer_name }}</span>
+                  <span class="aq-card-meta">
+                    {{ row.start_time.slice(0, 5) }}
+                    @if (row.service_name) {
+                      · {{ row.service_name }}
+                    }
+                  </span>
+                  <span class="aq-card-sub">
+                    {{ timingLabel(row) }}
+                    @if (row.provider_name) {
+                      · {{ row.provider_name }}
+                    }
+                  </span>
+                </div>
+                @if (idx === 0) {
+                  <button
+                    class="aq-btn aq-btn--primary"
+                    type="button"
+                    [disabled]="callingId() === row.booking_id"
+                    (click)="call(row)"
+                  >
+                    {{ callingId() === row.booking_id ? '…' : 'Llamar' }}
+                  </button>
+                }
+              </li>
+            }
+          </ol>
+        }
+      </section>
+
+      <section class="aq-col" aria-label="Próximos">
+        <header class="aq-col-head">
+          <h3>Próximos</h3>
+          <span class="aq-count">{{ upcoming().length }}</span>
+        </header>
+        @if (upcoming().length === 0) {
+          <p class="aq-col-empty">No queda programación por iniciar hoy.</p>
+        } @else {
+          <ol class="aq-list aq-list--timeline">
+            @for (row of upcoming(); track row.booking_id) {
+              <li class="aq-card">
+                <span class="aq-time">{{ row.start_time.slice(0, 5) }}</span>
+                <div class="aq-card-body">
+                  <span class="aq-card-name">{{ row.customer_name }}</span>
+                  <span class="aq-card-meta">
+                    {{ timingLabel(row) }}
+                    @if (row.service_name) {
+                      · {{ row.service_name }}
+                    }
+                    @if (row.provider_name) {
+                      · {{ row.provider_name }}
+                    }
+                  </span>
+                  @if (row.priority > 0) {
+                    <span class="aq-chip aq-chip--priority">Prioridad</span>
+                  }
+                </div>
+              </li>
+            }
+          </ol>
+        }
+      </section>
+    </div>
+  }
+</section>

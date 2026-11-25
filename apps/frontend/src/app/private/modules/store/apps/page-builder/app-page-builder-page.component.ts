@@ -40,6 +40,8 @@ import {
 import { APPS_ROUTE } from '../utils/app-routes.util';
 import { AppPageGeneralPanelComponent } from './app-page-general-panel.component';
 import { AppPageStyleBrandKey, AppPageStylePanelComponent } from './app-page-style-panel.component';
+import { AppMediaPickerComponent } from '../components/app-media-picker/app-media-picker.component';
+import type { AppMediaItem } from '../services/app-media.service';
 import { blocksToPage, emptyPage, pageToBlocks } from './page-builder-document';
 import { AppPageBuilderAdapter, AppPagePreviewPayload, appPagePreviewFrameSrc } from './page-builder.types';
 
@@ -93,6 +95,7 @@ function snapshot(value: unknown): string {
     AppPageGeneralPanelComponent,
     AppPageStylePanelComponent,
     LandingSeoPanelComponent,
+    AppMediaPickerComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
@@ -194,7 +197,8 @@ function snapshot(value: unknown): string {
           <div class="mx-auto max-w-3xl p-3 md:px-6 md:py-4">
             <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
               <app-app-page-style-panel [kind]="adapter().kind" [theme]="theme()" [brand]="brand()"
-                                        (themeChange)="setTheme($event)" (brandChange)="setBrand($event.key, $event.value)" />
+                                        (themeChange)="setTheme($event)" (brandChange)="setBrand($event.key, $event.value)"
+                                        (mediaRequested)="mediaField.set($event)" />
             </div>
           </div>
         }
@@ -207,6 +211,13 @@ function snapshot(value: unknown): string {
           </div>
         }
       }
+
+      <app-app-media-picker
+        [open]="mediaField() !== null"
+        [appKind]="adapter().kind"
+        (close)="mediaField.set(null)"
+        (picked)="onMediaPicked($event)"
+      />
     </div>
   `,
 })
@@ -415,6 +426,16 @@ export class AppPageBuilderPageComponent<S = unknown, C = unknown> implements On
       const { theme: _previous, ...rest } = page;
       return Object.keys(theme).length ? { ...rest, theme } : rest;
     });
+  }
+
+  /** Campo de imagen esperando una foto de la galería (null = cerrada). */
+  readonly mediaField = signal<'logo_url' | 'cover_url' | null>(null);
+
+  /** La galería devuelve la URL firmada del archivo ya guardado en la tienda. */
+  onMediaPicked(item: AppMediaItem): void {
+    const field = this.mediaField();
+    if (field && item.url) this.setBrand(field, item.url);
+    this.mediaField.set(null);
   }
 
   setBrand(key: AppPageStyleBrandKey, value: string | boolean | undefined): void {

@@ -7,6 +7,7 @@ import { AgendaShellComponent } from './agenda-shell.component';
 import { SchedulingAgendaPageComponent } from '../scheduling-agenda-page/scheduling-agenda-page.component';
 import { SchedulingListPageComponent } from '../scheduling-list-page/scheduling-list-page.component';
 import { SchedulingConfigTabComponent } from '../../components/scheduling-config-tab/scheduling-config-tab.component';
+import { AgendaQueueBoardComponent } from '../../components/agenda-queue-board/agenda-queue-board.component';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { SchedulingApiService } from '../../services/scheduling-api.service';
 import { SCHEDULING_AGENDA_ROUTES } from '../../scheduling.routes';
@@ -25,6 +26,8 @@ class ConfigStub {
   readonly section = input.required<string>();
   readonly sectionChange = output<string>();
 }
+@Component({ selector: 'app-agenda-queue-board', standalone: true, template: 'COLA' })
+class QueueStub {}
 
 /** Solo la ruta de Agenda: las redirecciones reales se prueban en `store-admin-rutas-routes.spec.ts`. */
 function routes() {
@@ -35,9 +38,14 @@ async function open(url: string) {
   TestBed.configureTestingModule({ providers: [provideRouter(routes())] });
   TestBed.overrideComponent(AgendaShellComponent, {
     remove: {
-      imports: [SchedulingAgendaPageComponent, SchedulingListPageComponent, SchedulingConfigTabComponent],
+      imports: [
+        SchedulingAgendaPageComponent,
+        SchedulingListPageComponent,
+        SchedulingConfigTabComponent,
+        AgendaQueueBoardComponent,
+      ],
     },
-    add: { imports: [CalendarStub, ListStub, ConfigStub] },
+    add: { imports: [CalendarStub, ListStub, ConfigStub, QueueStub] },
   });
   const harness = await RouterTestingHarness.create();
   await harness.navigateByUrl(url);
@@ -57,8 +65,13 @@ describe('Agenda unificada F1 — módulo Agenda con pestañas', () => {
     let { harness } = await open('/admin/orders/agenda?tab=programacion');
     expect(harness.routeNativeElement?.textContent).toContain('PROGRAMACION');
     TestBed.resetTestingModule();
+    ({ harness } = await open('/admin/orders/agenda?tab=cola'));
+    expect(harness.routeNativeElement?.textContent).toContain('COLA');
+    TestBed.resetTestingModule();
+    // Compatibilidad: la cola era una sección de Configuración.
     ({ harness } = await open('/admin/orders/agenda?tab=configuracion&seccion=cola'));
-    expect(harness.routeNativeElement?.textContent).toContain('CONFIG cola');
+    expect(harness.routeNativeElement?.textContent).toContain('COLA');
+    expect(TestBed.inject(Router).url).toBe('/admin/orders/agenda?tab=cola');
     TestBed.resetTestingModule();
     ({ harness } = await open('/admin/orders/agenda?tab=xyz'));
     expect(harness.routeNativeElement?.textContent).toContain('CALENDARIO');
@@ -103,36 +116,20 @@ describe('Agenda unificada F1 — pestaña Configuración', () => {
     // Sin detectChanges: las pantallas de Reservas se prueban en su módulo; aquí solo el acceso.
   }
 
-  it('da acceso a cada pantalla de configuración y a las demás de Reservas y Pedidos', () => {
+  it('configura las secciones de Agenda; las demás pantallas viven en el menú de Acciones', () => {
     setup(SOURCES);
     const fixture = TestBed.createComponent(SchedulingConfigTabComponent);
     fixture.componentRef.setInput('section', 'equipo');
     const tab = fixture.componentInstance;
-    expect(tab.sectionTabs.map((t) => t.id)).toEqual(['equipo', 'disponibilidad', 'cola', 'horario']);
+    expect(tab.sectionTabs.map((t) => t.id)).toEqual(['equipo', 'disponibilidad', 'horario']);
     expect(tab.hasBookings()).toBeTrue();
-    const routes = tab.links().map((l) => l.route);
-    for (const route of [
-      '/admin/reservations/reschedule-requests',
-      '/admin/reservations/payment-requests',
-      '/admin/settings/general/reservas',
-      '/admin/reservations/reminders',
-      '/admin/services/stations',
-      '/admin/scheduled-orders/day',
-      '/admin/scheduled-orders/production',
-      '/admin/settings/general/venta',
-    ]) {
-      expect(routes).withContext(route).toContain(route);
-    }
   });
 
-  it('sin reservas habilitadas no ofrece configurar prestadores, pero sí las pantallas de pedidos', () => {
+  it('sin reservas habilitadas no ofrece configurar prestadores', () => {
     setup({ ...SOURCES, types: [{ value: 'scheduled_order', label: 'Pedido programado' }] });
     const fixture = TestBed.createComponent(SchedulingConfigTabComponent);
     fixture.componentRef.setInput('section', 'equipo');
     const tab = fixture.componentInstance;
     expect(tab.hasBookings()).toBeFalse();
-    const routes = tab.links().map((l) => l.route);
-    expect(routes).not.toContain('/admin/reservations/payment-requests');
-    expect(routes).toContain('/admin/scheduled-orders/day');
   });
 });

@@ -671,17 +671,12 @@ export class VexiController {
    * duplicating, which also makes it the way to re-index after changing how an
    * entity's searchable text is composed.
    *
-   * Gated on `rag_embeddings`, the feature whose `indexed_docs_cap` budgets exactly
-   * this: one pass enqueues up to 500 records per entity type and every job is a
-   * paid embedding call. The check has to be here because there is nowhere else it
-   * could happen — this controller is the only caller of `backfillCurrentStore()`,
-   * and `EmbeddingService` calls the provider directly rather than through
-   * `AIEngineService`, so the inline gate that protects every other AI application
-   * never sees these jobs.
+   * No AI gate: la indexación es enriquecimiento de la plataforma y no se cobra
+   * ni se topa por tienda (decisión del dueño, 2026-11-24). Antes colgaba de
+   * `rag_embeddings`/`indexed_docs_cap`, y una tienda con el cupo agotado
+   * dejaba su búsqueda con IA sin índice.
    */
   @Post('embeddings/backfill')
-  @UseGuards(AiAccessGuard)
-  @RequireAIFeature('rag_embeddings')
   async backfillEmbeddings() {
     const report = await this.embeddingBackfill.backfillCurrentStore();
     return this.responseService.success(report, 'Indexación encolada');

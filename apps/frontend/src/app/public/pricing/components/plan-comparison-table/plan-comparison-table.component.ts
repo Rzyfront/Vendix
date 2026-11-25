@@ -259,13 +259,14 @@ export class PlanComparisonTableComponent {
   /**
    * For each AI feature, render its cap-specific sub-rows (only the fields
    * that are meaningful to that feature, per FEATURE_QUOTA_CONFIG).
+   * `rag_embeddings` no longer shows a docs cap: los embeddings no se cobran ni
+   * se topan por tienda (decisión del dueño, 2026-11-24).
    */
   private buildAISubRows(featureKey: string, plans: PublicPlan[]): ComparisonRow[] {
     const subFieldsByFeature: Record<string, Array<{ field: keyof AIFeatureValue; suffix?: string }>> = {
       text_generation: [{ field: 'monthly_tokens_cap', suffix: 'tokens/mes' }],
       streaming_chat: [{ field: 'daily_messages_cap', suffix: 'msj/día' }],
       conversations: [{ field: 'retention_days', suffix: 'días' }],
-      rag_embeddings: [{ field: 'indexed_docs_cap', suffix: 'docs' }],
       async_queue: [{ field: 'monthly_jobs_cap', suffix: 'jobs/mes' }],
     };
 

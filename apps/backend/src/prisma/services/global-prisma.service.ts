@@ -45,6 +45,14 @@ export class GlobalPrismaService extends BasePrismaService {
   }
 
   /**
+   * Apps · biblioteca de medios: el endpoint público resuelve la imagen por id
+   * (sin contexto de tienda), así que necesita el cliente global.
+   */
+  get store_app_media() {
+    return this.baseClient.store_app_media;
+  }
+
+  /**
    * Apps · landing page (Fase 6): the public read and the sitemap check that
    * the landing still has published content, by store_id.
    */

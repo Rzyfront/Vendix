@@ -27,7 +27,8 @@ export const USAGE_GROUP_QUOTA: Record<
   vex: null,
   text_generation: { feature: 'text_generation', unit: 'tokens' },
   jobs: { feature: 'async_queue', unit: 'jobs' },
-  semantic_search: { feature: 'rag_embeddings', unit: 'docs' },
+  // Embeddings: sin cobro ni barra de cupo (decisión del dueño, 2026-11-24).
+  semantic_search: null,
   voice: { feature: 'realtime_voice', unit: 'seconds' },
 };
 
