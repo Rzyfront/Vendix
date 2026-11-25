@@ -1,6 +1,7 @@
 import { Component, input, model, output, provideZonelessChangeDetection, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
+import { provideHttpClient } from '@angular/common/http';
 import { of } from 'rxjs';
 
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
@@ -117,6 +118,8 @@ describe('ServicePageBuilderPageComponent (F6-B)', () => {
       providers: [
         provideZonelessChangeDetection(),
         provideRouter([]),
+        // La galería de medios (estilo) inyecta HttpClient aunque no abra.
+        provideHttpClient(),
         { provide: StoreAppsService, useValue: apps },
         { provide: ProductsService, useValue: products },
         { provide: AuthFacade, useValue: { userStoreName: signal('Mi Tienda'), userStore: signal({ logo_url: null }) } },
