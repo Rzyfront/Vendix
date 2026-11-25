@@ -33,10 +33,10 @@ export class AppMediaPublicController {
     @Res() res: Response,
   ): Promise<void> {
     // El borrado es lógico: una página ya publicada sigue resolviendo su foto.
-    // Solo imágenes: la biblioteca admite documentos y este endpoint es público,
-    // así que un id adivinado no puede sacar el PDF de otra tienda.
+    // Se busca por el token opaco (no por id): con ids correlativos, cualquiera
+    // podía pedir el medio de otra tienda cambiando el número.
     const row = await this.prisma.store_app_media.findFirst({
-      where: { id, kind: 'image' },
+      where: { public_token: token },
       select: { s3_key: true, thumb_key: true },
     });
     if (!row) throw new NotFoundException('Medio no encontrado');

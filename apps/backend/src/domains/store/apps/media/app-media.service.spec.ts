@@ -74,7 +74,8 @@ describe('AppMediaService — biblioteca de medios (apps-customization F1.1)', (
     });
     // URL estable y opaca: no vence y no se puede enumerar por id.
     expect(row.url).toMatch(/^\/public\/apps\/media\/[0-9a-f-]{36}$/);
-    expect(row.url).not.toContain('1');
+    // No es un id numérico: un UUID puede contener "1", así que se compara la forma.
+    expect(row.url).not.toMatch(/\/\d+$/);
     expect(row.thumb_url).toBe(`${row.url}?thumb=1`);
   });
 
