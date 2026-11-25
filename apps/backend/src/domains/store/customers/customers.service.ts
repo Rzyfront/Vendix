@@ -2524,7 +2524,15 @@ export class CustomersService {
     };
   }
 
-  async update(storeId: number, id: number, dto: UpdateCustomerDto) {
+  async update(
+    storeId: number,
+    id: number,
+    dto: UpdateCustomerDto,
+    // Permite que el llamador envuelva la escritura (dos tablas) en una
+    // transacción propia, p. ej. la edición masiva.
+    tx?: Prisma.TransactionClient,
+  ) {
+    const db = tx ?? this.prisma;
     const user = await this.findOne(storeId, id);
     const priceTierId = await this.resolveCustomerPriceTierId(
       dto.price_tier_id,
@@ -2691,7 +2699,7 @@ export class CustomersService {
       lastNameUpdate = '';
     }
 
-    const updated = await this.prisma.users.update({
+    const updated = await db.users.update({
       where: { id: user.id },
       data: {
         first_name:
@@ -2747,7 +2755,7 @@ export class CustomersService {
     });
 
     if (priceTierId !== undefined) {
-      await this.prisma.store_users.update({
+      await db.store_users.update({
         where: { store_id_user_id: { store_id: storeId, user_id: user.id } },
         data: { price_tier_id: priceTierId },
       });

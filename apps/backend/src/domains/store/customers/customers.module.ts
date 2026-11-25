@@ -18,6 +18,8 @@ import { ExternalIdentityLookupService } from './external-identity/external-iden
 import { CustomersController } from './customers.controller';
 import { CustomersBulkService } from './customers-bulk.service';
 import { CustomersBulkController } from './customers-bulk.controller';
+import { CustomersBulkEditService } from './customers-bulk-edit.service';
+import { CustomersBulkEditController } from './customers-bulk-edit.controller';
 import { CustomerHistoryController } from './history/customer-history.controller';
 import { CustomerHistoryService } from './history/customer-history.service';
 import { CustomerEmailListener } from './customer-email.listener';
@@ -45,6 +47,10 @@ import { CustomerCrmModule } from './crm/customer-crm.module';
   controllers: [
     CustomersController,
     CustomersBulkController,
+    // Edición masiva de clientes: superficie propia (preview + apply + listado
+    // filtrado) para no mezclar la escritura en lote con la carga masiva, que
+    // tiene su propio DTO de filas y su propio job.
+    CustomersBulkEditController,
     CustomerHistoryController,
     CustomerAiImportController,
   ],
@@ -58,6 +64,7 @@ import { CustomerCrmModule } from './crm/customer-crm.module';
     RntSource,
     ExternalIdentityLookupService,
     CustomersBulkService,
+    CustomersBulkEditService,
     CustomersBulkJobHandler,
     CustomerHistoryService,
     CustomerEmailListener,
