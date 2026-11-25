@@ -261,6 +261,7 @@ import { OrganizationStoreSettingsService } from '../../services/organization-st
                   </h3>
                   <app-pos-settings-form
                     [settings]="settings().pos"
+                    [showAgendaLink]="false"
                     (settingsChange)="onSectionChange('pos', $event)"
                   />
                 </div>

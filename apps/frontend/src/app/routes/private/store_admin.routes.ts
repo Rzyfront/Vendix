@@ -457,11 +457,13 @@ export const storeAdminRoutes: Routes = [
                 (c) => c.DispatchNoteDetailPageComponent,
               ),
           },
-          // Módulo "Rutas" (QUI-1024). Las URLs canónicas son `rutas/*`; las
-          // viejas `planillas/*` redirigen conservando el `:id` (y los query
-          // params, por ser redirecciones relativas) para no romper enlaces
-          // guardados. Todas van ANTES de `:id` de órdenes, que si no las
-          // captura como id de orden.
+          // Módulo "Rutas" (QUI-1024, QUI-1057). Las URLs canónicas son
+          // `rutas/*`; las viejas `planillas/*` redirigen conservando el `:id`
+          // (y los query params, por ser redirecciones relativas) para no
+          // romper enlaces guardados. `planillas-rutas` y `planillas-de-ruta`
+          // circularon en enlaces y marcadores, así que también son alias.
+          // Todas van ANTES de `:id` de órdenes, que si no las captura como id
+          // de orden y muestra «No se pudo cargar la informacion de la orden».
           {
             path: 'rutas',
             loadComponent: () =>
@@ -490,6 +492,8 @@ export const storeAdminRoutes: Routes = [
             redirectTo: 'rutas/:id/recorrido',
           },
           { path: 'planillas/:id', pathMatch: 'full', redirectTo: 'rutas/:id' },
+          { path: 'planillas-rutas', pathMatch: 'full', redirectTo: 'rutas' },
+          { path: 'planillas-de-ruta', pathMatch: 'full', redirectTo: 'rutas' },
           {
             path: 'fleet',
             loadComponent: () =>

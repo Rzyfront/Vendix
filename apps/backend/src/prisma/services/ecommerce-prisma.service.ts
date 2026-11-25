@@ -16,6 +16,10 @@ export class EcommercePrismaService extends BasePrismaService {
     'legal_documents',
     'reviews',
     'order_reviews',
+    // QUI-1060 F2: ficha pública del plan (solo lectura, `store_id` propio).
+    'service_plan_departures',
+    'service_plan_pax_prices',
+    'service_plan_activities',
   ];
 
   // Modelos que filtran por store_id Y user_id (si hay auth)
@@ -173,6 +177,15 @@ export class EcommercePrismaService extends BasePrismaService {
   }
   get categories() {
     return this.scoped_client.categories;
+  }
+  get service_plan_departures() {
+    return this.scoped_client.service_plan_departures;
+  }
+  get service_plan_pax_prices() {
+    return this.scoped_client.service_plan_pax_prices;
+  }
+  get service_plan_activities() {
+    return this.scoped_client.service_plan_activities;
   }
   get store_payment_methods() {
     return this.scoped_client.store_payment_methods;

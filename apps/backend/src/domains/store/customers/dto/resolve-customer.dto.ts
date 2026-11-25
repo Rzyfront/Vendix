@@ -42,8 +42,9 @@ import {
  *
  * Every field is optional. The service treats empty / missing as
  * "this identifier is not being supplied", and requires AT LEAST one
- * of: email, document_type+document_number — otherwise
- * `findOrCreateByEmailOrDocument` returns 422.
+ * of: email, document_number, or a non-blank first_name / last_name /
+ * legal_name — otherwise `findOrCreateByEmailOrDocument` returns 422
+ * (SYS_VALIDATION_001, QUI-1051).
  */
 export class ResolveCustomerDto {
   @Transform(({ value }) =>

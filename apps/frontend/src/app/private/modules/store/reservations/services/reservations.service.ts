@@ -7,6 +7,7 @@ import {
   BookingStats,
   BookingQuery,
   CreateBookingDto,
+  AddBookingChargeDto,
   CancelBookingInput,
   RegisterPrepayPaymentInput,
   DepositDecisionAction,
@@ -274,6 +275,13 @@ export class ReservationsService {
     return this.http.get<any>(`${this.apiUrl}/${id}`).pipe(
       map((response) => response.data || response),
     );
+  }
+
+  /** Adds a product/service line to the booking's order; answers the updated detail. */
+  addCharge(id: number, dto: AddBookingChargeDto): Observable<Booking> {
+    return this.http
+      .post<any>(`${this.apiUrl}/${id}/charges`, dto)
+      .pipe(map((response) => response.data || response));
   }
 
   createReservation(dto: CreateBookingDto): Observable<Booking> {
@@ -687,7 +695,7 @@ export class ReservationsService {
     );
   }
 
-  updateProvider(id: number, dto: { display_name?: string; avatar_url?: string; bio?: string; is_active?: boolean; sort_order?: number; default_station_id?: number | null }): Observable<ServiceProvider> {
+  updateProvider(id: number, dto: { display_name?: string; avatar_url?: string; bio?: string; is_active?: boolean; sort_order?: number; default_station_id?: number | null; uses_store_hours?: boolean }): Observable<ServiceProvider> {
     return this.http.patch<any>(`${this.apiUrl}/providers/${id}`, dto).pipe(
       map((response) => response.data || response),
     );

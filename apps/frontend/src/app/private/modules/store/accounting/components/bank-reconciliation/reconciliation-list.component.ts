@@ -20,6 +20,7 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.p
 import { BankReconciliationService } from '../../services/bank-reconciliation.service';
 import {
   BankAccount,
+  BankAccountScopeContext,
   BankReconciliation,
 } from '../../interfaces/accounting.interface';
 
@@ -110,15 +111,17 @@ import {
                 [debounceTime]="300"
                 (searchChange)="onSearch($event)"
               ></app-inputsearch>
-              <app-button
-                variant="primary"
-                size="sm"
-                (clicked)="openCreateModal()"
-              >
-                <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
-                <span class="hidden sm:inline">Nueva Conciliacion</span>
-                <span class="sm:hidden">Nueva</span>
-              </app-button>
+              @if (canCreateReconciliation()) {
+                <app-button
+                  variant="primary"
+                  size="sm"
+                  (clicked)="openCreateModal()"
+                >
+                  <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
+                  <span class="hidden sm:inline">Nueva Conciliacion</span>
+                  <span class="sm:hidden">Nueva</span>
+                </app-button>
+              }
             </div>
           </div>
         </div>
@@ -258,12 +261,14 @@ import {
                     </span>
                   </div>
                   <div class="col-span-2 flex items-center justify-end gap-1">
-                    <button
-                      (click)="onDelete(rec, $event)"
-                      class="p-1.5 hover:bg-error-light rounded text-text-secondary hover:text-error"
-                    >
-                      <app-icon name="trash-2" [size]="14"></app-icon>
-                    </button>
+                    @if (canDeleteReconciliation(rec)) {
+                      <button
+                        (click)="onDelete(rec, $event)"
+                        class="p-1.5 hover:bg-error-light rounded text-text-secondary hover:text-error"
+                      >
+                        <app-icon name="trash-2" [size]="14"></app-icon>
+                      </button>
+                    }
                   </div>
                 </div>
               }
@@ -327,10 +332,22 @@ export class ReconciliationListComponent {
 
   reconciliations = signal<BankReconciliation[]>([]);
   bankAccounts = signal<BankAccount[]>([]);
+  scopeContext = signal<BankAccountScopeContext | null>(null);
+  scopeContextFailed = signal(false);
   loading = signal(false);
   creating = signal(false);
   searchTerm = signal('');
   isCreateModalOpen = signal(false);
+
+  editableAccounts = computed(() =>
+    this.bankAccounts().filter((a) => a.can_edit !== false),
+  );
+
+  canCreateReconciliation = computed(
+    () =>
+      (this.scopeContext()?.can_manage_accounts ?? this.scopeContextFailed()) ||
+      this.editableAccounts().length > 0,
+  );
 
   newRecForm: {
     bank_account_id: number | null;
@@ -364,7 +381,7 @@ export class ReconciliationListComponent {
 
   bankAccountOptions = computed<SelectorOption[]>(() =>
     this.bankAccounts()
-      .filter((a) => a.status === 'active')
+      .filter((a) => a.status === 'active' && a.can_edit !== false)
       .map((a) => ({
         value: a.id,
         label: `${a.name} - ${a.bank_name}`,
@@ -377,6 +394,18 @@ export class ReconciliationListComponent {
 
   private loadData(): void {
     this.loading.set(true);
+    this.reconciliationService
+      .getBankAccountScopeContext()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          this.scopeContextFailed.set(false);
+          this.scopeContext.set(res.data || null);
+        },
+        error: () => {
+          this.scopeContextFailed.set(true);
+        },
+      });
     this.reconciliationService.getReconciliations().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res) => {
         this.reconciliations.set(res.data || []);
@@ -396,7 +425,16 @@ export class ReconciliationListComponent {
     this.searchTerm.set(term);
   }
 
+  canDeleteReconciliation(rec: BankReconciliation): boolean {
+    if (this.scopeContext()?.can_manage_accounts ?? this.scopeContextFailed()) {
+      return true;
+    }
+    const account = this.bankAccounts().find((a) => a.id === rec.bank_account_id);
+    return account ? account.can_edit !== false : false;
+  }
+
   openCreateModal(): void {
+    if (!this.canCreateReconciliation()) return;
     this.newRecForm = {
       bank_account_id: null,
       period_start: '',
@@ -447,6 +485,7 @@ export class ReconciliationListComponent {
 
   onDelete(rec: BankReconciliation, event: MouseEvent): void {
     event.stopPropagation();
+    if (!this.canDeleteReconciliation(rec)) return;
     this.dialogService
       .confirm({
         title: 'Eliminar Conciliacion',

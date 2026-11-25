@@ -6,6 +6,7 @@ import { isSaleNature } from '../../store/products/services/product-usage-nature
 import { Injectable, Optional } from '@nestjs/common';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { bankAccountAvailableInStoreWhere } from '@common/helpers/bank-account-availability.helper';
 import { CartService } from '../cart/cart.service';
 import { TaxesService } from '../../store/taxes/taxes.service';
 // QUI-INC — el enum fiscal canónico, importado (no `string`) para que una
@@ -95,6 +96,7 @@ import { assertCanChargeVat } from '@common/helpers/vat-responsibility.helper';
 import { CheckoutIdempotencyService } from './checkout-idempotency.service';
 import { ShippingTaxService } from '../../store/shipping/services/shipping-tax.service';
 import { ShippingDistanceService } from '../../store/shipping/services/shipping-distance.service';
+import { isPlanProduct } from '../../store/reservations/service-plans/service-plan-pricing.util';
 import {
   ShippingCalculatorService,
   type AddressScope,
@@ -789,9 +791,8 @@ export class CheckoutService {
 
     const rows = await this.prisma.bank_accounts.findMany({
       where: {
-        organization_id: store.organization_id,
+        ...bankAccountAvailableInStoreWhere(storeId, store.organization_id),
         status: 'active',
-        OR: [{ store_id: null }, { store_id: storeId }],
         ...(configured !== null && { id: { in: configured } }),
       },
       orderBy: { bank_name: 'asc' },
@@ -1907,6 +1908,12 @@ export class CheckoutService {
 
     if (cart_items.length === 0) {
       throw new VendixHttpException(ErrorCodes.ECOM_CART_001);
+    }
+
+    // QUI-1060 F1: multi-day plans are sold only from the reservations panel; online
+    // the cart would charge the catalog price and the booking would skip the seats.
+    if (cart_items.some((item) => isPlanProduct(item.product))) {
+      throw new VendixHttpException(ErrorCodes.SERVICE_PLAN_018);
     }
 
     // A station-required service is a scheduled sale: every cart unit needs

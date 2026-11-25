@@ -183,6 +183,66 @@
       }
 
 
+      <!-- Order block: normal payment flow + extra charges -->
+      @if (order(); as ord) {
+        <div class="deposit-block" data-testid="booking-order-block">
+          <div class="deposit-head">
+            <span class="info-label">
+              <app-icon name="receipt" [size]="13"></app-icon>
+              Orden #{{ ord.order_number }}
+            </span>
+            <span class="deposit-badge">{{ orderStateLabel() }}</span>
+          </div>
+          <div class="deposit-figures">
+            <span>Total <strong>{{ toNumber(ord.grand_total) | currency }}</strong></span>
+            <span>Pagado <strong>{{ toNumber(ord.total_paid) | currency }}</strong></span>
+            <span>Saldo pendiente <strong>{{ toNumber(ord.remaining_balance) | currency }}</strong></span>
+            @if (hasDepositBalance()) {
+              <span>Anticipo disponible <strong>{{ deposit()?.balance | currency }}</strong></span>
+            }
+          </div>
+          <div class="deposit-link-row">
+            <button class="btn-primary-sm" (click)="goToOrder()" data-testid="booking-view-order">Ver orden / Cobrar</button>
+            @if (canAddCharge() && !chargeOpen()) {
+              <button class="btn-ghost-sm" (click)="openCharge()" data-testid="booking-add-charge">Agregar cargo</button>
+            }
+          </div>
+          @if (chargeOpen()) {
+            <div class="deposit-link-row" data-testid="booking-charge-form">
+              <select
+                class="deposit-link-input"
+                aria-label="Producto o servicio"
+                [ngModel]="chargeProductId()"
+                (ngModelChange)="onChargeProductChange($event)"
+              >
+                <option [ngValue]="null">Producto o servicio…</option>
+                @for (p of chargeOptions(); track p.id) {
+                  <option [ngValue]="p.id">{{ p.name }}</option>
+                }
+              </select>
+              <input
+                class="deposit-link-input"
+                style="flex: 0 1 90px"
+                type="number"
+                min="1"
+                aria-label="Cantidad"
+                [ngModel]="chargeQuantity()"
+                (ngModelChange)="onChargeQuantityChange($event)"
+              />
+              <button class="btn-primary-sm" [disabled]="!canSubmitCharge()" (click)="submitCharge()">
+                {{ chargeBusy() ? 'Agregando…' : 'Agregar' }}
+              </button>
+              <button class="btn-ghost-sm" [disabled]="chargeBusy()" (click)="chargeOpen.set(false)">Cancelar</button>
+            </div>
+          }
+          @if (!canAddCharge()) {
+            <p class="deposit-hint">No se pueden agregar cargos: la orden ya no admite cambios.</p>
+          }
+        </div>
+      } @else if (orderLoaded()) {
+        <p class="deposit-hint" style="margin: 0 16px 12px" data-testid="booking-no-order">Esta reserva no tiene orden asociada.</p>
+      }
+
       <!-- Deposit block (S15 / S17) -->
       @if (deposit(); as dep) {
         <div class="deposit-block">
@@ -237,6 +297,37 @@
               <app-icon name="wallet" [size]="14"></app-icon>
               Decidir anticipo
             </button>
+          }
+        </div>
+      }
+
+      <!-- Plan tasks (QUI-1060 F3) -->
+      @if (planTasks().length > 0) {
+        <div class="deposit-block">
+          <div class="deposit-head">
+            <span class="info-label">
+              <app-icon name="check-square" [size]="13"></app-icon>
+              Tareas del plan
+            </span>
+          </div>
+          @for (t of planTasks(); track t.link_id) {
+            <div class="plan-task-row">
+              <div class="plan-task-main">
+                <span class="plan-task-title">{{ t.title }}</span>
+                <span class="deposit-hint">
+                  {{ taskOwnerLabel(t) }}
+                  @if (t.due_at) {
+                    · {{ t.due_at | date:'dd/MM HH:mm' }}
+                  }
+                </span>
+              </div>
+              <div class="plan-task-side">
+                <span class="deposit-badge" [ngClass]="taskStatusClass(t.status)">{{ taskStatusLabel(t.status) }}</span>
+                @if (t.task_id != null) {
+                  <button class="btn-ghost-sm" (click)="openPlanTask(t.task_id)">Ver en CRM</button>
+                }
+              </div>
+            </div>
           }
         </div>
       }

@@ -26,6 +26,15 @@ export class UpdateProviderDto {
   @IsInt()
   sort_order?: number;
 
+  /**
+   * true = the provider works the store hours (read live from the store
+   * settings); false = its own weekly schedule. Switching never deletes the
+   * own schedule rows (Parte 1).
+   */
+  @IsOptional()
+  @IsBoolean()
+  uses_store_hours?: boolean;
+
   /** Preferred station (S10): must be linked to the provider; `null` clears it. */
   @IsOptional()
   @IsInt()

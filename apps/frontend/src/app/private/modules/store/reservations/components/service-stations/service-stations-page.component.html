@@ -584,7 +584,8 @@
   </app-modal>
 
   <!-- Modal 2: Nuevo Ingreso Operativo (Apertura de Cuenta) -->
-  <app-modal [(isOpen)]="showCheckinModal" title="Nuevo Ingreso de Estación" subtitle="Datos de la estación, cliente y apertura de cuenta" size="lg">
+  <!-- QUI-1059: Esc, X y Cancelar pasan por canCloseCheckin (confirma si hay datos capturados) -->
+  <app-modal #checkinModal [(isOpen)]="showCheckinModal" [canClose]="canCloseCheckin" title="Nuevo Ingreso de Estación" subtitle="Datos de la estación, cliente y apertura de cuenta" size="lg">
     <div class="space-y-4">
       <!-- Estación: nombre fijo si se abrió desde "Asignar"; select solo en ingreso general -->
       @if (checkinStationLocked() && selectedCheckinStation(); as st) {
@@ -957,7 +958,7 @@
     </div>
 
     <div slot="footer" class="flex items-center justify-end gap-2.5">
-      <app-button variant="secondary" (clicked)="showCheckinModal.set(false)">Cancelar</app-button>
+      <app-button variant="secondary" (clicked)="checkinModal.close()">Cancelar</app-button>
       <app-button variant="primary" [loading]="saving()" (clicked)="submitCheckin()">
         <app-icon name="play" [size]="14" slot="icon" /> Iniciar Atención & Abrir Cuenta
       </app-button>

@@ -4774,6 +4774,24 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'A bank account with this account number already exists',
   },
+  // QUI-1061 — cuentas bancarias según el scope fiscal de la organización.
+  BANK_ACCOUNT_ORG_MANAGED: {
+    code: 'BANK_ACCOUNT_ORG_MANAGED',
+    httpStatus: 403,
+    devMessage:
+      'En esta organización las cuentas bancarias las administra un usuario con permisos de organización.',
+  },
+  BANK_ACCOUNT_NOT_ASSIGNED_TO_STORE: {
+    code: 'BANK_ACCOUNT_NOT_ASSIGNED_TO_STORE',
+    httpStatus: 409,
+    devMessage:
+      'Ya existe una cuenta de la organización con ese número, pero no está asignada a esta tienda. Asígnala desde Contabilidad → Bancos.',
+  },
+  BANK_ACCOUNT_INVALID_ASSIGNMENT: {
+    code: 'BANK_ACCOUNT_INVALID_ASSIGNMENT',
+    httpStatus: 400,
+    devMessage: 'La asignación de tiendas de la cuenta bancaria no es válida.',
+  },
   BANK_RECONCILIATION_NOT_FOUND: {
     code: 'BANK_RECONCILIATION_NOT_FOUND',
     httpStatus: 404,
@@ -5993,6 +6011,12 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'A required service booking could not be allocated during checkout',
   },
+  // QUI-1063 — "Agregar cargo" of a service booking onto its order.
+  BOOKING_CHARGE_001: {
+    code: 'BOOKING_CHARGE_001',
+    httpStatus: 400,
+    devMessage: 'The charge cannot be added to the booking order',
+  },
   SERVICE_BUDGET_001: {
     code: 'SERVICE_BUDGET_001',
     httpStatus: 409,
@@ -6049,6 +6073,11 @@ export const ErrorCodes = {
     code: 'BOOK_CONFIRM_002',
     httpStatus: 400,
     devMessage: 'Token already used',
+  },
+  BOOK_CONFIRM_003: {
+    code: 'BOOK_CONFIRM_003',
+    httpStatus: 409,
+    devMessage: 'La reserva ya no admite este cambio: fue cancelada o ya avanzó de estado.',
   },
   BOOK_CHECKIN_001: {
     code: 'BOOK_CHECKIN_001',
@@ -6653,6 +6682,35 @@ export const ErrorCodes = {
   STATION_BOOKING_007: { code: 'STATION_BOOKING_007', httpStatus: 409, devMessage: 'La reserva no tiene un enlace de pago pendiente.' },
   STATION_BOOKING_008: { code: 'STATION_BOOKING_008', httpStatus: 400, devMessage: 'Para reservar con anticipo identifica al cliente.' },
   STATION_BOOKING_009: { code: 'STATION_BOOKING_009', httpStatus: 400, devMessage: 'Faltan datos para la decisión del anticipo.' },
+  // QUI-1060 modo Plan: eventos, cupos y precio por tamaño de grupo
+  SERVICE_PLAN_001: { code: 'SERVICE_PLAN_001', httpStatus: 400, devMessage: 'Este servicio no es un plan por paquete: activa el precio tipo paquete para cargar tramos y eventos.' },
+  SERVICE_PLAN_002: { code: 'SERVICE_PLAN_002', httpStatus: 400, devMessage: 'Los tramos de precio del plan se solapan.' },
+  SERVICE_PLAN_003: { code: 'SERVICE_PLAN_003', httpStatus: 400, devMessage: 'El mínimo de personas no puede ser mayor que el máximo.' },
+  SERVICE_PLAN_004: { code: 'SERVICE_PLAN_004', httpStatus: 400, devMessage: 'La fecha del evento no puede estar en el pasado.' },
+  SERVICE_PLAN_005: { code: 'SERVICE_PLAN_005', httpStatus: 400, devMessage: 'El cupo no puede ser menor que los cupos ya vendidos.' },
+  SERVICE_PLAN_006: { code: 'SERVICE_PLAN_006', httpStatus: 404, devMessage: 'El evento no existe para este plan.' },
+  SERVICE_PLAN_007: { code: 'SERVICE_PLAN_007', httpStatus: 409, devMessage: 'El evento no está abierto para reservas.' },
+  SERVICE_PLAN_008: { code: 'SERVICE_PLAN_008', httpStatus: 409, devMessage: 'No quedan cupos suficientes en este evento.' },
+  SERVICE_PLAN_009: { code: 'SERVICE_PLAN_009', httpStatus: 400, devMessage: 'No hay una tarifa del plan para ese número de personas.' },
+  SERVICE_PLAN_010: { code: 'SERVICE_PLAN_010', httpStatus: 400, devMessage: 'El número de personas está fuera del rango que admite el plan.' },
+  SERVICE_PLAN_011: { code: 'SERVICE_PLAN_011', httpStatus: 400, devMessage: 'Este plan se vende solo en eventos programados: elige un evento.' },
+  SERVICE_PLAN_012: { code: 'SERVICE_PLAN_012', httpStatus: 400, devMessage: 'Este plan se vende solo a fecha libre: no admite eventos programados.' },
+  SERVICE_PLAN_013: { code: 'SERVICE_PLAN_013', httpStatus: 409, devMessage: 'El evento tiene cupos vendidos: cancela o mueve esas reservas antes de cambiarlo.' },
+  SERVICE_PLAN_014: { code: 'SERVICE_PLAN_014', httpStatus: 400, devMessage: 'La fecha de la reserva no coincide con la fecha del evento elegido.' },
+  SERVICE_PLAN_015: { code: 'SERVICE_PLAN_015', httpStatus: 400, devMessage: 'La fecha de regreso del plan se calcula con su duración y no coincide con la enviada.' },
+  SERVICE_PLAN_016: { code: 'SERVICE_PLAN_016', httpStatus: 400, devMessage: 'Las reservas de un plan no se reagendan: cancélala y reserva otro evento o fecha.' },
+  SERVICE_PLAN_017: { code: 'SERVICE_PLAN_017', httpStatus: 400, devMessage: 'Las noches del plan no pueden superar sus días.' },
+  SERVICE_PLAN_018: { code: 'SERVICE_PLAN_018', httpStatus: 400, devMessage: 'Este plan se reserva desde el panel de reservas.' },
+  SERVICE_PLAN_019: { code: 'SERVICE_PLAN_019', httpStatus: 400, devMessage: 'El día de la actividad está fuera de la duración del plan.' },
+  SERVICE_PLAN_020: { code: 'SERVICE_PLAN_020', httpStatus: 400, devMessage: 'La actividad tiene un responsable interno o un tercero, no los dos.' },
+  SERVICE_PLAN_021: { code: 'SERVICE_PLAN_021', httpStatus: 400, devMessage: 'El responsable elegido no pertenece a esta tienda.' },
+  SERVICE_PLAN_022: { code: 'SERVICE_PLAN_022', httpStatus: 404, devMessage: 'La actividad no existe en este plan.' },
+  SERVICE_PLAN_023: { code: 'SERVICE_PLAN_023', httpStatus: 409, devMessage: 'Hay actividades del itinerario en días que quedarían fuera de la nueva duración: muévelas o elimínalas antes de acortar el plan.' },
+  SERVICE_PLAN_024: { code: 'SERVICE_PLAN_024', httpStatus: 400, devMessage: 'El nuevo orden no coincide con las actividades de ese día.' },
+  SERVICE_PLAN_025: { code: 'SERVICE_PLAN_025', httpStatus: 400, devMessage: 'El título de la actividad es obligatorio.' },
+  SERVICE_PLAN_026: { code: 'SERVICE_PLAN_026', httpStatus: 404, devMessage: 'La reserva no existe.' },
+  SERVICE_PLAN_027: { code: 'SERVICE_PLAN_027', httpStatus: 400, devMessage: 'El proveedor elegido no está activo o no pertenece a esta tienda.' },
+  SERVICE_BOOKING_END_DATE_001: { code: 'SERVICE_BOOKING_END_DATE_001', httpStatus: 400, devMessage: 'La fecha de fin no puede ser anterior a la fecha de inicio.' },
   STATION_BOOKING_010: { code: 'STATION_BOOKING_010', httpStatus: 409, devMessage: 'Esta estación cobra anticipo: reserva desde el flujo de reservas, no desde el carrito.' },
   STATION_BOOKING_011: { code: 'STATION_BOOKING_011', httpStatus: 400, devMessage: 'Una serie recurrente no se permite en estaciones con cobro para reservar o anticipo obligatorio.' },
   STATION_BOOKING_012: { code: 'STATION_BOOKING_012', httpStatus: 409, devMessage: 'La reserva tiene un cobro recibido: elige si devolverlo, dejarlo como saldo a favor o retenerlo.' },
@@ -7380,6 +7438,20 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'La receta no puede activarse porque tiene sub-componentes con cantidad invalida (0 o nula). Corregir antes de activar.',
+  },
+  /**
+   * QUI-1054 — receta ACTIVA con 0 insumos. `PUT /:id/items` con `items: []`
+   * (o borrar el último insumo) respondia 200 y dejaba la receta activa y
+   * vacia: la resolucion por variante encuentra esa receta exacta, no cae a la
+   * base, y el BOM vacio no descuenta inventario ni costo (venta silenciosa
+   * sin consumo). Se rechaza el estado en vez de desactivar la receta en
+   * silencio, para que el cliente decida.
+   */
+  RECIPE_ITEMS_REQUIRED: {
+    code: 'RECIPE_ITEMS_REQUIRED',
+    httpStatus: 422,
+    devMessage:
+      'Una receta activa no puede quedarse sin insumos: la venta dejaria de descontar inventario y costo. Agregar al menos un insumo o desactivar la receta.',
   },
   /**
    * `recipe_items` sólo tiene `component_product_id`: no hay columna de

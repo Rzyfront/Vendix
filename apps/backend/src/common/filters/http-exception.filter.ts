@@ -15,6 +15,7 @@ import {
 } from '../errors';
 import { RequestContextService } from '../context/request-context.service';
 import { redactSensitiveRoute } from '../utils/sensitive-route.util';
+import { getRequestIdFromRequest } from '../middleware/request-id.middleware';
 import { routeKeyOf } from '../platform-alerts/platform-alert-sanitize';
 import type { HttpFailureInput } from '../platform-alerts/platform-alert.service';
 
@@ -217,6 +218,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
       );
     }
 
+    const requestId =
+      getRequestIdFromRequest(request) ?? RequestContextService.getRequestId();
     const responseBody: Record<string, any> = {
       statusCode: status,
       ...(errorCode && { error_code: errorCode }),
@@ -238,9 +241,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
       // cuando el ALS está poblado: el id que va en esta respuesta puede no
       // tener fila de auditoría gemela, y el que va en la auditoría puede
       // faltar. Correlacionar por este campo es best-effort, no una garantía.
-      ...(RequestContextService.getRequestId()
-        ? { request_id: RequestContextService.getRequestId() }
-        : {}),
+      //
+      // QUI-1049 P3 / QUI-1019: la fuente de verdad es el id que
+      // `requestIdMiddleware` dejó en el `req` (el mismo de la cabecera
+      // `X-Request-Id`). El filtro corre fuera del AsyncLocalStorage, así que
+      // leer el ALS aquí devolvía el contexto de OTRA petición.
+      ...(requestId ? { request_id: requestId } : {}),
       timestamp: new Date().toISOString(),
       path: safePath,
     };

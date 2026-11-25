@@ -94,6 +94,15 @@ export class RecipesService {
       where: { recipe_id: recipeId },
       select: { id: true, component_product_id: true, quantity: true },
     });
+    // QUI-1054: una receta activa sin insumos vende sin descontar inventario
+    // ni costo (la resolucion por variante toma la receta exacta y no cae a la
+    // base). Una receta vacia no puede quedar activa por ninguna via.
+    if (items.length === 0) {
+      throw new VendixHttpException(
+        ErrorCodes.RECIPE_ITEMS_REQUIRED,
+        'No se puede activar la receta: no tiene insumos. Agregá al menos uno antes de activarla.',
+      );
+    }
     const invalid = items.find(
       (it) => it.quantity == null || Number(it.quantity) <= 0,
     );
@@ -708,6 +717,18 @@ export class RecipesService {
   async replaceItems(recipeId: number, items: RecipeItemInputDto[]) {
     const recipe = await this.findOne(recipeId);
 
+    // QUI-1054: vaciar una receta ACTIVA no se permite. Un `{"items": []}`
+    // dejaba la receta activa con 0 componentes: al vender, la resolución por
+    // variante encuentra la receta exacta (no cae a la base) y el BOM vacío no
+    // descuenta insumos ni costo, en silencio. El formulario ya exige un
+    // insumo; esto cierra el camino por API.
+    if (items.length === 0 && recipe.is_active !== false) {
+      throw new VendixHttpException(
+        ErrorCodes.RECIPE_ITEMS_REQUIRED,
+        'No se puede dejar la receta sin insumos mientras está activa. Agregá al menos uno o desactivala primero.',
+      );
+    }
+
     // 1. Uniqueness across incoming items (no duplicate components or IDs)
     const seenComponentIds = new Set<number>();
     for (const item of items) {
@@ -1019,6 +1040,27 @@ export class RecipesService {
     if (!item) {
       throw new VendixHttpException(ErrorCodes.RECIPE_ITEM_NOT_FOUND);
     }
+
+    // QUI-1054: borrar el ÚLTIMO insumo de una receta activa la dejaba activa
+    // y vacía (misma fuga que `replaceItems([])`). Una receta inactiva sí
+    // puede quedarse sin insumos.
+    const recipe = await this.prisma.recipes.findFirst({
+      where: { id: recipeId },
+      select: { id: true, is_active: true },
+    });
+    if (recipe && recipe.is_active !== false) {
+      const remaining = await this.prisma.recipe_items.findMany({
+        where: { recipe_id: recipeId },
+        select: { id: true },
+      });
+      if (remaining.length <= 1) {
+        throw new VendixHttpException(
+          ErrorCodes.RECIPE_ITEMS_REQUIRED,
+          'No se puede borrar el último insumo de una receta activa. Agregá otro insumo o desactivá la receta primero.',
+        );
+      }
+    }
+
     await this.prisma.recipe_items.delete({ where: { id: itemId } });
     return { deleted: true };
   }

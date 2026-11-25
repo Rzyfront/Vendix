@@ -7,7 +7,7 @@ import {
   signal,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
@@ -46,6 +46,13 @@ import { ProductionSseService } from '../../../../restaurant-ops/production/serv
 
 const STATUSES = Object.keys(ORDER_STATUS_LABELS) as ManufacturingOrderStatus[];
 
+/** Id de planta válido (entero > 0) o null. */
+function parsePlantId(raw: string | null | undefined): number | null {
+  if (raw == null || raw === '') return null;
+  const id = Number(raw);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
 @Component({
   selector: 'app-manufacturing-orders-list-page',
   standalone: true,
@@ -67,6 +74,7 @@ export class OrdersListPageComponent implements OnInit {
   private readonly plantsService = inject(ManufacturingPlantsService);
   private readonly toastService = inject(ToastService);
   private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
   private readonly destroyRef = inject(DestroyRef);
   private readonly sse = inject(ProductionSseService);
 
@@ -240,6 +248,13 @@ export class OrdersListPageComponent implements OnInit {
   };
 
   ngOnInit(): void {
+    // QUI-1065 — el filtro por planta vive en `?plant_id=` (mismo nombre que la
+    // sesión de producción) para sobrevivir a recargas y enlaces compartidos.
+    const plantFromUrl = parsePlantId(this.route.snapshot.queryParamMap.get('plant_id'));
+    if (plantFromUrl != null) {
+      this.plantFilter.set(plantFromUrl);
+      this.filterValues = { ...this.filterValues, plant_id: String(plantFromUrl) };
+    }
     this.loadProductOptions();
     this.loadPlantOptions();
     this.loadOrders();
@@ -269,13 +284,15 @@ export class OrdersListPageComponent implements OnInit {
       .list(true)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (rows) =>
+        next: (rows) => {
           this.plantOptions.set(
             rows.map((p) => ({
               value: String(p.id),
               label: p.is_active ? p.name : `${p.name} (inactiva)`,
             })),
-          ),
+          );
+          this.dropUnknownPlantFilter(rows.map((p) => p.id));
+        },
         error: () => {
           // El filtro por planta es opcional: se omite en silencio.
         },
@@ -337,7 +354,39 @@ export class OrdersListPageComponent implements OnInit {
     this.dateFrom.set((values['due_start'] as string | undefined) || null);
     this.dateTo.set((values['due_end'] as string | undefined) || null);
     this.filters.update((f) => ({ ...f, page: 1 }));
+    this.syncPlantToUrl();
     this.loadOrders();
+  }
+
+  /**
+   * QUI-1065 — una planta del enlace que no es de esta tienda (o un enlace
+   * abierto en una tienda con una sola planta, donde el filtro ni se muestra)
+   * no debe dejar la lista filtrada sin forma visible de quitarlo.
+   */
+  private dropUnknownPlantFilter(plantIds: number[]): void {
+    const plant = this.plantFilter();
+    if (plant == null) return;
+    if (plantIds.length > 1 && plantIds.includes(plant)) return;
+    this.plantFilter.set(null);
+    const rest = { ...this.filterValues };
+    delete rest['plant_id'];
+    this.filterValues = rest;
+    this.filters.update((f) => ({ ...f, page: 1 }));
+    this.syncPlantToUrl();
+    this.loadOrders();
+  }
+
+  /** Refleja la planta en `?plant_id=` sin tocar el resto de la URL ni el historial. */
+  private syncPlantToUrl(): void {
+    const plant = this.plantFilter();
+    const current = parsePlantId(this.route.snapshot.queryParamMap.get('plant_id'));
+    if (current === plant) return;
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { plant_id: plant },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
   }
 
   clearFilters(): void {
@@ -349,6 +398,7 @@ export class OrdersListPageComponent implements OnInit {
     this.dateTo.set(null);
     this.filterValues = {};
     this.filters.update((f) => ({ ...f, page: 1 }));
+    this.syncPlantToUrl();
     this.loadOrders();
   }
 

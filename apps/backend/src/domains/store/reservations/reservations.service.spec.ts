@@ -2,6 +2,8 @@ import { ReservationsService } from './reservations.service';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
 import { recordTriggerEvent } from '../workflows/engine/workflow-trigger.outbox';
+import { Prisma } from '@prisma/client';
+import { ErrorCodes, VendixHttpException } from '../../../common/errors';
 jest.mock('../workflows/engine/workflow-trigger.outbox', () => ({ recordTriggerEvent: jest.fn().mockResolvedValue(false) }));
 
 /**
@@ -41,6 +43,14 @@ describe('ReservationsService — state machine (appointments redesign)', () => 
           Object.assign(target, data);
           return Promise.resolve({ ...target });
         }),
+        // QUI-1060: transitions are claimed with a conditional update on the status.
+        updateMany: jest.fn(({ where, data }: any) => {
+          const target = bookings.find((b) => b.id === where.id && b.status === where.status);
+          if (!target) return Promise.resolve({ count: 0 });
+          Object.assign(target, data);
+          return Promise.resolve({ count: 1 });
+        }),
+        findUniqueOrThrow: jest.fn(({ where }: any) => Promise.resolve({ ...bookings.find((b) => b.id === where.id) })),
         create: jest.fn(),
       },
       products: {
@@ -890,7 +900,17 @@ describe('ReservationsService.getCalendar — overnight bookings (S21 / A14)', (
 
     expect(grouped['2026-03-06'].map((b: any) => b.id)).toEqual([1]);
     expect(grouped['2026-03-07'].map((b: any) => b.id)).toEqual([1]);
-    expect(prisma.bookings.findMany.mock.calls[0][0].where.OR).toHaveLength(2);
+    // QUI-1060: the third branch fetches multi-day bookings that cover the whole range.
+    expect(prisma.bookings.findMany.mock.calls[0][0].where.OR).toHaveLength(3);
+  });
+
+  it('QUI-1060: lists a multi-day booking under every day it covers inside the range', async () => {
+    const { service } = build([
+      { id: 4, date: new Date('2026-03-05'), end_date: new Date('2026-03-09'), start_time: '08:00', end_time: '18:00' },
+    ]);
+    const grouped = await service.getCalendar(query);
+
+    expect(Object.keys(grouped)).toEqual(['2026-03-06', '2026-03-07']);
   });
 
   it('keeps a daytime booking on a single day', async () => {
@@ -957,6 +977,13 @@ describe('ReservationsService — station deposits', () => {
           Object.assign(row, data);
           return Promise.resolve({ ...row });
         }),
+        // QUI-1060: state-machine transitions claim the status with a conditional update.
+        updateMany: jest.fn(({ where, data }: any) => {
+          if (where.status !== undefined && where.status !== row.status) return Promise.resolve({ count: 0 });
+          Object.assign(row, data);
+          return Promise.resolve({ count: 1 });
+        }),
+        findUniqueOrThrow: jest.fn(() => Promise.resolve({ ...row })),
       },
       service_allocations: {
         findFirst: jest.fn().mockResolvedValue(null),
@@ -1302,7 +1329,7 @@ describe('ReservationsService — station deposits', () => {
     const result = await service.cancel(77);
     expect(deposits.cancelWithDeposit).toHaveBeenCalledWith(77, {}, 'staff');
     expect(result.status).toBe('cancelled');
-    expect(prisma.bookings.update).toHaveBeenCalledWith(
+    expect(prisma.bookings.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'cancelled' }) }),
     );
     expect(emits.map((e) => e.name)).toContain('booking.cancelled');
@@ -1317,7 +1344,7 @@ describe('ReservationsService — station deposits', () => {
     const result = await service.cancel(77, { leftover_action: 'refund' });
     expect(deposits.cancelWithDeposit).toHaveBeenCalledWith(77, { leftover_action: 'refund' }, 'staff');
     expect(result.status).toBe('cancelled');
-    expect(prisma.bookings.update).not.toHaveBeenCalled();
+    expect(prisma.bookings.updateMany).not.toHaveBeenCalled();
     expect(emits.map((e) => e.name)).toContain('booking.cancelled');
   });
 
@@ -1349,7 +1376,7 @@ describe('ReservationsService — station deposits', () => {
     deposits.deferNoShowIfDeposit.mockResolvedValue(true);
     const result: any = await service.noShow(77);
     expect(result.status).toBe('confirmed');
-    expect(prisma.bookings.update).not.toHaveBeenCalled();
+    expect(prisma.bookings.updateMany).not.toHaveBeenCalled();
     expect(emits.find((e) => e.name === 'booking.no_show')).toBeUndefined();
   });
 
@@ -1364,7 +1391,7 @@ describe('ReservationsService — station deposits', () => {
     const deferred = build({ booking: { status: 'confirmed' } });
     deferred.deposits.deferNoShowIfDeposit.mockResolvedValue(true);
     await expect(deferred.service.archiveToNoShow(77)).resolves.toBe('deferred');
-    expect(deferred.prisma.bookings.update).not.toHaveBeenCalled();
+    expect(deferred.prisma.bookings.updateMany).not.toHaveBeenCalled();
 
     const plain = build({ booking: { status: 'confirmed' } });
     await expect(plain.service.archiveToNoShow(77)).resolves.toBe('archived');
@@ -1529,5 +1556,260 @@ describe('ReservationsService — getStats / getToday use the store day (S20)', 
     const where = prisma.bookings.findMany.mock.calls[0][0].where.date;
     expect(where.gte).toEqual(new Date('2026-11-10T00:00:00Z'));
     expect(where.lt).toEqual(new Date('2026-11-11T00:00:00Z'));
+  });
+});
+
+/**
+ * QUI-1060 modo Plan. `servicePlans` is a hand-made double: its rules (tiers, seats,
+ * departures) live in service-plans/service-plans.service.spec.ts. Here: what create,
+ * cancel, delete and reschedule do with a plan booking, and that an hourly service
+ * behaves exactly as before.
+ */
+describe('ReservationsService — planes de varios días (QUI-1060)', () => {
+  const hourly = {
+    id: 100, name: 'Corte de cabello', base_price: '25000.00', is_on_sale: false, sale_price: null,
+    track_inventory: false, requires_booking: true, requires_station: false, booking_mode: 'free_booking',
+    service_pricing_type: 'per_hour', plan_duration_days: null, plan_departure_mode: null, plan_min_pax: null, plan_max_pax: null,
+  };
+  const plan = {
+    ...hourly, id: 200, name: 'Tour Amazonas 3D/2N', base_price: '0.00', service_pricing_type: 'package',
+    plan_duration_days: 3, plan_departure_mode: 'both', plan_min_pax: 1, plan_max_pax: 8,
+  };
+
+  function build(options: { reserveSeats?: jest.Mock } = {}) {
+    const bookings: any[] = [];
+    const products = [hourly, plan];
+    const executeRaw = jest.fn().mockResolvedValue(1);
+    const bookingsDelegate = {
+      create: jest.fn(({ data }: any) => {
+        const created = { id: 999, ...data, product: { name: 'x' }, customer: { first_name: 'Lola', last_name: 'Pérez' } };
+        bookings.push(created);
+        return Promise.resolve({ ...created });
+      }),
+      findFirst: jest.fn(({ where }: any) => {
+        const found = bookings.find((b) => b.id === where.id);
+        return Promise.resolve(found ? { ...found } : null);
+      }),
+      update: jest.fn(({ where, data }: any) => {
+        const target = bookings.find((b) => b.id === where.id);
+        Object.assign(target, data);
+        return Promise.resolve({ ...target });
+      }),
+      // Conditional status claim, as Postgres re-checks the WHERE under a row lock.
+      updateMany: jest.fn(({ where, data }: any) => {
+        const target = bookings.find((b) => b.id === where.id && b.status === where.status);
+        if (!target) return Promise.resolve({ count: 0 });
+        Object.assign(target, data);
+        return Promise.resolve({ count: 1 });
+      }),
+      findUniqueOrThrow: jest.fn(({ where }: any) => Promise.resolve({ ...bookings.find((b) => b.id === where.id) })),
+      delete: jest.fn(({ where }: any) => {
+        bookings.splice(bookings.findIndex((b) => b.id === where.id), 1);
+        return Promise.resolve({});
+      }),
+    };
+    const prisma: any = {
+      bookings: bookingsDelegate,
+      products: { findFirst: jest.fn(({ where }: any) => Promise.resolve(products.find((p) => p.id === where.id) ?? null)) },
+      tables: { updateMany: jest.fn() },
+      $executeRaw: executeRaw,
+      $transaction: jest.fn(async (cb: any) => {
+        // Rollback double: rows written inside a failing callback disappear.
+        const before = bookings.length;
+        try {
+          return await cb(prisma);
+        } catch (e) {
+          bookings.splice(before);
+          throw e;
+        }
+      }),
+    };
+    const ordersService: any = {
+      create: jest.fn().mockResolvedValue({ id: 555 }),
+      update: jest.fn().mockResolvedValue({}),
+    };
+    const reserveSeatsInTx = options.reserveSeats ?? jest.fn().mockResolvedValue(undefined);
+    const servicePlans: any = {
+      resolveBooking: jest.fn().mockResolvedValue({
+        date: '2099-02-10', endDate: '2099-02-12', departureId: 2, paxAdults: 2, paxChildren: 1,
+        totalPax: 3, price: 1_800_000, priceSource: 'tier',
+      }),
+      reserveSeatsInTx,
+    };
+    const service = new ReservationsService(
+      prisma,
+      { isSlotAvailable: jest.fn().mockResolvedValue(true), validateNoOverlapForCustomer: jest.fn() } as any,
+      ordersService,
+      { signUrl: jest.fn((u: string) => Promise.resolve(u)) } as any,
+      { emit: jest.fn() } as any,
+      { resolvePrice: jest.fn(() => ({ unitPrice: 25000 })) } as any,
+      {} as any,
+      {} as any,
+      { record: jest.fn() } as any,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      servicePlans,
+    );
+    return { service, prisma, bookings, ordersService, servicePlans, executeRaw };
+  }
+
+  const hourlyDto: any = { customer_id: 1, product_id: 100, date: '2099-02-10', start_time: '10:00', end_time: '11:00' };
+  const planDto: any = {
+    customer_id: 1, product_id: 200, date: '2099-02-10', start_time: '08:00', end_time: '18:00',
+    departure_id: 2, pax_adults: 2, pax_children: 1,
+  };
+
+  beforeEach(() => {
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue({ store_id: 1, user_id: 1, organization_id: 1 } as any);
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  it('regresión: un servicio por horas se reserva igual que antes (sin plan, sin cupos)', async () => {
+    const { service, bookings, servicePlans, ordersService } = build();
+    await service.create(hourlyDto);
+
+    expect(servicePlans.resolveBooking).not.toHaveBeenCalled();
+    expect(servicePlans.reserveSeatsInTx).not.toHaveBeenCalled();
+    expect(bookings[0]).toMatchObject({ end_date: null, departure_id: null, pax_adults: null, pax_children: null });
+    expect(ordersService.create.mock.calls[0][0].items[0].unit_price).toBe(25000);
+  });
+
+  it('un servicio normal de varios días guarda la fecha de fin', async () => {
+    const { service, bookings } = build();
+    await service.create({ ...hourlyDto, end_date: '2099-02-12' });
+
+    expect(bookings[0].end_date).toEqual(new Date('2099-02-12'));
+  });
+
+  it('rechaza una fecha de fin anterior a la de inicio', async () => {
+    const { service, bookings } = build();
+    await expect(service.create({ ...hourlyDto, end_date: '2099-02-09' })).rejects.toMatchObject({
+      errorCode: 'SERVICE_BOOKING_END_DATE_001',
+    });
+    expect(bookings).toHaveLength(0);
+  });
+
+  it('un plan guarda regreso, salida y grupo, toma cupos en la transacción y cobra el precio del paquete', async () => {
+    const { service, bookings, servicePlans, ordersService, prisma } = build();
+    await service.create(planDto);
+
+    expect(servicePlans.resolveBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 200 }),
+      expect.objectContaining({ departure_id: 2, pax_adults: 2, pax_children: 1 }),
+    );
+    expect(bookings[0]).toMatchObject({ end_date: new Date('2099-02-12'), departure_id: 2, pax_adults: 2, pax_children: 1 });
+    expect(servicePlans.reserveSeatsInTx).toHaveBeenCalledWith(prisma, { storeId: 1, productId: 200, departureId: 2, pax: 3 });
+    expect(ordersService.create.mock.calls[0][0].items[0]).toMatchObject({ unit_price: 1_800_000, total_price: 1_800_000 });
+  });
+
+  it('sin cupos: no queda reserva y la orden se compensa', async () => {
+    const noSeats = jest.fn().mockRejectedValue(new VendixHttpException(ErrorCodes.SERVICE_PLAN_008));
+    const { service, bookings, ordersService } = build({ reserveSeats: noSeats });
+    await expect(service.create(planDto)).rejects.toMatchObject({ errorCode: 'SERVICE_PLAN_008' });
+
+    expect(bookings).toHaveLength(0);
+    expect(ordersService.update).toHaveBeenCalledWith(555, expect.objectContaining({ state: 'cancelled' }));
+  });
+
+  it('dos reservas compitiendo por el último cupo: la que aborta la base responde error de cupos', async () => {
+    const raced = jest.fn().mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Transaction failed due to a write conflict', { code: 'P2034', clientVersion: 'test' }),
+    );
+    const { service, bookings } = build({ reserveSeats: raced });
+    await expect(service.create(planDto)).rejects.toMatchObject({ errorCode: 'SERVICE_PLAN_008' });
+    expect(bookings).toHaveLength(0);
+  });
+
+  it('cancelar una reserva de plan devuelve sus cupos en la misma transacción', async () => {
+    const { service, bookings, executeRaw } = build();
+    bookings.push({ id: 7, store_id: 1, product_id: 200, status: 'confirmed', departure_id: 2, pax_adults: 2, pax_children: 1, product: {} });
+    await service.cancel(7);
+
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(executeRaw.mock.calls[0].slice(1)).toEqual([3, 2, 1]);
+    expect(bookings[0].status).toBe('cancelled');
+  });
+
+  it('cancelar una reserva normal no toca cupos', async () => {
+    const { service, bookings, executeRaw } = build();
+    bookings.push({ id: 8, store_id: 1, product_id: 100, status: 'confirmed', departure_id: null, pax_adults: null, pax_children: null, product: {} });
+    await service.cancel(8);
+
+    expect(executeRaw).not.toHaveBeenCalled();
+    expect(bookings[0].status).toBe('cancelled');
+  });
+
+  it('eliminar una reserva pendiente de plan devuelve sus cupos antes de borrarla', async () => {
+    const { service, bookings, executeRaw } = build();
+    bookings.push({ id: 9, store_id: 1, product_id: 200, status: 'pending', departure_id: 2, pax_adults: 4, pax_children: 0, product: {} });
+    await service.deleteBooking(9);
+
+    expect(executeRaw.mock.calls[0].slice(1)).toEqual([4, 2, 1]);
+    expect(bookings).toHaveLength(0);
+  });
+
+  it('cancelar dos veces a la vez la misma reserva de plan devuelve sus cupos una sola vez', async () => {
+    const { service, bookings, executeRaw } = build();
+    bookings.push({ id: 11, store_id: 1, product_id: 200, status: 'confirmed', departure_id: 2, pax_adults: 2, pax_children: 0, product: {} });
+    // Both requests read "confirmed" before either commits.
+    const results = await Promise.allSettled([service.cancel(11), service.cancel(11)]);
+
+    expect(results.map((r) => r.status).sort()).toEqual(['fulfilled', 'rejected']);
+    expect(results.find((r) => r.status === 'rejected')).toMatchObject({ reason: expect.any(ConflictException) });
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(bookings[0].status).toBe('cancelled');
+  });
+
+  it('una reserva ya cancelada no se vuelve a cancelar ni devuelve cupos', async () => {
+    const { service, bookings, executeRaw } = build();
+    bookings.push({ id: 12, store_id: 1, product_id: 200, status: 'cancelled', departure_id: 2, pax_adults: 2, pax_children: 0, product: {} });
+    await expect(service.cancel(12)).rejects.toBeInstanceOf(BadRequestException);
+    expect(executeRaw).not.toHaveBeenCalled();
+  });
+
+  it('eliminar una reserva que otra petición acaba de cancelar no devuelve cupos', async () => {
+    const { service, bookings, executeRaw, prisma } = build();
+    bookings.push({ id: 13, store_id: 1, product_id: 200, status: 'pending', departure_id: 2, pax_adults: 2, pax_children: 0, product: {} });
+    // The delete reads "pending", then a concurrent cancel commits before its transaction.
+    prisma.$transaction.mockImplementationOnce(async (cb: any) => {
+      bookings[0].status = 'cancelled';
+      return cb(prisma);
+    });
+    await expect(service.deleteBooking(13)).rejects.toBeInstanceOf(BadRequestException);
+    expect(executeRaw).not.toHaveBeenCalled();
+    expect(bookings).toHaveLength(1);
+  });
+
+  it('F1: un plan no se aparta desde el POS o la tienda online (hold)', async () => {
+    const { service, bookings } = build();
+    await expect(
+      service.hold({ customer_id: 1, product_id: 200, date: '2099-02-10', start_time: '08:00', end_time: '18:00' }),
+    ).rejects.toMatchObject({ errorCode: 'SERVICE_PLAN_018' });
+    expect(bookings).toHaveLength(0);
+  });
+
+  it('F1: un plan con orden ajena (POS o checkout) se rechaza antes de tomar cupos', async () => {
+    const { service, bookings, servicePlans } = build();
+    await expect(service.create({ ...planDto, order_id: 321 })).rejects.toMatchObject({ errorCode: 'SERVICE_PLAN_018' });
+    await expect(service.create({ ...planDto, skip_order_creation: true })).rejects.toMatchObject({ errorCode: 'SERVICE_PLAN_018' });
+    expect(servicePlans.resolveBooking).not.toHaveBeenCalled();
+    expect(bookings).toHaveLength(0);
+  });
+
+  it('regresión: un servicio por horas sigue apartándose con hold', async () => {
+    const { service, bookings } = build();
+    await service.hold({ customer_id: 1, product_id: 100, date: '2099-02-10', start_time: '10:00', end_time: '11:00' });
+    expect(bookings).toHaveLength(1);
+  });
+
+  it('una reserva de plan no se reagenda', async () => {
+    const { service, bookings } = build();
+    bookings.push({ id: 10, store_id: 1, product_id: 200, status: 'confirmed', departure_id: null, pax_adults: 2, pax_children: 0, product: {} });
+    await expect(
+      service.reschedule(10, { date: '2099-03-01', start_time: '08:00', end_time: '18:00' } as any),
+    ).rejects.toMatchObject({ errorCode: 'SERVICE_PLAN_016' });
   });
 });

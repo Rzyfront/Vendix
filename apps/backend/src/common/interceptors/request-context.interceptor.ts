@@ -13,6 +13,7 @@ import {
   RequestContext,
 } from '../context/request-context.service';
 import { redactSensitiveRoute } from '../utils/sensitive-route.util';
+import { getRequestIdFromRequest } from '../middleware/request-id.middleware';
 
 @Injectable()
 export class RequestContextInterceptor implements NestInterceptor {
@@ -39,11 +40,16 @@ export class RequestContextInterceptor implements NestInterceptor {
     // caller forgot to set the header. We also stamp the same id on the
     // response header so the client can echo it back in support tickets
     // without having to dig through DevTools.
+    //
+    // QUI-1049 P3: el id ya lo resolvió `requestIdMiddleware` (primer
+    // middleware de main.ts) para que guards, pipes y el filtro de excepciones
+    // vean el mismo. Lo de abajo solo cubre apps sin ese middleware (tests).
     const inboundRequestId = req.headers['x-request-id'];
     const requestId =
-      typeof inboundRequestId === 'string' && inboundRequestId.length > 0
+      getRequestIdFromRequest(req) ??
+      (typeof inboundRequestId === 'string' && inboundRequestId.length > 0
         ? inboundRequestId
-        : crypto.randomUUID();
+        : crypto.randomUUID());
     contextObj.request_id = requestId;
     try {
       res.setHeader('X-Request-Id', requestId);

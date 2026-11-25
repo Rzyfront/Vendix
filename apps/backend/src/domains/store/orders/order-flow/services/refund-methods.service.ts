@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
+import { bankAccountAvailableInStoreWhere } from '@common/helpers/bank-account-availability.helper';
 
 export interface RefundMethodOption {
   value: 'original_payment' | 'cash' | 'bank_transfer' | 'store_credit';
@@ -84,7 +85,7 @@ export class RefundMethodsService {
     // si hay fallback a otra vía.
     const bankAccounts = await this.prisma.bank_accounts.findMany({
       where: {
-        OR: [{ store_id: order.store_id }, { store_id: null }],
+        ...bankAccountAvailableInStoreWhere(order.store_id),
         status: 'active',
       },
       select: { id: true, name: true, account_number: true, bank_name: true },

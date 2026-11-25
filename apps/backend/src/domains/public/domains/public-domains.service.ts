@@ -165,6 +165,7 @@ export class PublicDomainsService {
           const nextOpenMessage = computeNextOpenMessage(
             settingsData?.pos?.business_hours,
             timezone,
+            settingsData?.pos?.schedule_mode,
           );
           if (nextOpenMessage) {
             ecommerceSettings.general.unavailable_message = nextOpenMessage;

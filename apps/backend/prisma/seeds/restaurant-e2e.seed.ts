@@ -329,12 +329,14 @@ export async function seedRestaurantE2E(
     name: string,
     storeId: number | null,
   ): Promise<number> {
-    const existing = await client.bank_accounts.findUnique({
+    // QUI-1061 — la unicidad ya no es por (organización, número): es por
+    // (organización, tienda, número), con las cuentas de organización
+    // (`store_id` NULL) en un único parcial. `findFirst` cubre ambos casos.
+    const existing = await client.bank_accounts.findFirst({
       where: {
-        organization_id_account_number: {
-          organization_id: organization!.id,
-          account_number: accountNumber,
-        },
+        organization_id: organization!.id,
+        store_id: storeId,
+        account_number: accountNumber,
       },
     });
     if (existing) {

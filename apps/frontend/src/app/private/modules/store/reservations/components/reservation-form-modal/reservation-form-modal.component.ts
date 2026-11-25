@@ -27,6 +27,8 @@ import { environment } from '../../../../../../../environments/environment';
 import { debounceTime, Subject, switchMap, of, forkJoin, finalize, map, catchError } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { bookingPaymentUrl } from '../../utils/booking-display.util';
+import { ServicePlan, ServicePlansService } from '../../../products/services/service-plans.service';
+import { computePlanReturnDate, planPriceFailureMessage, resolvePlanPackagePrice } from '../../utils/plan-pricing.util';
 import { PaymentMethodsService } from '../../../settings/payments/services/payment-methods.service';
 import { PaymentMethodState, StorePaymentMethod } from '../../../settings/payments/interfaces/payment-methods.interface';
 import {
@@ -65,6 +67,7 @@ export class ReservationFormModalComponent {
   private toastService = inject(ToastService);
   private destroyRef = inject(DestroyRef);
   private paymentMethodsApi = inject(PaymentMethodsService);
+  private plansService = inject(ServicePlansService);
 
   // Inputs / Outputs
   readonly isOpen = input<boolean>(false);
@@ -92,6 +95,8 @@ export class ReservationFormModalComponent {
 
   // Date & Channel
   selectedDate = signal('');
+  /** Fecha fin de un servicio de varios días (unidad `day`); vacío = sin fecha fin. */
+  endDate = signal('');
   selectedChannel = signal('pos');
 
   // Providers
@@ -179,6 +184,87 @@ export class ReservationFormModalComponent {
       (this.prepayMethodId() == null || (this.prepayAccountOptions().length > 0 && this.prepayAccountId() == null)),
   );
 
+  // ---- Plan / paquete (QUI-1060) ----
+  readonly planDetail = signal<ServicePlan | null>(null);
+  readonly loadingPlan = signal(false);
+  /** Modo `both`: true = evento programado, false = fecha libre. */
+  readonly planUseDeparture = signal(true);
+  readonly planDepartureId = signal<number | null>(null);
+  readonly paxAdults = signal(1);
+  readonly paxChildren = signal(0);
+
+  /** Servicio de tipo paquete con duración en días: se reserva como plan. */
+  readonly isPlan = computed(() => {
+    const plan = this.planDetail();
+    return (
+      this.selectedService()?.service_pricing_type === 'package' &&
+      !!plan?.is_plan &&
+      (plan.plan_duration_days ?? 0) >= 1
+    );
+  });
+  readonly planDays = computed(() => this.planDetail()?.plan_duration_days ?? 0);
+  readonly planMode = computed(() => this.planDetail()?.plan_departure_mode ?? 'on_demand');
+  /** La reserva usa un evento programado (modo fixed, o both con el interruptor en «Evento programado»). */
+  readonly planUsesDeparture = computed(
+    () => this.isPlan() && (this.planMode() === 'fixed' || (this.planMode() === 'both' && this.planUseDeparture())),
+  );
+  readonly openDepartures = computed(() =>
+    (this.planDetail()?.departures ?? []).filter((d) => d.status === 'open' && d.seats_available > 0),
+  );
+  readonly departureOptions = computed(() =>
+    this.openDepartures().map((d) => ({
+      value: d.id,
+      label: `${this.formatDate(d.departure_date)} · ${d.seats_available} ${d.seats_available === 1 ? 'cupo' : 'cupos'}`,
+    })),
+  );
+  readonly selectedDeparture = computed(
+    () => this.openDepartures().find((d) => d.id === this.planDepartureId()) ?? null,
+  );
+  readonly planTotalPax = computed(() => (Number(this.paxAdults()) || 0) + (Number(this.paxChildren()) || 0));
+  readonly planReturnDate = computed(() => {
+    const date = this.selectedDate();
+    return this.isPlan() && date ? computePlanReturnDate(date, this.planDays()) : '';
+  });
+  readonly planPrice = computed(() => {
+    const plan = this.planDetail();
+    return resolvePlanPackagePrice({
+      tiers: plan?.pax_prices ?? [],
+      adults: Number(this.paxAdults()) || 0,
+      children: Number(this.paxChildren()) || 0,
+      departureOverride: this.planUsesDeparture() ? this.selectedDeparture()?.price_override : null,
+      minPax: plan?.plan_min_pax,
+      maxPax: plan?.plan_max_pax,
+    });
+  });
+  /** Price shown for the plan; 0 when none applies (callers check `planPrice().ok`). */
+  readonly planPriceValue = computed(() => {
+    const result = this.planPrice();
+    return result.ok ? result.price : 0;
+  });
+  /** Why the plan cannot be booked yet (price, seats); null when it can. */
+  readonly planBlockReason = computed<string | null>(() => {
+    if (!this.isPlan()) return null;
+    const price = this.planPrice();
+    if (!price.ok) {
+      const plan = this.planDetail();
+      return planPriceFailureMessage(price.reason, this.planTotalPax(), plan?.plan_min_pax, plan?.plan_max_pax);
+    }
+    const departure = this.selectedDeparture();
+    if (this.planUsesDeparture() && departure && this.planTotalPax() > departure.seats_available) {
+      return `Solo quedan ${departure.seats_available} ${departure.seats_available === 1 ? 'cupo' : 'cupos'} en este evento.`;
+    }
+    return null;
+  });
+  /** Servicio normal de varios días: pide fecha fin. Los de horas no cambian. */
+  readonly isMultiDayService = computed(
+    () => this.selectedService()?.service_duration_unit === 'day' && !this.isPlan() && !this.loadingPlan(),
+  );
+
+  private readonly planLoader = effect(() => {
+    const service = this.selectedService();
+    untracked(() => this.loadPlan(service));
+  });
+
   /** The hint is shown when the end is not after the start: the booking then ends the next day (S21). */
   readonly endsNextDay = computed(() => {
     const start = this.startTime();
@@ -238,6 +324,9 @@ export class ReservationFormModalComponent {
 
   // Computed signals
   readonly wizardSteps = computed<StepsLineItem[]>(() => {
+    if (this.isPlan()) {
+      return [{ label: 'Servicio' }, { label: 'Cliente' }, { label: 'Confirmación' }];
+    }
     if (this.isFreeBooking()) {
       return [
         { label: 'Servicio' },
@@ -296,10 +385,11 @@ export class ReservationFormModalComponent {
   });
 
   // Dynamic step numbers
-  readonly providerStep = computed(() => this.isFreeBooking() ? -1 : 1);
-  readonly slotStep = computed(() => this.isFreeBooking() ? 1 : 2);
-  readonly customerStep = computed(() => this.isFreeBooking() ? 2 : 3);
-  readonly confirmStep = computed(() => this.isFreeBooking() ? 3 : 4);
+  // Un plan salta proveedor y horario: Servicio → Cliente → Confirmación.
+  readonly providerStep = computed(() => this.isPlan() || this.isFreeBooking() ? -1 : 1);
+  readonly slotStep = computed(() => this.isPlan() ? -1 : this.isFreeBooking() ? 1 : 2);
+  readonly customerStep = computed(() => this.isPlan() ? 1 : this.isFreeBooking() ? 2 : 3);
+  readonly confirmStep = computed(() => this.isPlan() ? 2 : this.isFreeBooking() ? 3 : 4);
 
   /**
    * Free slots for the SELECTED day only. The wizard's step 3 (Horario)
@@ -571,7 +661,13 @@ export class ReservationFormModalComponent {
     // and avoids Date-parsing timezone surprises.
     if (step === 0) {
       if (!this.selectedService() || !this.selectedDate()) return false;
+      if (this.loadingPlan()) return false;
+      if (this.isPlan()) {
+        if (this.planUsesDeparture() && !this.selectedDeparture()) return false;
+        return this.selectedDate() >= this.todayString && this.planBlockReason() === null;
+      }
       if (this.requiresStation() && !this.selectedStation()) return false;
+      if (this.isMultiDayService() && this.endDate() && this.endDate() < this.selectedDate()) return false;
       return this.selectedDate() >= this.todayString;
     }
     // Provider step (only in provider mode)
@@ -617,6 +713,12 @@ export class ReservationFormModalComponent {
     this.selectedStation.set(null);
     this.loadingStations.set(false);
     this.selectedDate.set('');
+    this.endDate.set('');
+    this.planDetail.set(null);
+    this.planUseDeparture.set(true);
+    this.planDepartureId.set(null);
+    this.paxAdults.set(1);
+    this.paxChildren.set(0);
     this.selectedChannel.set('pos');
     this.providers.set([]);
     this.selectedProvider.set(null);
@@ -726,7 +828,53 @@ export class ReservationFormModalComponent {
       });
   }
 
+  /** Loads the departures and price tiers when the selected service is a package. */
+  private loadPlan(service: any): void {
+    this.planDetail.set(null);
+    this.planDepartureId.set(null);
+    if (service?.service_pricing_type !== 'package' || !service?.id) {
+      this.loadingPlan.set(false);
+      return;
+    }
+    this.loadingPlan.set(true);
+    this.plansService
+      .get(service.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (plan) => {
+          if (this.selectedService()?.id !== service.id) return;
+          this.planDetail.set(plan);
+          this.loadingPlan.set(false);
+        },
+        error: (err) => {
+          if (this.selectedService()?.id !== service.id) return;
+          this.loadingPlan.set(false);
+          this.toastService.error(extractApiErrorMessage(err));
+        },
+      });
+  }
+
+  selectDeparture(value: string | number | null): void {
+    const id = value == null || value === '' ? null : Number(value);
+    this.planDepartureId.set(id);
+    const departure = this.openDepartures().find((d) => d.id === id);
+    this.selectedDate.set(departure?.departure_date ?? '');
+  }
+
+  setPlanUseDeparture(useDeparture: boolean): void {
+    this.planUseDeparture.set(useDeparture);
+    this.planDepartureId.set(null);
+    this.selectedDate.set('');
+  }
+
+  setPax(kind: 'adults' | 'children', value: unknown): void {
+    const n = Math.max(kind === 'adults' ? 1 : 0, Math.floor(Number(value)) || 0);
+    if (kind === 'adults') this.paxAdults.set(n);
+    else this.paxChildren.set(n);
+  }
+
   selectService(service: any): void {
+    this.endDate.set('');
     this.selectedService.set(service);
     this.isFreeBooking.set(service.booking_mode === 'free_booking');
     this.selectedStation.set(null);
@@ -768,6 +916,18 @@ export class ReservationFormModalComponent {
     if (!this.canGoNext()) return;
 
     const step = this.currentStep();
+
+    if (step === 0 && this.isPlan()) {
+      if (this.selectedDate() < this.todayString) {
+        this.toastService.warning('No puedes reservar un evento que ya pasó. Elige hoy o una fecha futura.');
+        return;
+      }
+      // El plan no usa franja horaria: ocupa los días completos.
+      this.startTime.set('00:00');
+      this.endTime.set('23:59');
+      this.currentStep.set(this.customerStep());
+      return;
+    }
 
     if (step === 0) {
       // Defense in depth: even if `canGoNext` somehow let a past date
@@ -1341,6 +1501,18 @@ export class ReservationFormModalComponent {
       station_id: this.requiresStation() ? this.selectedStation()?.id : undefined,
       skip_availability_check: this.skipAvailabilityCheck() || undefined,
     };
+
+    if (this.isPlan()) {
+      dto.start_time = '00:00';
+      dto.end_time = '23:59';
+      dto.pax_adults = Number(this.paxAdults());
+      dto.pax_children = Number(this.paxChildren()) || 0;
+      if (this.planUsesDeparture() && this.planDepartureId() != null) {
+        dto.departure_id = this.planDepartureId() as number;
+      }
+    } else if (this.isMultiDayService() && this.endDate()) {
+      dto.end_date = this.endDate();
+    }
 
     if (this.requiresStation() && this.depositMode() !== 'none') {
       const deposit: BookingDepositInput = {

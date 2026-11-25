@@ -171,4 +171,26 @@ export class CreateBookingDto {
   @ValidateNested()
   @Type(() => BookingDepositDto)
   deposit?: BookingDepositDto;
+
+  /** QUI-1060 modo Plan: salida fija elegida (planes con salidas `fixed`/`both`). */
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  departure_id?: number;
+
+  /** QUI-1060 modo Plan: adultos del grupo (por defecto 1 en planes; ignorado en servicios normales). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'Los adultos deben ser un número entero' })
+  @Min(0, { message: 'Los adultos no pueden ser negativos' })
+  @Max(999)
+  pax_adults?: number;
+
+  /** QUI-1060 modo Plan: niños del grupo (cuentan para cupo y tramo). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'Los niños deben ser un número entero' })
+  @Min(0, { message: 'Los niños no pueden ser negativos' })
+  @Max(999)
+  pax_children?: number;
 }

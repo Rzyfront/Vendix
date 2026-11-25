@@ -4,6 +4,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from '@common/errors';
 import { CustomersBulkJobHandler } from './customers-bulk-job.handler';
 import { CustomersBulkController } from './customers-bulk.controller';
+import { CustomersBulkService } from './customers-bulk.service';
 import { BulkCustomersJobDto } from './dto/bulk-customers-job.dto';
 import { sha256Hex } from '../bulk-uploads/bulk-file-fingerprint.util';
 
@@ -192,5 +193,44 @@ describe('CustomersBulkController.enqueueUploadJob (QUI-1009)', () => {
       }),
     );
     expect(bad.map((e) => e.property)).toEqual(['file_hash']);
+  });
+});
+
+/** QUI-1047 — una fila inválida del archivo queda fallida; las demás se crean. */
+describe('CustomersBulkJobHandler — filas inválidas por fila (QUI-1047)', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('marks the invalid-email row as failed with row/column and creates the rest', async () => {
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ store_id: 5 } as any);
+    const create = jest.fn(async (_s: number, d: any) => ({ id: 1, ...d }));
+    const bulk = new CustomersBulkService(
+      {} as any,
+      { create } as any,
+      {} as any,
+    );
+    const staged = [
+      { first_name: 'Ana', email: 'ana@mail.com', row_number: 2 },
+      { first_name: 'Alejandra', email: 'alejandra.rios@', row_number: 6 },
+      { first_name: 'Eva', row_number: 7 },
+    ];
+    const s3 = makeS3({
+      downloadFile: jest
+        .fn()
+        .mockResolvedValue(Buffer.from(JSON.stringify(staged))),
+    });
+    const handler = new CustomersBulkJobHandler(bulk, s3 as any);
+
+    const page = await handler.runPage(data, 0, 100);
+
+    expect(page).toMatchObject({ total: 3, successful: 2, failed: 1, done: true });
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(page.rows[1]).toMatchObject({
+      status: 'error',
+      row_number: 6,
+      message: expect.stringContaining('Fila 6, Correo:'),
+      row_error: { row: 6, column: 'Correo', code: 'validation' },
+    });
   });
 });

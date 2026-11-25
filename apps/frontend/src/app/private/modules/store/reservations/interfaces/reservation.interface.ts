@@ -12,6 +12,10 @@ export interface Booking {
   end_date?: string | null;
   /** Booking without an end (D9). */
   is_open_ended?: boolean;
+  /** QUI-1060: plan departure the booking holds seats on, and the group size. */
+  departure_id?: number | null;
+  pax_adults?: number | null;
+  pax_children?: number | null;
   status: BookingStatus;
   channel: string;
   notes?: string;
@@ -26,7 +30,7 @@ export interface Booking {
   product?: { id: number; name: string; service_duration_minutes?: number; image_url?: string; base_price?: number; is_consultation?: boolean; requires_station?: boolean; booking_mode?: string };
   product_variant?: { id: number; name?: string; sku?: string };
   created_by?: { id: number; first_name: string; last_name: string };
-  order?: { id: number; order_number: string };
+  order?: BookingOrderSummary;
   provider_id?: number;
   station_id?: number;
   provider?: { id: number; display_name?: string; avatar_url?: string; user?: { first_name: string | null; last_name: string | null } | null; employee?: { first_name: string; last_name: string } | null };
@@ -49,6 +53,23 @@ export interface Booking {
   payment_path?: string | null;
   /** Absolute payment page on the store's public domain; null when the store has none. */
   payment_url?: string | null;
+}
+
+/** `order` block of the booking detail; Decimal fields may arrive as strings. */
+export interface BookingOrderSummary {
+  id: number;
+  order_number: string;
+  state?: string;
+  grand_total?: number | string;
+  total_paid?: number | string;
+  remaining_balance?: number | string;
+}
+
+/** Body of `POST /store/reservations/:id/charges`. */
+export interface AddBookingChargeDto {
+  product_id: number;
+  product_variant_id?: number;
+  quantity: number;
 }
 
 /** `deposit` block of a booking (field names mirror `BookingDepositBlock` of the backend). */
@@ -140,15 +161,20 @@ export interface QueueEntry {
 }
 
 /**
- * One row of the per-store business-hours master calendar. The store
- * availability service intersects provider schedules against these
- * windows so a provider can't be booked outside the store's open hours.
+ * One day of the store's single schedule (`settings.pos.business_hours`, the
+ * same one Settings → Sales edits). The store availability service intersects
+ * provider schedules against these windows so a provider can't be booked
+ * outside the store's open hours.
  */
 export interface BusinessHoursRow {
   day_of_week: number;       // 0 = Sunday, 6 = Saturday
   start_time: string | null; // HH:mm in 24h, null when closed
-  end_time: string | null;
+  end_time: string | null;   // end <= start ends the next day; 00:00-00:00 = 24 h
   is_active: boolean;
+  /** Every block of the day (split shift). Sent and returned by the API. */
+  blocks?: Array<{ start_time: string; end_time: string }>;
+  /** Read-only: the day is the explicit 00:00-00:00 block. */
+  is_24h?: boolean;
 }
 
 export interface BookingStats {
@@ -202,12 +228,18 @@ export interface CreateBookingDto {
   product_id: number;
   product_variant_id?: number;
   date: string;
+  /** Last day of a multi-day service (unit `day`); plans compute it server-side. */
+  end_date?: string;
   start_time: string;
   end_time: string;
   channel?: string;
   notes?: string;
   provider_id?: number;
   station_id?: number;
+  /** QUI-1060 plan booking: chosen departure and group size. */
+  departure_id?: number;
+  pax_adults?: number;
+  pax_children?: number;
   skip_availability_check?: boolean;
   skip_order_creation?: boolean;
   deposit?: BookingDepositInput;
@@ -358,6 +390,13 @@ export interface ServiceProvider {
   sort_order: number;
   /** Preferred station (S10): booking with this provider tries it first. */
   default_station_id?: number | null;
+  /**
+   * true = works the store hours (read live from the store settings);
+   * false = own weekly schedule. Absent (older API) reads as true.
+   */
+  uses_store_hours?: boolean;
+  /** Detail only: the provider has active own schedule rows saved. */
+  has_own_schedule?: boolean;
   employee?: { id: number; first_name: string; last_name: string; position?: string } | null;
   user?: ProviderUser | null;
   services?: ProviderServiceAssignment[];
@@ -379,6 +418,8 @@ export interface ProviderSchedule {
   start_time: string;
   end_time: string;
   is_active: boolean;
+  /** The block comes from the store hours (read-only here, edited in the store hours). */
+  inherited?: boolean;
 }
 
 export interface ProviderException {

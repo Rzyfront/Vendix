@@ -12,13 +12,16 @@ import {
   ParseIntPipe,
   BadRequestException,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
+import { ErrorCodes, VendixHttpException } from 'src/common/errors';
 import { Response } from 'express';
 import { ReservationsService } from './reservations.service';
 import { ReservationsExportService } from './reservations-export.service';
 import { AvailabilityService } from './availability.service';
 import { ReservationDepositsService } from './reservation-deposits.service';
 import { RentalPrepayService } from './rental-prepay/rental-prepay.service';
+import { AddBookingChargeDto, BookingChargesService } from './booking-charges.service';
 import {
   BookingQueryDto,
   AvailabilityQueryDto,
@@ -90,6 +93,8 @@ export class ReservationsController {
     private readonly prisma: StorePrismaService,
     private readonly reservationDeposits: ReservationDepositsService,
     private readonly rentalPrepay: RentalPrepayService,
+    // QUI-1063 — extras of a booking onto its order.
+    @Optional() private readonly bookingCharges?: BookingChargesService,
   ) {}
 
   @Get()
@@ -519,6 +524,20 @@ export class ReservationsController {
       result,
       'Reserva obtenida exitosamente',
     );
+  }
+
+  /**
+   * QUI-1063 — "Agregar cargo": a product or service (without inventory)
+   * sold during the booking goes on its order now; total and pending
+   * balance follow it. Returns the booking detail with its order.
+   */
+  @Post(':id/charges')
+  @Permissions('store:reservations:update')
+  async addCharge(@Param('id', ParseIntPipe) id: number, @Body() dto: AddBookingChargeDto) {
+    if (!this.bookingCharges) throw new VendixHttpException(ErrorCodes.BOOKING_CHARGE_001);
+    await this.bookingCharges.addCharge(id, dto);
+    const result = await this.reservationsService.findOneDetail(id);
+    return this.responseService.success(result, 'Cargo agregado a la orden de la reserva');
   }
 
   @Post()

@@ -3,6 +3,7 @@ import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { ServiceSessionsService } from './service-sessions.service';
 import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { rentalBlocksConsumed } from './utils/session-order-lines.util';
+import { BusinessHoursService } from '../reservations/business-hours/business-hours.service';
 
 const field = (id: number, overrides: Record<string, unknown> = {}) => ({
   id,
@@ -524,9 +525,23 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
       prisma.service_allocations = { findMany: jest.fn().mockResolvedValue([{ provider_id: 3, station_id: 9, session_id: 50, booking_id: null }]) };
       prisma.bookings = { findMany: jest.fn().mockResolvedValue([{ provider_id: 4, start_time: '10:15', end_time: '11:00' }]) };
       prisma.service_stations.findMany = jest.fn().mockResolvedValue([{ id: 9, name: 'Bahía 2' }]);
+      // Lector real del horario efectivo del prestador (Parte 1) sobre el prisma simulado.
+      (service as any).businessHours = {
+        prisma,
+        loadStoreWindows: jest.fn().mockResolvedValue(new Map([[2, [{ start_time: '08:00', end_time: '18:00' }]]])),
+        loadProviderBlocks: BusinessHoursService.prototype.loadProviderBlocks,
+      };
     });
 
     afterEach(() => jest.useRealTimers());
+
+    it('Parte 1: quien trabaja en el horario de la tienda está disponible sin horario propio', async () => {
+      prisma.service_providers.findMany.mockResolvedValue([
+        { id: 1, store_id: 3, display_name: 'Sin horario', is_active: true, uses_store_hours: true },
+      ]);
+      const result = await service.assessProviders(3, END, [1]);
+      expect(result[0]).toMatchObject({ display_name: 'Sin horario', status: 'available' });
+    });
 
     it('clasifica sin horario, fuera de turno, ocupado, con reserva y disponible', async () => {
       const result = await service.assessProviders(3, END, [1, 2, 3, 4, 5]);
@@ -542,6 +557,94 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
       prisma.provider_exceptions.findMany.mockResolvedValue([{ provider_id: 2, is_unavailable: true, custom_start_time: null, custom_end_time: null }]);
       const result = await service.assessProviders(3, END, [2]);
       expect(result.find((r: any) => r.display_name === 'Libre')).toMatchObject({ status: 'off_schedule' });
+    });
+
+    it('acepta prestadores con horario 24 h (00:00-00:00) y nocturno (17:00-04:00) incluyendo madrugada del día siguiente', async () => {
+      // Martes 2026-04-21 10:00 Bogotá con bloque 00:00-00:00 → disponible
+      prisma.service_providers.findMany.mockResolvedValue([
+        { id: 10, store_id: 3, display_name: 'Turno 24h', is_active: true, uses_store_hours: false },
+        { id: 11, store_id: 3, display_name: 'Nocturno', is_active: true, uses_store_hours: false },
+      ]);
+      prisma.provider_schedules.findMany.mockResolvedValue([
+        { provider_id: 10, day_of_week: 2, start_time: '00:00', end_time: '00:00' },
+        { provider_id: 11, day_of_week: 1, start_time: '17:00', end_time: '04:00' },
+      ]);
+      prisma.service_allocations.findMany.mockResolvedValue([]);
+      prisma.bookings.findMany.mockResolvedValue([]);
+
+      const morning = await service.assessProviders(3, END, [10, 11]);
+      const byNameMorning = Object.fromEntries(morning.map((r: any) => [r.display_name, r]));
+      expect(byNameMorning['Turno 24h']).toMatchObject({ status: 'available' });
+      expect(byNameMorning['Nocturno']).toMatchObject({ status: 'off_schedule' });
+
+      // Martes 2026-04-21 01:00 Bogotá (06:00 UTC) → dentro del derrame del lunes 17:00-04:00
+      jest.setSystemTime(new Date('2026-04-21T06:00:00.000Z'));
+      const lateNight = await service.assessProviders(3, new Date('2026-04-21T07:00:00.000Z'), [10, 11]);
+      const byNameNight = Object.fromEntries(lateNight.map((r: any) => [r.display_name, r]));
+      expect(byNameNight['Turno 24h']).toMatchObject({ status: 'available' });
+      expect(byNameNight['Nocturno']).toMatchObject({ status: 'available' });
+    });
+
+    it('changeProvider acepta reasignar a un prestador 24 h o nocturno incluso cuando la sesión cruza medianoche', async () => {
+      // Lunes 2026-04-20 23:00 Bogotá (2026-04-21T04:00:00Z) hasta martes 01:00 Bogotá (06:00Z)
+      jest.setSystemTime(new Date('2026-04-21T04:00:00.000Z'));
+      jest.spyOn(service, 'findOne').mockResolvedValue({
+        id: 77,
+        store_id: 1,
+        status: 'open',
+        product_id: 50,
+        booking_id: null,
+      } as any);
+      prisma.service_allocations.findFirst = jest.fn().mockResolvedValue({
+        id: 88,
+        station_id: 3,
+        provider_id: 1,
+        end_at: new Date('2026-04-21T06:00:00.000Z'),
+      });
+      prisma.service_station_providers = { findFirst: jest.fn().mockResolvedValue({ provider_id: 11 }) };
+      prisma.service_providers.findFirst = jest.fn().mockResolvedValue({ id: 11, is_active: true });
+      prisma.provider_services = { findFirst: jest.fn().mockResolvedValue({ provider_id: 11, product_id: 50 }) };
+      prisma.provider_exceptions.findMany.mockResolvedValue([]);
+
+      const tx = {
+        service_allocations: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        bookings: { updateMany: jest.fn() },
+        service_progress_events: { create: jest.fn() },
+      };
+      prisma.$transaction.mockImplementation((fn: any) => fn(tx));
+
+      // Prestador nocturno 17:00-04:00 del lunes (day_of_week = 1)
+      (service as any).businessHours = {
+        loadProviderBlocks: jest.fn().mockResolvedValue([
+          { provider_id: 11, day_of_week: 1, start_time: '17:00', end_time: '04:00' },
+        ]),
+      };
+      await expect(
+        (service as any).changeProvider(77, 11),
+      ).resolves.toEqual({ id: 77, provider_id: 11 });
+
+      // Prestador 24 h lunes + martes (00:00-00:00 ambos días)
+      (service as any).businessHours = {
+        loadProviderBlocks: jest.fn().mockResolvedValue([
+          { provider_id: 11, day_of_week: 1, start_time: '00:00', end_time: '00:00' },
+          { provider_id: 11, day_of_week: 2, start_time: '00:00', end_time: '00:00' },
+        ]),
+      };
+      await expect(
+        (service as any).changeProvider(77, 11),
+      ).resolves.toEqual({ id: 77, provider_id: 11 });
+
+      // Prestador 24 h solo lunes (sin martes) no cubre 23:00 -> 01:00
+      (service as any).businessHours = {
+        loadProviderBlocks: jest.fn().mockResolvedValue([
+          { provider_id: 11, day_of_week: 1, start_time: '00:00', end_time: '00:00' },
+        ]),
+      };
+      await expect(
+        (service as any).changeProvider(77, 11),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ error_code: 'STATION_001' }),
+      });
     });
   });
 

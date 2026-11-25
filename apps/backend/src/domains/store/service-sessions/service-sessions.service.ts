@@ -42,7 +42,8 @@ import { buildOrderSaleTaxPayload } from '../payments/utils/order-sale-tax-paylo
 import { assertSaleNatureProducts } from '../products/services/product-usage-nature.util';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
-import { localTimeString, resolveStoreTimezone } from '../../../common/utils/store-timezone.util';
+import { daysBetweenDateStrings, localTimeString, resolveStoreTimezone } from '../../../common/utils/store-timezone.util';
+import { addDaysToDateString, ClockWindow, coversSpan, windowsForDate } from '../../../common/utils/schedule-window.util';
 import { ACTIVE_ALLOCATION_STATES, NEXT_RESERVATION_SELECT, toNextReservation } from './utils/next-reservation.util';
 import { BusinessHoursService } from '../reservations/business-hours/business-hours.service';
 import { ServiceAllocationCoordinator } from '../reservations/service-allocation-coordinator.service';
@@ -732,7 +733,7 @@ export class ServiceSessionsService {
 
     const [providers, schedules, exceptions, allocations, bookings] = await Promise.all([
       this.prisma.service_providers.findMany({ where: { id: { in: ids }, store_id: storeId }, select: { id: true, display_name: true, is_active: true } }),
-      this.prisma.provider_schedules.findMany({ where: { provider_id: { in: ids }, is_active: true }, select: { provider_id: true, day_of_week: true, start_time: true, end_time: true } }),
+      this.businessHours.loadProviderBlocks(ids),
       this.prisma.provider_exceptions.findMany({ where: { provider_id: { in: ids }, date: new Date(`${localDate}T00:00:00.000Z`) }, select: { provider_id: true, is_unavailable: true, custom_start_time: true, custom_end_time: true } }),
       this.prisma.service_allocations.findMany({
         where: {
@@ -761,11 +762,18 @@ export class ServiceSessionsService {
       if (exception?.is_unavailable && !exception.custom_start_time) {
         return { ...base, status: 'off_schedule' as const, detail: 'Hoy no trabaja (excepción de horario)' };
       }
-      const windows = exception?.custom_start_time && exception.custom_end_time
-        ? [{ start_time: exception.custom_start_time, end_time: exception.custom_end_time }]
-        : own.filter((s) => s.day_of_week === weekday);
-      if (!windows.some((w) => nowMinutes >= toMinutes(w.start_time) && nowMinutes < toMinutes(w.end_time))) {
-        return { ...base, status: 'off_schedule' as const, detail: windows.length ? 'Fuera de su horario en este momento' : 'Hoy no trabaja según su horario' };
+      const byWeekday = new Map<number, ClockWindow[]>();
+      for (const s of own) {
+        const list = byWeekday.get(s.day_of_week) ?? [];
+        list.push({ start_time: s.start_time, end_time: s.end_time });
+        byWeekday.set(s.day_of_week, list);
+      }
+      if (exception?.custom_start_time && exception.custom_end_time) {
+        byWeekday.set(weekday, [{ start_time: exception.custom_start_time, end_time: exception.custom_end_time }]);
+      }
+      const spans = windowsForDate(byWeekday, weekday);
+      if (!spans.some((s) => nowMinutes >= s.startMin && nowMinutes < s.endMin)) {
+        return { ...base, status: 'off_schedule' as const, detail: spans.length ? 'Fuera de su horario en este momento' : 'Hoy no trabaja según su horario' };
       }
       const allocation = allocations.find((a) => a.provider_id === provider.id);
       if (allocation) {
@@ -1390,7 +1398,7 @@ export class ServiceSessionsService {
     const [compatible, activeProvider, schedule, exceptionRows] = await Promise.all([
       this.prisma.service_station_providers.findFirst({ where: { store_id: storeId, station_id: allocation.station_id, provider_id: providerId } }),
       this.prisma.service_providers.findFirst({ where: { id: providerId, store_id: storeId, is_active: true } }),
-      this.prisma.provider_schedules.findMany({ where: { provider_id: providerId, is_active: true }, select: { day_of_week: true, start_time: true, end_time: true } }),
+      this.businessHours.loadProviderBlocks([providerId]),
       this.prisma.provider_exceptions.findMany({ where: { provider_id: providerId }, select: { date: true, is_unavailable: true, custom_start_time: true, custom_end_time: true } }),
     ]);
     const serviceCompatibility = await this.prisma.provider_services.findFirst({ where: { provider_id: providerId, product_id: session.product_id } });
@@ -1401,18 +1409,33 @@ export class ServiceSessionsService {
     const localNow = localParts(new Date());
     const localEnd = localParts(new Date(allocation.end_at));
     const localDate = `${localNow.year}-${localNow.month}-${localNow.day}`;
+    const localEndDate = `${localEnd.year}-${localEnd.month}-${localEnd.day}`;
     const exception = exceptionRows.find((row) => row.date.toISOString().slice(0, 10) === localDate);
+    const nextDate = addDaysToDateString(localDate, 1);
+    const nextException = exceptionRows.find((row) => row.date.toISOString().slice(0, 10) === nextDate);
     const weekday = new Date(`${localDate}T00:00:00.000Z`).getUTCDay();
-    const providerWindows = exception?.custom_start_time && exception.custom_end_time
-      ? [{ start_time: exception.custom_start_time, end_time: exception.custom_end_time }]
-      : schedule.filter((window) => window.day_of_week === weekday);
+    const nextWeekday = (weekday + 1) % 7;
+    const byWeekday = new Map<number, ClockWindow[]>();
+    for (const window of schedule) {
+      const list = byWeekday.get(window.day_of_week) ?? [];
+      list.push({ start_time: window.start_time, end_time: window.end_time });
+      byWeekday.set(window.day_of_week, list);
+    }
+    if (exception?.custom_start_time && exception.custom_end_time) {
+      byWeekday.set(weekday, [{ start_time: exception.custom_start_time, end_time: exception.custom_end_time }]);
+    }
+    if (nextException?.is_unavailable && !nextException.custom_start_time) {
+      byWeekday.set(nextWeekday, []);
+    } else if (nextException?.custom_start_time && nextException.custom_end_time) {
+      byWeekday.set(nextWeekday, [{ start_time: nextException.custom_start_time, end_time: nextException.custom_end_time }]);
+    }
+    const dayDiff = daysBetweenDateStrings(localDate, localEndDate);
     const nowMinutes = Number(localNow.hour) * 60 + Number(localNow.minute);
-    const endMinutes = Number(localEnd.hour) * 60 + Number(localEnd.minute);
-    const insideSchedule = localEnd.year === localNow.year && localEnd.month === localNow.month && localEnd.day === localNow.day && providerWindows.some((window) => {
-      const [startHour, startMinute] = window.start_time.split(':').map(Number);
-      const [endHour, endMinute] = window.end_time.split(':').map(Number);
-      return nowMinutes >= startHour * 60 + startMinute && endMinutes <= endHour * 60 + endMinute;
-    });
+    const endMinutes = dayDiff * 1440 + Number(localEnd.hour) * 60 + Number(localEnd.minute);
+    const insideSchedule =
+      dayDiff >= 0 &&
+      dayDiff <= 1 &&
+      coversSpan(byWeekday, weekday, nowMinutes, endMinutes);
     if (!compatible || !activeProvider || !serviceCompatibility || exception?.is_unavailable || !insideSchedule) {
       throw new VendixHttpException(ErrorCodes.STATION_001, 'El proveedor no está habilitado para este servicio y horario.');
     }

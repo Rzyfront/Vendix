@@ -4,6 +4,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom } from 'rxjs';
 import { HttpClient } from '@angular/common/http';
 import { environment } from '../../../../../../environments/environment';
+import { parseApiError } from '../../../../../core/utils/parse-api-error';
 
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup } from '@angular/forms';
@@ -423,6 +424,29 @@ import { dataUrlToFile } from '../../../../../../app/shared/utils/data-url.util'
                 </app-button>
               </div>
 
+              @if (unselectedStoreBankAccounts().length > 0) {
+                <div class="cfg-bank-available">
+                  <span class="cfg-bank-available-label">
+                    Cuentas disponibles para esta tienda (clic para agregar):
+                  </span>
+                  <div class="cfg-bank-available-list">
+                    @for (avail of unselectedStoreBankAccounts(); track avail.id ?? avail.account_number) {
+                      <button
+                        type="button"
+                        class="cfg-bank-available-chip"
+                        (click)="addAvailableBankConfigAccount(avail)"
+                      >
+                        <app-icon name="plus" [size]="12"></app-icon>
+                        <span>{{ avail.bank_name }} · {{ avail.account_number }}</span>
+                        @if (avail.name) {
+                          <span class="cfg-bank-available-name">({{ avail.name }})</span>
+                        }
+                      </button>
+                    }
+                  </div>
+                </div>
+              }
+
               @if (bankConfigAccounts().length === 0) {
                 <p class="cfg-warn">
                   Sin cuentas configuradas. Agrega al menos una cuenta bancaria.
@@ -708,6 +732,45 @@ import { dataUrlToFile } from '../../../../../../app/shared/utils/data-url.util'
         font-weight: 600;
         color: var(--color-text-secondary);
       }
+      .cfg-bank-available {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 8px 10px;
+        background: var(--color-surface-secondary, #F3F4F6);
+        border: 1px dashed var(--color-border);
+        border-radius: 8px;
+      }
+      .cfg-bank-available-label {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--color-text-secondary, #6b7280);
+      }
+      .cfg-bank-available-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .cfg-bank-available-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 8px;
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--color-text-primary);
+        background: var(--color-surface, #fff);
+        border: 1px solid var(--color-border);
+        border-radius: 9999px;
+        cursor: pointer;
+      }
+      .cfg-bank-available-chip:hover {
+        border-color: var(--color-primary);
+        color: var(--color-primary);
+      }
+      .cfg-bank-available-name {
+        color: var(--color-text-secondary, #6b7280);
+      }
       /* OJO: este bloque vive dentro de un template literal de styles.
          Nada de acentos graves aqui dentro: uno solo lo cierra y Angular
          responde con "Code: 1010" sin nombrar el archivo. */
@@ -831,6 +894,19 @@ export class PaymentsSettingsComponent implements OnInit {
   // QUI-728 — editor multi-cuenta para transferencia bancaria (settings).
   // Lista de cuentas de destino en el `custom_config.accounts` del método.
   bankConfigAccounts = signal<BankAccountOption[]>([]);
+  // QUI-1061 — cuentas ya activas y disponibles para esta tienda (propias o
+  // asignadas por la organización), para seleccionarlas sin redigitar.
+  availableStoreBankAccounts = signal<BankAccountOption[]>([]);
+  unselectedStoreBankAccounts = computed(() => {
+    const selectedIds = new Set(
+      this.bankConfigAccounts()
+        .map((a) => a.id)
+        .filter((id): id is number => typeof id === 'number' && id > 0),
+    );
+    return this.availableStoreBankAccounts().filter(
+      (a) => !a.id || !selectedIds.has(a.id),
+    );
+  });
   // QUI-728 — índice de la cuenta cuyo modal de imagen está abierto (null = cerrado).
   bankAccountImageModalIdx = signal<number | null>(null);
   // QUI-728 — cache local idx → URL firmada devuelta por el upload más reciente,
@@ -1194,6 +1270,32 @@ onSearchChange(term: string): void {
         ? accounts.map((a: any) => ({ ...a }))
         : [],
     );
+    this.loadAvailableStoreBankAccounts();
+  }
+
+  private loadAvailableStoreBankAccounts(): void {
+    this.http
+      .get<{ data?: BankAccountOption[] }>(
+        `${environment.apiUrl}/store/payments/bank-accounts`,
+      )
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          const list = Array.isArray(res?.data) ? res.data : [];
+          this.availableStoreBankAccounts.set(list);
+        },
+        error: () => {
+          this.availableStoreBankAccounts.set([]);
+        },
+      });
+  }
+
+  addAvailableBankConfigAccount(account: BankAccountOption): void {
+    const alreadyExists = this.bankConfigAccounts().some(
+      (a) => a.id && account.id && a.id === account.id,
+    );
+    if (alreadyExists) return;
+    this.bankConfigAccounts.update((list) => [...list, { ...account }]);
   }
 
   addBankConfigAccount(): void {
@@ -1362,15 +1464,17 @@ onSearchChange(term: string): void {
     return resolved;
   }
 
-  buildConfigForm(schema: any): void {
+  buildConfigForm(schema: any, seedBankAccounts = true): void {
     // QUI-728 — el editor multi-cuenta de `bank_transfer` es una lista
     // dinámica, no el grid genérico que asume inputs planos. Se deja el form
     // vacío (válido) y la UI maneja `custom_config.accounts` vía
     // `bankConfigAccounts`.
     if (this.isBankTransferConfig()) {
-      this.seedBankConfigAccounts(
-        (this.config_method as any)?.default_config,
-      );
+      if (seedBankAccounts) {
+        this.seedBankConfigAccounts(
+          (this.config_method as any)?.default_config,
+        );
+      }
       this.config_fields = [];
       this.config_form = this.fb.group({});
       return;
@@ -1494,8 +1598,10 @@ onSearchChange(term: string): void {
    * (spinner eterno, modal inservible) justo en el caso que este fix expone.
    */
   private reportBankAccountPersistError(error: unknown): void {
+    const parsed = parseApiError(error);
     const httpMessage = (error as { error?: { message?: string } })?.error?.message;
     const message =
+      (parsed.errorCode ? parsed.userMessage : null) ||
       httpMessage ||
       (error instanceof Error ? error.message : null) ||
       'No se pudieron registrar las cuentas bancarias.';
@@ -1525,6 +1631,7 @@ onSearchChange(term: string): void {
     this.config_fields = [];
     // QUI-728 — limpiar la lista de cuentas al cerrar el modal.
     this.bankConfigAccounts.set([]);
+    this.availableStoreBankAccounts.set([]);
     this.bankAccountImageModalIdx.set(null);
     this.bankAccountImagesCache.set(new Map());
     this.wompiTestResult = null;
@@ -1652,7 +1759,7 @@ onSearchChange(term: string): void {
     this.config_method = sys_method;
 
     if (sys_method?.config_schema) {
-      this.buildConfigForm(sys_method.config_schema);
+      this.buildConfigForm(sys_method.config_schema, false);
       // QUI-728 — `bank_transfer` edita `custom_config.accounts` desde la lista
       // dinámica, no desde el form plano.
       if (this.isBankTransferConfig()) {

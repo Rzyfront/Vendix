@@ -1,8 +1,11 @@
 <!-- Header -->
 <div class="section-header">
   <div class="section-title">
-    <app-icon name="calendar-x" [size]="18" class="text-[var(--color-primary)]"/>
-    <h3>Excepciones y Dias Especiales</h3>
+    <span class="section-title__icon"><app-icon name="calendar-x" [size]="16"/></span>
+    <div>
+      <h3>Ausencias y días especiales</h3>
+      <p>Vacaciones, días libres u horas distintas en una fecha. Aplican sobre cualquier horario.</p>
+    </div>
   </div>
   <app-button variant="outline" size="sm" (clicked)="showForm.set(!showForm())">
     <app-icon [name]="showForm() ? 'x' : 'plus'" [size]="14" slot="icon" />
@@ -23,7 +26,7 @@
     />
     <app-toggle
       [checked]="formIsUnavailable()"
-      label="No disponible todo el dia"
+      label="No atiende en todo el día"
       (toggled)="formIsUnavailable.set($event)"
     />
     @if (!formIsUnavailable()) {
@@ -48,7 +51,7 @@
     }
     <app-input
       label="Motivo (opcional)"
-      placeholder="Vacaciones, cita medica..."
+      placeholder="Vacaciones, cita médica..."
       size="sm"
       [ngModel]="formReason()"
       (inputChange)="formReason.set($event)"
@@ -76,12 +79,12 @@
           {{ formatDate(ex.date) }}
         </div>
         <app-badge [variant]="ex.is_unavailable ? 'error' : 'warning'" size="xsm">
-          {{ ex.is_unavailable ? 'No disponible' : ex.custom_start_time + ' - ' + ex.custom_end_time }}
+          {{ ex.is_unavailable ? 'No atiende' : formatTime12(ex.custom_start_time ?? '') + ' – ' + formatTime12(ex.custom_end_time ?? '') }}
         </app-badge>
         @if (ex.reason) {
           <span class="exception-reason">{{ ex.reason }}</span>
         }
-        <app-button variant="ghost" size="xsm" (clicked)="deleteException(ex.id)" aria-label="Eliminar excepcion">
+        <app-button variant="ghost" size="xsm" (clicked)="deleteException(ex.id)" aria-label="Eliminar ausencia">
           <app-icon name="trash-2" [size]="14" slot="icon" />
         </app-button>
       </div>
@@ -90,8 +93,8 @@
 } @else if (!loading()) {
   <app-empty-state
     icon="calendar-x"
-    title="Sin excepciones"
-    description="No hay excepciones programadas"
+    title="Sin ausencias programadas"
+    description="Agrega una fecha cuando no atienda o tenga un horario distinto."
     [showActionButton]="false"
   />
 }

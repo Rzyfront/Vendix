@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 import { environment } from '../../../../../environments/environment';
 
@@ -159,6 +160,8 @@ export interface EcommerceProduct {
   preparation_time_minutes?: number | null;
   service_modality?: 'in_person' | 'virtual' | 'hybrid' | null;
   requires_booking?: boolean;
+  /** QUI-1060 F2: plan de varios días; se consulta desde su ficha. */
+  is_plan?: boolean;
   requires_station?: boolean;
   booking_mode?: 'provider_required' | 'free_booking';
   brand: { id: number; name: string } | null;
@@ -244,6 +247,26 @@ export interface ProductVariantDetail {
   service_duration_unit?: 'minute' | 'hour' | 'day' | null;
 }
 
+/** QUI-1060 F2: ficha pública de un plan de varios días (sin datos internos). */
+export interface PublicServicePlan {
+  product_id: number;
+  duration_days: number;
+  duration_nights: number | null;
+  departure_mode: 'fixed' | 'on_demand' | 'both';
+  min_pax: number | null;
+  max_pax: number | null;
+  includes: string | null;
+  excludes: string | null;
+  recommendations: string | null;
+  pax_prices: { min_pax: number; max_pax: number; price: number }[];
+  departures: { departure_date: string; seats_available: number; price: number | null }[];
+  itinerary: {
+    day_number: number;
+    date: string | null;
+    activities: { start_time: string | null; title: string; description: string | null }[];
+  }[];
+}
+
 export interface ProductDetail extends EcommerceProduct {
   images: { id: number; image_url: string; is_main: boolean }[];
   variants: ProductVariantDetail[];
@@ -257,6 +280,9 @@ export interface ProductDetail extends EcommerceProduct {
   avg_rating: number;
   review_count: number;
   booking_mode?: 'provider_required' | 'free_booking';
+  /** QUI-1060 F2: duración del plan (precio por grupo, eventos, itinerario). */
+  plan_duration_days?: number | null;
+  plan_duration_nights?: number | null;
   /**
    * Presentaciones de venta ofrecidas en el detalle. `[]` o un solo elemento
    * significa que NO hay nada que elegir y el selector no debe renderizarse
@@ -489,6 +515,15 @@ export class CatalogService {
         headers: this.getHeaders(),
       },
     );
+  }
+
+  /** QUI-1060 F2: ficha pública del plan de la tienda del dominio. */
+  getServicePlan(productId: number): Observable<PublicServicePlan | null> {
+    return this.http
+      .get<{ success: boolean; data: PublicServicePlan }>(`${this.api_url}/plans/${productId}`, {
+        headers: this.getHeaders(),
+      })
+      .pipe(map((res) => res?.data ?? null));
   }
 
   getCategories(): Observable<{ success: boolean; data: Category[] }> {

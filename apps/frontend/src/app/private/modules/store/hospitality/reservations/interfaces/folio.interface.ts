@@ -88,6 +88,14 @@ export interface FolioDetail {
    * a deposit (D3): any desk payment or the check-out applies it first.
    */
   online_payment_available?: number;
+  /** Reservation status ('confirmed' before check-in, 'checked_in' in house). */
+  reservation_status?: string;
+  /** True only while the guest is in house: payments and advances are rejected otherwise. */
+  payments_allowed?: boolean;
+  /** deposit_available + online_payment_available. */
+  advances_available?: number;
+  /** max(0, balance - advances_available). */
+  balance_after_advances?: number;
   /** H3.7 / D11 — last review before the invoice, and whether it still matches the total. */
   verified_at?: string | null;
   verified_current?: boolean;

@@ -3,6 +3,12 @@ import { Injectable, inject } from '@angular/core';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency/currency.pipe';
 import { DocumentPrintService } from '../../../../../shared/services/print';
 import { Booking } from '../interfaces/reservation.interface';
+import { firstValueFrom } from 'rxjs';
+import {
+  PlanBookingItinerary,
+  ServicePlansService,
+} from '../../products/services/service-plans.service';
+import { isPlanBooking, planReceiptHtml } from '../utils/plan-receipt.util';
 
 /**
  * Document CSS handed to `DocumentPrintService`. The `@page` rule is NOT here:
@@ -61,17 +67,33 @@ const RESERVATION_PRINT_STYLES = `
 export class ReservationPrintService {
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly documentPrint = inject(DocumentPrintService);
+  private readonly servicePlans = inject(ServicePlansService);
 
   async printReservation(booking: Booking): Promise<void> {
+    const plan = await this.loadPlan(booking);
     await this.documentPrint.print({
       document: 'reservation',
-      body: this.generateReservationBody(booking),
+      body: this.generateReservationBody(booking, plan),
       title: `Comprobante de Reserva ${booking.booking_number}`,
       styles: RESERVATION_PRINT_STYLES,
     });
   }
 
-  private generateReservationBody(booking: Booking): string {
+  /**
+   * QUI-1060 F2: solo para reservas de plan se pide el itinerario. Una reserva
+   * normal no hace ninguna llamada y su comprobante queda idéntico. Si falla la
+   * lectura, se imprime el comprobante sin el bloque del plan.
+   */
+  private async loadPlan(booking: Booking): Promise<PlanBookingItinerary | null> {
+    if (!isPlanBooking(booking)) return null;
+    try {
+      return await firstValueFrom(this.servicePlans.getBookingItinerary(booking.id));
+    } catch {
+      return null;
+    }
+  }
+
+  private generateReservationBody(booking: Booking, plan: PlanBookingItinerary | null = null): string {
     let storeName = 'Vendix';
     let storeAddress = '';
     let storePhone = '';
@@ -191,7 +213,7 @@ export class ReservationPrintService {
       ${booking.product.base_price != null ? `<p style="margin: 4px 0 0; font-size: 13px; color: #6b7280;">Precio base: ${fmt(booking.product.base_price)}</p>` : ''}
     </div>` : ''}
 
-    <!-- Profesional -->
+${plan ? planReceiptHtml(plan) : ''}    <!-- Profesional -->
     ${providerName ? `
     <div style="border-radius: 8px; padding: 16px; margin-bottom: 24px; border: 1px solid #e5e7eb;">
       <h3 style="margin: 0 0 8px; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px;">Profesional</h3>

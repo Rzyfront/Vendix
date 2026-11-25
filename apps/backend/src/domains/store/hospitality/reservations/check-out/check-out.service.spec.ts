@@ -49,6 +49,8 @@ function build(
     findFolio: jest.fn(async () => folioRow),
     getFolio: jest.fn(async () => folioView()),
     postNightsThrough: jest.fn(async () => 0),
+    // QUI-1063 — the unslept nights posted at the confirmation leave first.
+    releaseUnsleptNights: jest.fn(async () => 0),
     assertVatExemptionHolds: jest.fn(async () => undefined),
     applyOnlinePayments: jest.fn(async () => {
       state.paid += state.online;
@@ -256,6 +258,17 @@ describe('LodgingCheckOutService (H3.7)', () => {
     expect(result.reservation).toMatchObject({ status: 'checked_out' });
   });
 
+  it('QUI-1063 — salida anticipada: quita las noches no dormidas antes de revisar y cobrar', async () => {
+    const { service, folios } = build();
+
+    await service.checkOut(7, { store_payment_method_id: 2, request_id: REQUEST }, DESK);
+
+    expect(folios.releaseUnsleptNights).toHaveBeenCalledWith(expect.objectContaining({ id: 40 }));
+    const released = folios.releaseUnsleptNights.mock.invocationCallOrder[0];
+    expect(released).toBeLessThan(folios.postNightsThrough.mock.invocationCallOrder[0]);
+    expect(released).toBeLessThan(folios.registerPayment.mock.invocationCallOrder[0]);
+  });
+
   it('con noches sin cobrar en un día cerrado no hace check-out ni mueve dinero', async () => {
     const { service, tx, folios, fiscal, prisma } = build({ frozenNights: ['2026-10-25'] });
 
@@ -424,6 +437,26 @@ describe('LodgingCheckOutService (H3.7)', () => {
       await service.checkOut(7, { store_payment_method_id: 2, request_id: REQUEST }, DESK);
 
       expect(fiscal.emitForOrder).toHaveBeenCalledTimes(1);
+    });
+
+    it('QUI-1063 — una reserva confirmada (aún sin llegar) no se verifica ni pierde noches', async () => {
+      const { service, prisma, folios } = build({ verified: false, status: 'confirmed' });
+
+      const error = await service.verify(7).catch((e) => e);
+
+      expect(error.errorCode).toBe('LODGING_CHECKOUT_001');
+      expect(error.message).toBe('La cuenta se verifica con el huésped en casa');
+      expect(folios.releaseUnsleptNights).not.toHaveBeenCalled();
+      expect(prisma.lodging_folios.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('verificar a media estadía no suelta las noches futuras', async () => {
+      const { service, folios } = build({ verified: false });
+
+      await service.verify(7);
+
+      expect(folios.releaseUnsleptNights).not.toHaveBeenCalled();
+      expect(folios.postNightsThrough).toHaveBeenCalledWith(expect.objectContaining({ id: 40 }), expect.any(String), false);
     });
 
     it('"Verificar folio" registra quién y a qué total', async () => {

@@ -55,6 +55,66 @@ interface CustomerGroup {
   locations: CustomerGroupLocation[];
 }
 
+/**
+ * Columnas que identifican al cliente: cada fila necesita al menos una para
+ * ser útil. Los nombres son los encabezados de la plantilla descargable.
+ */
+const CUSTOMER_KEY_COLUMNS: ReadonlyArray<{ key: string; header: string }> = [
+  { key: 'first_name', header: 'Nombre' },
+  { key: 'legal_name', header: 'Razón Social' },
+  { key: 'document_number', header: 'Documento' },
+];
+
+/** Encabezado de ejemplo (orden de la plantilla) para el mensaje de error. */
+const CUSTOMER_HEADER_EXAMPLE = 'Correo | Nombre | Apellido | Documento | Tipo Documento | Teléfono';
+
+/**
+ * QUI-1049 P1 — explica por qué un archivo no dejó ningún cliente útil en vez
+ * del genérico «No se encontraron clientes válidos». Distingue dos casos:
+ *  - faltan las columnas que identifican al cliente: dice cuáles faltan, qué
+ *    encabezados sí se reconocieron (y cuáles no) y un ejemplo correcto;
+ *  - las columnas están pero ninguna fila tiene datos en ellas.
+ *
+ * `headerMap` es el mapa índice → clave del DTO que arma `processFile`.
+ */
+export function diagnoseEmptyCustomerFile(
+  rawHeaders: unknown[],
+  headerMap: Record<number, string>,
+): string[] {
+  const recognizedKeys = new Set(Object.values(headerMap));
+  const recognized: string[] = [];
+  const unrecognized: string[] = [];
+  rawHeaders.forEach((h, index) => {
+    const text = h === undefined || h === null ? '' : String(h).trim();
+    if (!text) return;
+    (headerMap[index] ? recognized : unrecognized).push(text);
+  });
+
+  const hasKeyColumn = CUSTOMER_KEY_COLUMNS.some((c) => recognizedKeys.has(c.key));
+  const keyHeaders = CUSTOMER_KEY_COLUMNS.map((c) => c.header).join(', ');
+
+  if (hasKeyColumn) {
+    return [
+      'El archivo no tiene filas con datos: todas las filas debajo del encabezado están vacías.',
+      `Completa al menos una de estas columnas en cada cliente: ${keyHeaders}.`,
+    ];
+  }
+
+  const messages = [
+    `Faltan las columnas que identifican al cliente: ${keyHeaders} (se necesita al menos una).`,
+    recognized.length
+      ? `Encabezados reconocidos: ${recognized.join(', ')}.`
+      : 'Ningún encabezado del archivo coincide con los de la plantilla.',
+  ];
+  if (unrecognized.length) {
+    messages.push(`Encabezados no reconocidos: ${unrecognized.join(', ')}.`);
+  }
+  messages.push(
+    `Ejemplo de encabezado correcto: ${CUSTOMER_HEADER_EXAMPLE}. Descarga la plantilla para ver todas las columnas.`,
+  );
+  return messages;
+}
+
 /** Clave de agrupación por documento (NIT sin DV pegado); `null` si no hay documento. */
 function customerDocKey(row: Record<string, any>): string | null {
   const raw = String(row['document_number'] ?? '').trim();
@@ -95,6 +155,65 @@ function groupCustomerRows(rows: Record<string, any>[]): CustomerGroup[] {
     }
   }
   return [...groups.values()];
+}
+
+/**
+ * Formato de correo coherente con `IsEmail` (validator.js) del backend:
+ * parte local sin espacios ni puntos al borde/seguidos, dominio con TLD.
+ */
+const EMAIL_FORMAT =
+  /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,}$/;
+
+export type CustomerRowIssueKind = 'invalid_email' | 'duplicate_email';
+
+export interface CustomerRowIssue {
+  row_number: number;
+  /** Clave del cliente (la misma de `customerGroups`). */
+  groupKey: string;
+  name: string;
+  kind: CustomerRowIssueKind;
+  message: string;
+}
+
+/**
+ * QUI-1048: filas que el servidor marcará fallidas por el correo, detectadas
+ * antes de procesar. Correo vacío no es inválido (es una advertencia aparte).
+ * Repetido = mismo correo (sin mayúsculas ni espacios) en otro cliente; la
+ * primera aparición vale. Las filas con el mismo documento son ubicaciones
+ * del mismo cliente y pueden repetir su correo.
+ */
+export function detectCustomerRowIssues(rows: Record<string, any>[]): CustomerRowIssue[] {
+  const issues: CustomerRowIssue[] = [];
+  const seenDocs = new Set<string>();
+  const seenEmails = new Set<string>();
+  for (const row of rows) {
+    const docKey = customerDocKey(row);
+    const isContinuation = !!docKey && seenDocs.has(docKey);
+    if (docKey) seenDocs.add(docKey);
+
+    const email = String(row['email'] ?? '').trim();
+    if (!email) continue;
+    const base = {
+      row_number: Number(row['row_number'] ?? 0),
+      groupKey: docKey ?? `row:${row['row_number']}`,
+      name:
+        row['legal_name'] ||
+        [row['first_name'], row['last_name']].filter(Boolean).join(' ') ||
+        'Sin nombre',
+    };
+    if (!EMAIL_FORMAT.test(email)) {
+      issues.push({ ...base, kind: 'invalid_email', message: `correo "${email}" con formato inválido` });
+      continue;
+    }
+    if (isContinuation) continue;
+    const normalized = email.toLowerCase();
+    if (seenEmails.has(normalized)) {
+      issues.push({ ...base, kind: 'duplicate_email', message: `correo "${email}" repetido en el archivo` });
+    } else {
+      seenEmails.add(normalized);
+    }
+  }
+  return issues;
 }
 
 /** Fila del resultado tal como la devuelve el servidor (forma de la página de clientes). */
@@ -240,6 +359,11 @@ interface CustomerUploadResults {
                 @if (totalLocations() > 0) {
                   <p class="text-xs text-green-700">{{ totalLocations() }} ubicaciones en total</p>
                 }
+                @if (rowIssues().length > 0) {
+                  <p class="text-xs text-green-700">
+                    {{ validCustomerCount() }} válidos · {{ invalidEmailCount() }} con correo inválido · {{ duplicateEmailCount() }} con correo duplicado
+                  </p>
+                }
               </div>
             </div>
             <button (click)="goToStep(0)" class="text-xs text-red-500 hover:text-red-700 font-medium">
@@ -290,6 +414,25 @@ interface CustomerUploadResults {
           @if (uploadError()) {
             <div class="bg-red-50 p-3 rounded-lg border border-red-100 text-red-700 text-sm" role="alert">
               {{ uploadError() }}
+            </div>
+          }
+
+          <!-- QUI-1048: filas que fallarán al procesar -->
+          @if (rowIssues().length > 0) {
+            <div class="bg-red-50 p-3 rounded-lg border border-red-100 text-red-800 text-xs" role="alert">
+              <div class="font-medium flex items-center mb-1">
+                <app-icon name="alert-circle" [size]="14" class="mr-1"></app-icon>
+                {{ rowIssues().length }} {{ rowIssues().length === 1 ? 'fila no se cargará' : 'filas no se cargarán' }}
+              </div>
+              <p class="mb-1 text-red-700">Corrige el archivo y vuelve a subirlo, o continúa: estas filas quedarán como fallidas con su motivo.</p>
+              <ul class="list-disc list-inside space-y-0.5">
+                @for (issue of rowIssues().slice(0, 10); track issue.row_number) {
+                  <li>Fila {{ issue.row_number }}: {{ issue.name }} — {{ issue.message }}</li>
+                }
+              </ul>
+              @if (rowIssues().length > 10) {
+                <p class="mt-1 font-medium">… y {{ rowIssues().length - 10 }} más</p>
+              }
             </div>
           }
 
@@ -548,6 +691,7 @@ interface CustomerUploadResults {
             >
               <app-icon name="upload" [size]="16" slot="icon" ></app-icon>
               Cargar {{ customerGroups().length }} Clientes
+              @if (problemCustomerCount() > 0) { ({{ problemCustomerCount() }} con problemas) }
             </app-button>
           }
         </div>
@@ -608,6 +752,23 @@ export class CustomerBulkUploadModalComponent {
   // Una entrada por cliente: filas con el mismo documento = un cliente con N ubicaciones.
   readonly customerGroups = computed<CustomerGroup[]>(() =>
     groupCustomerRows(this.parsedData() ?? []),
+  );
+  // QUI-1048: filas que fallarán por el correo, visibles en «Verificar».
+  readonly rowIssues = computed<CustomerRowIssue[]>(() =>
+    detectCustomerRowIssues(this.parsedData() ?? []),
+  );
+  readonly invalidEmailCount = computed(
+    () => this.rowIssues().filter((i) => i.kind === 'invalid_email').length,
+  );
+  readonly duplicateEmailCount = computed(
+    () => this.rowIssues().filter((i) => i.kind === 'duplicate_email').length,
+  );
+  /** Clientes con al menos una fila problemática. */
+  readonly problemCustomerCount = computed(
+    () => new Set(this.rowIssues().map((i) => i.groupKey)).size,
+  );
+  readonly validCustomerCount = computed(
+    () => this.customerGroups().length - this.problemCustomerCount(),
   );
   readonly totalLocations = computed(() =>
     this.customerGroups().reduce((sum, g) => sum + g.locations.length, 0),
@@ -832,8 +993,11 @@ export class CustomerBulkUploadModalComponent {
 
         const rawData = xlsx.utils.sheet_to_json(ws, { header: 1 }) as any[][];
 
-        if (!rawData || rawData.length < 2) {
-          this.toastService.error('El archivo debe contener al menos una fila de encabezados y una fila de datos');
+        // QUI-1049 P1: sin fila de encabezados el archivo está vacío; con solo
+        // el encabezado sigue al diagnóstico de abajo, que dice si faltan
+        // columnas o si faltan filas con datos.
+        if (!rawData || rawData.length === 0) {
+          this.uploadError.set('El archivo está vacío: no tiene encabezados ni filas con datos.');
           this.isProcessingFile.set(false);
           return;
         }
@@ -905,7 +1069,8 @@ export class CustomerBulkUploadModalComponent {
         this.isProcessingFile.set(false);
 
         if (customers.length === 0) {
-          this.toastService.warning('No se encontraron clientes válidos en el archivo');
+          // QUI-1049 P1: el detalle queda en el modal, no en un toast efímero.
+          this.uploadError.set(diagnoseEmptyCustomerFile(rawHeaders, headerMap));
           return;
         }
 

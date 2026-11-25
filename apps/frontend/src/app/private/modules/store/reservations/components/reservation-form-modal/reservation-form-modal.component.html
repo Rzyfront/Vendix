@@ -159,7 +159,7 @@
 
       <!-- Date + Channel (always visible when service is selected) -->
       @if (selectedService()) {
-        @if (!posMode() && !isFreeBooking()) {
+        @if (!posMode() && !isFreeBooking() && !isPlan()) {
           <app-booking-series-form
             [base]="seriesBase()"
             [(repeating)]="repeating"
@@ -189,13 +189,14 @@
         }
 
         <div class="date-channel-row">
+          @if (!planUsesDeparture()) {
           <div class="form-section">
             <div class="section-header">
               <div class="section-icon-badge schedule-badge">
                 <app-icon name="calendar" [size]="14"></app-icon>
               </div>
               <span class="section-title"
-                ><span class="title-text">Fecha</span
+                ><span class="title-text">{{ isPlan() ? "Fecha de salida" : "Fecha" }}</span
                 ><span class="title-required">*</span></span
               >
             </div>
@@ -208,6 +209,7 @@
               [required]="true"
             ></app-input>
           </div>
+          }
           <div class="form-section">
             <div class="section-header">
               <div class="section-icon-badge channel-badge-icon">
@@ -226,8 +228,120 @@
           </div>
         </div>
 
+        @if (loadingPlan()) {
+          <div class="loading-state mt-4">
+            <app-spinner size="sm" color="primary"></app-spinner>
+            <span class="loading-text">Cargando datos del plan...</span>
+          </div>
+        }
+
+        <!-- Servicio de varios días: fecha fin -->
+        @if (isMultiDayService()) {
+          <div class="form-section mt-4">
+            <div class="section-header">
+              <div class="section-icon-badge schedule-badge">
+                <app-icon name="calendar" [size]="14"></app-icon>
+              </div>
+              <span class="section-title"
+                ><span class="title-text">Fecha fin</span></span
+              >
+            </div>
+            <app-input
+              type="date"
+              [ngModel]="endDate()"
+              (ngModelChange)="endDate.set($event)"
+              [min]="selectedDate() || todayString"
+              placeholder="Selecciona fecha fin"
+            ></app-input>
+            @if (endDate() && selectedDate() && endDate() < selectedDate()) {
+              <p class="text-xs text-error mt-1">La fecha fin no puede ser anterior a la fecha de inicio.</p>
+            }
+          </div>
+        }
+
+        <!-- Plan / paquete: salida, personas, regreso y precio -->
+        @if (isPlan()) {
+          <div class="form-section mt-4">
+            <div class="section-header">
+              <div class="section-icon-badge schedule-badge">
+                <app-icon name="users" [size]="14"></app-icon>
+              </div>
+              <span class="section-title"
+                ><span class="title-text">Plan de {{ planDays() }} {{ planDays() === 1 ? "día" : "días" }}</span></span
+              >
+            </div>
+
+            @if (planMode() === "both") {
+              <div class="flex gap-2 mb-3">
+                <app-button
+                  size="sm"
+                  [variant]="planUseDeparture() ? 'primary' : 'outline'"
+                  (clicked)="setPlanUseDeparture(true)"
+                  >Evento programado</app-button
+                >
+                <app-button
+                  size="sm"
+                  [variant]="!planUseDeparture() ? 'primary' : 'outline'"
+                  (clicked)="setPlanUseDeparture(false)"
+                  >Fecha libre</app-button
+                >
+              </div>
+            }
+
+            @if (planUsesDeparture()) {
+              @if (departureOptions().length === 0) {
+                <p class="text-xs text-text-secondary mb-3">No hay eventos con cupo disponible.</p>
+              } @else {
+                <app-selector
+                  label="Evento"
+                  [ngModel]="planDepartureId()"
+                  (ngModelChange)="selectDeparture($event)"
+                  [options]="departureOptions()"
+                  placeholder="Seleccionar evento"
+                  [required]="true"
+                ></app-selector>
+              }
+            }
+
+            <div class="grid grid-cols-2 gap-3 mt-3">
+              <app-input
+                label="Adultos"
+                type="number"
+                min="1"
+                [ngModel]="paxAdults()"
+                (ngModelChange)="setPax('adults', $event)"
+                [required]="true"
+              ></app-input>
+              <app-input
+                label="Niños"
+                type="number"
+                min="0"
+                [ngModel]="paxChildren()"
+                (ngModelChange)="setPax('children', $event)"
+              ></app-input>
+            </div>
+
+            <div class="mt-3 space-y-1 text-sm">
+              @if (planReturnDate()) {
+                <div class="flex justify-between">
+                  <span class="text-text-secondary">Fecha de regreso</span>
+                  <span class="font-medium text-text-primary">{{ formatDate(planReturnDate()) }}</span>
+                </div>
+              }
+              @if (planBlockReason(); as reason) {
+                <p class="text-xs text-error">{{ reason }}</p>
+              } @else if (planPrice().ok) {
+                <div class="flex justify-between">
+                  <span class="text-text-secondary">Precio del plan</span>
+                  <span class="font-semibold text-text-primary">{{ planPriceValue() | currency }}</span>
+                </div>
+              }
+            </div>
+          </div>
+        }
+
         <!-- Opción agenda directa (modo proveedor requerido) -->
-        @if (!isFreeBooking()) {
+        @if (!isFreeBooking() && !isPlan()) {
           <div class="mt-4 flex flex-col items-center gap-2">
             <div class="flex items-center gap-2 w-full">
               <div class="flex-1 h-px bg-border"></div>
@@ -667,16 +781,37 @@
         <div class="confirm-section">
           <div class="confirm-label">
             <app-icon name="calendar" [size]="14"></app-icon>
-            Fecha y Hora
+            {{ isPlan() ? "Salida y regreso" : "Fecha y Hora" }}
           </div>
           <div class="confirm-value">
-            {{ formatDate(selectedDate()) }} &middot;
-            {{ formatTime(startTime()) }} &rarr;
-            {{ formatTime(endTime() || getEndTime()) }}
-            @if (endsNextDay()) {
-              <span class="deposit-panel-hint">(termina el día siguiente)</span>
+            @if (isPlan()) {
+              {{ formatDate(selectedDate()) }} &rarr; {{ formatDate(planReturnDate()) }}
+            } @else {
+              {{ formatDate(selectedDate()) }}
+              @if (isMultiDayService() && endDate()) {
+                &rarr; {{ formatDate(endDate()) }}
+              }
+              &middot;
+              {{ formatTime(startTime()) }} &rarr;
+              {{ formatTime(endTime() || getEndTime()) }}
+              @if (endsNextDay()) {
+                <span class="deposit-panel-hint">(termina el día siguiente)</span>
+              }
             }
           </div>
+          @if (isPlan()) {
+            <div class="confirm-meta">
+              <span class="summary-chip">
+                {{ paxAdults() }} {{ paxAdults() === 1 ? "adulto" : "adultos" }}
+                @if (paxChildren() > 0) {
+                  &middot; {{ paxChildren() }} {{ paxChildren() === 1 ? "niño" : "niños" }}
+                }
+              </span>
+              @if (planPrice().ok) {
+                <span class="summary-chip">{{ planPriceValue() | currency }}</span>
+              }
+            </div>
+          }
         </div>
 
         <!-- Channel -->

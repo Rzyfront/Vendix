@@ -80,10 +80,35 @@ describe('BookingSchedulingSource (agenda-unificada F1)', () => {
     expect(where).toMatchObject({
       status: { in: ['pending', 'no_show'] },
       provider_id: { in: [3, 4] },
-      date: { gte: new Date('2026-11-01'), lte: new Date('2026-11-30') },
+      AND: [
+        {
+          OR: [
+            { date: { gte: new Date('2026-11-01'), lte: new Date('2026-11-30') } },
+            { date: new Date('2026-10-31'), end_date: { gte: new Date('2026-11-01') } },
+          ],
+        },
+      ],
     });
     expect(where?.OR).toHaveLength(5);
     expect(buildBookingWhere({ order: 'asc' })).toEqual({});
+  });
+
+  it('vista Día: trae la reserva 23:00–01:00 del día anterior que termina en el rango', () => {
+    const where = buildBookingWhere({ order: 'asc', from: '2026-11-24', to: '2026-11-24' });
+    expect(where).toEqual({
+      AND: [
+        {
+          OR: [
+            { date: { gte: new Date('2026-11-24'), lte: new Date('2026-11-24') } },
+            { date: new Date('2026-11-23'), end_date: { gte: new Date('2026-11-24') } },
+          ],
+        },
+      ],
+    });
+    // Sin `from` no hay día anterior que mirar: filtro de fecha simple.
+    expect(buildBookingWhere({ order: 'asc', to: '2026-11-24' })).toEqual({
+      date: { lte: new Date('2026-11-24') },
+    });
   });
 
   it('pagina en la base: cuenta y lee con el mismo filtro, ordenado y con tope', async () => {

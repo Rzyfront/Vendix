@@ -1,0 +1,253 @@
+<div class="whe" [class.whe--readonly]="readOnly()">
+  <!-- Plain-language summary of the week -->
+  <div class="whe-summary" data-testid="week-summary">
+    <span class="whe-summary__icon">
+      <app-icon name="clock" [size]="16" />
+    </span>
+    <div class="min-w-0 flex-1">
+      <p class="text-xs font-semibold text-text-secondary">
+        {{ readOnly() ? 'Horario vigente' : 'Así queda el horario' }}
+      </p>
+      <p class="whe-summary__text">{{ summary() }}</p>
+      <p class="text-xs text-text-secondary">
+        {{ openDays() }} {{ openDays() === 1 ? 'día abierto' : 'días abiertos' }} · {{ hours() }} h a la semana
+      </p>
+    </div>
+  </div>
+
+  @if (!readOnly() && showPresets()) {
+    <div class="whe-presets" role="group" aria-label="Atajos de horario">
+      <span class="whe-presets__label">Atajos</span>
+      @for (p of presets; track p.id) {
+        <button
+          type="button"
+          class="whe-pill"
+          [attr.title]="p.hint"
+          [attr.data-preset]="p.id"
+          (click)="applyPreset(p.id)"
+        >
+          <app-icon [name]="p.icon" [size]="14" />
+          {{ p.label }}
+        </button>
+      }
+    </div>
+  }
+
+  <!-- Hour scale, aligned with the bars (desktop) -->
+  <div class="whe-scale" aria-hidden="true">
+    <span></span>
+    <div class="whe-scale__track">
+      @for (t of hourTicks; track $index) {
+        <span class="whe-scale__tick" [style.left.%]="t.pct">{{ t.label }}</span>
+      }
+    </div>
+  </div>
+
+  <ul class="whe-days">
+    @for (row of rows(); track row.day.day_of_week) {
+      <li
+        class="whe-day"
+        [class.whe-day--closed]="!row.day.is_active"
+        [attr.data-day]="row.day.day_of_week"
+      >
+        <div class="whe-day__head">
+          @if (!readOnly()) {
+            <app-toggle
+              [checked]="row.day.is_active"
+              [ariaLabel]="row.label + (row.day.is_active ? ': abierto, tocar para cerrar' : ': cerrado, tocar para abrir')"
+              (toggled)="toggleOpen(row.day.day_of_week)"
+            />
+          }
+          <div class="min-w-0 flex-1">
+            <p class="whe-day__name">{{ row.label }}</p>
+            <p class="whe-day__state" [class.whe-day__state--open]="row.day.is_active">
+              {{ row.day.is_active ? (row.day.is_24h ? 'Abierto 24 horas' : 'Abierto') : 'Cerrado' }}
+            </p>
+          </div>
+          @if (!readOnly()) {
+            <button
+              type="button"
+              class="whe-icon-btn"
+              [class.whe-icon-btn--active]="copyMenuFor() === row.day.day_of_week"
+              [attr.aria-label]="copyMenuLabel(row.day.day_of_week)"
+              [attr.title]="copyMenuLabel(row.day.day_of_week)"
+              [attr.aria-expanded]="copyMenuFor() === row.day.day_of_week"
+              (click)="toggleCopyMenu(row.day.day_of_week)"
+            >
+              <app-icon name="copy" [size]="14" />
+            </button>
+          }
+        </div>
+
+        <div class="whe-day__main">
+          <!-- 0–24 h bar -->
+          <div class="whe-bar" role="img" [attr.aria-label]="row.label + ': ' + row.text">
+            <span class="whe-bar__grid" style="left: 25%"></span>
+            <span class="whe-bar__grid" style="left: 50%"></span>
+            <span class="whe-bar__grid" style="left: 75%"></span>
+            @for (seg of row.segments; track $index) {
+              <span
+                class="whe-bar__seg"
+                [class.whe-bar__seg--spill]="seg.kind === 'spill'"
+                [class.whe-bar__seg--continues]="seg.continues"
+                [style.left.%]="seg.left"
+                [style.width.%]="seg.width"
+                [attr.title]="seg.label"
+              ></span>
+            }
+          </div>
+
+          @if (copyMenuFor() === row.day.day_of_week && !readOnly()) {
+            <div class="whe-copy" role="group" [attr.aria-label]="copyMenuLabel(row.day.day_of_week)">
+              <span class="text-xs font-semibold text-text-secondary">Copiar este día a</span>
+              @for (t of copyTargets; track t.id) {
+                <button
+                  type="button"
+                  class="whe-pill"
+                  [attr.data-copy]="t.id"
+                  (click)="copyTo(row.day.day_of_week, t.id)"
+                >{{ t.label }}</button>
+              }
+            </div>
+          }
+
+          @if (row.day.is_active) {
+            <div class="whe-day__body">
+            @if (!readOnly()) {
+              <label class="whe-day__full">
+                <app-toggle
+                  [checked]="row.day.is_24h"
+                  [ariaLabel]="row.label + ': abrir las 24 horas'"
+                  (toggled)="toggle24h(row.day.day_of_week)"
+                />
+                <span>24 horas</span>
+              </label>
+            }
+            @if (row.day.is_24h) {
+              <p class="whe-note">Abierto todo el día, sin cierre. Si el día siguiente también es de 24 horas, las reservas pueden cruzar la medianoche.</p>
+            } @else if (readOnly()) {
+              <div class="whe-readonly">
+                @for (block of row.day.blocks; track $index) {
+                  <span class="whe-readonly__block">
+                    {{ formatTime12(block.start_time) }} – {{ formatTime12(block.end_time) }}
+                    @if (endsNextDay(block)) {
+                      <span class="whe-chip">Termina al día siguiente</span>
+                    }
+                  </span>
+                }
+              </div>
+            } @else {
+              <div class="whe-blocks">
+                @for (block of row.day.blocks; track $index; let i = $index) {
+                  <div class="whe-block" [class.whe-block--error]="!!blockIssue(row.day.day_of_week, i)" [attr.data-block]="i">
+                    <div class="whe-block__fields">
+                      <label class="whe-field">
+                        <span class="whe-field__label">Abre</span>
+                        <select
+                          class="whe-select"
+                          [attr.aria-label]="row.label + ': abre (tramo ' + (i + 1) + ')'"
+                          (change)="setTime(row.day.day_of_week, i, 'start_time', $any($event.target).value)"
+                        >
+                          @for (opt of optionsFor(block.start_time); track opt.value) {
+                            <option [value]="opt.value" [selected]="opt.value === block.start_time">{{ opt.label }}</option>
+                          }
+                        </select>
+                      </label>
+                      <span class="whe-block__sep" aria-hidden="true">a</span>
+                      <label class="whe-field">
+                        <span class="whe-field__label">Cierra</span>
+                        <select
+                          class="whe-select"
+                          [attr.aria-label]="row.label + ': cierra (tramo ' + (i + 1) + ')'"
+                          (change)="setTime(row.day.day_of_week, i, 'end_time', $any($event.target).value)"
+                        >
+                          @for (opt of optionsFor(block.end_time); track opt.value) {
+                            <option [value]="opt.value" [selected]="opt.value === block.end_time">{{ opt.label }}</option>
+                          }
+                        </select>
+                      </label>
+                      @if (row.day.blocks.length > 1) {
+                        <button
+                          type="button"
+                          class="whe-icon-btn whe-icon-btn--danger"
+                          [attr.aria-label]="'Quitar el tramo ' + (i + 1) + ' del ' + row.label.toLowerCase()"
+                          title="Quitar tramo"
+                          (click)="removeBlock(row.day.day_of_week, i)"
+                        >
+                          <app-icon name="x" [size]="14" />
+                        </button>
+                      }
+                    </div>
+                    @if (endsNextDay(block)) {
+                      <span class="whe-chip" data-testid="ends-next-day">
+                        <app-icon name="moon" [size]="12" />
+                        Termina al día siguiente
+                      </span>
+                    }
+                    @if (blockIssue(row.day.day_of_week, i); as issue) {
+                      <p class="whe-error" role="alert">
+                        <app-icon name="alert-circle" [size]="12" />
+                        {{ issue }}
+                      </p>
+                    }
+                  </div>
+                }
+                @if (row.day.blocks.length < maxBlocks) {
+                  <button type="button" class="whe-add" (click)="addBlock(row.day.day_of_week)">
+                    <app-icon name="plus" [size]="14" />
+                    Agregar tramo
+                  </button>
+                }
+              </div>
+            }
+            </div>
+          }
+          @if (row.dayIssue) {
+            <p class="whe-error" role="alert">
+              <app-icon name="alert-circle" [size]="12" />
+              {{ row.dayIssue }}
+            </p>
+          }
+        </div>
+      </li>
+    }
+  </ul>
+
+  @if (issues().week) {
+    <p class="whe-error mt-2" role="alert">
+      <app-icon name="alert-circle" [size]="12" />
+      {{ issues().week }}
+    </p>
+  }
+
+  @if (showSave() && !readOnly()) {
+    <div class="whe-footer">
+      <p class="whe-footer__status" role="status">
+        @if (issues().count > 0) {
+          <span class="text-error">
+            {{ issues().count === 1 ? 'Hay 1 problema por corregir' : 'Hay ' + issues().count + ' problemas por corregir' }} antes de guardar.
+          </span>
+        } @else if (saving()) {
+          Guardando…
+        } @else if (dirty()) {
+          Tienes cambios sin guardar.
+        } @else if (saved()) {
+          <span class="text-success inline-flex items-center gap-1">
+            <app-icon name="check-circle" [size]="14" /> Horario guardado
+          </span>
+        } @else {
+          Sin cambios por guardar.
+        }
+      </p>
+      <app-button
+        variant="primary"
+        [loading]="saving()"
+        [disabled]="!canSave()"
+        (clicked)="onSave()"
+      >
+        <app-icon name="save" [size]="16" slot="icon" />
+        {{ saveLabel() }}
+      </app-button>
+    </div>
+  }
+</div>

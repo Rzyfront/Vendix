@@ -98,6 +98,18 @@ function formatBlocks(blocks: BusinessHoursBlock[]): string {
     .join(', ');
 }
 
+function isClosedCustomDay(
+  hours: BusinessHours | undefined,
+  customMode: boolean,
+): boolean {
+  return Boolean(
+    customMode &&
+      hours &&
+      Array.isArray(hours.blocks) &&
+      hours.blocks.length === 0,
+  );
+}
+
 /**
  * Finds the next open day/time. If "now" is before today's opening hour,
  * returns TODAY as the next opening. Returns null when nothing can be found.
@@ -107,12 +119,13 @@ function findNextOpen(
   businessHours: Record<string, BusinessHours>,
   currentDay: number,
   currentMinutes: number,
+  customMode: boolean,
 ): string | null {
   // 1. Today may open later than "now".
   const todayName = DAY_NAMES[currentDay];
   const todayHours = businessHours[todayName];
 
-  if (todayHours) {
+  if (todayHours && !isClosedCustomDay(todayHours, customMode)) {
     if (todayHours.blocks && todayHours.blocks.length > 0) {
       for (const block of todayHours.blocks) {
         if (block.open !== 'closed' && block.close !== 'closed') {
@@ -138,7 +151,7 @@ function findNextOpen(
     const dayName = DAY_NAMES[dayIndex];
     const hours = businessHours[dayName];
 
-    if (!hours) continue;
+    if (!hours || isClosedCustomDay(hours, customMode)) continue;
 
     if (hours.blocks && hours.blocks.length > 0) {
       const hasOpen = hours.blocks.some(
@@ -158,14 +171,16 @@ function findNextOpen(
 export function computeNextOpenMessage(
   businessHours: Record<string, BusinessHours> | undefined | null,
   timezone: string | undefined | null,
+  scheduleMode?: string | null,
 ): string | null {
   if (!businessHours || typeof businessHours !== 'object') return null;
 
   const tz = timezone || 'America/Bogota';
   const { day, hours, minutes } = getDateInTimezone(tz);
   const currentMinutes = hours * 60 + minutes;
+  const customMode = scheduleMode === 'custom';
 
-  const next = findNextOpen(businessHours, day, currentMinutes);
+  const next = findNextOpen(businessHours, day, currentMinutes, customMode);
   if (!next) return null;
 
   return `Reabrimos: ${next}`;

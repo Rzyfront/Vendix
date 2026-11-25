@@ -39,6 +39,13 @@ export class BankAccountsController {
     return this.response_service.success(result);
   }
 
+  @Get('scope-context')
+  @Permissions('store:accounting:bank_reconciliation:read')
+  async getScopeContext() {
+    const result = await this.bank_accounts_service.getScopeContext();
+    return this.response_service.success(result);
+  }
+
   @Get(':id')
   @Permissions('store:accounting:bank_reconciliation:read')
   async findOne(@Param('id') id: string) {

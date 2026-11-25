@@ -14,6 +14,7 @@ import { ProductComplementsComponent } from '../product-page/components/product-
 import {
   ServiceCardData,
   ServiceCategoryChip,
+  bookingLabel,
   bookingTarget,
   formatDuration,
   serviceCategories,
@@ -124,7 +125,7 @@ import {
               [attr.data-book]="service.id"
               (click)="book(service)"
             >
-              {{ service.requires_booking && books() ? 'Reservar' : 'Ver servicio' }}
+              {{ bookingLabel(service, books()) }}
             </button>
           </div>
         </div>
@@ -236,6 +237,8 @@ export class ServicePageHomeViewComponent {
     const text = plainDescription(service.description, '');
     return text || null;
   }
+
+  readonly bookingLabel = bookingLabel;
 
   book(service: ServiceCardData): void {
     // A page that does not book sends the visitor to the service detail.

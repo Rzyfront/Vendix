@@ -206,6 +206,12 @@ export class CrmService {
       );
   }
 
+  task(id: number): Observable<CrmTask> {
+    return this.http
+      .get<ApiResponse<CrmTask>>(`${this.base}/crm/tasks/${id}`)
+      .pipe(map((r) => r.data));
+  }
+
   tasksToday(): Observable<CrmTasksToday> {
     return this.http
       .get<ApiResponse<CrmTasksToday>>(`${this.base}/crm/tasks/today`)

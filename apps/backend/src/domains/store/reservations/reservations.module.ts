@@ -1,4 +1,4 @@
-import { Module, OnModuleInit } from '@nestjs/common';
+import { Module, OnModuleInit, forwardRef } from '@nestjs/common';
 import { ReservationsService } from './reservations.service';
 import { ReservationsExportService } from './reservations-export.service';
 import { AvailabilityService } from './availability.service';
@@ -21,6 +21,7 @@ import { AutoNoShowJob } from './jobs/auto-no-show.job';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { OrdersModule } from '../orders/orders.module';
+import { BookingChargesService } from './booking-charges.service';
 import { S3Module } from '@common/services/s3.module';
 import { ProductsModule } from '../products/products.module';
 import { TablesModule } from '../tables/tables.module';
@@ -30,6 +31,9 @@ import { ServiceDepositsModule } from '../service-deposits/service-deposits.modu
 import { PaymentRequestsModule } from '../payment-requests/payment-requests.module';
 import { ReservationDepositsService } from './reservation-deposits.service';
 import { ServiceStationsModule } from '../service-stations/service-stations.module';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { ServicePlanTasksService } from './service-plans/service-plan-tasks.service';
+import { ServicePlanTasksListener } from './service-plans/service-plan-tasks.listener';
 import { RentalPrepayService } from './rental-prepay/rental-prepay.service';
 import { RentalPrepayPaidListener } from './rental-prepay/rental-prepay-paid.listener';
 import { RentalPrepayHoldExpiryJob } from './rental-prepay/rental-prepay-hold-expiry.job';
@@ -37,6 +41,8 @@ import { ServiceDepositPaidListener } from './listeners/service-deposit-paid.lis
 import { ServiceDepositHoldExpiryJob } from './jobs/service-deposit-hold-expiry.job';
 import { BookingSeriesController } from './recurrence/booking-series.controller';
 import { BookingSeriesService } from './recurrence/booking-series.service';
+import { ServicePlansController } from './service-plans/service-plans.controller';
+import { ServicePlansService } from './service-plans/service-plans.service';
 
 @Module({
   imports: [
@@ -53,6 +59,8 @@ import { BookingSeriesService } from './recurrence/booking-series.service';
     PaymentRequestsModule,
     // RentalQuoteService: the rental price of a booking (T15).
     ServiceStationsModule,
+    // QUI-1060 F3: recordatorios y aviso de asignación de las tareas del plan.
+    forwardRef(() => NotificationsModule),
   ],
   controllers: [
     ProvidersController,
@@ -60,9 +68,11 @@ import { BookingSeriesService } from './recurrence/booking-series.service';
     ReservationsController,
     StationAvailabilityController,
     BusinessHoursController,
+    ServicePlansController,
   ],
   providers: [
     ReservationsService,
+    BookingChargesService,
     ReservationsExportService,
     AvailabilityService,
     BookingConfirmationService,
@@ -78,6 +88,9 @@ import { BookingSeriesService } from './recurrence/booking-series.service';
     RentalPrepayService,
     RentalPrepayPaidListener,
     RentalPrepayHoldExpiryJob,
+    ServicePlansService,
+    ServicePlanTasksService,
+    ServicePlanTasksListener,
   ],
   exports: [
     ReservationsService,
@@ -90,6 +103,7 @@ import { BookingSeriesService } from './recurrence/booking-series.service';
     BusinessHoursService,
     ProvidersService,
     ProviderAvailabilityService,
+    ServicePlansService,
   ],
 })
 export class ReservationsModule implements OnModuleInit {

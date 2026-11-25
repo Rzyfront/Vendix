@@ -72,6 +72,9 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
     orders: {
       groupBy: jest.fn(),
     },
+    // QUI-1052 — la búsqueda de homónimos por nombre usa SQL crudo para
+    // comparar con `public.immutable_unaccent` (pliega tildes, preserva ñ).
+    $queryRaw: jest.fn(),
   };
 
   const mockEventEmitter = {
@@ -106,6 +109,9 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
     eventEmitter = module.get<EventEmitter2>(EventEmitter2);
 
     jest.clearAllMocks();
+
+    // QUI-1052 — por defecto no hay homónimos por nombre (0 filas).
+    mockPrismaService.$queryRaw.mockResolvedValue([]);
 
     // Common happy-path stubs for `create()`.
     mockPrismaService.stores.findUnique.mockResolvedValue(mockStore);
@@ -653,6 +659,153 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
       expect(result.matched_by).toBe(null);
       expect(result.customer.id).toBe(42); // from the create() mock
       expect(mockPrismaService.users.create).toHaveBeenCalledTimes(1);
+    });
+
+    describe('QUI-1051 — never creates a blank customer', () => {
+      it.each([
+        ['name_only without any name', { name_only: true }],
+        [
+          'name_only with whitespace-only names',
+          { name_only: true, first_name: '   ', last_name: '   ' },
+        ],
+        ['an empty body', {}],
+        ['only a phone', { phone: '+573001234567' }],
+        ['a whitespace-only document number', { document_type: 'CC', document_number: '  ' }],
+      ])('rejects %s with 422 and creates nothing', async (_label, dto) => {
+        await expect(
+          service.findOrCreateByEmailOrDocument(1, dto as any),
+        ).rejects.toMatchObject({
+          errorCode: 'SYS_VALIDATION_001',
+        });
+        expect(mockPrismaService.users.create).not.toHaveBeenCalled();
+        expect(mockPrismaService.users.findMany).not.toHaveBeenCalled();
+      });
+
+      it('says the name is required when name_only arrives without a name', async () => {
+        await expect(
+          service.findOrCreateByEmailOrDocument(1, {
+            name_only: true,
+            first_name: ' ',
+          } as any),
+        ).rejects.toThrow('El nombre del cliente es obligatorio');
+      });
+
+      it.each([
+        ['only an email', { email: 'solo@x.com' }],
+        ['a document number without type', { document_number: '12345678' }],
+        [
+          'a JURIDICA with only legal_name',
+          { legal_name: 'Acme SAS', person_type: 'JURIDICA' },
+        ],
+      ])('does not reject %s', async (_label, dto) => {
+        mockPrismaService.users.findFirst.mockResolvedValue(null);
+        mockPrismaService.users.findMany.mockResolvedValue([]);
+
+        await service
+          .findOrCreateByEmailOrDocument(1, dto as any)
+          .catch((err) => {
+            expect(err?.errorCode).not.toBe('SYS_VALIDATION_001');
+          });
+        expect(mockPrismaService.stores.findUnique).toHaveBeenCalled();
+      });
+
+      it('still creates a name-only customer when a real name arrives', async () => {
+        mockPrismaService.users.findFirst.mockResolvedValue(null);
+        mockPrismaService.users.findMany.mockResolvedValue([]);
+
+        const result = await service.findOrCreateByEmailOrDocument(1, {
+          name_only: true,
+          first_name: 'Ana',
+        } as any);
+
+        expect(result.was_created).toBe(true);
+        expect(mockPrismaService.users.create).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    // QUI-1052 — el match por nombre en la caja ignoraba tildes: "Ana Lucia
+    // Gomez" creaba un duplicado de "Ana Lucía Gómez". Ahora compara con
+    // `public.immutable_unaccent` (mismo criterio del buscador del POS:
+    // pliega tildes y preserva ñ/Ñ, F-079).
+    describe('QUI-1052 — homónimos por nombre ignorando tildes', () => {
+      const resolveNameOnly = (first_name: string) =>
+        service.findOrCreateByEmailOrDocument(1, {
+          name_only: true,
+          first_name,
+        } as any);
+
+      it('compara con immutable_unaccent y no con equals insensible a mayúsculas', async () => {
+        mockPrismaService.$queryRaw.mockResolvedValue([]);
+
+        await resolveNameOnly('Ana Lucia Gomez');
+
+        const call = (mockPrismaService.$queryRaw as jest.Mock).mock.calls[0][0];
+        const sqlText = (call.strings as string[]).join(' ? ').toLowerCase();
+
+        // Función calificada por esquema: production la tiene en public.
+        expect(sqlText).toContain('public.immutable_unaccent');
+        expect(sqlText).toContain('btrim(u.first_name)');
+        // Igualdad exacta (QUI-734), nunca subcadena.
+        expect(sqlText).not.toContain('like');
+        // Se filtra por organización y se excluyen archivados.
+        expect(sqlText).toContain('organization_id');
+        expect(sqlText).toContain("'archived'");
+        expect(call.values).toContain(100);
+        expect(call.values).toContain('Ana Lucia Gomez');
+      });
+
+      it('reutiliza el cliente existente aunque el cajero omita las tildes', async () => {
+        mockPrismaService.$queryRaw.mockResolvedValue([{ id: 77 }]);
+        mockPrismaService.users.findMany.mockResolvedValue([
+          { id: 77, first_name: 'Ana Lucía', last_name: 'Gómez' },
+        ]);
+
+        const result = await resolveNameOnly('Ana Lucia');
+
+        expect(result.matched_by).toBe('name');
+        expect(result.was_created).toBe(false);
+        expect(mockPrismaService.users.create).not.toHaveBeenCalled();
+      });
+
+      it('sigue lanzando 409 cuando hay dos homónimos', async () => {
+        mockPrismaService.$queryRaw.mockResolvedValue([{ id: 77 }, { id: 88 }]);
+        mockPrismaService.users.findMany.mockResolvedValue([
+          { id: 77, first_name: 'Ana Lucía', last_name: 'Gómez' },
+          { id: 88, first_name: 'Ana', last_name: 'Gomez' },
+        ]);
+
+        const error: any = await resolveNameOnly('Ana Lucia').catch((e) => e);
+
+        expect(error.errorCode).toBe('SYS_CONFLICT_001');
+        expect(mockPrismaService.users.create).not.toHaveBeenCalled();
+      });
+
+      it('filtra por nombre Y apellido cuando el cajero escribe los dos', async () => {
+        mockPrismaService.$queryRaw.mockResolvedValue([]);
+
+        await service.findOrCreateByEmailOrDocument(1, {
+          name_only: true,
+          first_name: 'Ana Lucia',
+          last_name: 'Gomez',
+        } as any);
+
+        const call = (mockPrismaService.$queryRaw as jest.Mock).mock.calls[0][0];
+        const sqlText = (call.strings as string[]).join(' ? ').toLowerCase();
+
+        expect(sqlText).toContain('btrim(u.first_name)');
+        expect(sqlText).toContain('btrim(u.last_name)');
+        expect(call.values).toContain('Ana Lucia');
+        expect(call.values).toContain('Gomez');
+      });
+
+      it('crea el cliente cuando no hay coincidencias', async () => {
+        mockPrismaService.$queryRaw.mockResolvedValue([]);
+
+        const result = await resolveNameOnly('Ana Lucia');
+
+        expect(result.was_created).toBe(true);
+        expect(mockPrismaService.users.create).toHaveBeenCalledTimes(1);
+      });
     });
 
     it('accepts non-canonical document_number on the resolve path (no DocumentNumberMatchesType)', async () => {

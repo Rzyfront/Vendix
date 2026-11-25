@@ -748,7 +748,7 @@
                               customClasses="!h-11 !w-11 !px-0"
                               [disabled]="true"
                               [attr.title]="reason"
-                              [attr.aria-label]="'Eliminar ' + item.product_name + ': ' + reason"
+                              [ariaLabel]="'Eliminar ' + item.product_name + ': ' + reason"
                             >
                               <app-icon slot="icon" name="trash-2" [size]="13"></app-icon>
                             </app-button>
@@ -774,8 +774,7 @@
         variant="ghost"
         size="md"
         customClasses="!h-11 !w-11 !px-0"
-        [attr.title]="'Más acciones'"
-        [attr.aria-label]="'Más acciones'"
+        ariaLabel="Más acciones"
         (clicked)="isActionsSheetOpen.set(true)"
       >
         <app-icon slot="icon" name="more-horizontal" [size]="18"></app-icon>

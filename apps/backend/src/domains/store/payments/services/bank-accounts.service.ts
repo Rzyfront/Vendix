@@ -2,11 +2,19 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
-  ConflictException,
 } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+import { VendixHttpException, ErrorCodes } from '@common/errors';
+import {
+  BankAccountPolicy,
+  bankAccountAvailableInStoreWhere,
+  canModifyBankAccount,
+  isBankAccountAvailableInStore,
+  resolveBankAccountPolicy,
+} from '@common/helpers/bank-account-availability.helper';
 import {
   BankAccountOptionDto,
   CreateBankAccountDto,
@@ -32,6 +40,7 @@ export class BankAccountsService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly s3Service: S3Service,
+    private readonly fiscalScopeService: FiscalScopeService,
   ) {}
 
   /**
@@ -52,8 +61,9 @@ export class BankAccountsService {
 
   /**
    * Lista las cuentas bancarias disponibles para la tienda del contexto:
-   * `status='active'` y scope `organization_id` + (`store_id === null` o
-   * `=== store_id`). Devuelve la proyección mínima.
+   * `status='active'` y disponibles en la tienda (QUI-1061: propias de la
+   * tienda o de la organización disponibles en todas / asignadas a esta
+   * tienda; ver `bankAccountAvailableInStoreWhere`). Proyección mínima.
    */
   async listForStore(): Promise<BankAccountOptionDto[]> {
     const storeId = this.getContextStoreId();
@@ -68,9 +78,8 @@ export class BankAccountsService {
 
     const accounts = await this.prisma.bank_accounts.findMany({
       where: {
-        organization_id: store.organization_id,
+        ...bankAccountAvailableInStoreWhere(storeId, store.organization_id),
         status: 'active',
-        OR: [{ store_id: null }, { store_id: storeId }],
       },
       orderBy: { bank_name: 'asc' },
       select: {
@@ -91,23 +100,26 @@ export class BankAccountsService {
   }
 
   /**
-   * Alta de cuenta bancaria, IDEMPOTENTE por `(organization_id, account_number)`.
+   * Alta de cuenta bancaria, IDEMPOTENTE dentro de lo que la tienda ve.
    *
    * El editor de `custom_config.accounts` reenvía la lista completa en cada
    * guardado, así que "la cuenta ya existe" es el camino NORMAL, no un error del
    * usuario: se devuelve la fila existente para que la ref del `custom_config`
-   * SIEMPRE quede con un `bank_accounts.id` real.
+   * SIEMPRE quede con un `bank_accounts.id` real (sin id el cobro caía en
+   * "Pagos sin asignar").
    *
-   * Sin esta idempotencia el `create` violaba `@@unique([organization_id,
-   * account_number])` y la ref se guardaba sin `id` — dejando la cuenta
-   * inseleccionable en el cobro (`bank_account_id` NULL → "Pagos sin asignar").
-   *
-   * Dos matices deliberados:
-   * - Una cuenta `closed` que se vuelve a dar de alta se REACTIVA: si no, el
-   *   número quedaría quemado para siempre por el unique.
-   * - Si la cuenta existe pero pertenece a OTRA tienda de la organización, no se
-   *   devuelve (sería fuga entre tiendas) ni se puede crear (unique por org):
-   *   409 explícito. Misma regla de pertenencia que ERR-04.
+   * QUI-1061 — la unicidad sigue el `fiscal_scope` de la organización:
+   * - Solo cuentan las cuentas DISPONIBLES en esta tienda (propias o de la
+   *   organización disponibles aquí). Una cuenta de OTRA tienda con el mismo
+   *   número ya no se ve ni bloquea (antes: 409).
+   * - Scope STORE: si no existe, se crea como cuenta de la tienda. La misma
+   *   cuenta física en dos tiendas son dos registros independientes.
+   * - Scope ORGANIZATION: si no existe, la crea un usuario de organización
+   *   como cuenta de organización disponible en todas las tiendas (el default
+   *   de la decisión). Si ya existe en la organización pero no está asignada
+   *   a esta tienda → `BANK_ACCOUNT_NOT_ASSIGNED_TO_STORE` (no se duplica).
+   * - Una cuenta `closed` que se vuelve a dar de alta se REACTIVA (si quien
+   *   da de alta puede modificarla), para no quemar el número.
    */
   async create(dto: CreateBankAccountDto): Promise<BankAccountOptionDto> {
     const storeId = this.getContextStoreId();
@@ -118,10 +130,11 @@ export class BankAccountsService {
     if (!store) {
       throw new NotFoundException('Tienda no encontrada para crear la cuenta bancaria');
     }
+    const policy = await this.resolvePolicy(store.organization_id, storeId);
 
-    const existing = await this.prisma.bank_accounts.findFirst({
+    const candidates = await this.prisma.bank_accounts.findMany({
       where: {
-        organization_id: store.organization_id,
+        ...bankAccountAvailableInStoreWhere(storeId, store.organization_id),
         account_number: dto.account_number,
       },
       select: {
@@ -134,14 +147,15 @@ export class BankAccountsService {
         image_s3_key: true,
       },
     });
+    // La cuenta propia de la tienda manda sobre la de organización.
+    const existing =
+      candidates.find((c) => c.store_id === storeId) ?? candidates[0] ?? null;
 
     if (existing) {
-      if (existing.store_id !== null && existing.store_id !== storeId) {
-        throw new ConflictException(
-          'Ya existe una cuenta con ese número en otra tienda de la organización.',
-        );
-      }
       if (existing.status !== 'active') {
+        if (!canModifyBankAccount(existing, policy)) {
+          throw new VendixHttpException(ErrorCodes.BANK_ACCOUNT_ORG_MANAGED);
+        }
         const reactivated = await this.prisma.bank_accounts.update({
           where: { id: existing.id },
           data: {
@@ -172,10 +186,33 @@ export class BankAccountsService {
       };
     }
 
+    let ownerStoreId: number | null = storeId;
+    if (policy.fiscal_scope === 'ORGANIZATION') {
+      if (!policy.can_manage_organization_accounts) {
+        throw new VendixHttpException(ErrorCodes.BANK_ACCOUNT_ORG_MANAGED);
+      }
+      const orgLevel = await this.prisma.bank_accounts.findFirst({
+        where: {
+          organization_id: store.organization_id,
+          store_id: null,
+          account_number: dto.account_number,
+        },
+        select: { id: true },
+      });
+      if (orgLevel) {
+        throw new VendixHttpException(
+          ErrorCodes.BANK_ACCOUNT_NOT_ASSIGNED_TO_STORE,
+        );
+      }
+      ownerStoreId = null;
+    }
+
     const account = await this.prisma.bank_accounts.create({
       data: {
         organization_id: store.organization_id,
-        store_id: storeId,
+        // Scope STORE → cuenta de la tienda; scope ORGANIZATION → cuenta de
+        // organización (`available_in_all_stores` toma su default `true`).
+        store_id: ownerStoreId,
         name: dto.name,
         bank_name: dto.bank_name,
         account_number: dto.account_number,
@@ -206,7 +243,22 @@ export class BankAccountsService {
 
   async update(id: number, dto: UpdateBankAccountDto): Promise<BankAccountOptionDto> {
     const storeId = this.getContextStoreId();
-    await this.assertOwned(id, storeId);
+    const owned = await this.assertOwned(id, storeId);
+
+    if (dto.account_number !== undefined) {
+      const duplicate = await this.prisma.bank_accounts.findFirst({
+        where: {
+          organization_id: owned.organization_id,
+          store_id: owned.store_id,
+          account_number: dto.account_number,
+          id: { not: id },
+        },
+        select: { id: true },
+      });
+      if (duplicate) {
+        throw new VendixHttpException(ErrorCodes.BANK_ACCOUNT_DUPLICATE);
+      }
+    }
 
     const account = await this.prisma.bank_accounts.update({
       where: { id },
@@ -267,7 +319,26 @@ export class BankAccountsService {
     return storeId;
   }
 
-  private async assertOwned(id: number, storeId: number): Promise<void> {
+  private async resolvePolicy(
+    organizationId: number,
+    storeId: number,
+  ): Promise<BankAccountPolicy> {
+    return resolveBankAccountPolicy(this.fiscalScopeService, {
+      organization_id: organizationId,
+      store_id: storeId,
+      context: RequestContextService.getContext(),
+    });
+  }
+
+  /**
+   * La cuenta debe estar DISPONIBLE en la tienda (QUI-1061) y el contexto
+   * debe poder modificarla: en scope ORGANIZATION una cuenta de organización
+   * solo la edita/cierra un usuario de organización.
+   */
+  private async assertOwned(
+    id: number,
+    storeId: number,
+  ): Promise<{ id: number; organization_id: number; store_id: number | null }> {
     const store = await this.prisma.stores.findUnique({
       where: { id: storeId },
       select: { organization_id: true },
@@ -277,15 +348,30 @@ export class BankAccountsService {
     }
     const account = await this.prisma.bank_accounts.findFirst({
       where: { id },
+      select: {
+        id: true,
+        organization_id: true,
+        store_id: true,
+        available_in_all_stores: true,
+        store_assignments: { select: { store_id: true } },
+      },
     });
     if (!account) {
       throw new NotFoundException('Cuenta bancaria no encontrada');
     }
     if (
-      account.organization_id !== store.organization_id ||
-      (account.store_id !== null && account.store_id !== storeId)
+      !isBankAccountAvailableInStore(account, storeId, store.organization_id)
     ) {
       throw new ForbiddenException('La cuenta bancaria no pertenece a esta tienda');
     }
+    const policy = await this.resolvePolicy(store.organization_id, storeId);
+    if (!canModifyBankAccount(account, policy)) {
+      throw new VendixHttpException(ErrorCodes.BANK_ACCOUNT_ORG_MANAGED);
+    }
+    return {
+      id: account.id,
+      organization_id: account.organization_id,
+      store_id: account.store_id,
+    };
   }
 }

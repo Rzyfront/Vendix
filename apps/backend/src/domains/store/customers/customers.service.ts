@@ -834,6 +834,27 @@ export class CustomersService {
       number: dto.document_number ?? null,
     });
 
+    // QUI-1051 — never create a blank customer. The resolve flow needs at
+    // least one identifier to look up or to name the new row: an email, a
+    // document number, or a non-blank name (first/last or legal name).
+    // Without one, the lookup has nothing to match and `create()` would
+    // persist a nameless row (seen as a "-" in the customers list). The POS
+    // form already blocks this (`canResolve`); this guards direct API calls.
+    const hasName = !!(
+      dto.first_name?.trim() ||
+      dto.last_name?.trim() ||
+      dto.legal_name?.trim()
+    );
+    if (!effectiveEmail && !normalizedDoc.number && !hasName) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        dto.name_only === true
+          ? 'El nombre del cliente es obligatorio'
+          : 'Ingresa un email, un documento o un nombre para continuar',
+        { field: dto.name_only === true ? 'first_name' : 'identifier' },
+      );
+    }
+
     // Match 1 — email first (case-insensitive, org-scoped, archived excluded).
     let existing: any = null;
     let matched_by: 'email' | 'document' | 'name' | null = null;
@@ -871,41 +892,17 @@ export class CustomersService {
       dto.name_only === true &&
       (dto.first_name?.trim() || dto.last_name?.trim())
     ) {
-      const nameMatches = await this.prisma.users.findMany({
-        where: {
-          organization_id: store.organization_id,
-          user_roles: { some: { roles: { name: 'customer' } } },
-          state: { not: user_state_enum.archived },
-          // QUI-734 (auditoria 2026-08-31): igualdad exacta insensible a
-          // mayusculas, NO subcadena. Antes `contains` permitia que
-          // "Rober" matcheara "Roberto", "Ana" matcheara "Mariana",
-          // "Sofi" matcheara "Sofia" — la venta quedaba atada al
-          // cliente equivocado en silencio. Con `equals`, "Rober" ya
-          // no matchea "Roberto": cae a 0 coincidencias y sigue el
-          // camino de creación. El 409 de homonimos reales sigue
-          // disparandose porque `equals` distingue mayusculas pero NO
-          // acentos — "Ana" y "ANA" son la misma fila, "Ana" y
-          // "Anabella" no.
-          ...(dto.first_name?.trim()
-            ? {
-                first_name: {
-                  equals: dto.first_name.trim(),
-                  mode: 'insensitive' as const,
-                },
-              }
-            : {}),
-          ...(dto.last_name?.trim()
-            ? {
-                last_name: {
-                  equals: dto.last_name.trim(),
-                  mode: 'insensitive' as const,
-                },
-              }
-            : {}),
-        },
-        omit: CUSTOMER_PRIVATE_COLUMNS,
-        take: 2,
-      });
+      const nameIdRows = await this.findNameOnlyMatchIds(
+        store.organization_id,
+        dto.first_name?.trim() || null,
+        dto.last_name?.trim() || null,
+      );
+      const nameMatches = nameIdRows.length
+        ? await this.prisma.users.findMany({
+            where: { id: { in: nameIdRows.map((row) => row.id) } },
+            omit: CUSTOMER_PRIVATE_COLUMNS,
+          })
+        : [];
       if (nameMatches.length === 1) {
         existing = nameMatches[0];
         matched_by = 'name';
@@ -1098,6 +1095,57 @@ export class CustomersService {
       matched_by: null,
       document_conflict: false,
     };
+  }
+
+  /**
+   * QUI-1052 — IDs de los clientes cuyo nombre coincide, ignorando tildes.
+   *
+   * Antes se resolvía con `equals` + `mode: 'insensitive'` en Prisma, que
+   * pliega mayúsculas pero NO tildes: "Ana Lucia Gomez" creaba un duplicado
+   * de "Ana Lucía Gómez" en la caja (único llamador de /customers/resolve;
+   * el checkout de la tienda no busca por nombre).
+   *
+   * La comparación usa `public.immutable_unaccent`, que ya existe en
+   * producción desde la migración `20260917113922_pos_search_extensions` y es
+   * el mismo criterio del buscador del POS: pliega tildes y PRESERVA ñ/Ñ
+   * (decisión F-079), así que "Peña" y "Pena" siguen siendo distintos,
+   * igual que en el buscador. Sin migración nueva.
+   *
+   * Sigue siendo igualdad exacta, no subcadena (QUI-734): "Ana" no matchea
+   * "Anabella". Se filtra por organización y se excluyen archivados igual
+   * que antes; el rol `customer` se exige con EXISTS porque un JOIN podía
+   * duplicar filas y romper el LIMIT 2.
+   */
+  private async findNameOnlyMatchIds(
+    organizationId: number,
+    firstName: string | null,
+    lastName: string | null,
+  ): Promise<Array<{ id: number }>> {
+    const predicates: Prisma.Sql[] = [];
+    if (firstName) {
+      predicates.push(Prisma.sql`AND lower(public.immutable_unaccent(btrim(u.first_name))) =
+            lower(public.immutable_unaccent(btrim(${firstName})))`);
+    }
+    if (lastName) {
+      predicates.push(Prisma.sql`AND lower(public.immutable_unaccent(btrim(u.last_name))) =
+            lower(public.immutable_unaccent(btrim(${lastName})))`);
+    }
+
+    return this.prisma.$queryRaw<Array<{ id: number }>>(Prisma.sql`
+      SELECT u.id
+      FROM users u
+      WHERE u.organization_id = ${organizationId}
+        AND u.state <> 'archived'
+        AND EXISTS (
+          SELECT 1
+          FROM user_roles ur
+          JOIN roles r ON r.id = ur.role_id
+          WHERE ur.user_id = u.id AND r.name = 'customer'
+        )
+        ${Prisma.join(predicates, ' ')}
+      ORDER BY u.id ASC
+      LIMIT 2
+    `);
   }
 
   /**

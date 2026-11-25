@@ -1,6 +1,18 @@
 import { AvailabilityService } from './availability.service';
 import { BusinessHoursService } from './business-hours/business-hours.service';
 
+/**
+ * Parte 1: the REAL provider-blocks reader (`loadProviderBlocks`) over the
+ * mocked prisma and the mocked store windows, so every spec exercises the one
+ * reader the service uses in production.
+ */
+function withProviderBlocks(hours: object, prisma: unknown): BusinessHoursService {
+  return Object.assign(hours, {
+    prisma,
+    loadProviderBlocks: BusinessHoursService.prototype.loadProviderBlocks,
+  }) as unknown as BusinessHoursService;
+}
+
 describe('AvailabilityService — business hours integration', () => {
   function buildService(opts: {
     storeHours?: Array<{
@@ -104,7 +116,7 @@ describe('AvailabilityService — business hours integration', () => {
     };
 
     return {
-      service: new AvailabilityService(prisma, businessHoursService),
+      service: new AvailabilityService(prisma, withProviderBlocks(businessHoursService, prisma)),
       prisma,
       businessHoursService,
     };
@@ -260,7 +272,7 @@ describe('AvailabilityService — provider_required never returns generic slots 
       },
     };
     return {
-      service: new AvailabilityService(prisma, businessHoursService),
+      service: new AvailabilityService(prisma, withProviderBlocks(businessHoursService, prisma)),
       prisma,
     };
   }
@@ -340,7 +352,7 @@ describe('AvailabilityService — free_booking longer than the open day (multi-d
         findUnique: jest.fn().mockResolvedValue(null),
       },
     };
-    return new AvailabilityService(prisma, businessHoursService);
+    return new AvailabilityService(prisma, withProviderBlocks(businessHoursService, prisma));
   }
   const tour = (minutes: number) => ({
     id: 10,
@@ -439,7 +451,7 @@ describe('AvailabilityService — horarios nocturnos (S21)', () => {
       service_station_exceptions: { findMany: jest.fn().mockResolvedValue([]) },
       service_allocations: { findMany: jest.fn().mockResolvedValue(opts.allocations ?? []) },
     };
-    return { service: new AvailabilityService(prisma, businessHoursService), prisma };
+    return { service: new AvailabilityService(prisma, withProviderBlocks(businessHoursService, prisma)), prisma };
   }
 
   const nightStore = [{ day_of_week: 5, start_time: '18:00', end_time: '03:00' }];
@@ -537,6 +549,187 @@ describe('AvailabilityService — horarios nocturnos (S21)', () => {
       });
       await expect(service.isSlotAvailable(10, SATURDAY, '00:00', '01:00', 5)).resolves.toBe(false);
       await expect(service.isSlotAvailable(10, SATURDAY, '01:00', '02:00', 5)).resolves.toBe(true);
+    });
+  });
+
+  describe('24 h continuas (consecutive 24 h days)', () => {
+    // 2026-11-16 is a Monday, 2026-11-17 a Tuesday.
+    const MONDAY = '2026-11-16';
+    const TUESDAY = '2026-11-17';
+    const fullDay = (day: number) => ({ day_of_week: day, start_time: '00:00', end_time: '00:00' });
+    const fullDayProvider = (day: number) => ({ provider_id: 5, ...fullDay(day), is_active: true });
+
+    it('offers a slot that starts on Monday and ends on Tuesday, once, dated Monday', async () => {
+      const { service } = buildService({
+        product: { service_duration_minutes: 50 },
+        storeHours: [fullDay(1), fullDay(2)],
+        providers: ana,
+        schedules: [fullDayProvider(1), fullDayProvider(2)],
+      });
+      const slots = await service.getAvailableSlots(10, MONDAY, TUESDAY);
+      const crossing = slots.filter((s) => s.end_date);
+      expect(crossing).toEqual([
+        expect.objectContaining({ date: MONDAY, start_time: '23:20', end_time: '00:10', end_date: TUESDAY }),
+      ]);
+      // Tuesday's own grid starts again at 00:00 and its slots are not dated Monday.
+      expect(slots.find((s) => s.date === TUESDAY && s.start_time === '00:00')).toBeDefined();
+      const keys = slots.map((s) => `${s.date}|${s.start_time}`);
+      expect(new Set(keys).size).toBe(keys.length);
+    });
+
+    it('keeps the Monday grid inside the day when Tuesday is closed', async () => {
+      const { service } = buildService({
+        product: { service_duration_minutes: 50 },
+        storeHours: [fullDay(1), fullDay(2)],
+        providers: ana,
+        schedules: [fullDayProvider(1)],
+      });
+      const slots = await service.getAvailableSlots(10, MONDAY, MONDAY);
+      expect(slots.some((s) => s.end_date)).toBe(false);
+      expect(slots[slots.length - 1]).toMatchObject({ start_time: '22:30', end_time: '23:20' });
+    });
+
+    it('accepts a 23:00-01:00 booking when the provider works 24 h on both days', async () => {
+      const { service } = buildService({
+        storeHours: [fullDay(1), fullDay(2)],
+        providers: ana,
+        schedules: [fullDayProvider(1), fullDayProvider(2)],
+      });
+      await expect(service.isSlotAvailable(10, MONDAY, '23:00', '01:00', 5)).resolves.toBe(true);
+    });
+
+    it('rejects it when the provider does not work Tuesday', async () => {
+      const { service } = buildService({
+        storeHours: [fullDay(1), fullDay(2)],
+        providers: ana,
+        schedules: [fullDayProvider(1)],
+      });
+      await expect(service.isSlotAvailable(10, MONDAY, '23:00', '01:00', 5)).resolves.toBe(false);
+    });
+
+    it('rejects it when the provider has a Tuesday 00:30 booking (overlap across midnight)', async () => {
+      const { service } = buildService({
+        storeHours: [fullDay(1), fullDay(2)],
+        providers: ana,
+        schedules: [fullDayProvider(1), fullDayProvider(2)],
+        bookings: [
+          { provider_id: 5, date: new Date(`${TUESDAY}T00:00:00.000Z`), end_date: null, start_time: '00:30', end_time: '01:30' },
+        ],
+      });
+      await expect(service.isSlotAvailable(10, MONDAY, '23:00', '01:00', 5)).resolves.toBe(false);
+      await expect(service.isSlotAvailable(10, MONDAY, '22:00', '23:00', 5)).resolves.toBe(true);
+    });
+
+    it('joins a 17:00-04:00 night shift with a Tuesday block starting at 04:00', async () => {
+      const { service } = buildService({
+        storeHours: [
+          { day_of_week: 1, start_time: '17:00', end_time: '04:00' },
+          { day_of_week: 2, start_time: '04:00', end_time: '12:00' },
+        ],
+        providers: ana,
+        schedules: [
+          { provider_id: 5, day_of_week: 1, start_time: '17:00', end_time: '04:00', is_active: true },
+          { provider_id: 5, day_of_week: 2, start_time: '04:00', end_time: '12:00', is_active: true },
+        ],
+      });
+      await expect(service.isSlotAvailable(10, TUESDAY, '03:00', '05:00', 5)).resolves.toBe(true);
+    });
+
+    it('free booking: a 24 h store offers the crossing slot too', async () => {
+      const { service } = buildService({
+        product: { booking_mode: 'free_booking', service_duration_minutes: 50 },
+        storeHours: [fullDay(1), fullDay(2)],
+      });
+      const slots = await service.getAvailableSlots(10, MONDAY, MONDAY);
+      expect(slots.filter((s) => s.end_date)).toEqual([
+        expect.objectContaining({ date: MONDAY, start_time: '23:20', end_time: '00:10', end_date: TUESDAY }),
+      ]);
+    });
+  });
+
+  describe('Parte 1 — el prestador trabaja en el horario de la tienda (uses_store_hours)', () => {
+    // 2026-11-16 is a Monday, 2026-11-17 a Tuesday.
+    const MONDAY = '2026-11-16';
+    const TUESDAY = '2026-11-17';
+    const fullDay = (day: number) => ({ day_of_week: day, start_time: '00:00', end_time: '00:00' });
+    const anaStore = [{ id: 5, store_id: 1, display_name: 'Ana', avatar_url: null, uses_store_hours: true }];
+    const anaOwn = [{ id: 5, store_id: 1, display_name: 'Ana', avatar_url: null, uses_store_hours: false }];
+    // Saved own rows that must be IGNORED while Ana works the store hours.
+    const ownMorning = [{ provider_id: 5, day_of_week: 5, start_time: '08:00', end_time: '12:00', is_active: true }];
+
+    it('inherits the night store 17:00-04:00: Friday slots run past midnight with no own schedule', async () => {
+      const { service, prisma } = buildService({
+        storeHours: [{ day_of_week: 5, start_time: '17:00', end_time: '04:00' }],
+        providers: anaStore,
+        schedules: ownMorning,
+      });
+      const slots = await service.getAvailableSlots(10, FRIDAY, SATURDAY);
+      expect(slots[0]).toMatchObject({ date: FRIDAY, start_time: '17:00', end_time: '18:00' });
+      // The Friday block spills into Saturday until 04:00 (A5).
+      expect(slots.filter((s) => s.date === SATURDAY).map((s) => s.start_time)).toEqual([
+        '00:00',
+        '01:00',
+        '02:00',
+        '03:00',
+      ]);
+      // Nothing from the saved own morning block.
+      expect(slots.some((s) => s.start_time === '08:00')).toBe(false);
+      expect(prisma.provider_schedules.findMany).not.toHaveBeenCalled();
+      await expect(service.isSlotAvailable(10, SATURDAY, '02:00', '03:00', 5)).resolves.toBe(true);
+      await expect(service.isSlotAvailable(10, FRIDAY, '09:00', '10:00', 5)).resolves.toBe(false);
+    });
+
+    it('inherits a 24 h store: a 23:00-01:00 booking crosses midnight', async () => {
+      const { service } = buildService({
+        storeHours: [fullDay(1), fullDay(2)],
+        providers: anaStore,
+      });
+      await expect(service.isSlotAvailable(10, MONDAY, '23:00', '01:00', 5)).resolves.toBe(true);
+      const slots = await service.getAvailableSlots(10, MONDAY, MONDAY);
+      expect(slots).toHaveLength(24);
+      expect(slots[slots.length - 1]).toMatchObject({ start_time: '23:00', end_time: '00:00', end_date: TUESDAY });
+    });
+
+    it('own schedule: behaves as before and ignores the store hours beyond its blocks (regression)', async () => {
+      const { service, prisma } = buildService({
+        storeHours: [{ day_of_week: 5, start_time: '06:00', end_time: '22:00' }],
+        providers: anaOwn,
+        schedules: ownMorning,
+      });
+      const slots = await service.getAvailableSlots(10, FRIDAY, FRIDAY);
+      expect(slots.map((s) => s.start_time)).toEqual(['08:00', '09:00', '10:00', '11:00']);
+      expect(prisma.provider_schedules.findMany).toHaveBeenCalled();
+      await expect(service.isSlotAvailable(10, FRIDAY, '15:00', '16:00', 5)).resolves.toBe(false);
+    });
+
+    it('a provider exception still blocks the day although it inherits the store hours', async () => {
+      const { service, prisma } = buildService({
+        storeHours: [{ day_of_week: 5, start_time: '17:00', end_time: '04:00' }],
+        providers: anaStore,
+      });
+      const dayOff = { provider_id: 5, date: new Date(`${FRIDAY}T00:00:00.000Z`), is_unavailable: true };
+      prisma.provider_exceptions.findMany.mockResolvedValue([dayOff]);
+      prisma.provider_exceptions.findFirst.mockImplementation(({ where }: any) =>
+        Promise.resolve(where.date.toISOString().slice(0, 10) === FRIDAY ? dayOff : null),
+      );
+      await expect(service.getAvailableSlots(10, FRIDAY, FRIDAY)).resolves.toEqual([]);
+      await expect(service.isSlotAvailable(10, FRIDAY, '18:00', '19:00', 5)).resolves.toBe(false);
+    });
+
+    it('a change of the store hours reaches the inheriting provider without touching it', async () => {
+      const { service } = buildService({
+        storeHours: [{ day_of_week: 5, start_time: '09:00', end_time: '12:00' }],
+        providers: anaStore,
+      });
+      await expect(service.isSlotAvailable(10, FRIDAY, '18:00', '19:00', 5)).resolves.toBe(false);
+      // The store now opens Friday nights: same provider row, new hours.
+      const later = new Map([[5, [{ start_time: '17:00', end_time: '04:00' }]]]);
+      const hours = (service as any).businessHoursService;
+      hours.loadStoreWindows.mockResolvedValue(later);
+      hours.loadStoreHours.mockResolvedValue(later);
+      await expect(service.isSlotAvailable(10, FRIDAY, '18:00', '19:00', 5)).resolves.toBe(true);
+      const slots = await service.getAvailableSlots(10, FRIDAY, FRIDAY);
+      expect(slots[0]).toMatchObject({ start_time: '17:00' });
     });
   });
 
@@ -682,6 +875,84 @@ describe('AvailabilityService — horarios nocturnos (S21)', () => {
         });
         const slots = await service.getAvailableSlots(10, SATURDAY, SATURDAY);
         expect(slots.map((s) => s.start_time)).toEqual(['09:00', '10:00']);
+      });
+
+      it('chains consecutive 24 h station days across midnight without duplicating the next day', async () => {
+        const station24h = [
+          { station_id: 3, weekday: 6, start_time: '00:00', end_time: '00:00', is_active: true },
+          { station_id: 3, weekday: 0, start_time: '00:00', end_time: '00:00', is_active: true },
+        ];
+        const store24h = [
+          { day_of_week: 6, start_time: '00:00', end_time: '00:00' },
+          { day_of_week: 0, start_time: '00:00', end_time: '00:00' },
+        ];
+        const { service } = buildService({
+          product: { ...stationProduct, service_duration_minutes: 120, buffer_minutes: 15 },
+          storeHours: store24h,
+          stations: [station],
+          stationSchedules: station24h,
+        });
+        const slots = await service.getAvailableSlots(10, SATURDAY, SUNDAY);
+        const crossing = slots.find((s) => s.date === SATURDAY && s.start_time === '22:30');
+        expect(crossing).toMatchObject({
+          station_id: 3,
+          date: SATURDAY,
+          start_time: '22:30',
+          end_time: '00:30',
+          end_date: SUNDAY,
+          total_available: 1,
+        });
+        // No slot on Sunday should be duplicated by Saturday's chained window.
+        const sundayStarts = slots.filter((s) => s.date === SUNDAY).map((s) => s.start_time);
+        expect(sundayStarts[0]).toBe('00:00');
+        expect(new Set(sundayStarts).size).toBe(sundayStarts.length);
+      });
+
+      it('chains consecutive 24 h station+provider days and respects next-day provider unavailability', async () => {
+        const station24h = [
+          { station_id: 3, weekday: 6, start_time: '00:00', end_time: '00:00', is_active: true },
+          { station_id: 3, weekday: 0, start_time: '00:00', end_time: '00:00', is_active: true },
+        ];
+        const store24h = [
+          { day_of_week: 6, start_time: '00:00', end_time: '00:00' },
+          { day_of_week: 0, start_time: '00:00', end_time: '00:00' },
+        ];
+        const provider24h = [
+          { provider_id: 1, day_of_week: 6, start_time: '00:00', end_time: '00:00', is_active: true },
+          { provider_id: 1, day_of_week: 0, start_time: '00:00', end_time: '00:00', is_active: true },
+        ];
+        const { service } = buildService({
+          product: { requires_station: true, booking_mode: 'provider_required', service_duration_minutes: 120, buffer_minutes: 15 },
+          storeHours: store24h,
+          stations: [station],
+          stationProviders: [{ station_id: 3, provider_id: 1 }],
+          stationSchedules: station24h,
+          providers: [{ id: 1, display_name: 'Ana', avatar_url: null }],
+          schedules: provider24h,
+        });
+        const slots = await service.getAvailableSlots(10, SATURDAY, SATURDAY);
+        expect(slots.find((s) => s.date === SATURDAY && s.start_time === '22:30')).toMatchObject({
+          station_id: 3,
+          end_time: '00:30',
+          end_date: SUNDAY,
+          total_available: 1,
+        });
+
+        // If the provider is unavailable on Sunday, Saturday 22:30-00:30 must not be offered.
+        const blocked = buildService({
+          product: { requires_station: true, booking_mode: 'provider_required', service_duration_minutes: 120, buffer_minutes: 15 },
+          storeHours: store24h,
+          stations: [station],
+          stationProviders: [{ station_id: 3, provider_id: 1 }],
+          stationSchedules: station24h,
+          providers: [{ id: 1, display_name: 'Ana', avatar_url: null }],
+          schedules: provider24h,
+        });
+        blocked.prisma.provider_exceptions.findMany.mockResolvedValue([
+          { provider_id: 1, date: new Date(`${SUNDAY}T00:00:00.000Z`), is_unavailable: true },
+        ]);
+        const blockedSlots = await blocked.service.getAvailableSlots(10, SATURDAY, SATURDAY);
+        expect(blockedSlots.find((s) => s.start_time === '22:30')).toBeUndefined();
       });
     });
 

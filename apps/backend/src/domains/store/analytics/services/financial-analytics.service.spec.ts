@@ -545,6 +545,122 @@ describe('FinancialAnalyticsService', () => {
     });
   });
 
+  describe('getProfitLossSummary — reembolsos que vuelven al inventario (QUI-1056)', () => {
+    const sqlOf = (args: unknown[]): string => {
+      const [first, ...values] = args;
+      if (!Array.isArray(first)) return (first as { sql: string }).sql;
+      return Prisma.sql(
+        first as unknown as TemplateStringsArray,
+        ...(values as never[]),
+      ).sql;
+    };
+
+    beforeEach(() => {
+      // Venta de $100.000 (costo $60.000) entregada y reembolsada completa en
+      // el mismo período, con la mercancía devuelta al inventario.
+      prisma.orders.aggregate.mockResolvedValue({
+        _sum: {
+          subtotal_amount: 100000,
+          discount_amount: 0,
+          tax_amount: 0,
+          shipping_cost: 0,
+          grand_total: 100000,
+        },
+        _count: { id: 1 },
+      });
+      prisma.refunds.aggregate.mockResolvedValue({
+        _sum: {
+          amount: 100000,
+          subtotal_refund: 100000,
+          tax_refund: 0,
+          shipping_refund: 0,
+        },
+      });
+      prisma.expenses.aggregate.mockResolvedValue({ _sum: { amount: 0 } });
+    });
+
+    const mockSql = (restocked: number, cashRestocked = restocked) =>
+      prisma.$queryRaw.mockImplementation((...args: unknown[]) => {
+        const sql = sqlOf(args);
+        if (/AS restocked_cogs/.test(sql)) {
+          const isCash = /processed_at/.test(sql);
+          return Promise.resolve([
+            { restocked_cogs: isCash ? cashRestocked : restocked },
+          ]);
+        }
+        if (/paid_per_order/.test(sql)) {
+          return Promise.resolve([
+            { income: 100000, passthrough_tax: 0, cogs: 60000, units: 1, units_without_cost: 0, order_count: 1 },
+          ]);
+        }
+        if (/AS cogs/.test(sql)) {
+          return Promise.resolve([{ cogs: 60000, units: 1, units_without_cost: 0 }]);
+        }
+        if (/AS amount/.test(sql) && /refund_count/.test(sql)) {
+          return Promise.resolve([
+            { amount: 100000, subtotal_refund: 100000, tax_refund: 0, shipping_refund: 0, refund_count: 1 },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
+
+    it('restock: el costo vuelve y la orden cierra en cero', async () => {
+      mockSql(60000);
+
+      const result = await service.getProfitLossSummary(QUERY as any);
+
+      expect(result.revenue.operating_revenue).toBe(0);
+      expect(result.costs.gross_cost_of_goods_sold).toBe(60000);
+      expect(result.costs.restocked_cogs).toBe(60000);
+      expect(result.costs.cost_of_goods_sold).toBe(0);
+      expect(result.costs.gross_profit).toBe(0);
+      expect(result.bottom_line.net_profit).toBe(0);
+    });
+
+    it('merma o sin devolución: el costo se queda (no hay reversa)', async () => {
+      mockSql(0);
+
+      const result = await service.getProfitLossSummary(QUERY as any);
+
+      expect(result.costs.cost_of_goods_sold).toBe(60000);
+      expect(result.costs.gross_profit).toBe(-60000);
+    });
+
+    it('base de caja: la tarjeta de Ganancias también descuenta el costo repuesto', async () => {
+      mockSql(60000, 60000);
+
+      const result = await service.getProfitLossSummary(QUERY as any);
+
+      expect(result.cash.restocked_cogs).toBe(60000);
+      expect(result.cash.cost_of_goods_sold).toBe(0);
+      // 100.000 cobrados − 0 costo neto − 100.000 devueltos = 0
+      expect(result.cash.net_profit).toBe(0);
+    });
+
+    it('la consulta solo revierte líneas restock, no canceladas, en la fracción devuelta y con la regla de unidades de stock', async () => {
+      mockSql(0);
+
+      await service.getProfitLossSummary(QUERY as any);
+
+      const sqls = prisma.$queryRaw.mock.calls
+        .map((call: unknown[]) => sqlOf(call))
+        .filter((sql: string) => /AS restocked_cogs/.test(sql));
+
+      // accrual actual + caja actual + caja anterior
+      expect(sqls.length).toBe(3);
+      for (const sql of sqls) {
+        expect(sql).toContain("ri.inventory_action = 'restock'");
+        expect(sql).toContain('oi.cancelled_at IS NULL');
+        expect(sql).toContain(
+          '(COALESCE(oi.stock_units_consumed, oi.quantity) * COALESCE(oi.cost_price, 0))',
+        );
+        expect(sql).toContain(
+          'LEAST(ri.quantity::numeric / NULLIF(oi.quantity, 0), 1)',
+        );
+      }
+    });
+  });
+
   describe('getTaxSummary', () => {
     it('tax_rate del breakdown es FRACCION con 5 decimales (0.08 y 0.00966 se conservan)', async () => {
       prisma.$queryRaw.mockResolvedValueOnce([

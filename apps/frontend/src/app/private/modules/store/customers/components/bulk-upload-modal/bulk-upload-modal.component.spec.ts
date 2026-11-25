@@ -2,7 +2,11 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Observable, of, throwError } from 'rxjs';
 
-import { CustomerBulkUploadModalComponent } from './bulk-upload-modal.component';
+import {
+  CustomerBulkUploadModalComponent,
+  detectCustomerRowIssues,
+  diagnoseEmptyCustomerFile,
+} from './bulk-upload-modal.component';
 import { CustomersService } from '../../services/customers.service';
 import { BulkUploadLogService } from '../../../bulk-uploads/services/bulk-upload-log.service';
 import { BulkUploadJobService } from '../../../bulk-uploads/services/bulk-upload-job.service';
@@ -380,5 +384,190 @@ describe('CustomerBulkUploadModalComponent — carga durable en servidor (QUI-10
     expect(jobs.forget).not.toHaveBeenCalled();
     expect(component.job()).toBeNull();
     expect(component.currentStep()).toBe(0);
+  });
+});
+
+/**
+ * QUI-1048 — el paso «Verificar» marca, antes de procesar, las filas con
+ * correo de formato inválido y los correos repetidos dentro del archivo.
+ */
+describe('detectCustomerRowIssues (QUI-1048)', () => {
+  it('marca el correo con formato inválido con su fila y motivo', () => {
+    const issues = detectCustomerRowIssues([
+      { row_number: 2, first_name: 'Ana', email: 'ana@x.co' },
+      { row_number: 3, first_name: 'Luis', last_name: 'Gil', email: 'luis@@x' },
+      { row_number: 4, first_name: 'Eva', email: 'eva sin arroba.com' },
+    ]);
+    expect(issues.map((i) => [i.row_number, i.kind])).toEqual([
+      [3, 'invalid_email'],
+      [4, 'invalid_email'],
+    ]);
+    expect(issues[0].name).toBe('Luis Gil');
+    expect(issues[0].message).toBe('correo "luis@@x" con formato inválido');
+  });
+
+  it('marca el correo repetido (sin distinguir mayúsculas ni espacios); la primera aparición es válida', () => {
+    const issues = detectCustomerRowIssues([
+      { row_number: 2, first_name: 'Ana', document_number: '1', email: 'ana@x.co' },
+      { row_number: 3, first_name: 'Otra', document_number: '2', email: ' ANA@X.CO ' },
+    ]);
+    expect(issues.length).toBe(1);
+    expect(issues[0].row_number).toBe(3);
+    expect(issues[0].kind).toBe('duplicate_email');
+    expect(issues[0].message).toBe('correo "ANA@X.CO" repetido en el archivo');
+  });
+
+  it('una ubicación adicional (mismo documento) que repite el correo NO se marca', () => {
+    const issues = detectCustomerRowIssues([
+      { row_number: 2, legal_name: 'ACME', person_type: 'JURIDICA', document_number: '900123456-1', email: 'acme@x.co', address_line_1: 'Cra 1' },
+      { row_number: 3, legal_name: 'ACME', person_type: 'JURIDICA', document_number: '900.123.456', email: 'acme@x.co', address_line_1: 'Cra 2' },
+    ]);
+    expect(issues).toEqual([]);
+  });
+
+  it('el correo vacío no es inválido ni duplicado', () => {
+    const issues = detectCustomerRowIssues([
+      { row_number: 2, first_name: 'Ana', email: '' },
+      { row_number: 3, first_name: 'Luis' },
+      { row_number: 4, first_name: 'Eva', email: '  ' },
+    ]);
+    expect(issues).toEqual([]);
+  });
+});
+
+describe('CustomerBulkUploadModalComponent — Verificar marca filas problemáticas (QUI-1048)', () => {
+  let component: CustomerBulkUploadModalComponent;
+
+  beforeEach(async () => {
+    const jobs = jasmine.createSpyObj<BulkUploadJobService>('BulkUploadJobService', ['findResumable']);
+    jobs.findResumable.and.returnValue(of(null));
+    await TestBed.configureTestingModule({
+      imports: [CustomerBulkUploadModalComponent],
+      providers: [
+        { provide: CustomersService, useValue: {} },
+        { provide: BulkUploadLogService, useValue: {} },
+        { provide: BulkUploadJobService, useValue: jobs },
+        { provide: DialogService, useValue: {} },
+        { provide: ToastService, useValue: {} },
+      ],
+    })
+      .overrideComponent(CustomerBulkUploadModalComponent, { set: { template: '', imports: [] } })
+      .compileComponents();
+    component = TestBed.createComponent(CustomerBulkUploadModalComponent).componentInstance;
+  });
+
+  it('cuenta válidos / con correo inválido / con correo duplicado', () => {
+    component.parsedData.set([
+      { row_number: 2, first_name: 'Ana', document_number: '1', email: 'ana@x.co', address_line_1: 'Cl 1' },
+      { row_number: 3, first_name: 'Ana', document_number: '1', email: 'ana@x.co', address_line_1: 'Cl 2' },
+      { row_number: 4, first_name: 'Luis', document_number: '2', email: 'luis@' },
+      { row_number: 5, first_name: 'Eva', document_number: '3', email: 'ANA@x.co' },
+      { row_number: 6, first_name: 'Sin', document_number: '4', email: '' },
+    ]);
+
+    expect(component.customerGroups().length).toBe(4);
+    expect(component.invalidEmailCount()).toBe(1);
+    expect(component.duplicateEmailCount()).toBe(1);
+    expect(component.problemCustomerCount()).toBe(2);
+    expect(component.validCustomerCount()).toBe(2);
+    expect(component.rowIssues().map((i) => i.row_number)).toEqual([4, 5]);
+  });
+
+  it('sin filas problemáticas todos los clientes son válidos', () => {
+    component.parsedData.set([
+      { row_number: 2, first_name: 'Ana', email: 'ana@x.co' },
+      { row_number: 3, first_name: 'Luis', email: 'luis@x.co' },
+    ]);
+    expect(component.rowIssues()).toEqual([]);
+    expect(component.validCustomerCount()).toBe(2);
+  });
+});
+
+describe('diagnoseEmptyCustomerFile (QUI-1049 P1)', () => {
+  it('sin columnas clave dice cuáles faltan, qué encabezados reconoció y cuáles no, y un ejemplo', () => {
+    const msgs = diagnoseEmptyCustomerFile(['Correo', 'Cliente', 'Teléfono'], {
+      0: 'email',
+      2: 'phone',
+    });
+    expect(msgs).toEqual([
+      'Faltan las columnas que identifican al cliente: Nombre, Razón Social, Documento (se necesita al menos una).',
+      'Encabezados reconocidos: Correo, Teléfono.',
+      'Encabezados no reconocidos: Cliente.',
+      'Ejemplo de encabezado correcto: Correo | Nombre | Apellido | Documento | Tipo Documento | Teléfono. Descarga la plantilla para ver todas las columnas.',
+    ]);
+  });
+
+  it('sin ningún encabezado reconocido lo dice explícitamente', () => {
+    const msgs = diagnoseEmptyCustomerFile(['Cliente', 'Mail'], {});
+    expect(msgs[1]).toBe('Ningún encabezado del archivo coincide con los de la plantilla.');
+    expect(msgs[2]).toBe('Encabezados no reconocidos: Cliente, Mail.');
+  });
+
+  it('con columnas clave pero sin datos dice que el archivo no tiene filas con datos', () => {
+    const msgs = diagnoseEmptyCustomerFile(['Nombre', 'Correo'], { 0: 'first_name', 1: 'email' });
+    expect(msgs).toEqual([
+      'El archivo no tiene filas con datos: todas las filas debajo del encabezado están vacías.',
+      'Completa al menos una de estas columnas en cada cliente: Nombre, Razón Social, Documento.',
+    ]);
+  });
+});
+
+describe('CustomerBulkUploadModalComponent — archivo sin clientes útiles (QUI-1049 P1)', () => {
+  let component: CustomerBulkUploadModalComponent;
+  let toast: jasmine.SpyObj<ToastService>;
+
+  beforeEach(async () => {
+    const jobs = jasmine.createSpyObj<BulkUploadJobService>('BulkUploadJobService', ['findResumable']);
+    jobs.findResumable.and.returnValue(of(null));
+    const log = jasmine.createSpyObj<BulkUploadLogService>('BulkUploadLogService', ['fingerprint']);
+    log.fingerprint.and.resolveTo(null);
+    toast = jasmine.createSpyObj<ToastService>('ToastService', ['success', 'warning', 'error', 'info']);
+    await TestBed.configureTestingModule({
+      imports: [CustomerBulkUploadModalComponent],
+      providers: [
+        { provide: CustomersService, useValue: {} },
+        { provide: BulkUploadLogService, useValue: log },
+        { provide: BulkUploadJobService, useValue: jobs },
+        { provide: DialogService, useValue: {} },
+        { provide: ToastService, useValue: toast },
+      ],
+    })
+      .overrideComponent(CustomerBulkUploadModalComponent, { set: { template: '', imports: [] } })
+      .compileComponents();
+    component = TestBed.createComponent(CustomerBulkUploadModalComponent).componentInstance;
+  });
+
+  const load = async (csv: string) => {
+    component.processFile(new File([csv], 'clientes.csv', { type: 'text/csv' }));
+    for (let i = 0; i < 200 && component.isProcessingFile(); i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(component.isProcessingFile()).toBeFalse();
+  };
+
+  it('columnas incorrectas: el detalle queda en el modal (uploadError), no en el toast genérico', async () => {
+    await load('Cliente,Correo\nAna,ana@x.co\n');
+    const err = component.uploadError() as string[];
+    expect(Array.isArray(err)).toBeTrue();
+    expect(err[0]).toContain('Faltan las columnas que identifican al cliente');
+    expect(err).toContain('Encabezados reconocidos: Correo.');
+    expect(err).toContain('Encabezados no reconocidos: Cliente.');
+    expect(toast.warning).not.toHaveBeenCalled();
+    expect(component.currentStep()).toBe(0);
+    expect(component.parsedData()).toBeNull();
+  });
+
+  it('columnas correctas sin filas con datos: mensaje distinto', async () => {
+    await load('Nombre,Correo\n');
+    const err = component.uploadError() as string[];
+    expect(err[0]).toBe('El archivo no tiene filas con datos: todas las filas debajo del encabezado están vacías.');
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it('un archivo válido sigue avanzando a Verificar sin error', async () => {
+    await load('Nombre,Correo\nAna,ana@x.co\n');
+    expect(component.uploadError()).toBeNull();
+    expect(component.currentStep()).toBe(1);
+    expect(component.parsedData()?.length).toBe(1);
   });
 });

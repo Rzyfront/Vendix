@@ -16,6 +16,8 @@ import { ModuleShellActionsService } from '../../../../../shared/components/modu
 import { ProductionSseService } from '../../restaurant-ops/production/services/production-sse.service';
 import { RescheduleRequestsCounterService } from '../services/reschedule-requests-counter.service';
 import { EventCalendarComponent } from '../components/event-calendar/event-calendar.component';
+import { storeClock } from '../utils/scheduling-calendar.util';
+import { addDays } from '../../scheduled-orders/utils/ymd.util';
 
 /** Sustituye los modales de las fuentes: aquí solo importa la pantalla. */
 @Component({ selector: 'app-scheduling-record-host', standalone: true, template: '' })
@@ -224,6 +226,42 @@ describe('Agenda unificada F1 — Agenda', () => {
     );
   });
 
+  it('encabezado de una sola fila: en celular la vista vive dentro de Filtros y no hay texto de ayuda', () => {
+    const api = setup();
+    const fixture = TestBed.createComponent(SchedulingAgendaPageComponent);
+    const page = fixture.componentInstance;
+    page.isMobile.set(false);
+    fixture.detectChanges();
+    let el: HTMLElement = fixture.nativeElement;
+    const toolbar = el.querySelector('[data-testid="agenda-toolbar"]')!;
+    expect(toolbar.querySelector('app-input-buttons')).not.toBeNull();
+    expect(toolbar.querySelector('app-inputsearch')).not.toBeNull();
+    expect(page.filterConfigs().some((f) => f.key === 'vista')).toBeFalse();
+    expect(el.textContent).not.toContain('Filtra por personal');
+
+    page.isMobile.set(true);
+    fixture.detectChanges();
+    el = fixture.nativeElement;
+    expect(el.querySelector('[data-testid="agenda-toolbar"] app-input-buttons')).toBeNull();
+    expect(el.querySelector('[data-testid="agenda-toolbar"] app-inputsearch')).toBeNull();
+    expect(el.querySelector('[data-testid="agenda-search-toggle"]')).not.toBeNull();
+    const view = page.filterConfigs()[0];
+    expect(view.key).toBe('vista');
+    expect(view.countsAsActive).toBeFalse();
+    expect(view.options?.map((o) => o.label)).toEqual(['Mes', 'Día']);
+
+    page.onFilterChange({ vista: 'month', staff_ids: ['3'] });
+    expect(page.view()).toBe('month');
+    expect(page.filterValues()).toEqual({ staff_ids: ['3'] });
+    expect(api.getCalendar.calls.mostRecent().args[0]).toEqual(
+      jasmine.objectContaining({ from: '2026-10-26', to: '2026-12-06', staff_ids: [3] }),
+    );
+
+    page.mobileSearchOpen.set(true);
+    fixture.detectChanges();
+    expect(el.querySelector('[data-testid="agenda-toolbar"] app-inputsearch')).not.toBeNull();
+  });
+
   it('los filtros viajan al calendario sin pisar el rango de la vista', () => {
     const api = setup();
     const page = TestBed.createComponent(SchedulingAgendaPageComponent).componentInstance;
@@ -349,16 +387,81 @@ describe('Agenda unificada F1 — hueco tocado en el calendario', () => {
     const cmp = fixture.componentInstance;
     const emitted: Array<{ date: string; time: string }> = [];
     cmp.slotClick.subscribe((slot) => emitted.push(slot));
-    const column = { getBoundingClientRect: () => ({ top: 0, height: 840 }) };
+    const column = { getBoundingClientRect: () => ({ top: 0, height: 1440 }) };
     const plain = document.createElement('div');
-    // Franja por defecto 07:00–21:00 (840 min): 220 px → 10:40 → 10:30.
-    cmp.onGridClick({ clientY: 220, target: plain, currentTarget: column } as unknown as MouseEvent, '2026-11-26');
+    // Rejilla de 24 h (1440 min en 1440 px): 640 px → 10:40 → 10:30.
+    cmp.onGridClick({ clientY: 640, target: plain, currentTarget: column } as unknown as MouseEvent, '2026-11-26');
     expect(emitted).toEqual([{ date: '2026-11-26', time: '10:30' }]);
     const button = document.createElement('button');
-    cmp.onGridClick({ clientY: 220, target: button, currentTarget: column } as unknown as MouseEvent, '2026-11-26');
+    cmp.onGridClick({ clientY: 640, target: button, currentTarget: column } as unknown as MouseEvent, '2026-11-26');
     expect(emitted.length).toBe(1);
     fixture.componentRef.setInput('slotClickable', false);
-    cmp.onGridClick({ clientY: 220, target: plain, currentTarget: column } as unknown as MouseEvent, '2026-11-26');
+    cmp.onGridClick({ clientY: 640, target: plain, currentTarget: column } as unknown as MouseEvent, '2026-11-26');
     expect(emitted.length).toBe(1);
+  });
+});
+
+describe('Agenda 24 h — rejilla completa, línea de ahora y reservas nocturnas', () => {
+  const TZ = 'America/Bogota';
+  const todayInStore = () => storeClock(new Date(), TZ).date;
+  const nightEvent = (date: string, endDate: string): SchedulingEvent => ({
+    id: 'booking:9',
+    type: 'booking',
+    type_label: 'Reserva de servicio',
+    source_id: 9,
+    reference: 'R9',
+    title: 'Turno nocturno',
+    start: '',
+    end: '',
+    date,
+    local_start: '23:00',
+    end_date: endDate,
+    local_end: '01:00',
+    status: 'confirmed',
+    status_label: 'Confirmada',
+    status_group: 'confirmed',
+    staff: null,
+    customer: null,
+    order_id: null,
+    detail: null,
+  });
+
+  function render(view: 'week' | 'day', anchor: string, events: SchedulingEvent[] = []) {
+    TestBed.configureTestingModule({});
+    const fixture = TestBed.createComponent(EventCalendarComponent);
+    fixture.componentRef.setInput('view', view);
+    fixture.componentRef.setInput('anchor', anchor);
+    fixture.componentRef.setInput('timezone', TZ);
+    fixture.componentRef.setInput('events', events);
+    fixture.detectChanges();
+    return fixture;
+  }
+
+  it('muestra las 24 horas y la línea de ahora solo en la columna de hoy', () => {
+    const fixture = render('week', todayInStore());
+    const el: HTMLElement = fixture.nativeElement;
+    expect(fixture.componentInstance.hours().length).toBe(24);
+    expect(fixture.componentInstance.hours()[0]).toBe('00:00');
+    const lines = el.querySelectorAll('[data-testid="now-line"]');
+    expect(lines.length).toBe(1);
+    expect(lines[0].closest('[data-day]')?.getAttribute('data-day')).toBe(todayInStore());
+  });
+
+  it('no pinta la línea de ahora en otra semana', () => {
+    const fixture = render('week', addDays(todayInStore(), 14));
+    expect(fixture.nativeElement.querySelectorAll('[data-testid="now-line"]').length).toBe(0);
+  });
+
+  it('enfoca la hora actual cuando hoy está visible', () => {
+    const fixture = render('day', todayInStore());
+    expect(fixture.componentInstance.focusMinutes()).toBe(storeClock(new Date(), TZ).minutes);
+  });
+
+  it('una reserva 23:00–01:00 aparece en sus dos días', () => {
+    const fixture = render('week', '2026-11-23', [nightEvent('2026-11-24', '2026-11-25')]);
+    const el: HTMLElement = fixture.nativeElement;
+    const blocks = Array.from(el.querySelectorAll('[data-day] .ev-block'));
+    expect(blocks.map((b) => b.closest('[data-day]')?.getAttribute('data-day'))).toEqual(['2026-11-24', '2026-11-25']);
+    expect(blocks[1].getAttribute('data-continued')).toBe('true');
   });
 });

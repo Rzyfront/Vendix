@@ -1,5 +1,6 @@
 import { VendixHttpException } from '../../../common/errors';
 import { ServiceAllocationCoordinator } from './service-allocation-coordinator.service';
+import { BusinessHoursService } from './business-hours/business-hours.service';
 
 describe('ServiceAllocationCoordinator.allocateBooking', () => {
   const STORE_ID = 1;
@@ -31,6 +32,9 @@ describe('ServiceAllocationCoordinator.allocateBooking', () => {
     dailyWeekday?: number;
     storeDaily?: { start_time: string; end_time: string } | null;
     stationRows?: any[];
+    /** Parte 1: the provider works the store hours instead of its own rows. */
+    providerUsesStoreHours?: boolean;
+    providerRows?: any[];
   } = {}) {
     const { requiresStation = true, legacyOverlapId = BOOKING_ID, duration = 60 } = options;
     const dailyWeekday = options.dailyWeekday ?? weekday;
@@ -50,7 +54,12 @@ describe('ServiceAllocationCoordinator.allocateBooking', () => {
       service_station_services: { findFirst: jest.fn().mockResolvedValue({ id: 1 }) },
       service_station_providers: { findFirst: jest.fn().mockResolvedValue({ id: 1 }) },
       provider_services: { findFirst: jest.fn().mockResolvedValue({ id: 1 }) },
-      service_providers: { findFirst: jest.fn().mockResolvedValue({ id: PROVIDER_ID }) },
+      service_providers: {
+        findFirst: jest.fn().mockResolvedValue({ id: PROVIDER_ID }),
+        findMany: jest.fn().mockResolvedValue([
+          { id: PROVIDER_ID, store_id: STORE_ID, uses_store_hours: options.providerUsesStoreHours ?? false },
+        ]),
+      },
       product_variants: { findFirst: jest.fn() },
       service_station_schedules: {
         findMany: jest.fn().mockResolvedValue(options.stationRows ?? [{ weekday: dailyWeekday, ...daily }]),
@@ -61,7 +70,9 @@ describe('ServiceAllocationCoordinator.allocateBooking', () => {
         findFirst: jest.fn().mockResolvedValue(null),
       },
       provider_schedules: {
-        findMany: jest.fn().mockResolvedValue([{ day_of_week: dailyWeekday, ...daily }]),
+        findMany: jest.fn().mockResolvedValue(
+          (options.providerRows ?? [{ day_of_week: dailyWeekday, ...daily }]).map((row) => ({ provider_id: PROVIDER_ID, ...row })),
+        ),
       },
       provider_exceptions: { findMany: jest.fn().mockResolvedValue([]) },
       service_allocations: {
@@ -91,6 +102,8 @@ describe('ServiceAllocationCoordinator.allocateBooking', () => {
             : new Map([[dailyWeekday, [options.storeDaily ?? daily]]]),
         ),
     };
+    // The REAL provider-blocks reader (Parte 1) over the mocked tx and store windows.
+    businessHours.loadProviderBlocks = BusinessHoursService.prototype.loadProviderBlocks;
     const coordinator = new ServiceAllocationCoordinator(prisma, businessHours);
     return { coordinator, tx };
   }
@@ -402,6 +415,34 @@ describe('ServiceAllocationCoordinator.allocateBooking', () => {
         legacyRows: [{ date: dayOf(-1), end_date: null, start_time: '22:00', end_time: '02:00' }],
       });
       await expect(coordinator.allocateBooking(tx, { ...baseInput, startTime: '01:00', endTime: '02:00' })).rejects.toMatchObject({ errorCode: 'STATION_003' });
+    });
+  });
+
+  describe('Parte 1 — provider that works the store hours', () => {
+    it('allocates with no own rows: the store hours are its week', async () => {
+      const { coordinator, tx } = build({ providerUsesStoreHours: true, providerRows: [] });
+      await expect(coordinator.allocateBooking(tx, { ...baseInput, excludeBookingId: BOOKING_ID })).resolves.toMatchObject({
+        provider_id: PROVIDER_ID,
+      });
+      expect(tx.provider_schedules.findMany).not.toHaveBeenCalled();
+    });
+
+    it('own schedule with no rows still rejects with STATION_003 (unchanged)', async () => {
+      const { coordinator, tx } = build({ providerRows: [] });
+      await expect(coordinator.allocateBooking(tx, { ...baseInput, excludeBookingId: BOOKING_ID })).rejects.toMatchObject({
+        errorCode: 'STATION_003',
+      });
+    });
+
+    it('rejects outside the inherited store hours although the station is open', async () => {
+      const { coordinator, tx } = build({
+        providerUsesStoreHours: true,
+        providerRows: [{ day_of_week: weekday, start_time: '08:00', end_time: '18:00' }],
+        storeDaily: { start_time: '08:00', end_time: '12:00' },
+      });
+      await expect(
+        coordinator.allocateBooking(tx, { ...baseInput, startTime: '13:00', endTime: '14:00', excludeBookingId: BOOKING_ID }),
+      ).rejects.toMatchObject({ errorCode: 'STATION_003' });
     });
   });
 });

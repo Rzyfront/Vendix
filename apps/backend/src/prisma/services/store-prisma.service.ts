@@ -102,6 +102,12 @@ export class StorePrismaService extends BasePrismaService {
     // Estaciones fase 3: tarifas por franja y reservas recurrentes
     'service_station_rate_windows',
     'booking_series',
+    // QUI-1060 modo Plan: salidas y tramos de precio llevan `store_id` propio.
+    'service_plan_departures',
+    'service_plan_pax_prices',
+    'service_plan_activities',
+    // QUI-1060 F3: enlace reserva × actividad → tarea CRM.
+    'service_plan_booking_tasks',
     'service_progress_events',
     'service_session_tokens',
     'service_subjects',
@@ -534,6 +540,7 @@ export class StorePrismaService extends BasePrismaService {
       'layaway_installments', // Relational
       'layaway_payments', // Relational
       'bank_accounts', // Org scoped
+      'bank_account_stores', // Org scoped (QUI-1061 — asignación de cuentas de org a tiendas)
       'fixed_asset_categories', // Org scoped
       'fixed_assets', // Org scoped
       'budgets', // Org scoped
@@ -845,6 +852,7 @@ export class StorePrismaService extends BasePrismaService {
       'payroll_novelties',
       'employee_advances',
       'bank_accounts',
+      'bank_account_stores',
       'fixed_asset_categories',
       'fixed_assets',
       'budgets',
@@ -1490,6 +1498,10 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.bank_accounts;
   }
 
+  get bank_account_stores() {
+    return this.scoped_client.bank_account_stores;
+  }
+
   get bank_transactions() {
     return this.scoped_client.bank_transactions;
   }
@@ -1731,6 +1743,10 @@ export class StorePrismaService extends BasePrismaService {
   get payment_requests() { return this.scoped_client.payment_requests; }
   get service_station_rate_windows() { return this.scoped_client.service_station_rate_windows; }
   get booking_series() { return this.scoped_client.booking_series; }
+  get service_plan_departures() { return this.scoped_client.service_plan_departures; }
+  get service_plan_pax_prices() { return this.scoped_client.service_plan_pax_prices; }
+  get service_plan_activities() { return this.scoped_client.service_plan_activities; }
+  get service_plan_booking_tasks() { return this.scoped_client.service_plan_booking_tasks; }
   get service_change_proposals() { return this.scoped_client.service_change_proposals; }
   get service_proposal_decisions() { return this.scoped_client.service_proposal_decisions; }
   get service_contact_attempts() { return this.scoped_client.service_contact_attempts; }

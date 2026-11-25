@@ -4,6 +4,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'crypto';
 import { Prisma, booking_status_enum } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
+import { bankAccountAvailableInStoreWhere } from '@common/helpers/bank-account-availability.helper';
 import { ErrorCodes, VendixHttpException } from '../../../../common/errors';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { PaymentLinksService } from '../../payment-links/payment-links.service';
@@ -489,8 +490,7 @@ export class RentalPrepayService {
             where: {
               id: dto.bank_account_id,
               status: 'active',
-              organization_id: store.organization_id,
-              OR: [{ store_id: null }, { store_id: storeId }],
+              ...bankAccountAvailableInStoreWhere(storeId, store.organization_id),
             },
             select: { id: true },
           })

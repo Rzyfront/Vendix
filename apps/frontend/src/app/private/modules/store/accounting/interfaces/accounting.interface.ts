@@ -230,6 +230,11 @@ export interface PaginatedApiResponse<T> {
 }
 
 // ── Bank Reconciliation ─────────────────────────────────────────
+export interface BankAccountStoreAssignment {
+  store_id: number;
+  store?: { id: number; name: string } | null;
+}
+
 export interface BankAccount {
   id: number;
   name: string;
@@ -240,11 +245,51 @@ export interface BankAccount {
   opening_balance: number;
   current_balance: number;
   status: 'active' | 'inactive' | 'closed';
+  store_id?: number | null;
+  store?: { id: number; name: string } | null;
+  available_in_all_stores?: boolean;
+  store_assignments?: BankAccountStoreAssignment[];
+  assigned_store_ids?: number[];
+  can_edit?: boolean;
   chart_account_id?: number;
   chart_account?: ChartAccount;
   column_mapping?: ColumnMappingConfig;
   unreconciled_count?: number;
   created_at: string;
+}
+
+export interface BankAccountPayload extends Partial<BankAccount> {
+  store_ids?: number[];
+}
+
+export interface BankAccountScopeStore {
+  id: number;
+  name: string;
+  store_code?: string | null;
+  is_active: boolean;
+}
+
+export interface BankAccountDuplicateWarningItem {
+  id: number;
+  name: string;
+  bank_name: string;
+  store_id: number | null;
+  store_name: string | null;
+  status: string;
+}
+
+export interface BankAccountDuplicateWarning {
+  account_number: string;
+  accounts: BankAccountDuplicateWarningItem[];
+}
+
+export interface BankAccountScopeContext {
+  fiscal_scope: 'STORE' | 'ORGANIZATION';
+  can_manage_accounts: boolean;
+  can_manage_organization_accounts: boolean;
+  current_store_id: number;
+  stores: BankAccountScopeStore[];
+  duplicate_number_warnings: BankAccountDuplicateWarning[];
 }
 
 export interface ColumnMappingConfig {

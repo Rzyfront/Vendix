@@ -275,6 +275,8 @@ export class OptionsDropdownComponent {
     let count = 0;
     const values = this.localFilterValues();
     for (const filter of this.filters()) {
+      // Controles que cambian la vista, no acotan datos (p. ej. Mes/Día en la Agenda móvil).
+      if (filter.countsAsActive === false) continue;
       if (filter.type === 'multi-select') {
         const value = values[filter.key];
         if (Array.isArray(value) && value.length > 0) {

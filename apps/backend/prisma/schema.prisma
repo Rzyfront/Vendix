@@ -793,6 +793,7 @@ model organizations {
 
   // Bank Reconciliation & Advanced Accounting
   bank_accounts             bank_accounts[]
+  bank_account_stores       bank_account_stores[]
   fixed_asset_categories    fixed_asset_categories[]
   fixed_assets              fixed_assets[]
   budgets                   budgets[]
@@ -1139,6 +1140,8 @@ model stores {
 
   // Bank Reconciliation & Advanced Accounting
   bank_accounts             bank_accounts[]
+  bank_account_stores       bank_account_stores[]
+  bank_transactions         bank_transactions[]
   fixed_assets              fixed_assets[]
   budgets                   budgets[]
   consolidation_adjustments consolidation_adjustments[]
@@ -1232,6 +1235,10 @@ model stores {
   payment_requests               payment_requests[]
   service_station_rate_windows   service_station_rate_windows[]
   booking_series                 booking_series[]
+  service_plan_departures        service_plan_departures[]
+  service_plan_pax_prices        service_plan_pax_prices[]
+  service_plan_activities        service_plan_activities[]
+  service_plan_booking_tasks     service_plan_booking_tasks[]
   lodging_room_charges           lodging_room_charges[]
   lodging_housekeeping_tasks     lodging_housekeeping_tasks[]
   lodging_inventory_blocks       lodging_inventory_blocks[]
@@ -2311,6 +2318,19 @@ model products {
   rental_pricing_mode            rental_pricing_mode_enum?
   service_modality               service_modality_enum?
   service_pricing_type           service_pricing_type_enum?
+  /// QUI-1060 modo Plan (service_pricing_type = package): duración en días del plan. NULL = no es plan de varios días.
+  plan_duration_days             Int?
+  /// Noches del plan (informativo, ≤ días).
+  plan_duration_nights           Int?
+  /// Cómo se venden las salidas del plan: fijas, a fecha libre o ambas.
+  plan_departure_mode            service_plan_departure_mode_enum?
+  /// Tamaño de grupo admitido (pax totales = adultos + niños).
+  plan_min_pax                   Int?
+  plan_max_pax                   Int?
+  /// Ficha informativa del plan.
+  plan_includes                  String?                          @db.Text
+  plan_excludes                  String?                          @db.Text
+  plan_recommendations           String?                          @db.Text
   requires_booking               Boolean                          @default(false)
   /// CP-estaciones-servicio-reservas-qr-presupue A.2: opt-in, preserving legacy behavior.
   requires_station               Boolean                          @default(false)
@@ -2527,6 +2547,9 @@ model products {
   service_station_services_product_fkey service_station_services[] @relation("service_station_services_product_fkey")
   service_sessions_product_fkey service_sessions[] @relation("service_sessions_product_fkey")
   booking_series_product_fkey booking_series[] @relation("booking_series_product_fkey")
+  service_plan_departures_product_fkey service_plan_departures[] @relation("service_plan_departures_product_fkey")
+  service_plan_pax_prices_product_fkey service_plan_pax_prices[] @relation("service_plan_pax_prices_product_fkey")
+  service_plan_activities_product_fkey service_plan_activities[] @relation("service_plan_activities_product_fkey")
 
   @@index([store_id, slug])
   @@index([store_id, sku])
@@ -4038,6 +4061,7 @@ model suppliers {
   organizations                       organizations              @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   store                               stores?                    @relation(fields: [store_id], references: [id], onDelete: SetNull)
   addresses                           addresses?                 @relation("supplier_addresses", fields: [address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  service_plan_activities             service_plan_activities[]
   invoices                            invoices[]
   withholding_calculations            withholding_calculations[]
   accounts_payable                    accounts_payable[]         @relation("supplier_accounts_payable")
@@ -10736,11 +10760,17 @@ model bank_accounts {
   status           bank_account_status_enum @default(active)
   chart_account_id Int?
   column_mapping   Json?
+  // QUI-1061 — solo aplica a cuentas de ORGANIZACIÓN (`store_id` NULL):
+  // `true` = disponible en todas las tiendas (default, y lo que ya eran las
+  // cuentas existentes); `false` = solo en las tiendas de `store_assignments`.
+  // Las cuentas de tienda (`store_id` = tienda) lo ignoran.
+  available_in_all_stores Boolean         @default(true)
   created_at       DateTime?                @default(now()) @db.Timestamp(6)
   updated_at       DateTime?                @default(now()) @db.Timestamp(6)
 
   organization         organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   store                stores?                @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  store_assignments    bank_account_stores[]
   chart_account        chart_of_accounts?     @relation(fields: [chart_account_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   bank_transactions    bank_transactions[]
   bank_reconciliations bank_reconciliations[]
@@ -10748,13 +10778,42 @@ model bank_accounts {
   // CP-POLLO-ARABE-727 A.3 — pagos asociados a esta cuenta (FK Restrict)
   payments             payments[]
 
-  @@unique([organization_id, account_number])
+  // QUI-1061 — unicidad según el scope fiscal de la organización:
+  // - cuentas de tienda: única por (organización, tienda, número);
+  // - cuentas de organización (`store_id` NULL): única por (organización,
+  //   número) vía el índice parcial `bank_accounts_org_account_number_org_level_key`
+  //   (`WHERE store_id IS NULL`), que vive solo en la migración
+  //   `20261231180000_bank_accounts_fiscal_scope` porque Prisma no modela
+  //   índices parciales y Postgres no compara NULL en el único compuesto.
+  @@unique([organization_id, store_id, account_number])
+  @@index([organization_id, store_id])
+}
+
+/// QUI-1061 — tiendas en las que está disponible una cuenta bancaria de
+/// ORGANIZACIÓN (`bank_accounts.store_id` NULL) cuando
+/// `available_in_all_stores = false`. Org-scoped en `StorePrismaService`.
+model bank_account_stores {
+  id              Int       @id @default(autoincrement())
+  bank_account_id Int
+  store_id        Int
+  organization_id Int
+  created_at      DateTime? @default(now()) @db.Timestamp(6)
+
+  bank_account bank_accounts @relation(fields: [bank_account_id], references: [id], onDelete: Cascade)
+  store        stores        @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+
+  @@unique([bank_account_id, store_id])
   @@index([organization_id, store_id])
 }
 
 model bank_transactions {
   id               Int                        @id @default(autoincrement())
   bank_account_id  Int
+  // QUI-1061 — tienda de origen del movimiento (nullable para históricos y
+  // extractos importados a nivel organización). Permite filtrar por sucursal
+  // en cuentas consolidadas de organización sin dividir saldo ni conciliación.
+  store_id         Int?
   transaction_date DateTime                   @db.Date
   value_date       DateTime?                  @db.Date
   description      String                     @db.VarChar(500)
@@ -10769,11 +10828,13 @@ model bank_transactions {
   updated_at       DateTime?                  @default(now()) @db.Timestamp(6)
 
   bank_account                bank_accounts                 @relation(fields: [bank_account_id], references: [id], onDelete: Cascade)
+  store                       stores?                       @relation(fields: [store_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   bank_reconciliation_matches bank_reconciliation_matches[]
 
   @@unique([bank_account_id, external_id])
   @@index([bank_account_id, transaction_date])
   @@index([bank_account_id, is_reconciled])
+  @@index([bank_account_id, store_id])
 }
 
 model bank_reconciliations {
@@ -11394,6 +11455,11 @@ model bookings {
   /// the same booking atomically. NULL when the booking was created
   /// outside the POS (ecommerce, reservations module, etc.).
   cart_item_id              String?                       @db.VarChar(80)
+  /// QUI-1060: salida fija del plan que ocupa esta reserva (NULL = fecha libre o servicio normal).
+  departure_id              Int?
+  /// QUI-1060: tamaño del grupo del plan. NULL en servicios normales.
+  pax_adults                Int?
+  pax_children              Int?
   created_at                DateTime?                     @default(now()) @db.Timestamp(6)
   updated_at                DateTime?                     @default(now()) @db.Timestamp(6)
 
@@ -11424,8 +11490,11 @@ model bookings {
   service_sessions_booking_fkey service_sessions[] @relation("service_sessions_booking_fkey")
 
   service_deposits_booking_fkey service_deposits[] @relation("service_deposits_booking_fkey")
+  service_plan_booking_tasks service_plan_booking_tasks[]
 
   series booking_series? @relation("bookings_series_fkey", fields: [series_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "bookings_series_id_fkey")
+
+  departure service_plan_departures? @relation("bookings_departure_fkey", fields: [departure_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "bookings_departure_id_fkey")
 
   @@unique([store_id, booking_number])
   @@unique([series_id, series_index], map: "bookings_series_id_series_index_key")
@@ -11437,6 +11506,7 @@ model bookings {
   @@index([provider_id])
   @@index([order_id])
   @@index([store_id, table_id])
+  @@index([departure_id])
 }
 
 /// Per-store business hours: the master calendar the booking flow consults
@@ -11492,6 +11562,8 @@ model service_providers {
   sort_order   Int       @default(0)
   /// Preferred station (not exclusive): booking with this provider tries it first, then falls back to auto-assignment. Must be linked in service_station_providers.
   default_station_id Int?
+  /// true = the weekly availability IS the store hours (settings.pos.business_hours), read live; false = own provider_schedules. Exceptions apply either way.
+  uses_store_hours Boolean @default(true)
   created_at   DateTime? @default(now()) @db.Timestamp(6)
   updated_at   DateTime? @default(now()) @db.Timestamp(6)
 
@@ -11508,6 +11580,7 @@ model service_providers {
 
   service_station_providers_provider_fkey service_station_providers[] @relation("service_station_providers_provider_fkey")
   service_allocations_provider_fkey service_allocations[] @relation("service_allocations_provider_fkey")
+  service_plan_activities_provider_fkey service_plan_activities[] @relation("service_plan_activities_provider_fkey")
   booking_reschedule_requests_provider_store_fkey booking_reschedule_requests[] @relation("booking_reschedule_requests_provider_store_fkey")
 
   @@unique([store_id, employee_id])
@@ -16118,6 +16191,7 @@ model crm_tasks {
   created_by    users?               @relation("crm_tasks_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   move_to_stage crm_pipeline_stages? @relation(fields: [move_to_stage_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   supporters    crm_task_assignees[]
+  plan_booking_tasks service_plan_booking_tasks[]
 
   @@index([store_id, assigned_user_id, status, due_at])
   @@index([customer_id])
@@ -16931,6 +17005,121 @@ model booking_series {
 
   @@index([store_id, created_at], map: "booking_series_store_created_idx")
   @@map("booking_series")
+}
+
+/// QUI-1060 modo Plan: cómo se venden las salidas de un plan de varios días.
+enum service_plan_departure_mode_enum {
+  fixed
+  on_demand
+  both
+}
+
+/// QUI-1060: estado de una salida fija de un plan.
+enum service_plan_departure_status_enum {
+  open
+  closed
+  cancelled
+}
+
+/// QUI-1060: salida fija de un plan (fecha, cupo y vendidos). `seats_sold` se mueve
+/// con una actualización condicional atómica al reservar y al cancelar.
+model service_plan_departures {
+  id             Int                                @id @default(autoincrement())
+  store_id       Int
+  product_id     Int
+  departure_date DateTime                           @db.Date
+  capacity       Int
+  seats_sold     Int                                @default(0)
+  price_override Decimal?                           @db.Decimal(12, 2)
+  status         service_plan_departure_status_enum @default(open)
+  notes          String?                            @db.Text
+  created_at     DateTime                           @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime                           @default(now()) @db.Timestamptz(6)
+
+  store    stores     @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "service_plan_departures_store_fkey")
+  product  products   @relation("service_plan_departures_product_fkey", fields: [store_id, product_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_plan_departures_product_fkey")
+  bookings bookings[] @relation("bookings_departure_fkey")
+
+  @@index([store_id, product_id, departure_date], map: "service_plan_departures_store_product_date_idx")
+  @@map("service_plan_departures")
+}
+
+/// QUI-1060: precio del paquete según tamaño del grupo (tramos sin solape por producto).
+model service_plan_pax_prices {
+  id         Int      @id @default(autoincrement())
+  store_id   Int
+  product_id Int
+  min_pax    Int
+  max_pax    Int
+  price      Decimal  @db.Decimal(12, 2)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+
+  store   stores   @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "service_plan_pax_prices_store_fkey")
+  product products @relation("service_plan_pax_prices_product_fkey", fields: [store_id, product_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_plan_pax_prices_product_fkey")
+
+  @@index([store_id, product_id, min_pax], map: "service_plan_pax_prices_store_product_min_idx")
+  @@map("service_plan_pax_prices")
+}
+
+/// QUI-1060 F2: actividad del itinerario de un plan, por día (1..plan_duration_days).
+/// Responsable interno (`provider_id`) o tercero (`supplier_*`), nunca los dos. Costo y
+/// responsables son internos: solo `is_public` sale al cliente (sin costo ni proveedor).
+model service_plan_activities {
+  id               Int      @id @default(autoincrement())
+  store_id         Int
+  product_id       Int
+  day_number       Int
+  /// `HH:mm` en la hora local de la tienda; null = sin hora.
+  start_time       String?  @db.VarChar(5)
+  title            String   @db.VarChar(200)
+  description      String?  @db.Text
+  sort_order       Int      @default(0)
+  provider_id      Int?
+  supplier_name    String?  @db.VarChar(200)
+  supplier_contact String?  @db.VarChar(200)
+  /// F3: tercero elegido de los proveedores registrados; nombre y contacto quedan
+  /// copiados en `supplier_name`/`supplier_contact` como respaldo.
+  supplier_id      Int?
+  cost             Decimal? @db.Decimal(12, 2)
+  /// F3: crea una tarea al vender el plan.
+  creates_task     Boolean  @default(false)
+  is_public        Boolean  @default(true)
+  created_at       DateTime @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime @default(now()) @db.Timestamptz(6)
+
+  store    stores             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "service_plan_activities_store_fkey")
+  product  products           @relation("service_plan_activities_product_fkey", fields: [store_id, product_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_plan_activities_product_fkey")
+  provider service_providers? @relation("service_plan_activities_provider_fkey", fields: [store_id, provider_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_plan_activities_provider_fkey")
+  supplier suppliers?         @relation(fields: [supplier_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "service_plan_activities_supplier_fkey")
+  booking_tasks service_plan_booking_tasks[]
+
+  @@index([store_id, product_id, day_number, sort_order], map: "service_plan_activities_store_product_day_order_idx")
+  @@index([supplier_id], map: "service_plan_activities_supplier_id_idx")
+  @@map("service_plan_activities")
+}
+
+/// QUI-1060 F3: tarea CRM generada por una actividad del plan al confirmar la
+/// reserva. El UNIQUE (booking_id, activity_id) hace idempotente la generación.
+model service_plan_booking_tasks {
+  id          Int      @id @default(autoincrement())
+  store_id    Int
+  booking_id  Int
+  activity_id Int?
+  crm_task_id Int?
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  store    stores                   @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "service_plan_booking_tasks_store_fkey")
+  booking  bookings                 @relation(fields: [store_id, booking_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_plan_booking_tasks_booking_fkey")
+  activity service_plan_activities? @relation(fields: [activity_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "service_plan_booking_tasks_activity_fkey")
+  crm_task crm_tasks?               @relation(fields: [crm_task_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "service_plan_booking_tasks_crm_task_fkey")
+
+  @@unique([booking_id, activity_id], map: "service_plan_booking_tasks_booking_activity_key")
+  @@index([store_id, booking_id], map: "service_plan_booking_tasks_store_booking_idx")
+  @@index([activity_id], map: "service_plan_booking_tasks_activity_id_idx")
+  @@index([crm_task_id], map: "service_plan_booking_tasks_crm_task_id_idx")
+  @@map("service_plan_booking_tasks")
 }
 
 enum service_deposit_kind_enum {
