@@ -943,6 +943,7 @@ jobs:
           --include='**/reservations/utils/plan-tasks.util.spec.ts'
           --include='**/shared/utils/plan-itinerary.util.spec.ts'
           --include='**/public/service-page/service-page.util.spec.ts'
+          --include='**/store/accounting/components/bank-reconciliation/bank-accounts.component.spec.ts'
 
   mobile:
     name: Mobile
