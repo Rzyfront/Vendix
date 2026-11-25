@@ -55,6 +55,7 @@ import { Router } from '@angular/router';
 import type { Observable } from 'rxjs';
 
 import {
+  ButtonComponent,
   IconComponent,
   StickyHeaderComponent,
   ToastService,
@@ -104,6 +105,7 @@ const PAGE_SIZE = 20;
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    ButtonComponent,
     IconComponent,
     StickyHeaderComponent,
     BulkCustomerSelectionPanelComponent,
