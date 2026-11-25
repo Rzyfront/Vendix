@@ -47,6 +47,7 @@ describe('service page reader', () => {
       featured_service_ids: [],
       product_ids: [],
       custom_domain_previous_app_type: null,
+      custom_domain_aliases: [],
     });
     expect(
       parseServicePageConfig({
@@ -58,6 +59,7 @@ describe('service page reader', () => {
       featured_service_ids: [4, 9],
       product_ids: [],
       custom_domain_previous_app_type: 'STORE_LANDING',
+      custom_domain_aliases: [],
     });
   });
 

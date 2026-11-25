@@ -37,7 +37,7 @@ describe('BookingPublicController.get (stay_facts)', () => {
       schema_version: 1,
       blocks: [{ id: 'stay', type: 'stay_detail', props: { show_deposit: true } }],
     });
-    const data = (await controller.get()) as Record<string, unknown>;
+    const data = (await controller.get()) as unknown as Record<string, unknown>;
     expect(data['stay_facts']).toEqual(stayFacts);
     expect(policies.stayFacts).toHaveBeenCalledWith(7);
   });
@@ -47,7 +47,7 @@ describe('BookingPublicController.get (stay_facts)', () => {
       schema_version: 1,
       blocks: [{ id: 'faq', type: 'faq', props: { title: 'Preguntas' } }],
     });
-    const data = (await controller.get()) as Record<string, unknown>;
+    const data = (await controller.get()) as unknown as Record<string, unknown>;
     expect(data).not.toHaveProperty('stay_facts');
     expect(policies.stayFacts).not.toHaveBeenCalled();
 
