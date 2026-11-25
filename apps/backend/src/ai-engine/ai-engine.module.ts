@@ -60,6 +60,7 @@ import { AgentDurableSessionService } from './tasks/agent-durable-session.servic
 import { S3Module } from '../common/services/s3.module';
 import { S3Service } from '../common/services/s3.service';
 import { ConversationCompactorService } from './context/conversation-compactor.service';
+import { RequestContextService } from '../common/context/request-context.service';
 
 /**
  * Tool registration is decentralized: each domain module registers its own
@@ -208,7 +209,31 @@ export class AIEngineModule implements OnModuleInit {
       }),
     );
     this.toolRegistry.registerMany(
-      createCapabilityTools({ capabilities: this.capabilities }),
+      createCapabilityTools({
+        capabilities: this.capabilities,
+        // T7: native tools the caller's permissions reach, same gate as the
+        // turn's tool list (getAvailableDefinitions).
+        nativeTools: () => {
+          const context = RequestContextService.getContext();
+          const granted = context?.permissions?.length
+            ? context.permissions
+            : (context?.roles ?? []);
+          const permitted = new Set(
+            this.toolRegistry
+              .getAvailableDefinitions(granted)
+              .map((d) => d.function.name),
+          );
+          return this.toolRegistry
+            .getAll()
+            .filter((tool) => permitted.has(tool.name) && !tool.clientSide)
+            .map((tool) => ({
+              name: tool.name,
+              domain: tool.domain,
+              description: tool.description,
+              readOnly: tool.readOnly === true,
+            }));
+        },
+      }),
     );
     this.toolRegistry.registerMany(
       createAiToolboxTools({

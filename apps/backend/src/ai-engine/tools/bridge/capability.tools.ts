@@ -9,8 +9,42 @@ import {
   CapabilityRegistryService,
 } from './capability-registry.service';
 
+/** A native (typed) tool the caller may use, for the capability map (T7). */
+export interface NativeToolSummary {
+  name: string;
+  domain: string;
+  description: string;
+  readOnly: boolean;
+}
+
 export interface CapabilityToolDeps {
   capabilities: CapabilityRegistryService;
+  /**
+   * T7: native tools the CURRENT caller may use (already filtered by their
+   * permissions). Without it the map only knows bridge routes, and an area
+   * served by typed tools (pricing) read as «no hay rutas del puente».
+   */
+  nativeTools?: () => NativeToolSummary[];
+}
+
+/** Domains that are agent plumbing, not business areas. */
+const PLUMBING_DOMAINS = new Set([
+  'capabilities',
+  'discovery',
+  'turn',
+  'ui',
+  'vex_batches',
+  'planning',
+]);
+
+function normalizeDomain(domain: string): string {
+  return domain.trim().toLowerCase().replace(/[\s_]+/g, '-');
+}
+
+/** First sentence, bounded: enough to choose, not a manual. */
+function shortDescription(text: string): string {
+  const first = text.split(/(?<=\.)\s/)[0] ?? text;
+  return first.length > 180 ? `${first.slice(0, 177)}...` : first;
 }
 
 function summaryFields<T extends Capability>(
@@ -38,7 +72,13 @@ const MAX_CAPABILITIES_PER_ANSWER = 60;
  */
 export function createCapabilityTools({
   capabilities,
+  nativeTools,
 }: CapabilityToolDeps): RegisteredTool[] {
+  const permittedNative = (): NativeToolSummary[] =>
+    (nativeTools?.() ?? []).filter(
+      (tool) => !PLUMBING_DOMAINS.has(tool.domain),
+    );
+
   return [
     {
       name: 'list_capabilities',
@@ -71,6 +111,10 @@ export function createCapabilityTools({
                 args,
                 'capability-domains',
               );
+              // T7: areas served by native tools, with or without routes.
+              const byDomain = new Map<string, number>();
+              for (const tool of permittedNative())
+                byDomain.set(tool.domain, (byDomain.get(tool.domain) ?? 0) + 1);
               return JSON.stringify({
                 areas: page.data.map((d) => ({
                   domain: d.domain,
@@ -81,8 +125,13 @@ export function createCapabilityTools({
                 total: page.total,
                 has_more: page.has_more,
                 cursor: page.cursor,
+                ...(byDomain.size && {
+                  areas_con_herramientas: [...byDomain.entries()]
+                    .sort(([a], [b]) => a.localeCompare(b))
+                    .map(([domain, herramientas]) => ({ domain, herramientas })),
+                }),
                 next_step:
-                  'Consulta domain para procesos; usa cursor para continuar áreas.',
+                  'Consulta domain para procesos y herramientas; usa cursor para continuar áreas.',
               });
             }
             const operations = capabilities
@@ -98,15 +147,27 @@ export function createCapabilityTools({
               'capabilities',
               args.domain,
             ]);
+            const wanted = normalizeDomain(String(args.domain));
+            const herramientas = permittedNative()
+              .filter((tool) => normalizeDomain(tool.domain) === wanted)
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map((tool) => ({
+                name: tool.name,
+                tipo: tool.readOnly ? 'consulta' : 'cambio',
+                does: shortDescription(tool.description),
+              }));
             return JSON.stringify({
               domain: args.domain,
               operaciones: page.data.map(summaryFields),
               total: page.total,
               has_more: page.has_more,
               cursor: page.cursor,
+              ...(herramientas.length && { herramientas }),
               next_step: page.total
                 ? 'Obtén el contrato completo en list_endpoints antes de escribir; no adivines DTOs anidados.'
-                : 'Esta área no tiene rutas del puente: no adivines rutas con call_endpoint. Busca la herramienta propia con search_tools usando la intención de la persona.',
+                : herramientas.length
+                  ? 'Esta área se maneja con sus herramientas propias (herramientas): llámalas por su nombre exacto; no adivines rutas con call_endpoint.'
+                  : 'Esta área no tiene rutas del puente ni herramientas para esta persona: no adivines rutas con call_endpoint. Busca una vez con search_tools usando la intención de la persona; si tampoco aparece, dile en una frase que no puedes hacerlo.',
             });
           } catch (error) {
             return discoveryError(error);
