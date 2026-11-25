@@ -148,7 +148,9 @@ interface PlaceholderView {
       :host([data-ap-hero='full']) .ap-hero {
         display: flex;
         align-items: center;
-        min-height: 100svh;
+        /* --ap-hero-min-h la fija el preview del editor: dentro del panel,
+           100svh sería la ventana entera y empujaría el resto de la página. */
+        min-height: var(--ap-hero-min-h, 100svh);
       }
       :host([data-ap-card='flat']) .ap-card,
       :host([data-ap-card='flat']) .ap-round {
