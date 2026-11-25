@@ -11,7 +11,10 @@ import { Observable } from 'rxjs';
 import { tap, catchError } from 'rxjs/operators';
 import { PerformanceCollectorService } from '../services/performance-collector.service';
 import { PlatformAlertService } from '../../../../common/platform-alerts/platform-alert.service';
-import { safeRouteParams } from '../../../../common/platform-alerts/platform-alert-sanitize';
+import {
+  alertIdentityFromRequest,
+  safeRouteParams,
+} from '../../../../common/platform-alerts/platform-alert-sanitize';
 import { getRequestIdFromRequest } from '../../../../common/middleware/request-id.middleware';
 
 const EXCLUDED_PATHS = [
@@ -59,7 +62,7 @@ export class PerformanceInterceptor implements NestInterceptor {
         if (isSse) return;
         // Identidad explícita: este `tap` corre fuera del AsyncLocalStorage del
         // request, así que la alerta salía como «Plataforma (sin tienda)».
-        const who = this.tenantOf(req);
+        const who = alertIdentityFromRequest(req);
         this.alerts?.captureSlowRequest({
           method,
           route: path,
@@ -80,24 +83,6 @@ export class PerformanceInterceptor implements NestInterceptor {
         throw err;
       }),
     );
-  }
-
-  /** Tienda, organización y usuario del request ya autenticado (`req.user`). */
-  private tenantOf(req: any): {
-    organizationId: number | null;
-    storeId: number | null;
-    userId: number | null;
-  } {
-    const user = req?.user ?? {};
-    const num = (value: unknown): number | null => {
-      const parsed = Number(value);
-      return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-    };
-    return {
-      organizationId: num(user.organization_id),
-      storeId: num(user.store_id),
-      userId: num(user.id ?? user.user_id),
-    };
   }
 
   private getPath(req: any): string {

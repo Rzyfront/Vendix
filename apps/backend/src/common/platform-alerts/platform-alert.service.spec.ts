@@ -226,6 +226,43 @@ describe('PlatformAlertService', () => {
     expect(text).toContain('orderId=987');
   });
 
+  it('sin identidad explícita usa el contexto del request (jobs e incidentes)', async () => {
+    const service = build();
+    await RequestContextService.asyncLocalStorage.run(
+      { is_super_admin: false, is_owner: false, store_id: 105, organization_id: 82, user_id: 7 } as never,
+      async () => {
+        service.captureSlowRequest({
+          method: 'GET',
+          route: '/api/store/invoicing/orders/:orderId',
+          durationMs: 60_000,
+          statusCode: 200,
+        });
+      },
+    );
+    await service.flush();
+    expect(prisma.rows[0]).toMatchObject({ store_id: 105, organization_id: 82 });
+  });
+
+  it('la identidad explícita gana sobre el contexto del request', async () => {
+    const service = build();
+    await RequestContextService.asyncLocalStorage.run(
+      { is_super_admin: false, is_owner: false, store_id: 1, organization_id: 2, user_id: 3 } as never,
+      async () => {
+        service.captureSlowRequest({
+          method: 'GET',
+          route: '/api/store/x',
+          durationMs: 60_000,
+          statusCode: 200,
+          organizationId: 82,
+          storeId: 105,
+          userId: 7,
+        });
+      },
+    );
+    await service.flush();
+    expect(prisma.rows[0]).toMatchObject({ store_id: 105, organization_id: 82 });
+  });
+
   it('un 5xx de tienda usa la identidad explícita del request', async () => {
     const service = build();
     service.captureHttpFailure(
