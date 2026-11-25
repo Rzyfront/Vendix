@@ -29,7 +29,9 @@
 :host(.pa-embedded) .provider-availability {
   max-width: none;
   margin: 0;
-  padding: 0;
+  // Solo se quitan los laterales: el respiro inferior evita que la última
+  // tarjeta quede pegada al borde del scroll.
+  padding: 0 0 24px;
 }
 
 // ===== Tokens ===============================================================

@@ -103,15 +103,13 @@ describe('Agenda unificada F1 — pestaña Configuración', () => {
     // Sin detectChanges: las pantallas de Reservas se prueban en su módulo; aquí solo el acceso.
   }
 
-  it('configura las secciones de Agenda sin repetir las pantallas que ya viven en el menú de Acciones', () => {
+  it('configura las secciones de Agenda; las demás pantallas viven en el menú de Acciones', () => {
     setup(SOURCES);
     const fixture = TestBed.createComponent(SchedulingConfigTabComponent);
     fixture.componentRef.setInput('section', 'equipo');
     const tab = fixture.componentInstance;
     expect(tab.sectionTabs.map((t) => t.id)).toEqual(['equipo', 'disponibilidad', 'cola', 'horario']);
     expect(tab.hasBookings()).toBeTrue();
-    // La rejilla «Otras pantallas» se retiró: esas rutas ya están en el menú de acciones de Agenda.
-    expect((tab as unknown as { links?: unknown }).links).toBeUndefined();
   });
 
   it('sin reservas habilitadas no ofrece configurar prestadores', () => {

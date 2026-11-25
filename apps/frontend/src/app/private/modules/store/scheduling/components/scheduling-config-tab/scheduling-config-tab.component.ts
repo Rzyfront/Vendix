@@ -2,7 +2,6 @@ import { Component, DestroyRef, computed, inject, input, output, signal } from '
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   EmptyStateComponent,
-  IconComponent,
   ScrollableTabsComponent,
   SpinnerComponent,
 } from '../../../../../../shared/components/index';
@@ -34,7 +33,6 @@ export const CONFIG_SECTION_TABS: { id: ConfigSection; label: string; icon: stri
   selector: 'app-scheduling-config-tab',
   standalone: true,
   imports: [
-    IconComponent,
     ScrollableTabsComponent,
     SpinnerComponent,
     EmptyStateComponent,
