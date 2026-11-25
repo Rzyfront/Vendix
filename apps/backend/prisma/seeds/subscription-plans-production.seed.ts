@@ -157,9 +157,12 @@ const CANONICAL_PLANS: CanonicalPlan[] = [
         tools_allowed: ['inventory', 'customers', 'orders'],
         degradation: 'warn',
       },
+      // Sin tope: la indexación no se cobra ni se topa por tienda
+      // (decisión de Rafael, 25-nov-2026). El tope de 1000 divergía de la
+      // migración `20270105130000_enable_rag_embeddings_all_plans`.
       rag_embeddings: {
         enabled: true,
-        indexed_docs_cap: 1000,
+        indexed_docs_cap: null,
         degradation: 'warn',
       },
       async_queue: {
