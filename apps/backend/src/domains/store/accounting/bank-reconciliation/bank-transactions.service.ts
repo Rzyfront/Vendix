@@ -100,6 +100,9 @@ export class BankTransactionsService {
     filename: string,
   ) {
     const account = await this.bank_accounts_service.findOne(bank_account_id);
+    if (account.can_edit === false) {
+      throw new VendixHttpException(ErrorCodes.BANK_ACCOUNT_ORG_MANAGED);
+    }
 
     let column_mapping: any = undefined;
     if (account.column_mapping) {
@@ -220,7 +223,12 @@ export class BankTransactionsService {
       throw new VendixHttpException(ErrorCodes.BANK_TRANSACTION_NOT_FOUND);
     }
 
-    await this.bank_accounts_service.findOne(transaction.bank_account_id);
+    const account = await this.bank_accounts_service.findOne(
+      transaction.bank_account_id,
+    );
+    if (account.can_edit === false) {
+      throw new VendixHttpException(ErrorCodes.BANK_ACCOUNT_ORG_MANAGED);
+    }
 
     if (transaction.is_reconciled) {
       throw new VendixHttpException(

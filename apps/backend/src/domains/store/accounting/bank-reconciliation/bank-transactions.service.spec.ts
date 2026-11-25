@@ -1,5 +1,6 @@
 import { BankTransactionsService } from './bank-transactions.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
+import { ErrorCodes } from '../../../../common/errors';
 
 describe('BankTransactionsService — origin store_id tracking & filtering (QUI-1061)', () => {
   let service: BankTransactionsService;
@@ -11,8 +12,10 @@ describe('BankTransactionsService — origin store_id tracking & filtering (QUI-
     prisma = {
       bank_transactions: {
         findMany: jest.fn(),
+        findFirst: jest.fn(),
         count: jest.fn(),
         createMany: jest.fn(),
+        delete: jest.fn(),
       },
     };
     bankAccountsService = {
@@ -87,5 +90,32 @@ describe('BankTransactionsService — origin store_id tracking & filtering (QUI-
         }),
       }),
     );
+  });
+
+  it('blocks importStatement and remove when account is read-only (can_edit=false) for store admin in scope ORGANIZATION', async () => {
+    bankAccountsService.findOne.mockResolvedValue({
+      id: 50,
+      store_id: null,
+      can_edit: false,
+      column_mapping: null,
+    });
+
+    await expect(
+      service.importStatement(50, Buffer.from('csv'), 'extracto.csv'),
+    ).rejects.toMatchObject({
+      errorCode: ErrorCodes.BANK_ACCOUNT_ORG_MANAGED.code,
+    });
+    expect(parserFactory.parse).not.toHaveBeenCalled();
+
+    prisma.bank_transactions.findFirst.mockResolvedValue({
+      id: 901,
+      bank_account_id: 50,
+      is_reconciled: false,
+    });
+
+    await expect(service.remove(901)).rejects.toMatchObject({
+      errorCode: ErrorCodes.BANK_ACCOUNT_ORG_MANAGED.code,
+    });
+    expect(prisma.bank_transactions.delete).not.toHaveBeenCalled();
   });
 });
