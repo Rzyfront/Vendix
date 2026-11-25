@@ -77,26 +77,33 @@ describe('AppProductSelectorComponent', () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     fixture.detectChanges();
 
-    // Foco inicial en el campo de búsqueda y atributos ARIA del diálogo y listbox
+    // Foco inicial en el campo de búsqueda y atributos ARIA del diálogo y grupo de opciones
     const dialog = el().querySelector('[role="dialog"]');
     expect(dialog?.getAttribute('aria-modal')).toBe('true');
     const searchInput = el().querySelector('[data-testid="product-selector-search"]') as HTMLInputElement;
     expect(document.activeElement).toBe(searchInput);
 
-    const listbox = el().querySelector('[role="listbox"]');
-    expect(listbox?.getAttribute('aria-multiselectable')).toBe('true');
+    const group = el().querySelector('[data-testid="product-selector-results"]');
+    expect(group?.getAttribute('role')).toBe('group');
+    expect(group?.querySelector('li')).toBeNull();
 
-    // Muestra miniatura, SKU, precio y estado
+    // Muestra miniatura, SKU, precio y estado con rol checkbox accesible
     const option20 = el().querySelector('[data-testid="product-selector-option-20"]') as HTMLButtonElement;
+    expect(option20.getAttribute('role')).toBe('checkbox');
+    expect(option20.getAttribute('aria-checked')).toBe('false');
     expect(option20.querySelector('img')?.getAttribute('src')).toBe('https://cdn.vendix.test/20.jpg');
     expect(option20.textContent).toContain('SKU: SRM-20');
     expect(option20.textContent).toContain('$68000');
     expect(option20.textContent).toContain('Inactivo');
 
     // Elegir en orden inverso: primero 30, luego 10
-    (el().querySelector('[data-testid="product-selector-option-30"]') as HTMLButtonElement).click();
-    (el().querySelector('[data-testid="product-selector-option-10"]') as HTMLButtonElement).click();
+    const option30 = el().querySelector('[data-testid="product-selector-option-30"]') as HTMLButtonElement;
+    const option10 = el().querySelector('[data-testid="product-selector-option-10"]') as HTMLButtonElement;
+    option30.click();
+    option10.click();
     fixture.detectChanges();
+    expect(option30.getAttribute('aria-checked')).toBe('true');
+    expect(option10.getAttribute('aria-checked')).toBe('true');
 
     (el().querySelector('[data-testid="product-selector-apply"]') as HTMLButtonElement).click();
     fixture.detectChanges();

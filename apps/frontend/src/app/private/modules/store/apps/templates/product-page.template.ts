@@ -92,7 +92,7 @@ export const PRODUCT_PAGE_TEMPLATE: AppPageTemplate = {
     {
       type: 'products',
       label: 'Productos',
-      description: 'Vitrina de productos con selección automática o manual, variantes y diseño.',
+      description: 'Vitrina de productos (automático: hasta 8 recientes de la tienda; manual: tu selección), variantes y diseño.',
       icon: 'shopping-bag',
       fields: productsFields(),
     },

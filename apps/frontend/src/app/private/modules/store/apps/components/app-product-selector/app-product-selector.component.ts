@@ -188,10 +188,9 @@ const STATE_LABELS: Record<string, { label: string; tone: string }> = {
               <p>No encontramos productos que coincidan con tu búsqueda.</p>
             </div>
           } @else {
-            <ul
+            <div
               class="max-h-96 divide-y divide-[var(--color-border)] overflow-y-auto rounded-xl border border-[var(--color-border)]"
-              role="listbox"
-              aria-multiselectable="true"
+              role="group"
               aria-label="Resultados de productos"
               data-testid="product-selector-results"
             >
@@ -200,70 +199,68 @@ const STATE_LABELS: Record<string, { label: string; tone: string }> = {
                 @let disabled = !selected && isLimitReached();
                 @let order = draftOrderOf(product.id);
                 @let status = statusOf(product);
-                <li>
-                  <button
-                    type="button"
-                    role="option"
-                    class="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-[var(--color-background)] disabled:cursor-not-allowed disabled:opacity-50"
-                    [class.bg-[var(--color-primary)]/5]="selected"
-                    [attr.aria-selected]="selected"
-                    [disabled]="disabled"
-                    [attr.data-testid]="'product-selector-option-' + product.id"
-                    (click)="toggleDraft(product)"
+                <button
+                  type="button"
+                  role="checkbox"
+                  class="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-[var(--color-background)] disabled:cursor-not-allowed disabled:opacity-50"
+                  [class.bg-[var(--color-primary)]/5]="selected"
+                  [attr.aria-checked]="selected"
+                  [disabled]="disabled"
+                  [attr.data-testid]="'product-selector-option-' + product.id"
+                  (click)="toggleDraft(product)"
+                >
+                  <span
+                    class="flex h-5 w-5 shrink-0 items-center justify-center rounded border text-[11px] font-bold"
+                    [class]="selected
+                      ? 'border-[var(--color-primary)] bg-[var(--color-primary)] text-white'
+                      : 'border-[var(--color-border)] bg-[var(--color-surface)] text-transparent'"
+                    aria-hidden="true"
                   >
+                    @if (order !== null) {
+                      {{ order }}
+                    }
+                  </span>
+
+                  <span class="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] text-[var(--color-text-secondary)]">
+                    @if (thumbOf(product); as src) {
+                      <img [src]="src" alt="" class="h-full w-full object-cover" loading="lazy" />
+                    } @else {
+                      <app-icon name="package" [size]="16" />
+                    }
+                  </span>
+
+                  <span class="min-w-0 flex-1">
+                    <span class="block truncate text-sm font-medium text-[var(--color-text-primary)]">
+                      {{ product.name }}
+                    </span>
+                    <span class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-[var(--color-text-secondary)]">
+                      @if (product.sku) {
+                        <span data-testid="product-selector-sku">SKU: {{ product.sku }}</span>
+                      }
+                      @if (variantCountOf(product) > 0) {
+                        <span>{{ variantCountOf(product) }} variantes</span>
+                      }
+                      @if (product.available_for_ecommerce === false) {
+                        <span>No publicado en línea</span>
+                      }
+                    </span>
+                  </span>
+
+                  <span class="flex shrink-0 flex-col items-end gap-1">
+                    <span class="text-sm font-semibold text-[var(--color-text-primary)]" data-testid="product-selector-price">
+                      {{ priceOf(product) | currency }}
+                    </span>
                     <span
-                      class="flex h-5 w-5 shrink-0 items-center justify-center rounded border text-[11px] font-bold"
-                      [class]="selected
-                        ? 'border-[var(--color-primary)] bg-[var(--color-primary)] text-white'
-                        : 'border-[var(--color-border)] bg-[var(--color-surface)] text-transparent'"
-                      aria-hidden="true"
+                      class="rounded-full border px-2 py-0.5 text-[10px] font-semibold"
+                      [class]="status.tone"
+                      data-testid="product-selector-status"
                     >
-                      @if (order !== null) {
-                        {{ order }}
-                      }
+                      {{ status.label }}
                     </span>
-
-                    <span class="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] text-[var(--color-text-secondary)]">
-                      @if (thumbOf(product); as src) {
-                        <img [src]="src" alt="" class="h-full w-full object-cover" loading="lazy" />
-                      } @else {
-                        <app-icon name="package" [size]="16" />
-                      }
-                    </span>
-
-                    <span class="min-w-0 flex-1">
-                      <span class="block truncate text-sm font-medium text-[var(--color-text-primary)]">
-                        {{ product.name }}
-                      </span>
-                      <span class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-[var(--color-text-secondary)]">
-                        @if (product.sku) {
-                          <span data-testid="product-selector-sku">SKU: {{ product.sku }}</span>
-                        }
-                        @if (variantCountOf(product) > 0) {
-                          <span>{{ variantCountOf(product) }} variantes</span>
-                        }
-                        @if (product.available_for_ecommerce === false) {
-                          <span>No publicado en línea</span>
-                        }
-                      </span>
-                    </span>
-
-                    <span class="flex shrink-0 flex-col items-end gap-1">
-                      <span class="text-sm font-semibold text-[var(--color-text-primary)]" data-testid="product-selector-price">
-                        {{ priceOf(product) | currency }}
-                      </span>
-                      <span
-                        class="rounded-full border px-2 py-0.5 text-[10px] font-semibold"
-                        [class]="status.tone"
-                        data-testid="product-selector-status"
-                      >
-                        {{ status.label }}
-                      </span>
-                    </span>
-                  </button>
-                </li>
+                  </span>
+                </button>
               }
-            </ul>
+            </div>
           }
         </div>
 

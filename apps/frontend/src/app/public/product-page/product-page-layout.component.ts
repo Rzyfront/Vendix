@@ -45,7 +45,6 @@ import { ProductPageService } from './product-page.service';
       [homeLink]="homeLink()"
       [cartCount]="cartCount()"
       [featuredRoute]="isFeaturedRoute()"
-      [autoProductIds]="complementIds()"
     >
       <router-outlet />
       @if (showComplements()) {

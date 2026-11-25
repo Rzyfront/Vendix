@@ -1,3 +1,4 @@
+import { NgTemplateOutlet } from '@angular/common';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -23,7 +24,6 @@ import {
   ResolvedCardPrice,
   mapEcommerceProductToItem,
   orderProductsByIds,
-  resolveProductCardPrice,
 } from './app-page-products.util';
 import { safeUrl } from './app-page-view.util';
 
@@ -32,18 +32,24 @@ import { safeUrl } from './app-page-view.util';
  *
  * Se usa tanto en la página pública (cargando productos reales desde
  * `CatalogService` con `include_variants`) como en la vista previa del editor
- * (recibiendo `previewItems` ya resueltos desde el builder, sin peticiones).
+ * (recibiendo `previewItems` ya resueltos desde el servidor, sin peticiones).
  *
- * - Soporta diseños `grid` (por defecto), `list` y `carousel`.
+ * - Soporta diseños `grid` (por defecto), `list` y `carousel` con una sola
+ *   plantilla de tarjeta (`#productCardTpl`).
  * - En modo `manual`, respeta exactamente el orden de `productIds` (máx. 50).
+ * - En modo `auto`:
+ *   - En `service_page`: usa `autoProductIds` (los productos secundarios de General).
+ *   - En `product_page`: no repite la sección `complements`; muestra hasta 8
+ *     productos recientes del catálogo (`allowCatalogFallback = true`, y
+ *     `auto_products` en vista previa).
  * - Con `showVariants = true`, cada tarjeta con variantes ofrece selector
- *   (nombre y precio) que actualiza el precio mostrado usando la misma
- *   resolución que la página pública. Sin HTML libre.
+ *   (nombre y precio) y anuncia el cambio de precio con `aria-live="polite"`.
+ *   Sin HTML libre.
  */
 @Component({
   selector: 'app-page-products-view',
   standalone: true,
-  imports: [RouterModule, IconComponent, CurrencyPipe],
+  imports: [NgTemplateOutlet, RouterModule, IconComponent, CurrencyPipe],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (displayedProducts().length > 0) {
@@ -67,76 +73,7 @@ import { safeUrl } from './app-page-view.util';
               data-testid="products-carousel-track"
             >
               @for (item of displayedProducts(); track item.id) {
-                <article
-                  class="ap-card flex w-60 shrink-0 snap-start flex-col overflow-hidden rounded-2xl border border-border bg-surface sm:w-64"
-                  [attr.data-product-id]="item.id"
-                  data-testid="product-block-card"
-                >
-                  <div class="aspect-square overflow-hidden bg-surface-secondary">
-                    @if (imageOf(item); as src) {
-                      <img [src]="src" [alt]="item.name" loading="lazy" class="ap-img h-full w-full object-cover" />
-                    } @else {
-                      <span class="flex h-full w-full items-center justify-center text-text-secondary">
-                        <app-icon name="package" [size]="28" />
-                      </span>
-                    }
-                  </div>
-                  <div class="flex flex-1 flex-col gap-2 p-3.5 text-left">
-                    @if (preview()) {
-                      <h3 class="ap-heading line-clamp-2 text-sm font-semibold text-text-primary">{{ item.name }}</h3>
-                    } @else {
-                      <a
-                        [routerLink]="['/products', item.slug]"
-                        [queryParams]="variantQueryParams(item.id)"
-                        class="hover:underline"
-                      >
-                        <h3 class="ap-heading line-clamp-2 text-sm font-semibold text-text-primary">{{ item.name }}</h3>
-                      </a>
-                    }
-
-                    @let priceInfo = priceOf(item);
-                    <div class="flex flex-wrap items-baseline gap-2" data-testid="product-card-price-row">
-                      <span
-                        class="text-base font-bold text-text-primary"
-                        [class.text-emerald-600]="priceInfo.onSale"
-                        data-testid="product-card-price"
-                      >
-                        {{ priceInfo.price | currency }}
-                      </span>
-                      @if (priceInfo.compareAt !== null) {
-                        <span class="text-xs text-text-secondary line-through" data-testid="product-card-compare-at">
-                          {{ priceInfo.compareAt | currency }}
-                        </span>
-                      }
-                    </div>
-
-                    @if (showVariants() && item.variants.length > 0) {
-                      <div
-                        class="mt-auto flex flex-wrap gap-1.5 pt-1"
-                        role="group"
-                        [attr.aria-label]="'Variantes de ' + item.name"
-                        data-testid="product-variant-selector"
-                      >
-                        @for (variant of item.variants; track variant.id) {
-                          @let active = isVariantSelected(item.id, variant.id);
-                          <button
-                            type="button"
-                            class="rounded-lg border px-2 py-1 text-xs font-medium transition-colors"
-                            [class]="active
-                              ? 'ap-accent-bg border-transparent'
-                              : 'border-border bg-surface text-text-primary hover:bg-surface-secondary'"
-                            [attr.aria-pressed]="active"
-                            [attr.data-variant-id]="variant.id"
-                            [attr.data-testid]="'variant-option-' + variant.id"
-                            (click)="selectVariant(item.id, variant.id, $event)"
-                          >
-                            {{ variant.name }} · {{ variant.final_price | currency }}
-                          </button>
-                        }
-                      </div>
-                    }
-                  </div>
-                </article>
+                <ng-container *ngTemplateOutlet="productCardTpl; context: { item: item, layout: 'carousel' }" />
               }
             </div>
 
@@ -166,78 +103,7 @@ import { safeUrl } from './app-page-view.util';
         } @else if (effectiveLayout() === 'list') {
           <div class="flex flex-col gap-3" data-testid="products-layout-list">
             @for (item of displayedProducts(); track item.id) {
-              <article
-                class="ap-card flex overflow-hidden rounded-2xl border border-border bg-surface text-left"
-                [attr.data-product-id]="item.id"
-                data-testid="product-block-card"
-              >
-                <div class="h-28 w-28 shrink-0 overflow-hidden bg-surface-secondary sm:h-36 sm:w-36">
-                  @if (imageOf(item); as src) {
-                    <img [src]="src" [alt]="item.name" loading="lazy" class="ap-img h-full w-full object-cover" />
-                  } @else {
-                    <span class="flex h-full w-full items-center justify-center text-text-secondary">
-                      <app-icon name="package" [size]="28" />
-                    </span>
-                  }
-                </div>
-                <div class="flex min-w-0 flex-1 flex-col gap-2 p-4">
-                  <div class="flex flex-wrap items-start justify-between gap-2">
-                    @if (preview()) {
-                      <h3 class="ap-heading text-base font-semibold text-text-primary">{{ item.name }}</h3>
-                    } @else {
-                      <a
-                        [routerLink]="['/products', item.slug]"
-                        [queryParams]="variantQueryParams(item.id)"
-                        class="min-w-0 hover:underline"
-                      >
-                        <h3 class="ap-heading text-base font-semibold text-text-primary">{{ item.name }}</h3>
-                      </a>
-                    }
-
-                    @let priceInfo = priceOf(item);
-                    <div class="flex shrink-0 items-baseline gap-2" data-testid="product-card-price-row">
-                      <span
-                        class="text-base font-bold text-text-primary"
-                        [class.text-emerald-600]="priceInfo.onSale"
-                        data-testid="product-card-price"
-                      >
-                        {{ priceInfo.price | currency }}
-                      </span>
-                      @if (priceInfo.compareAt !== null) {
-                        <span class="text-xs text-text-secondary line-through" data-testid="product-card-compare-at">
-                          {{ priceInfo.compareAt | currency }}
-                        </span>
-                      }
-                    </div>
-                  </div>
-
-                  @if (showVariants() && item.variants.length > 0) {
-                    <div
-                      class="mt-auto flex flex-wrap gap-1.5 pt-1"
-                      role="group"
-                      [attr.aria-label]="'Variantes de ' + item.name"
-                      data-testid="product-variant-selector"
-                    >
-                      @for (variant of item.variants; track variant.id) {
-                        @let active = isVariantSelected(item.id, variant.id);
-                        <button
-                          type="button"
-                          class="rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors"
-                          [class]="active
-                            ? 'ap-accent-bg border-transparent'
-                            : 'border-border bg-surface text-text-primary hover:bg-surface-secondary'"
-                          [attr.aria-pressed]="active"
-                          [attr.data-variant-id]="variant.id"
-                          [attr.data-testid]="'variant-option-' + variant.id"
-                          (click)="selectVariant(item.id, variant.id, $event)"
-                        >
-                          {{ variant.name }} · {{ variant.final_price | currency }}
-                        </button>
-                      }
-                    </div>
-                  }
-                </div>
-              </article>
+              <ng-container *ngTemplateOutlet="productCardTpl; context: { item: item, layout: 'list' }" />
             }
           </div>
         } @else {
@@ -247,76 +113,7 @@ import { safeUrl } from './app-page-view.util';
             data-testid="products-layout-grid"
           >
             @for (item of displayedProducts(); track item.id) {
-              <article
-                class="ap-card flex flex-col overflow-hidden rounded-2xl border border-border bg-surface text-left"
-                [attr.data-product-id]="item.id"
-                data-testid="product-block-card"
-              >
-                <div class="aspect-square overflow-hidden bg-surface-secondary">
-                  @if (imageOf(item); as src) {
-                    <img [src]="src" [alt]="item.name" loading="lazy" class="ap-img h-full w-full object-cover" />
-                  } @else {
-                    <span class="flex h-full w-full items-center justify-center text-text-secondary">
-                      <app-icon name="package" [size]="28" />
-                    </span>
-                  }
-                </div>
-                <div class="flex flex-1 flex-col gap-2 p-3.5">
-                  @if (preview()) {
-                    <h3 class="ap-heading line-clamp-2 text-sm font-semibold text-text-primary">{{ item.name }}</h3>
-                  } @else {
-                    <a
-                      [routerLink]="['/products', item.slug]"
-                      [queryParams]="variantQueryParams(item.id)"
-                      class="hover:underline"
-                    >
-                      <h3 class="ap-heading line-clamp-2 text-sm font-semibold text-text-primary">{{ item.name }}</h3>
-                    </a>
-                  }
-
-                  @let priceInfo = priceOf(item);
-                  <div class="flex flex-wrap items-baseline gap-2" data-testid="product-card-price-row">
-                    <span
-                      class="text-base font-bold text-text-primary"
-                      [class.text-emerald-600]="priceInfo.onSale"
-                      data-testid="product-card-price"
-                    >
-                      {{ priceInfo.price | currency }}
-                    </span>
-                    @if (priceInfo.compareAt !== null) {
-                      <span class="text-xs text-text-secondary line-through" data-testid="product-card-compare-at">
-                        {{ priceInfo.compareAt | currency }}
-                      </span>
-                    }
-                  </div>
-
-                  @if (showVariants() && item.variants.length > 0) {
-                    <div
-                      class="mt-auto flex flex-wrap gap-1.5 pt-1"
-                      role="group"
-                      [attr.aria-label]="'Variantes de ' + item.name"
-                      data-testid="product-variant-selector"
-                    >
-                      @for (variant of item.variants; track variant.id) {
-                        @let active = isVariantSelected(item.id, variant.id);
-                        <button
-                          type="button"
-                          class="rounded-lg border px-2 py-1 text-xs font-medium transition-colors"
-                          [class]="active
-                            ? 'ap-accent-bg border-transparent'
-                            : 'border-border bg-surface text-text-primary hover:bg-surface-secondary'"
-                          [attr.aria-pressed]="active"
-                          [attr.data-variant-id]="variant.id"
-                          [attr.data-testid]="'variant-option-' + variant.id"
-                          (click)="selectVariant(item.id, variant.id, $event)"
-                        >
-                          {{ variant.name }} · {{ variant.final_price | currency }}
-                        </button>
-                      }
-                    </div>
-                  }
-                </div>
-              </article>
+              <ng-container *ngTemplateOutlet="productCardTpl; context: { item: item, layout: 'grid' }" />
             }
           </div>
         }
@@ -330,6 +127,114 @@ import { safeUrl } from './app-page-view.util';
         }
       </div>
     }
+
+    <!-- Plantilla única de tarjeta de producto compartida por cuadrícula, lista y carrusel -->
+    <ng-template #productCardTpl let-item="item" let-layout="layout">
+      <article
+        class="ap-card flex overflow-hidden rounded-2xl border border-border bg-surface text-left"
+        [class]="layout === 'carousel'
+          ? 'w-60 shrink-0 snap-start flex-col sm:w-64'
+          : layout === 'list'
+            ? 'flex-row'
+            : 'flex-col'"
+        [attr.data-product-id]="item.id"
+        data-testid="product-block-card"
+      >
+        <div
+          class="overflow-hidden bg-surface-secondary"
+          [class]="layout === 'list' ? 'h-28 w-28 shrink-0 sm:h-36 sm:w-36' : 'aspect-square'"
+        >
+          @if (imageOf(item); as src) {
+            <img [src]="src" [alt]="item.name" loading="lazy" class="ap-img h-full w-full object-cover" />
+          } @else {
+            <span class="flex h-full w-full items-center justify-center text-text-secondary">
+              <app-icon name="package" [size]="28" />
+            </span>
+          }
+        </div>
+
+        <div
+          class="flex min-w-0 flex-1 flex-col gap-2"
+          [class]="layout === 'list' ? 'p-4' : 'p-3.5'"
+        >
+          <div
+            [class]="layout === 'list'
+              ? 'flex flex-wrap items-start justify-between gap-2'
+              : 'flex flex-col gap-2'"
+          >
+            @if (preview()) {
+              <h3
+                class="ap-heading font-semibold text-text-primary"
+                [class]="layout === 'list' ? 'text-base' : 'line-clamp-2 text-sm'"
+              >
+                {{ item.name }}
+              </h3>
+            } @else {
+              <a
+                [routerLink]="['/products', item.slug]"
+                [queryParams]="variantQueryParams(item.id)"
+                class="min-w-0 hover:underline"
+              >
+                <h3
+                  class="ap-heading font-semibold text-text-primary"
+                  [class]="layout === 'list' ? 'text-base' : 'line-clamp-2 text-sm'"
+                >
+                  {{ item.name }}
+                </h3>
+              </a>
+            }
+
+            @let priceInfo = priceOf(item);
+            <div
+              class="flex items-baseline gap-2"
+              [class]="layout === 'list' ? 'shrink-0' : 'flex-wrap'"
+              aria-live="polite"
+              aria-atomic="true"
+              data-testid="product-card-price-row"
+            >
+              <span
+                class="text-base font-bold text-text-primary"
+                [class.text-emerald-600]="priceInfo.onSale"
+                data-testid="product-card-price"
+              >
+                {{ priceInfo.price | currency }}
+              </span>
+              @if (priceInfo.compareAt !== null) {
+                <span class="text-xs text-text-secondary line-through" data-testid="product-card-compare-at">
+                  {{ priceInfo.compareAt | currency }}
+                </span>
+              }
+            </div>
+          </div>
+
+          @if (showVariants() && item.variants.length > 0) {
+            <div
+              class="mt-auto flex flex-wrap gap-1.5 pt-1"
+              role="group"
+              [attr.aria-label]="'Variantes de ' + item.name"
+              data-testid="product-variant-selector"
+            >
+              @for (variant of item.variants; track variant.id) {
+                @let active = isVariantSelected(item.id, variant.id);
+                <button
+                  type="button"
+                  class="rounded-lg border py-1 text-xs font-medium transition-colors"
+                  [class]="(layout === 'list' ? 'px-2.5 ' : 'px-2 ') + (active
+                    ? 'ap-accent-bg border-transparent'
+                    : 'border-border bg-surface text-text-primary hover:bg-surface-secondary')"
+                  [attr.aria-pressed]="active"
+                  [attr.data-variant-id]="variant.id"
+                  [attr.data-testid]="'variant-option-' + variant.id"
+                  (click)="selectVariant(item.id, variant.id, $event)"
+                >
+                  {{ variant.name }} · {{ variant.final_price | currency }}
+                </button>
+              }
+            </div>
+          }
+        </div>
+      </article>
+    </ng-template>
   `,
 })
 export class AppPageProductsViewComponent {
@@ -449,9 +354,22 @@ export class AppPageProductsViewComponent {
     this.selectedVariants.set({ ...current, [productId]: variantId });
   }
 
+  /** Lee directamente el precio resuelto por el servidor para el producto o la variante elegida. */
   priceOf(item: AppPageProductItem): ResolvedCardPrice {
-    const selectedId = this.selectedVariants()[item.id] ?? null;
-    return resolveProductCardPrice(item, selectedId);
+    const selectedId = this.selectedVariants()[item.id];
+    const variant =
+      selectedId !== undefined
+        ? (item.variants.find((v) => v.id === selectedId) ?? null)
+        : null;
+    const target = variant ?? item;
+    const price = Number.isFinite(Number(target.final_price)) ? Number(target.final_price) : 0;
+    const regular = Number(target.regular_final_price);
+    const compareAt = Number.isFinite(regular) && regular > price ? regular : null;
+    return {
+      price,
+      compareAt,
+      onSale: compareAt !== null || Boolean(target.is_on_sale),
+    };
   }
 
   imageOf(item: AppPageProductItem): string | null {

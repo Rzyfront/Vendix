@@ -15,8 +15,6 @@ export interface AppPageProductVariant {
   final_price: number;
   regular_final_price?: number | null;
   is_on_sale?: boolean;
-  price_override?: number | null;
-  sale_price?: number | null;
   image_url?: string | null;
   is_available?: boolean;
 }
@@ -42,59 +40,9 @@ export interface ResolvedCardPrice {
 export const PRODUCTS_SELECTIONS: readonly AppProductsSelection[] = ['auto', 'manual'];
 export const PRODUCTS_LAYOUTS: readonly AppProductsLayout[] = ['grid', 'list', 'carousel'];
 
-function finitePositive(value: unknown): number | null {
-  const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
 function finiteNumber(value: unknown, fallback = 0): number {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
-}
-
-/**
- * Resuelve el precio mostrado en una tarjeta de producto con la misma escalera
- * que la página pública (`product-detail.component.ts` / `final-price.util.ts`):
- * variante seleccionada (final_price de la variante > sale > override > producto)
- * o precio final del producto si no hay variante elegida.
- */
-export function resolveProductCardPrice(
-  product: AppPageProductItem,
-  selectedVariantId: number | null,
-): ResolvedCardPrice {
-  const basePrice = finiteNumber(product.final_price, 0);
-  const variant =
-    selectedVariantId !== null
-      ? (product.variants.find((v) => v.id === selectedVariantId) ?? null)
-      : null;
-
-  if (variant) {
-    let price: number;
-    if (typeof variant.final_price === 'number' && Number.isFinite(variant.final_price)) {
-      price = variant.final_price;
-    } else if (variant.is_on_sale && finitePositive(variant.sale_price) !== null) {
-      price = finitePositive(variant.sale_price)!;
-    } else if (finitePositive(variant.price_override) !== null) {
-      price = finitePositive(variant.price_override)!;
-    } else {
-      price = basePrice;
-    }
-    const regular = finitePositive(variant.regular_final_price);
-    const compareAt = regular !== null && regular > price ? regular : null;
-    return {
-      price,
-      compareAt,
-      onSale: compareAt !== null || Boolean(variant.is_on_sale),
-    };
-  }
-
-  const regular = finitePositive(product.regular_final_price);
-  const compareAt = regular !== null && regular > basePrice ? regular : null;
-  return {
-    price: basePrice,
-    compareAt,
-    onSale: compareAt !== null || Boolean(product.is_on_sale),
-  };
 }
 
 /**
@@ -149,17 +97,32 @@ export function blockShowVariants(props: Record<string, unknown>): boolean {
   return props['show_variants'] === true;
 }
 
-/** Convierte un `EcommerceProduct` del catálogo público al modelo unificado de tarjeta. */
+/**
+ * Convierte un `EcommerceProduct` del catálogo público al modelo unificado de tarjeta.
+ * Respeta el precio ya resuelto por el servidor (`final_price` y promoción plana activa
+ * `active_promotion`, igual que `resolvePreviewProductCards` en el backend).
+ */
 export function mapEcommerceProductToItem(product: EcommerceProduct): AppPageProductItem {
+  const baseFinal = finiteNumber(product.final_price, 0);
+  const promo = product.active_promotion ?? null;
+  const promoPrice = promo ? Number(promo.promotional_price) : NaN;
+  const hasFlatPromo =
+    promo !== null &&
+    promo.is_quantity_tiered !== true &&
+    Number.isFinite(promoPrice) &&
+    promoPrice > 0 &&
+    promoPrice < baseFinal;
+
+  const finalPrice = hasFlatPromo ? promoPrice : baseFinal;
+  const regularFinalPrice = hasFlatPromo ? baseFinal : (product.regular_final_price ?? null);
+
   const variants: AppPageProductVariant[] = (product.variants ?? []).map((v: ProductVariantDetail) => ({
     id: v.id,
     name: v.name?.trim() || v.sku || `Variante ${v.id}`,
     sku: v.sku ?? null,
-    final_price: finiteNumber(v.final_price, finiteNumber(product.final_price, 0)),
+    final_price: finiteNumber(v.final_price, baseFinal),
     regular_final_price: v.regular_final_price ?? null,
     is_on_sale: Boolean(v.is_on_sale),
-    price_override: v.price_override ?? null,
-    sale_price: v.sale_price ?? null,
     image_url: safeUrl(v.image_url ?? undefined),
     is_available: v.is_available !== false,
   }));
@@ -169,48 +132,37 @@ export function mapEcommerceProductToItem(product: EcommerceProduct): AppPagePro
     slug: product.slug,
     name: product.name,
     image_url: safeUrl(product.image_url ?? undefined),
-    final_price: finiteNumber(product.final_price, finiteNumber(product.base_price, 0)),
-    regular_final_price: product.regular_final_price ?? null,
-    is_on_sale: Boolean(product.is_on_sale),
+    final_price: finalPrice,
+    regular_final_price: regularFinalPrice,
+    is_on_sale: hasFlatPromo || Boolean(product.is_on_sale),
     variants,
   };
 }
 
-/** Convierte un `Product` del catálogo admin (selector / vista previa en vivo) al modelo unificado. */
+/**
+ * Proyecta un `Product` del catálogo admin al modelo unificado solo como relleno
+ * mientras el usuario elige productos nuevos antes de guardar. Nunca recalcula
+ * precios: lee directamente el `final_price` entregado por el servidor.
+ */
 export function mapAdminProductToItem(product: Product): AppPageProductItem {
-  const baseFinal = finiteNumber(
-    product.final_price,
-    product.is_on_sale && finitePositive(product.sale_price) !== null
-      ? finitePositive(product.sale_price)!
-      : finiteNumber(product.base_price, 0),
-  );
+  const baseFinal = finiteNumber(product.final_price, 0);
   const rawVariants = (product.variants ?? product.product_variants ?? []) as Array<
     ProductVariant & { final_price?: number; regular_final_price?: number }
   >;
 
-  const variants: AppPageProductVariant[] = rawVariants.map((v) => {
-    const fallbackVariantPrice =
-      v.is_on_sale && finitePositive(v.sale_price) !== null
-        ? finitePositive(v.sale_price)!
-        : finitePositive(v.price_override) !== null
-          ? finitePositive(v.price_override)!
-          : baseFinal;
-    return {
-      id: v.id,
-      name: v.name?.trim() || v.sku || `Variante ${v.id}`,
-      sku: v.sku ?? null,
-      final_price: typeof v.final_price === 'number' && Number.isFinite(v.final_price) ? v.final_price : fallbackVariantPrice,
-      regular_final_price:
-        typeof v.regular_final_price === 'number' && Number.isFinite(v.regular_final_price)
-          ? v.regular_final_price
-          : null,
-      is_on_sale: Boolean(v.is_on_sale),
-      price_override: v.price_override ?? null,
-      sale_price: v.sale_price ?? null,
-      image_url: safeUrl(v.image_url ?? undefined),
-      is_available: true,
-    };
-  });
+  const variants: AppPageProductVariant[] = rawVariants.map((v) => ({
+    id: v.id,
+    name: v.name?.trim() || v.sku || `Variante ${v.id}`,
+    sku: v.sku ?? null,
+    final_price: finiteNumber(v.final_price, baseFinal),
+    regular_final_price:
+      typeof v.regular_final_price === 'number' && Number.isFinite(v.regular_final_price)
+        ? v.regular_final_price
+        : null,
+    is_on_sale: Boolean(v.is_on_sale),
+    image_url: safeUrl(v.image_url ?? undefined),
+    is_available: true,
+  }));
 
   const thumb = product.image_url ?? product.product_images?.[0]?.image_url ?? product.images?.[0]?.image_url;
   return {

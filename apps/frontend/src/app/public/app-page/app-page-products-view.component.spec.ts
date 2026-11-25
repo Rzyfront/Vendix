@@ -6,7 +6,7 @@ import { of } from 'rxjs';
 import { CatalogService, EcommerceProduct } from '../../private/modules/ecommerce/services/catalog.service';
 import { CurrencyFormatService } from '../../shared/pipes/currency';
 import { AppPageProductsViewComponent } from './app-page-products-view.component';
-import { AppPageProductItem, orderProductsByIds, resolveProductCardPrice } from './app-page-products.util';
+import { AppPageProductItem, mapEcommerceProductToItem, orderProductsByIds } from './app-page-products.util';
 
 const item = (id: number, name: string, over: Partial<AppPageProductItem> = {}): AppPageProductItem => ({
   id,
@@ -145,7 +145,7 @@ describe('AppPageProductsViewComponent', () => {
     expect(cards[0].querySelector('[data-testid="product-card-price"]')?.textContent?.trim()).toBe('$18500');
   });
 
-  it('renderiza los diseños grid, list y carousel y nunca inyecta HTML libre', () => {
+  it('renderiza los diseños grid, list y carousel con plantilla unificada, aria-live en precio y sin HTML libre', () => {
     const xssItem = item(1, '<b>Oferta</b>', { final_price: 20000 });
     for (const layout of ['grid', 'list', 'carousel'] as const) {
       fixture = TestBed.createComponent(AppPageProductsViewComponent);
@@ -157,16 +157,82 @@ describe('AppPageProductsViewComponent', () => {
       expect(el().querySelector(`[data-testid="products-layout-${layout}"]`)).not.toBeNull();
       expect(el().querySelector('b')).toBeNull();
       expect(el().textContent).toContain('<b>Oferta</b>');
+      const priceRow = el().querySelector('[data-testid="product-card-price-row"]');
+      expect(priceRow?.getAttribute('aria-live')).toBe('polite');
+      expect(priceRow?.getAttribute('aria-atomic')).toBe('true');
     }
+  });
 
-    // Verifica resolución de precio cuando no hay variante elegida vs elegida
-    const resolved = resolveProductCardPrice(
-      item(1, 'Test', {
-        final_price: 100,
-        variants: [{ id: 5, name: 'XL', final_price: 140, regular_final_price: 160, is_on_sale: true }],
+  it('aplica promoción plana activa desde el catálogo público e ignora el descuento unitario en promociones por cantidad', () => {
+    const flatMapped = mapEcommerceProductToItem({
+      id: 1,
+      slug: 'crema',
+      name: 'Crema',
+      final_price: 50000,
+      regular_final_price: 50000,
+      image_url: null,
+      active_promotion: {
+        id: 1,
+        name: 'Promo 20%',
+        type: 'percentage',
+        scope: 'product',
+        promotional_price: 40000,
+        badge_label: '-20% OFF',
+        priority: 1,
+      },
+    } as unknown as EcommerceProduct);
+    expect(flatMapped).toEqual(
+      jasmine.objectContaining({
+        final_price: 40000,
+        regular_final_price: 50000,
+        is_on_sale: true,
       }),
-      5,
     );
-    expect(resolved).toEqual({ price: 140, compareAt: 160, onSale: true });
+
+    const tieredMapped = mapEcommerceProductToItem({
+      id: 2,
+      slug: 'jabon',
+      name: 'Jabón',
+      final_price: 20000,
+      regular_final_price: 20000,
+      image_url: null,
+      active_promotion: {
+        id: 2,
+        name: 'Lleva 3',
+        type: 'percentage',
+        scope: 'product',
+        promotional_price: 20000,
+        badge_label: 'Desde 3 und',
+        priority: 1,
+        is_quantity_tiered: true,
+      },
+    } as unknown as EcommerceProduct);
+    expect(tieredMapped).toEqual(
+      jasmine.objectContaining({
+        final_price: 20000,
+        regular_final_price: 20000,
+        is_on_sale: false,
+      }),
+    );
+  });
+
+  it('en modo auto con allowCatalogFallback carga hasta 8 productos recientes del catálogo', async () => {
+    catalogSpy.getProducts.and.returnValue(
+      of({
+        success: true,
+        data: [{ id: 9, slug: 'reciente', name: 'Reciente', final_price: 12000, image_url: null } as unknown as EcommerceProduct],
+        meta: { total: 1, page: 1, limit: 8, total_pages: 1 },
+      }),
+    );
+
+    fixture = TestBed.createComponent(AppPageProductsViewComponent);
+    fixture.componentRef.setInput('selection', 'auto');
+    fixture.componentRef.setInput('allowCatalogFallback', true);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(catalogSpy.getProducts).toHaveBeenCalledWith({ limit: 8, include_variants: false });
+    expect(el().querySelectorAll('[data-testid="product-block-card"]').length).toBe(1);
   });
 });

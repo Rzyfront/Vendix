@@ -349,4 +349,25 @@ describe('service page builder document (F6-B)', () => {
   it('vista previa: sin contexto no dibuja servicios y no falla', () => {
     expect(servicePagePreview(payload(empty, null, null)).services).toEqual([]);
   });
+
+  it('vista previa: block_products del servidor gana sobre catalogProducts del selector y el selector solo rellena huecos', () => {
+    const ctx: ServicePageContext = {
+      ...CONTEXT,
+      block_products: [
+        { id: 7, slug: 'crema', name: 'Crema servidor', image_url: null, final_price: 35700, regular_final_price: 40000, is_on_sale: true, variants: [] },
+      ],
+    };
+    const view = servicePagePreview({
+      ...payload(empty, { featured: [], products: [{ id: 7, name: 'Crema' }] }, ctx),
+      catalogProducts: [
+        { id: 7, slug: 'crema', name: 'Crema selector', image_url: null, final_price: 30000, variants: [] },
+        { id: 55, slug: 'nuevo', name: 'Producto nuevo', image_url: null, final_price: 18000, variants: [] },
+      ],
+    });
+
+    const byId = new Map(view.catalogProducts.map((p) => [p.id, p]));
+    expect(byId.get(7)?.final_price).toBe(35700);
+    expect(byId.get(7)?.name).toBe('Crema servidor');
+    expect(byId.get(55)?.final_price).toBe(18000);
+  });
 });

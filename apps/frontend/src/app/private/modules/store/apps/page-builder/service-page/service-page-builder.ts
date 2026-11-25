@@ -147,7 +147,11 @@ export function servicePagePreview(
     name: p.name,
     image_url: context.products.find((k) => k.id === p.id)?.image_url ?? null,
   }));
+  // Los datos resueltos por el servidor siempre ganan; el selector solo rellena huecos.
   const catalogById = new Map<number, AppPageProductItem>();
+  for (const item of payload.catalogProducts ?? []) {
+    catalogById.set(item.id, item);
+  }
   for (const item of context.products) {
     catalogById.set(item.id, {
       id: item.id,
@@ -161,9 +165,6 @@ export function servicePagePreview(
     });
   }
   for (const item of context.block_products ?? []) {
-    catalogById.set(item.id, item);
-  }
-  for (const item of payload.catalogProducts ?? []) {
     catalogById.set(item.id, item);
   }
   return {

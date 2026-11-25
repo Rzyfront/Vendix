@@ -6,8 +6,22 @@ import {
   Max,
   MaxLength,
   IsEnum,
+  IsIn,
+  ValidateBy,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
+
+/** Tope máximo de identificadores permitidos en `GET /ecommerce/catalog?ids=...`. */
+export const MAX_CATALOG_QUERY_IDS = 50;
+
+function hasAtMostMaxCatalogIds(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  const parts = value
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  return parts.length <= MAX_CATALOG_QUERY_IDS;
+}
 
 export enum ProductSortBy {
   NAME = 'name',
@@ -79,8 +93,18 @@ export class CatalogQueryDto {
   @Max(100)
   limit?: number = 20;
 
+  /** Lista CSV de IDs de productos (máx. 50 para evitar respuestas gigantes en el endpoint público). */
   @IsOptional()
   @IsString()
+  @MaxLength(600)
+  @ValidateBy({
+    name: 'maxCatalogIds',
+    validator: {
+      validate: (value: unknown) => hasAtMostMaxCatalogIds(value),
+      defaultMessage: () =>
+        `ids admite máximo ${MAX_CATALOG_QUERY_IDS} identificadores`,
+    },
+  })
   ids?: string;
 
   @IsOptional()
@@ -97,6 +121,6 @@ export class CatalogQueryDto {
 
   /** Opcional: cuando es 'true', incluye las variantes con precio resuelto en el listado. */
   @IsOptional()
-  @IsString()
+  @IsIn(['true', 'false'])
   include_variants?: string;
 }

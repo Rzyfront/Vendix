@@ -48,8 +48,10 @@ export interface ProductPageContext {
     is_on_sale?: boolean;
     variants?: AppPageProductVariant[];
   }[];
-  /** Productos elegidos manualmente en bloques `products`, resueltos por el backend. */
+  /** Productos elegidos manualmente en bloques `products` activos, resueltos por el backend. */
   block_products?: AppPageProductItem[];
+  /** Hasta 8 productos recientes del catálogo para bloques `products` en modo `auto` (no repite complementos). */
+  auto_products?: AppPageProductItem[];
 }
 
 export const EMPTY_PRODUCT_PAGE_CONTEXT: ProductPageContext = { product: null, complements: [] };
@@ -84,7 +86,7 @@ const META: Record<string, PageBlockMeta> = {
   },
   products: {
     category: 'sales',
-    liveData: 'Muestra productos reales de tu tienda en orden automático o manual.',
+    liveData: 'En modo automático muestra hasta 8 productos recientes de tu tienda; en manual muestra los que elijas.',
   },
   cta: { category: 'sales' },
 };
@@ -103,7 +105,7 @@ export interface ProductPagePreview {
   complementsTitle: string;
   /** Id of the «Complementos» block, to select it from the preview; `null` when the page has none. */
   complementsBlockId: string | null;
-  /** IDs automáticos (complementos) para bloques `products` en modo `auto`. */
+  /** IDs automáticos (hasta 8 productos recientes de la tienda) para bloques `products` en modo `auto`. */
   autoProductIds: number[];
   /** Productos resueltos (contexto del servidor + selección en vivo) para bloques `products` en vista previa. */
   catalogProducts: AppPageProductItem[];
@@ -132,7 +134,12 @@ export function productPagePreview(
     image_url: context.complements.find((k) => k.id === c.id)?.image_url ?? null,
   }));
   const block = page.blocks.find((b) => b.type === 'complements');
+  // Los datos resueltos por el servidor siempre ganan (incluyen impuestos, promociones y
+  // presentación por defecto); el selector del editor solo rellena huecos de productos nuevos.
   const catalogById = new Map<number, AppPageProductItem>();
+  for (const item of payload.catalogProducts ?? []) {
+    catalogById.set(item.id, item);
+  }
   for (const c of context.complements) {
     catalogById.set(c.id, {
       id: c.id,
@@ -145,10 +152,10 @@ export function productPagePreview(
       variants: c.variants ?? [],
     });
   }
-  for (const item of context.block_products ?? []) {
+  for (const item of context.auto_products ?? []) {
     catalogById.set(item.id, item);
   }
-  for (const item of payload.catalogProducts ?? []) {
+  for (const item of context.block_products ?? []) {
     catalogById.set(item.id, item);
   }
   return {
@@ -160,7 +167,9 @@ export function productPagePreview(
     showComplements: !!product && complements.length > 0 && block?.enabled !== false,
     complementsTitle: complementsTitleOf(page),
     complementsBlockId: block?.id ?? null,
-    autoProductIds: complements.map((c) => c.id),
+    // En Product Page el bloque `products` en modo `auto` muestra los 8 productos recientes
+    // del catálogo (sin repetir `complements`, que ya tiene su propia sección).
+    autoProductIds: (context.auto_products ?? []).map((p) => p.id),
     catalogProducts: Array.from(catalogById.values()),
   };
 }

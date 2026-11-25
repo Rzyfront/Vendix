@@ -1,13 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { S3Service } from '@common/services/s3.service';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
+import { StorefrontPriceService } from '../../../ecommerce/shared/services/storefront-price.service';
+import { PromotionEngineService } from '../../promotions/promotion-engine/promotion-engine.service';
 import {
   PREVIEW_IMAGE_ORDER,
   PreviewProductCard,
   PreviewProductRow,
   buildPreviewProductSelect,
   extractBlockProductIds,
-  mapPreviewProductCard,
+  resolvePreviewProductCards,
 } from '../shared/app-page-products.helper';
 import {
   onlineServicesWhere,
@@ -35,7 +37,7 @@ export interface ServicePageViewData {
   }[];
   featured_service_ids: number[];
   products: PreviewProductCard[];
-  /** Productos elegidos manualmente en el bloque `products` (en el orden configurado). */
+  /** Productos elegidos manualmente en el bloque `products` activo (en el orden configurado). */
   block_products?: PreviewProductCard[];
 }
 
@@ -56,6 +58,8 @@ export class ServicePageViewService {
   constructor(
     private readonly globalPrisma: GlobalPrismaService,
     private readonly s3: S3Service,
+    private readonly storefrontPrice: StorefrontPriceService,
+    private readonly promotionEngine: PromotionEngineService,
   ) {}
 
   async read(storeId: number, rawConfig: unknown): Promise<ServicePageViewData> {
@@ -115,12 +119,17 @@ export class ServicePageViewService {
       });
     }
 
-    const byId = new Map(productRows.map((p) => [p.id, p]));
+    const { cardsById } = await resolvePreviewProductCards(productRows, {
+      prisma: this.globalPrisma as any,
+      s3: this.s3,
+      storefrontPrice: this.storefrontPrice,
+      promotionEngine: this.promotionEngine,
+    });
+
     const products: ServicePageViewData['products'] = [];
     for (const id of config.product_ids) {
-      const p = byId.get(id);
-      if (!p) continue;
-      products.push(await mapPreviewProductCard(p, this.s3));
+      const card = cardsById.get(id);
+      if (card) products.push(card);
     }
 
     if (blockProductIds.length === 0) {
@@ -129,9 +138,8 @@ export class ServicePageViewService {
 
     const blockProducts: PreviewProductCard[] = [];
     for (const id of blockProductIds) {
-      const p = byId.get(id);
-      if (!p) continue;
-      blockProducts.push(await mapPreviewProductCard(p, this.s3));
+      const card = cardsById.get(id);
+      if (card) blockProducts.push(card);
     }
 
     return {

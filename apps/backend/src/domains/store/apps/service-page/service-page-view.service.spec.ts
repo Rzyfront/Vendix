@@ -1,4 +1,6 @@
 import { RequestContextService } from '@common/context/request-context.service';
+import { StorefrontPriceService } from '../../../ecommerce/shared/services/storefront-price.service';
+import { PriceResolverService } from '../../products/services/price-resolver.service';
 import { ServicePageAppService } from './service-page-app.service';
 import { ServicePageViewService } from './service-page-view.service';
 
@@ -23,19 +25,51 @@ const product = (id: number, over: Record<string, unknown> = {}) => ({
   id,
   slug: `p-${id}`,
   name: `Producto ${id}`,
+  base_price: '0.00',
+  sale_price: null,
+  is_on_sale: false,
+  track_inventory: false,
   product_images: [],
+  product_categories: [],
+  product_tax_assignments: [],
+  product_variants: [],
   ...over,
 });
 
 describe('ServicePageViewService (F6-B)', () => {
-  const build = (services: unknown[], products: unknown[] = []) => {
+  const storefrontPrice = new StorefrontPriceService(new PriceResolverService());
+
+  const build = (
+    services: unknown[],
+    products: unknown[] = [],
+    opts: { tierAssignments?: unknown[]; tierOverrides?: unknown[]; promotions?: Map<number, any> } = {},
+  ) => {
     const findMany = jest
       .fn()
       .mockResolvedValueOnce(services)
       .mockResolvedValueOnce(products);
     const s3 = { signUrl: jest.fn(async (key?: string) => (key ? `signed:${key}` : undefined)) };
-    const view = new ServicePageViewService({ products: { findMany } } as any, s3 as any);
-    return { view, findMany, s3 };
+    const prisma = {
+      products: { findMany },
+      product_price_tier_assignments: {
+        findMany: jest.fn().mockResolvedValue(opts.tierAssignments ?? []),
+      },
+      product_price_tier_overrides: {
+        findMany: jest.fn().mockResolvedValue(opts.tierOverrides ?? []),
+      },
+    };
+    const promotionEngine = {
+      findActiveAutoPromotionsForProducts: jest
+        .fn()
+        .mockResolvedValue(opts.promotions ?? new Map()),
+    };
+    const view = new ServicePageViewService(
+      prisma as any,
+      s3 as any,
+      storefrontPrice,
+      promotionEngine as any,
+    );
+    return { view, findMany, s3, prisma, promotionEngine };
   };
 
   it('filters services and secondary products by the store and the sold-online rule', async () => {
@@ -104,7 +138,7 @@ describe('ServicePageViewService (F6-B)', () => {
     expect(findMany).toHaveBeenCalledTimes(1);
   });
 
-  it('proyecta block_products en orden manual con variantes y precios finales', async () => {
+  it('proyecta block_products en orden manual con variantes, presentación por defecto y promociones activas', async () => {
     const { view } = build(
       [],
       [
@@ -112,8 +146,38 @@ describe('ServicePageViewService (F6-B)', () => {
           base_price: '20000.00',
           product_variants: [{ id: 81, name: 'Chica', sku: 'C', price_override: '25000.00', is_on_sale: false }],
         }),
-        product(5, { base_price: '10000.00' }),
+        product(5, {
+          base_price: '10000.00',
+          product_variants: [{ id: 51, name: 'Oculta por presentación', sku: 'H', price_override: '12000.00' }],
+        }),
       ],
+      {
+        tierAssignments: [
+          {
+            product_id: 5,
+            price_tier_id: 3,
+            price_tier: {
+              id: 3,
+              name: 'Pack x6',
+              discount_percentage: 0,
+              adjustment_type: 'fixed_price',
+              adjustment_value: null,
+              amount_scope: 'package',
+              is_package_unit: true,
+              units_per_package: 6,
+            },
+          },
+        ],
+        tierOverrides: [
+          {
+            product_id: 5,
+            price_tier_id: 3,
+            variant_id: null,
+            override_price: '54000.00',
+            override_units_per_package: 6,
+          },
+        ],
+      },
     );
 
     const data = await view.read(7, {
@@ -126,6 +190,8 @@ describe('ServicePageViewService (F6-B)', () => {
     });
 
     expect(data.block_products?.map((p) => p.id)).toEqual([5, 8]);
+    // Producto 5 con presentación por defecto: precio del paquete y sin variantes.
+    expect(data.block_products?.[0]).toMatchObject({ final_price: 54000, variants: [] });
     expect(data.block_products?.[1].variants).toEqual([
       expect.objectContaining({ id: 81, name: 'Chica', final_price: 25000 }),
     ]);
