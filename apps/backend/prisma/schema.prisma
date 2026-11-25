@@ -1330,6 +1330,8 @@ model store_app_media {
   /// `null` = compartida por todas las apps de la tienda.
   app_kind           app_kind_enum?
   kind               app_media_kind_enum @default(image)
+  /// Identificador opaco de la URL pública: evita enumerar fotos por id.
+  public_token       String              @unique @db.Uuid
   s3_key             String              @db.VarChar(512)
   thumb_key          String?             @db.VarChar(512)
   mime_type          String              @db.VarChar(100)

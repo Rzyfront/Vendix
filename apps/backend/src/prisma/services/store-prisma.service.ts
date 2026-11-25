@@ -2573,7 +2573,7 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.store_apps;
   }
 
-  // ===== Apps media (odd/tasks/apps-customization.md F1.1) — scoped getter =====
+  // ===== Apps media (docs/apps/apps-customization-plan.md F1.1) — scoped getter =====
   get store_app_media() {
     return this.scoped_client.store_app_media;
   }

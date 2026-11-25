@@ -86,6 +86,7 @@ export class AppMediaService {
             store_id: storeId,
             app_kind: appKind ?? null,
             kind: uploaded.kind,
+            public_token: randomUUID(),
             s3_key: uploaded.s3Key,
             thumb_key: uploaded.thumbKey,
             mime_type: file.mimetype.toLowerCase(),
@@ -190,8 +191,8 @@ export class AppMediaService {
     files: Express.Multer.File[],
   ): Promise<void> {
     const incoming = files.reduce((sum, file) => sum + (file.size ?? 0), 0);
+    // Cuenta también lo borrado: el objeto sigue en S3 y ocupa espacio.
     const aggregate = await this.prisma.store_app_media.aggregate({
-      where: { deleted_at: null },
       _sum: { size_bytes: true },
     });
     const used = Number(aggregate._sum.size_bytes ?? 0);
@@ -232,12 +233,13 @@ export class AppMediaService {
    * antepone su `environment.apiUrl`. Ese endpoint firma al vuelo, así que el
    * enlace guardado en la app nunca vence.
    */
-  private stableUrl(id: number, thumb = false): string {
-    return `/public/apps/media/${id}${thumb ? '?thumb=1' : ''}`;
+  private stableUrl(token: string, thumb = false): string {
+    return `/public/apps/media/${token}${thumb ? '?thumb=1' : ''}`;
   }
 
   private withUrls(row: {
     id: number;
+    public_token: string;
     app_kind: app_kind_enum | null;
     kind: app_media_kind_enum;
     s3_key: string;
@@ -261,8 +263,8 @@ export class AppMediaService {
       height: row.height,
       alt: row.alt,
       created_at: row.created_at,
-      url: this.stableUrl(row.id),
-      thumb_url: row.thumb_key ? this.stableUrl(row.id, true) : null,
+      url: this.stableUrl(row.public_token),
+      thumb_url: row.thumb_key ? this.stableUrl(row.public_token, true) : null,
     };
   }
 

@@ -72,9 +72,10 @@ describe('AppMediaService — biblioteca de medios (apps-customization F1.1)', (
         alt: 'fachada local',
       }),
     });
-    // URL estable de la API: no vence como una firma.
-    expect(row.url).toBe('/public/apps/media/1');
-    expect(row.thumb_url).toBe('/public/apps/media/1?thumb=1');
+    // URL estable y opaca: no vence y no se puede enumerar por id.
+    expect(row.url).toMatch(/^\/public\/apps\/media\/[0-9a-f-]{36}$/);
+    expect(row.url).not.toContain('1');
+    expect(row.thumb_url).toBe(`${row.url}?thumb=1`);
   });
 
   it('guarda un PDF como documento y respeta la app destino', async () => {
@@ -119,6 +120,13 @@ describe('AppMediaService — biblioteca de medios (apps-customization F1.1)', (
       data: { deleted_at: expect.any(Date) },
     });
     expect(s3.deleteFile).not.toHaveBeenCalled();
+  });
+
+  it('si falla la creación de la fila borra de S3 lo ya subido', async () => {
+    const { service, prisma, s3 } = build();
+    prisma.store_app_media.create.mockRejectedValueOnce(new Error('db down'));
+    await expect(service.upload([file()])).rejects.toThrow('db down');
+    expect(s3.deleteFile).toHaveBeenCalled();
   });
 
   it('rechaza un PDF que no empieza por %PDF-', async () => {

@@ -3,11 +3,11 @@ import {
   Get,
   NotFoundException,
   Param,
-  ParseIntPipe,
   Query,
   Res,
 } from '@nestjs/common';
 import type { Response } from 'express';
+import { Public } from '../../../auth/decorators/public.decorator';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { S3Service } from '@common/services/s3.service';
 
@@ -25,9 +25,10 @@ export class AppMediaPublicController {
     private readonly s3: S3Service,
   ) {}
 
-  @Get(':id')
+  @Public()
+  @Get(':token')
   async file(
-    @Param('id', ParseIntPipe) id: number,
+    @Param('token') token: string,
     @Query('thumb') thumb: string | undefined,
     @Res() res: Response,
   ): Promise<void> {

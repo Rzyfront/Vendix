@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS "store_app_media" (
   "store_id" INTEGER NOT NULL,
   "app_kind" "app_kind_enum",
   "kind" "app_media_kind_enum" NOT NULL DEFAULT 'image',
+  "public_token" UUID NOT NULL,
   "s3_key" VARCHAR(512) NOT NULL,
   "thumb_key" VARCHAR(512),
   "mime_type" VARCHAR(100) NOT NULL,
@@ -37,6 +38,9 @@ CREATE TABLE IF NOT EXISTS "store_app_media" (
   CONSTRAINT "store_app_media_store_id_fkey"
     FOREIGN KEY ("store_id") REFERENCES "stores"("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS "store_app_media_public_token_key"
+  ON "store_app_media" ("public_token");
 
 CREATE INDEX IF NOT EXISTS "store_app_media_store_id_app_kind_idx"
   ON "store_app_media" ("store_id", "app_kind");

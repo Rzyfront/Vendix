@@ -91,6 +91,8 @@ export class AppMediaService {
   }
 
   remove(id: number): Observable<{ deleted: true }> {
-    return this.http.delete<{ deleted: true }>(`${this.apiUrl}/${id}`);
+    return this.unwrap<{ deleted: true }>(
+      this.http.delete<{ data: { deleted: true } }>(`${this.apiUrl}/${id}`),
+    );
   }
 }
