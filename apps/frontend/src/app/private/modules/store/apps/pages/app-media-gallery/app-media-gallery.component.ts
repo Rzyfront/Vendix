@@ -38,13 +38,13 @@ import { AppMediaItem, AppMediaService } from '../../services/app-media.service'
           type="button"
           class="inline-flex items-center gap-2 rounded-lg bg-[var(--color-primary)] px-3 py-2 text-sm font-semibold text-[var(--color-text-on-primary,#fff)]"
           [disabled]="uploading()"
-          (click)="filePicker().nativeElement.click()"
+          (click)="filePickerRef().nativeElement.click()"
         >
           <app-icon name="upload" [size]="15"></app-icon>
           {{ uploading() ? 'Subiendo…' : 'Subir fotos' }}
         </button>
         <input
-          #filePicker
+          #mediaFileInput
           type="file"
           accept="image/jpeg,image/png,image/webp,image/avif"
           multiple
@@ -154,7 +154,9 @@ export class AppMediaGalleryComponent {
   readonly uploading = signal(false);
   readonly search = signal('');
   readonly hasMore = computed(() => this.items().length < this.total());
-  readonly filePicker = viewChild.required<ElementRef<HTMLInputElement>>('filePicker');
+  // El nombre del signal NO puede coincidir con el template ref: en el template
+  // el ref gana y `signal()` deja de ser llamable.
+  readonly filePickerRef = viewChild.required<ElementRef<HTMLInputElement>>('mediaFileInput');
   readonly pendingDelete = signal<AppMediaItem | null>(null);
   readonly deleteOpen = signal(false);
   readonly deleteMessage = computed(() => {
