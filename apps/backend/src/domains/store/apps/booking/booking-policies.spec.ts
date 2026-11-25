@@ -1,4 +1,11 @@
-import { BookingPoliciesService, formatCheckIn, formatCheckOut, fillPolicies } from './booking-policies';
+import {
+  BookingPoliciesService,
+  buildStayFacts,
+  fillPolicies,
+  formatCheckIn,
+  formatCheckOut,
+  needsStayFacts,
+} from './booking-policies';
 import { AppPageDocument } from '../shared/app-page.contract';
 
 const page = (props: Record<string, unknown>, enabled = true): AppPageDocument => ({
@@ -113,5 +120,76 @@ describe('BookingPoliciesService', () => {
     expect(await service.fill(7, full)).toEqual(full);
     expect(await service.fill(7, page({}, false))).toEqual(page({}, false));
     expect(prisma.store_settings.findFirst).not.toHaveBeenCalled();
+  });
+});
+
+describe('stay_detail — hechos reales de la estadía (apps-booking-detail B)', () => {
+  const defaults = {
+    check_in: 'Desde las 3:00 p. m.',
+    check_out: 'Hasta las 12:00 m.',
+    cancellation: 'Flexible: gratis hasta 48 h antes de la llegada',
+  };
+
+  it('buildStayFacts toma la capacidad máxima de las habitaciones activas, el anticipo y las fotos', () => {
+    expect(
+      buildStayFacts(defaults, 30, [
+        { max_occupancy: 2, images: [] },
+        { max_occupancy: 5, images: ['k/a.jpg'] },
+      ]),
+    ).toEqual({
+      ...defaults,
+      max_guests: 5,
+      deposit_percent: 30,
+      has_photos: true,
+      has_availability: true,
+    });
+  });
+
+  it('buildStayFacts sin habitaciones ni anticipo deja esos datos vacíos', () => {
+    expect(buildStayFacts({ check_in: null, check_out: null, cancellation: null }, 0, [])).toEqual({
+      check_in: null,
+      check_out: null,
+      cancellation: null,
+      max_guests: null,
+      deposit_percent: null,
+      has_photos: false,
+      has_availability: false,
+    });
+  });
+
+  it('needsStayFacts solo cuando la página tiene un stay_detail visible o algún visible_when', () => {
+    const doc = (blocks: AppPageDocument['blocks']): AppPageDocument => ({ schema_version: 1 as never, blocks });
+    expect(needsStayFacts(doc([]))).toBe(false);
+    expect(needsStayFacts(doc([{ id: 'f', type: 'faq', enabled: true, props: {} }]))).toBe(false);
+    expect(needsStayFacts(doc([{ id: 's', type: 'stay_detail', enabled: false, props: {} }]))).toBe(false);
+    expect(needsStayFacts(doc([{ id: 's', type: 'stay_detail', enabled: true, props: {} }]))).toBe(true);
+    expect(
+      needsStayFacts(doc([{ id: 'f', type: 'faq', enabled: true, props: { visible_when: { has_photos: true } } }])),
+    ).toBe(true);
+  });
+
+  it('stayFacts lee todo con el store_id de la petición', async () => {
+    const prisma = {
+      store_settings: { findFirst: jest.fn().mockResolvedValue({ settings: { hospitality: { check_in_time: '14:00' } } }) },
+      lodging_rate_plans: {
+        findFirst: jest.fn().mockResolvedValue({ deposit_percent: '25.00', cancellation_policy: null }),
+      },
+      lodging_unit_types: {
+        findMany: jest.fn().mockResolvedValue([{ max_occupancy: 3, images: [] }]),
+      },
+    };
+    const service = new BookingPoliciesService(prisma as never);
+
+    await expect(service.stayFacts(7)).resolves.toEqual({
+      check_in: 'Desde las 2:00 p. m.',
+      check_out: 'Hasta las 12:00 m.',
+      cancellation: null,
+      max_guests: 3,
+      deposit_percent: 25,
+      has_photos: false,
+      has_availability: true,
+    });
+    expect(prisma.lodging_unit_types.findMany.mock.calls[0][0].where).toEqual({ store_id: 7, is_active: true });
+    expect(prisma.lodging_rate_plans.findFirst.mock.calls[0][0].where).toMatchObject({ store_id: 7, is_default: true });
   });
 });

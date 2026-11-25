@@ -153,6 +153,44 @@ describe('ServicePageHomeComponent (apps-module Fase 3)', () => {
     expect(block.textContent).toContain('También puedes comprar:7,8');
   });
 
+  it('selección manual: lista los servicios que manda el servidor en su orden y sin servicios válidos sigue disponible', async () => {
+    const manual = ownPage({
+      blocks: [{ id: 'services', type: 'services', enabled: true, props: { selection: 'manual', service_ids: [11, 10] } }],
+    });
+    catalog.getProducts.and.returnValue(of({ data: [service(10, 'Limpieza'), service(11, 'Masaje')] } as any));
+    await render({ service_ids: [11, 10], featured_service_ids: [], product_ids: [], page: manual });
+    const cards = Array.from(fixture.nativeElement.querySelectorAll('[data-service]')) as HTMLElement[];
+    expect(cards.map((c) => c.getAttribute('data-service'))).toEqual(['s-11', 's-10']);
+  });
+
+  it('selección manual sin servicios en línea: la página no se apaga y la sección no deja hueco', async () => {
+    const manual = ownPage({
+      blocks: [
+        { id: 'services', type: 'services', enabled: true, props: { selection: 'manual', service_ids: [77] } },
+        { id: 'faq', type: 'faq', enabled: true, props: { items: [{ question: 'Pregunta?', answer: 'Sí' }] } },
+      ],
+    });
+    await render({ service_ids: [], featured_service_ids: [], product_ids: [], page: manual });
+    expect(fixture.nativeElement.querySelector('[data-testid="service-page-unavailable"]')).toBeNull();
+    expect(fixture.nativeElement.querySelector('[data-testid="service-list"]')).toBeNull();
+    expect(text()).toContain('Pregunta?');
+    expect(catalog.getProducts).not.toHaveBeenCalled();
+  });
+
+  it('visible_when: un bloque «solo si hay fotos» no se muestra si ningún servicio tiene foto', async () => {
+    const withConditions = ownPage({
+      blocks: [
+        { id: 'services', type: 'services', enabled: true, props: {} },
+        { id: 'faq', type: 'faq', enabled: true, props: { items: [{ question: 'Con fotos?', answer: 'Sí' }], visible_when: { has_photos: true } } },
+        { id: 'cta', type: 'cta', enabled: true, props: { title: 'Agenda ya', visible_when: { has_availability: true } } },
+      ],
+    });
+    catalog.getProducts.and.returnValue(of({ data: [service(10, 'Limpieza')] } as any));
+    await render({ service_ids: [10], featured_service_ids: [], product_ids: [], page: withConditions });
+    expect(text()).not.toContain('Con fotos?');
+    expect(text()).toContain('Agenda ya');
+  });
+
   it('sin página publicada dice que no está disponible', async () => {
     await render(null);
 

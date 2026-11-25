@@ -103,7 +103,33 @@ export interface BuilderProductIdsFieldDef {
   group?: 'appearance';
 }
 
-export type BuilderFieldDef = BuilderScalarFieldDef | BuilderListFieldDef | BuilderProductIdsFieldDef;
+/** Selector de servicios en línea de la tienda (bloque `services` de Service Page). */
+export interface BuilderServiceIdsFieldDef {
+  key: string;
+  label: string;
+  kind: 'service_ids';
+  max: number;
+  hint?: string;
+  /** Solo muestra el campo en el inspector cuando otra prop del bloque coincide. */
+  visibleWhen?: { key: string; value: unknown };
+  group?: 'appearance';
+}
+
+/** `visible_when`: condiciones cerradas (fotos, disponibilidad, venta) para mostrar el bloque. */
+export interface BuilderConditionsFieldDef {
+  key: string;
+  label: string;
+  kind: 'conditions';
+  hint?: string;
+  group?: 'appearance';
+}
+
+export type BuilderFieldDef =
+  | BuilderScalarFieldDef
+  | BuilderListFieldDef
+  | BuilderProductIdsFieldDef
+  | BuilderServiceIdsFieldDef
+  | BuilderConditionsFieldDef;
 
 export interface BuilderCategory {
   id: string;

@@ -18,6 +18,25 @@ import {
   secondaryProductsWhere,
 } from './service-page.reader';
 
+type ServiceCategory = { id: number; name: string; slug: string };
+
+/** A service row as read for the preview (price fields of the product cards plus service data). */
+type ServiceRow = {
+  id: number;
+  slug: string;
+  name: string;
+  description: string | null;
+  base_price: unknown;
+  sale_price: unknown;
+  is_on_sale: boolean | null;
+  service_duration_minutes: number | null;
+  service_duration_unit: 'minute' | 'hour' | 'day' | null;
+  service_modality: string | null;
+  requires_booking: boolean | null;
+  product_images: { image_url: string }[];
+  product_categories: { categories: ServiceCategory | null }[];
+};
+
 /** What the service page paints from the store's catalog: services (featured first) and secondary products. */
 export interface ServicePageViewData {
   services: {
@@ -25,8 +44,13 @@ export interface ServicePageViewData {
     slug: string;
     name: string;
     description: string | null;
-    /** Regular price before taxes (the public page shows the tax-derived final price). */
+    /** Regular price before taxes. */
     price: number;
+    /**
+     * Price the public page shows: resolved like the ecommerce catalog (taxes,
+     * default sale unit and automatic promotions), so preview and public match.
+     */
+    final_price: number;
     image_url: string | null;
     service_duration_minutes: number | null;
     /** Unit the duration is shown in; null reads as 'minute'. */
@@ -76,38 +100,49 @@ export class ServicePageViewService {
       this.globalPrisma.products.findMany({
         where: onlineServicesWhere(storeId),
         select: {
-          id: true,
-          slug: true,
-          name: true,
-          description: true,
-          base_price: true,
-          sale_price: true,
-          is_on_sale: true,
+          // Same price fields as the product cards, so the service price is
+          // resolved by the catalog's own rule (`resolvePreviewProductCards`).
+          ...buildPreviewProductSelect(true),
           service_duration_minutes: true,
           service_duration_unit: true,
           service_modality: true,
           requires_booking: true,
           product_images: image,
           product_categories: {
-            select: { categories: { select: { id: true, name: true, slug: true } } },
+            select: {
+              category_id: true,
+              categories: { select: { id: true, name: true, slug: true } },
+            },
           },
-        },
+        } as any,
         orderBy: [{ name: 'asc' }, { id: 'asc' }],
-      }),
+      }) as unknown as Promise<ServiceRow[]>,
       this.findProducts(storeId, allProductIds),
     ]);
+
+    const { cardsById } = await resolvePreviewProductCards(
+      [...(rows as unknown as PreviewProductRow[]), ...productRows],
+      {
+        prisma: this.globalPrisma as any,
+        s3: this.s3,
+        storefrontPrice: this.storefrontPrice,
+        promotionEngine: this.promotionEngine,
+      },
+    );
 
     const { services, featuredIds } = orderServices(rows, config.featured_service_ids);
     const sign = async (key?: string) => (await this.s3.signUrl(key)) ?? null;
 
     const serviceViews: ServicePageViewData['services'] = [];
     for (const s of services) {
+      const price = Number(s.is_on_sale && s.sale_price != null ? s.sale_price : s.base_price);
       serviceViews.push({
         id: s.id,
         slug: s.slug,
         name: s.name,
         description: s.description ?? null,
-        price: Number(s.is_on_sale && s.sale_price != null ? s.sale_price : s.base_price),
+        price,
+        final_price: cardsById.get(s.id)?.final_price ?? price,
         image_url: await sign(s.product_images[0]?.image_url),
         service_duration_minutes: s.service_duration_minutes ?? null,
         service_duration_unit: s.service_duration_unit ?? null,
@@ -115,16 +150,9 @@ export class ServicePageViewService {
         requires_booking: !!s.requires_booking,
         categories: s.product_categories
           .map((pc) => pc.categories)
-          .filter((c): c is { id: number; name: string; slug: string } => !!c),
+          .filter((c): c is ServiceCategory => !!c),
       });
     }
-
-    const { cardsById } = await resolvePreviewProductCards(productRows, {
-      prisma: this.globalPrisma as any,
-      s3: this.s3,
-      storefrontPrice: this.storefrontPrice,
-      promotionEngine: this.promotionEngine,
-    });
 
     const products: ServicePageViewData['products'] = [];
     for (const id of config.product_ids) {

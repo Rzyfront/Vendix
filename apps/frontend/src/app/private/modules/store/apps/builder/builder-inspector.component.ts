@@ -6,8 +6,9 @@ import type { AppPageProductItem } from '../../../../../public/app-page/app-page
 import { AppMediaFieldComponent } from '../components/app-media-field/app-media-field.component';
 import { AppMediaPickerComponent } from '../components/app-media-picker/app-media-picker.component';
 import { AppProductSelectorComponent } from '../components/app-product-selector/app-product-selector.component';
+import { AppServiceSelectorComponent } from '../components/app-service-selector/app-service-selector.component';
 import type { AppMediaItem } from '../services/app-media.service';
-import type { PageAppKind } from '../templates/app-page.types';
+import { APP_BLOCK_CONDITION_OPTIONS, AppBlockConditionKey, AppBlockConditions, PageAppKind } from '../templates/app-page.types';
 import { BuilderListItem, blockDef, readListItems } from './builder-blocks';
 import type {
   BuilderBlock,
@@ -16,6 +17,7 @@ import type {
   BuilderListFieldDef,
   BuilderProductIdsFieldDef,
   BuilderScalarFieldDef,
+  BuilderServiceIdsFieldDef,
 } from './builder.types';
 
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
@@ -40,7 +42,14 @@ export interface BuilderPropChange {
 @Component({
   selector: 'app-builder-inspector',
   standalone: true,
-  imports: [NgTemplateOutlet, IconComponent, AppMediaFieldComponent, AppMediaPickerComponent, AppProductSelectorComponent],
+  imports: [
+    NgTemplateOutlet,
+    IconComponent,
+    AppMediaFieldComponent,
+    AppMediaPickerComponent,
+    AppProductSelectorComponent,
+    AppServiceSelectorComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (block(); as b) {
@@ -125,6 +134,41 @@ export interface BuilderPropChange {
             <span class="mt-1 block text-[11px] text-[var(--color-text-secondary)]">{{ field.hint }}</span>
           }
         </div>
+      } @else if (isServiceIds(field)) {
+        <div class="block" [attr.data-field]="field.key">
+          <app-service-selector
+            [selectedIds]="productIds(b, field.key)"
+            [max]="field.max"
+            [label]="field.label"
+            (selectedIdsChange)="setProductIds(b, field.key, $event)"
+          />
+          @if (field.hint) {
+            <span class="mt-1 block text-[11px] text-[var(--color-text-secondary)]">{{ field.hint }}</span>
+          }
+        </div>
+      } @else if (field.kind === 'conditions') {
+        <fieldset class="space-y-2 rounded-xl border border-[var(--color-border)] p-3" [attr.data-field]="field.key" data-testid="builder-conditions">
+          <legend class="px-1 text-xs font-semibold text-[var(--color-text-primary)]">{{ field.label }}</legend>
+          @for (option of conditionOptions; track option.key) {
+            <label class="flex items-center justify-between gap-2 text-xs">
+              <span class="text-[var(--color-text-primary)]">{{ option.label }}</span>
+              <select
+                class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-xs"
+                [attr.data-condition]="option.key"
+                [attr.aria-label]="field.label + ': ' + option.label"
+                [value]="conditionValue(b, field.key, option.key)"
+                (change)="setCondition(b, field.key, option.key, $any($event.target).value)"
+              >
+                <option value="">Siempre</option>
+                <option value="true">{{ option.yes }}</option>
+                <option value="false">{{ option.no }}</option>
+              </select>
+            </label>
+          }
+          @if (field.hint) {
+            <p class="text-[11px] text-[var(--color-text-secondary)]">{{ field.hint }}</p>
+          }
+        </fieldset>
       } @else if (isList(field)) {
         <fieldset class="space-y-2" [attr.data-field]="field.key">
           <legend class="flex w-full items-center justify-between text-xs font-semibold text-[var(--color-text-primary)]">
@@ -442,6 +486,31 @@ export class BuilderInspectorComponent {
 
   isProductIds(field: BuilderFieldDef): field is BuilderProductIdsFieldDef {
     return field.kind === 'product_ids';
+  }
+
+  isServiceIds(field: BuilderFieldDef): field is BuilderServiceIdsFieldDef {
+    return field.kind === 'service_ids';
+  }
+
+  readonly conditionOptions = APP_BLOCK_CONDITION_OPTIONS;
+
+  /** `''` (siempre), `'true'` o `'false'` de una condición de `visible_when`. */
+  conditionValue(block: BuilderBlock, key: string, condition: AppBlockConditionKey): string {
+    const value = this.conditions(block, key)[condition];
+    return typeof value === 'boolean' ? String(value) : '';
+  }
+
+  /** Cambia una condición; sin ninguna, la prop se quita (bloque siempre visible). */
+  setCondition(block: BuilderBlock, key: string, condition: AppBlockConditionKey, raw: string): void {
+    const next: AppBlockConditions = { ...this.conditions(block, key) };
+    if (raw === 'true' || raw === 'false') next[condition] = raw === 'true';
+    else delete next[condition];
+    this.propChange.emit({ blockId: block.id, key, value: Object.keys(next).length ? next : undefined });
+  }
+
+  private conditions(block: BuilderBlock, key: string): AppBlockConditions {
+    const raw = block.props[key];
+    return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as AppBlockConditions) : {};
   }
 
   isFieldVisible(block: BuilderBlock, field: BuilderFieldDef): boolean {

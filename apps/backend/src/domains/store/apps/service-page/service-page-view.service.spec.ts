@@ -198,6 +198,52 @@ describe('ServicePageViewService (F6-B)', () => {
   });
 });
 
+describe('ServicePageViewService — precio igual al público (apps-booking-detail A)', () => {
+  const storefrontPrice = new StorefrontPriceService(new PriceResolverService());
+
+  it('cada servicio trae final_price resuelto como el catálogo público (impuestos y promoción automática)', async () => {
+    const findMany = jest.fn().mockResolvedValueOnce([
+      service(1, 'Facial', {
+        base_price: '50000.00',
+        track_inventory: false,
+        product_tax_assignments: [],
+        product_variants: [],
+      }),
+      service(2, 'Masaje', {
+        base_price: '80000.00',
+        track_inventory: false,
+        product_tax_assignments: [],
+        product_variants: [],
+      }),
+    ]);
+    const prisma = {
+      products: { findMany },
+      product_price_tier_assignments: { findMany: jest.fn().mockResolvedValue([]) },
+      product_price_tier_overrides: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    const promotionEngine = {
+      findActiveAutoPromotionsForProducts: jest.fn().mockResolvedValue(
+        new Map([[2, { promotional_price: 60000, is_quantity_tiered: false }]]),
+      ),
+    };
+    const s3 = { signUrl: jest.fn(async () => undefined) };
+    const view = new ServicePageViewService(prisma as any, s3 as any, storefrontPrice, promotionEngine as any);
+
+    const data = await view.read(7, { featured_service_ids: [], product_ids: [] });
+
+    expect(data.services.map((s) => [s.id, s.price, s.final_price])).toEqual([
+      [1, 50000, 50000],
+      [2, 80000, 60000],
+    ]);
+    // Los servicios se leen con los campos de precio que usa el catálogo público.
+    expect(findMany.mock.calls[0][0].select).toMatchObject({
+      product_tax_assignments: expect.any(Object),
+      service_duration_minutes: true,
+      requires_booking: true,
+    });
+  });
+});
+
 describe('ServicePageAppService.previewContext (F6-B)', () => {
   it('reads the preview for the store of the request, with the stored config and whatever the status', async () => {
     jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(10);

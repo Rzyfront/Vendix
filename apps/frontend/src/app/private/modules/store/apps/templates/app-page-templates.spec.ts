@@ -14,6 +14,8 @@ import {
 import { APP_PAGE_TEMPLATES, APP_PAGE_VARIANTS, PAGE_APP_KINDS, applyVariant } from './index';
 import { blocksToPage, pageToBlocks } from '../page-builder/page-builder-document';
 import { PRODUCT_PAGE_BUILDER_CATALOG } from '../page-builder/product-page/product-page-builder';
+import { SERVICE_PAGE_BUILDER_CATALOG } from '../page-builder/service-page/service-page-builder';
+import { BOOKING_BUILDER_CATALOG } from '../page-builder/booking/booking-builder';
 
 describe('Apps F2 · app page templates', () => {
   for (const kind of PAGE_APP_KINDS) {
@@ -202,6 +204,56 @@ describe('Apps F2 · app page templates', () => {
         pageToBlocks(doc),
       );
       expect(roundTripped).toEqual(doc);
+    });
+  });
+  describe('apps-booking-detail', () => {
+    it('servicios manuales y condiciones por bloque pasan el contrato y el round-trip del constructor', () => {
+      const doc = {
+        schema_version: 1 as const,
+        mode: 'both' as const,
+        blocks: [
+          {
+            id: 'services',
+            type: 'services',
+            enabled: true,
+            props: { selection: 'manual', service_ids: [8, 2], show_duration: true, show_price: false },
+          },
+          {
+            id: 'gallery',
+            type: 'gallery',
+            enabled: true,
+            props: { title: 'Fotos', visible_when: { has_photos: true, sells: false } },
+          },
+        ],
+      };
+      expect(validateAppPage('service_page', doc).errors).toEqual([]);
+      const roundTripped = blocksToPage(
+        'service_page',
+        SERVICE_PAGE_BUILDER_CATALOG,
+        { schema_version: 1, mode: 'both', blocks: [] },
+        pageToBlocks(doc),
+      );
+      expect(roundTripped).toEqual(doc);
+    });
+
+    it('stay_detail pasa el contrato y el round-trip; un visible_when vacío se quita al guardar', () => {
+      const doc = {
+        schema_version: 1 as const,
+        blocks: [
+          {
+            id: 'stay',
+            type: 'stay_detail',
+            enabled: true,
+            props: { title: 'Tu estadía', inclusions: ['Wifi'], show_deposit: true, layout: 'list' },
+          },
+        ],
+      };
+      expect(validateAppPage('booking', doc).errors).toEqual([]);
+      const blocks = pageToBlocks(doc);
+      blocks[1].props['visible_when'] = {};
+      const saved = blocksToPage('booking', BOOKING_BUILDER_CATALOG, { schema_version: 1, blocks: [] }, blocks);
+      expect(saved).toEqual(doc);
+      expect(validateAppPage('booking', saved).valid).toBeTrue();
     });
   });
 });

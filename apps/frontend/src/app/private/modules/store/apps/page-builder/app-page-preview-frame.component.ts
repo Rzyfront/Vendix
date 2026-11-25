@@ -78,6 +78,7 @@ const SELECTED_STYLE = `[data-preview-selected="true"]{outline:2px solid var(--c
                 [storeName]="view.storeName"
                 [previewRooms]="view.rooms"
                 [previewProducts]="view.products"
+                [stayFacts]="view.stayFacts"
                 [blockIds]="true"
               />
             </app-booking-page-view>

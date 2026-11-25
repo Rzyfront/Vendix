@@ -4,6 +4,7 @@ import {
   faqFields,
   galleryFields,
   highlightsFields,
+  stayDetailFields,
   subtitleField,
   testimonialsFields,
   titleField,
@@ -30,6 +31,13 @@ export const BOOKING_TEMPLATE: AppPageTemplate = {
       icon: 'calendar-search',
       existing: true,
       fields: [titleField(), subtitleField()],
+    },
+    {
+      type: 'stay_detail',
+      label: 'Detalle de la estadía',
+      description: 'Horarios, capacidad, qué incluye, cancelación y anticipo, con los datos reales de tu hotel.',
+      icon: 'clipboard-list',
+      fields: stayDetailFields(),
     },
     {
       type: 'highlights',

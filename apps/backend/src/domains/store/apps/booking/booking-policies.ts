@@ -43,6 +43,61 @@ function needsFill(block: AppPageBlock): boolean {
   return block.type === 'policies' && block.enabled && POLICY_KEYS.some((k) => isBlank(block.props?.[k]));
 }
 
+/**
+ * Apps booking-detail — the hotel's real data behind the `stay_detail` block
+ * and the `visible_when` conditions of the booking page. Nothing here is typed
+ * by the owner: times come from the store settings, cancellation and deposit
+ * from the default rate plan, capacity and photos from the active room types.
+ */
+export interface BookingStayFacts {
+  /** "Desde las 3:00 p. m." */
+  check_in: string | null;
+  /** "Hasta las 12:00 m." */
+  check_out: string | null;
+  /** Policy text of the default rate plan. */
+  cancellation: string | null;
+  /** Most guests the largest active room type takes. */
+  max_guests: number | null;
+  /** Deposit (% of the stay) of the default rate plan; `null` without one. */
+  deposit_percent: number | null;
+  /** Some active room type has photos (`visible_when.has_photos`). */
+  has_photos: boolean;
+  /** Some room type can be booked (`visible_when.has_availability`). */
+  has_availability: boolean;
+}
+
+/** Facts of the stay from already-read data. Pure. */
+export function buildStayFacts(
+  defaults: PolicyDefaults,
+  depositPercent: unknown,
+  rooms: { max_occupancy: number; images: string[] | null }[],
+): BookingStayFacts {
+  const deposit = Number(depositPercent);
+  const capacity = rooms.reduce((max, r) => Math.max(max, Number(r.max_occupancy) || 0), 0);
+  return {
+    check_in: defaults.check_in || null,
+    check_out: defaults.check_out || null,
+    cancellation: defaults.cancellation || null,
+    max_guests: capacity > 0 ? capacity : null,
+    deposit_percent: Number.isFinite(deposit) && deposit > 0 ? deposit : null,
+    has_photos: rooms.some((r) => (r.images ?? []).length > 0),
+    has_availability: rooms.length > 0,
+  };
+}
+
+/**
+ * Whether the public page needs the stay facts: an enabled `stay_detail`
+ * block, or any block shown under conditions. A page without them keeps its
+ * response (and its queries) as before.
+ */
+export function needsStayFacts(page: AppPageDocument): boolean {
+  return page.blocks.some(
+    (b) =>
+      (b.type === 'stay_detail' && b.enabled) ||
+      (!!b.props?.['visible_when'] && typeof b.props['visible_when'] === 'object'),
+  );
+}
+
 /** Fills the empty texts of the policies block; saved texts are kept. Pure. */
 export function fillPolicies(page: AppPageDocument, defaults: PolicyDefaults): AppPageDocument {
   if (!page.blocks.some(needsFill)) return page;
@@ -76,6 +131,22 @@ export class BookingPoliciesService {
 
   /** The hotel's real policy texts; the editor preview fills its draft with them too. */
   async defaults(storeId: number): Promise<PolicyDefaults> {
+    return (await this.read(storeId)).defaults;
+  }
+
+  /** Real data of the stay (`stay_detail` and `visible_when`), scoped by `storeId`. */
+  async stayFacts(storeId: number): Promise<BookingStayFacts> {
+    const [{ defaults, depositPercent }, rooms] = await Promise.all([
+      this.read(storeId),
+      this.prisma.lodging_unit_types.findMany({
+        where: { store_id: storeId, is_active: true },
+        select: { max_occupancy: true, images: true },
+      }),
+    ]);
+    return buildStayFacts(defaults, depositPercent, rooms);
+  }
+
+  private async read(storeId: number): Promise<{ defaults: PolicyDefaults; depositPercent: unknown }> {
     const row = await this.prisma.store_settings.findFirst({
       where: { store_id: storeId },
       select: { settings: true },
@@ -87,6 +158,7 @@ export class BookingPoliciesService {
     const plan = await this.prisma.lodging_rate_plans.findFirst({
       where: { store_id: storeId, is_default: true, is_active: true },
       select: {
+        deposit_percent: true,
         cancellation_policy: {
           select: { id: true, name: true, rules: true, no_show_penalty: true, is_active: true },
         },
@@ -94,9 +166,12 @@ export class BookingPoliciesService {
     });
     const policy = plan?.cancellation_policy?.is_active ? toPolicySnapshot(plan.cancellation_policy) : null;
     return {
-      check_in: formatCheckIn(hospitality.check_in_time || '15:00'),
-      check_out: formatCheckOut(hospitality.check_out_time || '12:00'),
-      cancellation: policyText(asPolicySnapshot(policy)),
+      defaults: {
+        check_in: formatCheckIn(hospitality.check_in_time || '15:00'),
+        check_out: formatCheckOut(hospitality.check_out_time || '12:00'),
+        cancellation: policyText(asPolicySnapshot(policy)),
+      },
+      depositPercent: plan?.deposit_percent ?? null,
     };
   }
 }

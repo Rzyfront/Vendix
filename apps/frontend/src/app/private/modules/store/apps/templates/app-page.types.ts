@@ -397,6 +397,19 @@ export type AppTextAlign = 'left' | 'center' | 'right';
 export type AppProductsSelection = 'auto' | 'manual';
 export type AppProductsLayout = 'grid' | 'list' | 'carousel';
 export const MAX_BLOCK_PRODUCT_IDS = 50;
+/** Apps booking-detail — mismo tope que el backend (`MAX_BLOCK_SERVICE_IDS`). */
+export const MAX_BLOCK_SERVICE_IDS = 50;
+export type AppStayDetailLayout = 'card' | 'list';
+/** Topes del bloque `stay_detail` (backend `MAX_STAY_*`). */
+export const MAX_STAY_INCLUSIONS = 12;
+export const MAX_STAY_INCLUSION_LENGTH = 80;
+export const MAX_STAY_NOTE_LENGTH = 400;
+/** Condiciones cerradas de `props.visible_when` (backend `APP_BLOCK_CONDITION_KEYS`). */
+export type AppBlockConditionKey = 'has_photos' | 'has_availability' | 'sells';
+export type AppBlockConditions = Partial<Record<AppBlockConditionKey, boolean>>;
+export const APP_BLOCK_CONDITION_KEYS: readonly AppBlockConditionKey[] = ['has_photos', 'has_availability', 'sells'];
+/** Apps que admiten condiciones por bloque (backend `withConditions`). */
+export const CONDITIONAL_PAGE_APP_KINDS: readonly PageAppKind[] = ['service_page', 'booking'];
 export type AppHighlightsIcon =
   | 'sparkles'
   | 'star'
@@ -480,6 +493,18 @@ export const APP_TEXT_ALIGN_OPTIONS: readonly FieldOption[] = [
 export const APP_PRODUCTS_SELECTION_OPTIONS: readonly FieldOption[] = [
   { value: 'auto', label: 'Automática' },
   { value: 'manual', label: 'Manual' },
+];
+
+export const APP_STAY_DETAIL_LAYOUT_OPTIONS: readonly FieldOption[] = [
+  { value: 'card', label: 'Tarjetas' },
+  { value: 'list', label: 'Lista' },
+];
+
+/** Etiquetas del editor de `visible_when`: qué dato real mira cada condición. */
+export const APP_BLOCK_CONDITION_OPTIONS: readonly { key: AppBlockConditionKey; label: string; yes: string; no: string }[] = [
+  { key: 'has_photos', label: 'Fotos', yes: 'Solo si hay fotos', no: 'Solo si no hay fotos' },
+  { key: 'has_availability', label: 'Disponibilidad', yes: 'Solo si se puede reservar', no: 'Solo si no se puede reservar' },
+  { key: 'sells', label: 'Venta', yes: 'Solo si la página vende', no: 'Solo si la página no vende' },
 ];
 
 export const APP_PRODUCTS_LAYOUT_OPTIONS: readonly FieldOption[] = [
@@ -568,7 +593,17 @@ export type FieldDef =
       max: number;
       hint?: string;
       visibleWhen?: { key: string; value: unknown };
-    };
+    }
+  | {
+      key: string;
+      label: string;
+      kind: 'service_ids';
+      max: number;
+      hint?: string;
+      visibleWhen?: { key: string; value: unknown };
+    }
+  /** `visible_when`: el bloque se muestra solo cuando cada condición coincide con el dato real. */
+  | { key: string; label: string; kind: 'conditions'; hint?: string };
 
 export interface BlockDef {
   type: string;
@@ -837,6 +872,64 @@ export const productsFields = (): FieldDef[] => [
     emptyLabel: 'Por defecto',
   },
 ];
+
+/** Campos del bloque de servicios de Service Page (selección automática/manual, duración y precio). */
+export const servicesFields = (): FieldDef[] => [
+  titleField(),
+  subtitleField(),
+  {
+    key: 'selection',
+    label: 'Selección de servicios',
+    kind: 'select',
+    display: 'chips',
+    options: APP_PRODUCTS_SELECTION_OPTIONS,
+    emptyLabel: 'Por defecto',
+    hint: 'Automática lista todos tus servicios en línea; manual, solo los que elijas.',
+  },
+  {
+    key: 'service_ids',
+    label: 'Servicios elegidos',
+    kind: 'service_ids',
+    max: MAX_BLOCK_SERVICE_IDS,
+    hint: 'El orden de la lista se respeta en la página pública y en la vista previa.',
+    visibleWhen: { key: 'selection', value: 'manual' },
+  },
+  { key: 'show_duration', label: 'Mostrar duración', kind: 'bool' },
+  { key: 'show_price', label: 'Mostrar precio', kind: 'bool' },
+];
+
+/**
+ * Campos del bloque `stay_detail` (Booking): qué datos reales mostrar y los
+ * textos propios del dueño. Duración, capacidad, cancelación y anticipo salen
+ * del hotel; no se escriben aquí.
+ */
+export const stayDetailFields = (): FieldDef[] => [
+  titleField(),
+  { key: 'show_duration', label: 'Mostrar horarios de la estadía', kind: 'bool' },
+  { key: 'show_capacity', label: 'Mostrar capacidad (huéspedes)', kind: 'bool' },
+  { key: 'show_cancellation', label: 'Mostrar política de cancelación', kind: 'bool' },
+  { key: 'show_deposit', label: 'Mostrar anticipo', kind: 'bool' },
+  { key: 'show_inclusions', label: 'Mostrar «Qué incluye»', kind: 'bool' },
+  { key: 'inclusions', label: 'Qué incluye', kind: 'text_list', max: MAX_STAY_INCLUSIONS, itemMax: MAX_STAY_INCLUSION_LENGTH },
+  { key: 'show_note', label: 'Mostrar nota', kind: 'bool' },
+  { key: 'note', label: 'Nota', kind: 'text', max: MAX_STAY_NOTE_LENGTH, multiline: true },
+  {
+    key: 'layout',
+    label: 'Diseño',
+    kind: 'select',
+    display: 'chips',
+    options: APP_STAY_DETAIL_LAYOUT_OPTIONS,
+    emptyLabel: 'Por defecto',
+  },
+];
+
+/** Campo `visible_when` que el editor añade a cada bloque de Service Page y Booking. */
+export const CONDITIONS_FIELD: FieldDef = {
+  key: 'visible_when',
+  label: 'Mostrar esta sección',
+  kind: 'conditions',
+  hint: 'Sin condiciones se muestra siempre. Se aplica igual en la vista previa y en la página publicada.',
+};
 
 /** Hero fields, common to every app page. */
 export const HERO_FIELDS: ScalarFieldDef[] = [

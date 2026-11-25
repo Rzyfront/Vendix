@@ -6,6 +6,9 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { ProductsService } from '../../products/services/products.service';
 import { LANDING_BUILDER_CATALOG } from '../landing-builder/landing-builder.catalog';
 import { PRODUCT_PAGE_BUILDER_CATALOG } from '../page-builder/product-page/product-page-builder';
+import { BOOKING_BUILDER_CATALOG } from '../page-builder/booking/booking-builder';
+import { SERVICE_PAGE_BUILDER_CATALOG } from '../page-builder/service-page/service-page-builder';
+import { StoreAppsService } from '../services/store-apps.service';
 import { BuilderInspectorComponent, BuilderPropChange } from './builder-inspector.component';
 import type { BuilderBlock, BuilderCatalog } from './builder.types';
 
@@ -183,5 +186,65 @@ describe('BuilderInspectorComponent (F6-A)', () => {
     fixture.detectChanges();
     await fixture.whenStable();
     expect(el().querySelector('app-product-selector')).not.toBeNull();
+  });
+  describe('apps-booking-detail', () => {
+    async function renderWith(block: BuilderBlock, catalog: BuilderCatalog) {
+      TestBed.configureTestingModule({
+        imports: [BuilderInspectorComponent],
+        providers: [
+          provideZonelessChangeDetection(),
+          {
+            provide: StoreAppsService,
+            useValue: { servicePagePreviewContext: () => of({ data: { services: [], featured_service_ids: [], products: [] } }) },
+          },
+          {
+            provide: CurrencyFormatService,
+            useValue: { currencyCode: signal('COP'), format: (v: number) => `$${v}`, loadCurrency: () => {} },
+          },
+        ],
+      });
+      fixture = TestBed.createComponent(BuilderInspectorComponent);
+      fixture.componentRef.setInput('catalog', catalog);
+      fixture.componentRef.setInput('block', block);
+      fixture.componentRef.setInput('appKind', catalog.appKind);
+      changes = [];
+      fixture.componentInstance.propChange.subscribe((c) => changes.push(c));
+      fixture.detectChanges();
+      await fixture.whenStable();
+    }
+
+    const condition = (key: string) => el().querySelector('[data-condition="' + key + '"]') as HTMLSelectElement;
+
+    it('el bloque de servicios muestra el selector de servicios solo en selección manual', async () => {
+      await renderWith({ id: 'services', type: 'services', props: {} }, SERVICE_PAGE_BUILDER_CATALOG);
+      expect(el().querySelector('[data-testid="app-service-selector"]')).toBeNull();
+
+      fixture.componentRef.setInput('block', { id: 'services', type: 'services', props: { selection: 'manual', service_ids: [4] } });
+      fixture.detectChanges();
+      expect(el().querySelector('[data-field="service_ids"] [data-testid="app-service-selector"]')).not.toBeNull();
+    });
+
+    it('las condiciones se eligen por dato y vaciarlas quita visible_when', async () => {
+      await renderWith({ id: 'faq', type: 'faq', props: { visible_when: { sells: true } } }, BOOKING_BUILDER_CATALOG);
+      expect(condition('sells').value).toBe('true');
+      expect(condition('has_photos').value).toBe('');
+
+      condition('has_photos').value = 'false';
+      condition('has_photos').dispatchEvent(new Event('change'));
+      expect(changes[changes.length - 1]).toEqual({
+        blockId: 'faq',
+        key: 'visible_when',
+        value: { sells: true, has_photos: false },
+      });
+
+      condition('sells').value = '';
+      condition('sells').dispatchEvent(new Event('change'));
+      expect(changes[changes.length - 1]).toEqual({ blockId: 'faq', key: 'visible_when', value: undefined });
+    });
+
+    it('Product Page no ofrece condiciones por bloque', async () => {
+      await renderWith({ id: 'faq', type: 'faq', props: {} }, PRODUCT_PAGE_BUILDER_CATALOG);
+      expect(el().querySelector('[data-testid="builder-conditions"]')).toBeNull();
+    });
   });
 });

@@ -67,13 +67,19 @@ export class ServicePageHomeComponent {
   /** The owner's own page; `null` keeps the page exactly as it was (apps-f2 S5). */
   readonly page = computed(() => this.servicePage.config()?.page ?? null);
 
+  /** El dueño eligió los servicios a mano: una lista vacía no apaga la página (solo la sección). */
+  private readonly manualServices = computed(
+    () => this.page()?.blocks.find((b) => b.type === 'services')?.props['selection'] === 'manual',
+  );
+
   constructor() {
     this.servicePage
       .load()
       .pipe(
         switchMap((config) => {
-          if (!config || config.service_ids.length === 0) return of(null);
+          if (!config) return of(null);
           const ids = config.service_ids;
+          if (ids.length === 0) return of([] as EcommerceProduct[]);
           return this.catalog.getProducts({ ids: ids.join(','), limit: ids.length }).pipe(
             // Keep the page order (featured first); drop what the catalog no longer sells.
             map((res) => {
@@ -88,7 +94,7 @@ export class ServicePageHomeComponent {
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((services) => {
-        if (!services || services.length === 0) {
+        if (!services || (services.length === 0 && !this.manualServices())) {
           this.state.set('unavailable');
           return;
         }

@@ -116,6 +116,22 @@ export const APP_TEXT_ALIGNS = ['left', 'center', 'right'] as const;
 export const APP_PRODUCTS_SELECTIONS = ['auto', 'manual'] as const;
 export const APP_PRODUCTS_LAYOUTS = ['grid', 'list', 'carousel'] as const;
 export const MAX_BLOCK_PRODUCT_IDS = 50;
+/** Apps booking-detail — tope de servicios elegidos a mano en el bloque `services` (Service Page). */
+export const MAX_BLOCK_SERVICE_IDS = 50;
+/** Diseños del bloque `stay_detail` (Booking). */
+export const APP_STAY_DETAIL_LAYOUTS = ['card', 'list'] as const;
+/** Máximo de elementos de «Qué incluye» del bloque `stay_detail` y su largo por elemento. */
+export const MAX_STAY_INCLUSIONS = 12;
+export const MAX_STAY_INCLUSION_LENGTH = 80;
+/** Largo máximo de la nota libre del bloque `stay_detail`. */
+export const MAX_STAY_NOTE_LENGTH = 400;
+/**
+ * Condiciones cerradas de `props.visible_when` (Service Page y Booking): el
+ * bloque se muestra solo cuando cada condición presente coincide con el dato
+ * real de la página. Sin condiciones = siempre visible.
+ */
+export const APP_BLOCK_CONDITION_KEYS = ['has_photos', 'has_availability', 'sells'] as const;
+export type AppBlockConditionKey = (typeof APP_BLOCK_CONDITION_KEYS)[number];
 
 /**
  * Mode each app has today, before F2, when it has no saved page: the product
@@ -146,7 +162,8 @@ type FieldSpec =
   | { kind: 'list'; max: number; item: Record<string, ScalarField> }
   | { kind: 'text_list'; max: number; itemMax: number }
   | { kind: 'url_list'; max: number }
-  | { kind: 'id_list'; max: number };
+  | { kind: 'id_list'; max: number }
+  | { kind: 'conditions'; keys: readonly string[] };
 
 type FieldsSpec = Record<string, FieldSpec>;
 
@@ -252,6 +269,44 @@ const CTA: FieldsSpec = {
   image_url: url,
 };
 
+/**
+ * `visible_when` de un bloque (Service Page y Booking): objeto cerrado de
+ * condiciones booleanas, todas opcionales y combinables.
+ */
+const CONDITIONS: FieldsSpec = {
+  visible_when: { kind: 'conditions', keys: APP_BLOCK_CONDITION_KEYS },
+};
+
+/** Añade `visible_when` a cada bloque de un catálogo. */
+const withConditions = (
+  catalog: Record<string, FieldsSpec>,
+): Record<string, FieldsSpec> =>
+  Object.fromEntries(
+    Object.entries(catalog).map(([type, spec]) => [type, { ...spec, ...CONDITIONS }]),
+  );
+
+/**
+ * Detalle de la reserva/estadía (Booking): qué mostrar de los datos reales de
+ * las habitaciones (duración, capacidad, cancelación, anticipo) y los textos
+ * propios del dueño (qué incluye, nota). Los datos no se escriben a mano.
+ */
+const STAY_DETAIL: FieldsSpec = {
+  title: TITLE,
+  show_duration: bool,
+  show_capacity: bool,
+  show_inclusions: bool,
+  inclusions: {
+    kind: 'text_list',
+    max: MAX_STAY_INCLUSIONS,
+    itemMax: MAX_STAY_INCLUSION_LENGTH,
+  },
+  show_cancellation: bool,
+  show_deposit: bool,
+  show_note: bool,
+  note: text(MAX_STAY_NOTE_LENGTH),
+  layout: oneOf(APP_STAY_DETAIL_LAYOUTS),
+};
+
 /** Bloque de productos con selección automática/manual, variantes y diseño (Product Page y Service Page). */
 const PRODUCTS_BLOCK: FieldsSpec = {
   title: TITLE,
@@ -298,11 +353,18 @@ export const APP_PAGE_BLOCKS: Record<PageAppKind, Record<string, FieldsSpec>> =
       faq: withBlockStyle(FAQ),
       cta: withBlockStyle(CTA),
     },
-    service_page: {
-      /** Existing: the service list (cards with duration and price). */
+    service_page: withConditions({
+      /**
+       * Existing: the service list (cards with duration and price). Apps
+       * booking-detail: `selection: 'manual'` lists only `service_ids`, in
+       * that order (scoped to the store's online services); `auto` (or
+       * absent) lists every online service, as before.
+       */
       services: withBlockStyle({
         title: TITLE,
         subtitle: SUBTITLE,
+        selection: oneOf(APP_PRODUCTS_SELECTIONS),
+        service_ids: { kind: 'id_list', max: MAX_BLOCK_SERVICE_IDS },
         show_duration: bool,
         show_price: bool,
       }),
@@ -333,10 +395,12 @@ export const APP_PAGE_BLOCKS: Record<PageAppKind, Record<string, FieldsSpec>> =
       /** Existing: the secondary "también puedes comprar" products. */
       products: withBlockStyle(PRODUCTS_BLOCK),
       cta: withBlockStyle(CTA),
-    },
-    booking: {
+    }),
+    booking: withConditions({
       /** Existing: the PMS search (dates, guests) and the room types with rate. */
       search: withBlockStyle({ title: TITLE, subtitle: SUBTITLE }),
+      /** Detalle de la estadía con los datos reales del hotel (apps-booking-detail). */
+      stay_detail: withBlockStyle(STAY_DETAIL),
       highlights: withBlockStyle(HIGHLIGHTS),
       amenities: withBlockStyle({
         title: TITLE,
@@ -362,7 +426,7 @@ export const APP_PAGE_BLOCKS: Record<PageAppKind, Record<string, FieldsSpec>> =
       checkin_info: withBlockStyle({ text: text(300) }),
       /** Existing: the "para tu estadía" products. */
       products: withBlockStyle({ title: TITLE }),
-    },
+    }),
     store_home: {
       /**
        * Cards to the store's published apps (automatic). F6-B: `kinds` picks
@@ -703,6 +767,27 @@ function cleanFields(
         )
         .filter((item) => item !== undefined);
       if (items.length) out[key] = items;
+    } else if (field.kind === 'conditions') {
+      if (!isPlainObject(raw)) {
+        errors.push(`${fieldPath} debe ser un objeto.`);
+        continue;
+      }
+      const conditions: Record<string, boolean> = {};
+      for (const key of Object.keys(raw)) {
+        if (!field.keys.includes(key)) {
+          errors.push(`${fieldPath}.${key} no es una condición permitida.`);
+        }
+      }
+      for (const key of field.keys) {
+        const condition = raw[key];
+        if (condition === undefined || condition === null) continue;
+        if (typeof condition !== 'boolean') {
+          errors.push(`${fieldPath}.${key} debe ser verdadero o falso.`);
+          continue;
+        }
+        conditions[key] = condition;
+      }
+      if (Object.keys(conditions).length) out[key] = conditions;
     } else if (field.kind === 'id_list') {
       if (!Array.isArray(raw)) {
         errors.push(`${fieldPath} debe ser una lista.`);

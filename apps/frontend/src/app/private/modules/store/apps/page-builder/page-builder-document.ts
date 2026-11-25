@@ -1,12 +1,16 @@
 import type { BuilderBlock, BuilderBlockDef, BuilderCatalog, BuilderCategory, BuilderFieldDef, BuilderListFieldDef, BuilderOperationMode, BuilderScalarFieldDef } from '../builder/builder.types';
 import { blockDef, cleanListItems, readListItems } from '../builder/builder-blocks';
 import {
+  APP_BLOCK_CONDITION_KEYS,
   APP_PAGE_SCHEMA_VERSION,
   APP_PAGE_TEMPLATES,
+  AppBlockConditions,
   AppPageBlock,
   AppPageDocument,
   AppPageHero,
   BLOCK_APPEARANCE_FIELDS,
+  CONDITIONAL_PAGE_APP_KINDS,
+  CONDITIONS_FIELD,
   FieldDef,
   HERO_CUSTOM_FIELDS,
   HERO_FIELDS,
@@ -52,6 +56,11 @@ const SCALAR_ITEM_KEY = 'value';
 /** Apps con configurabilidad extendida (la tienda en línea `store_home` no se toca). */
 function supportsSectionCustomization(kind: PageAppKind): boolean {
   return kind !== 'store_home';
+}
+
+/** `visible_when` que el contrato admite en cada bloque de Service Page y Booking. */
+function conditionFields(kind: PageAppKind): FieldDef[] {
+  return CONDITIONAL_PAGE_APP_KINDS.includes(kind) ? [CONDITIONS_FIELD] : [];
 }
 
 function scalarField(def: ScalarFieldDef): BuilderScalarFieldDef {
@@ -143,6 +152,17 @@ export function builderField(def: FieldDef): BuilderFieldDef {
         hint: def.hint,
         visibleWhen: def.visibleWhen,
       };
+    case 'service_ids':
+      return {
+        key: def.key,
+        label: def.label,
+        kind: 'service_ids',
+        max: def.max,
+        hint: def.hint,
+        visibleWhen: def.visibleWhen,
+      };
+    case 'conditions':
+      return { key: def.key, label: def.label, kind: 'conditions', hint: def.hint };
     default:
       return scalarField(def);
   }
@@ -177,13 +197,14 @@ export function pageBuilderCatalog(
     const m = meta[def.type];
     if (!m) continue;
     const extraAppearance = customizable ? BLOCK_APPEARANCE_FIELDS : [];
+    const conditions = conditionFields(kind);
     blocks.push({
       type: def.type,
       label: def.label,
       description: def.description,
       icon: def.icon,
       category: m.category,
-      fields: [...def.fields, ...extraAppearance].map(builderField),
+      fields: [...def.fields, ...conditions, ...extraAppearance].map(builderField),
       // The sections the layout draws are read with `blocks.find(type)`: one per page.
       single: !!def.existing,
       pinned: m.pinned,
@@ -243,13 +264,28 @@ export function cleanBlockProps(fields: readonly FieldDef[], props: Record<strin
       out[def.key] = cleanTypedItems(builderField(def) as BuilderListFieldDef, value);
     } else if (def.kind === 'text_list' || def.kind === 'url_list' || def.kind === 'media_list') {
       out[def.key] = cleanScalarItems(builderField(def) as BuilderListFieldDef, value);
-    } else if (def.kind === 'product_ids') {
+    } else if (def.kind === 'product_ids' || def.kind === 'service_ids') {
       const cleaned = cleanProductIds(value, def.max);
       if (cleaned.length > 0) out[def.key] = cleaned;
+      else delete out[def.key];
+    } else if (def.kind === 'conditions') {
+      const cleaned = cleanConditions(value);
+      if (cleaned) out[def.key] = cleaned;
       else delete out[def.key];
     }
   }
   return out;
+}
+
+/** Solo las condiciones conocidas con valor booleano; `null` si no queda ninguna (siempre visible). */
+function cleanConditions(raw: unknown): AppBlockConditions | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const out: AppBlockConditions = {};
+  for (const key of APP_BLOCK_CONDITION_KEYS) {
+    const value = (raw as Record<string, unknown>)[key];
+    if (typeof value === 'boolean') out[key] = value;
+  }
+  return Object.keys(out).length ? out : null;
 }
 
 /** Conserva enteros positivos únicos en orden, hasta el máximo permitido por el contrato. */
@@ -280,7 +316,10 @@ export function blocksToPage(
 ): AppPageDocument {
   const customizable = supportsSectionCustomization(kind);
   const extraAppearance = customizable ? BLOCK_APPEARANCE_FIELDS : [];
-  const fieldsOf = new Map(APP_PAGE_TEMPLATES[kind].blocks.map((b) => [b.type, [...b.fields, ...extraAppearance]]));
+  const conditions = conditionFields(kind);
+  const fieldsOf = new Map(
+    APP_PAGE_TEMPLATES[kind].blocks.map((b) => [b.type, [...b.fields, ...conditions, ...extraAppearance]]),
+  );
   const heroBlock = blocks.find((b) => blockDef(catalog, b.type)?.virtual);
   const hero = cleanHero(heroBlock?.props ?? {}, customizable ? HERO_CUSTOM_FIELDS : HERO_FIELDS);
   const page: AppPageDocument = {

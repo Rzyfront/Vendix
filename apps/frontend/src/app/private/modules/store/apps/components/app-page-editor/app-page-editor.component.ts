@@ -18,6 +18,7 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { AppPageViewComponent } from '../../../../../../public/app-page/app-page-view.component';
 import { AppProductSelectorComponent } from '../app-product-selector/app-product-selector.component';
+import { AppServiceSelectorComponent } from '../app-service-selector/app-service-selector.component';
 import { contrastChecks } from '../../../../../../public/app-page/app-page-theme';
 import type { StoreAppDetail } from '../../interfaces/store-app.interface';
 import { StoreAppsService } from '../../services/store-apps.service';
@@ -83,7 +84,7 @@ const APP_LABEL: Record<PageAppKind, string> = {
 @Component({
   selector: 'app-app-page-editor',
   standalone: true,
-  imports: [NgTemplateOutlet, IconComponent, AppPageViewComponent, AppProductSelectorComponent],
+  imports: [NgTemplateOutlet, IconComponent, AppPageViewComponent, AppProductSelectorComponent, AppServiceSelectorComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="space-y-4" data-testid="app-page-editor">
@@ -570,6 +571,19 @@ const APP_LABEL: Record<PageAppKind, string> = {
               (selectedIdsChange)="onProductIds(i, field.key, $event)"
             />
           }
+        }
+        @case ('service_ids') {
+          @if (!field.visibleWhen || read(blockTarget(i), field.visibleWhen.key) === field.visibleWhen.value) {
+            <app-service-selector
+              [selectedIds]="productIdsOf(i, field.key)"
+              [max]="field.max"
+              [label]="field.label"
+              (selectedIdsChange)="onProductIds(i, field.key, $event)"
+            />
+          }
+        }
+        @case ('conditions') {
+          <!-- Las condiciones por bloque se editan en el constructor de páginas. -->
         }
         @default {
           <ng-container *ngTemplateOutlet="scalar; context: { def: field, target: blockTarget(i) }" />
