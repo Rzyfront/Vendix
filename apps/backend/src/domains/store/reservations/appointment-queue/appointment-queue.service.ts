@@ -4,6 +4,24 @@ import { NotificationsService } from '../../notifications/notifications.service'
 import { bookingInterval } from '@common/utils/schedule-window.util';
 import { resolveStoreTimezone } from '@common/utils/store-timezone.util';
 
+/** Fila del tablero de la pestaña Cola (agenda-unificada, 2026-11-24). */
+export interface QueueBoardRow {
+  booking_id: number;
+  booking_number: string;
+  customer_name: string;
+  service_name: string | null;
+  provider_name: string | null;
+  status: 'confirmed' | 'arriving' | 'attending';
+  checked_in: boolean;
+  start_time: string;
+  end_time: string;
+  starts_at: Date;
+  arrival_at: Date | null;
+  /** Minutos hasta el inicio; negativo si la hora ya pasó. */
+  minutes_to_start: number;
+  priority: number;
+}
+
 /**
  * Smart queue for the reservations redesign.
  *
@@ -30,8 +48,7 @@ import { resolveStoreTimezone } from '@common/utils/store-timezone.util';
  * so manual invocations are rarely needed.
  */
 @Injectable()
-export class AppointmentQueueService {
-  private readonly logger = new Logger(AppointmentQueueService.name);
+export class AppointmentQueueService {  private readonly logger = new Logger(AppointmentQueueService.name);
 
   constructor(
     private readonly prisma: StorePrismaService,
@@ -111,6 +128,122 @@ export class AppointmentQueueService {
         priority: c.priority,
       };
     });
+  }
+
+  /**
+   * Tablero del día para la pestaña Cola: todo lo que la recepción necesita ver
+   * de un vistazo, sin tocar `queue_position` ni notificar a nadie.
+   *
+   * - `attending`: ya está en atención.
+   * - `arriving`: hizo check-in y espera (orden de la cola viva, por cercanía a
+   *   su hora, con la prioridad manual como desempate).
+   * - `confirmed`: programación confirmada que todavía no empieza, por hora
+   *   (las de hora ya pasada sin check-in se quedan para que se vean).
+   *
+   * La cola viva (`computeQueueForStore`) sigue siendo la única fuente para
+   * persistir posiciones y avisar al siguiente; este tablero es solo lectura y
+   * agrega lo que aún no ha llegado.
+   */
+  async dayBoard(
+    storeId: number,
+    isoDay: string,
+    now: Date = new Date(),
+  ): Promise<{
+    day: string;
+    generated_at: Date;
+    in_service: QueueBoardRow[];
+    waiting: QueueBoardRow[];
+    upcoming: QueueBoardRow[];
+  }> {
+    const day = new Date(`${isoDay.slice(0, 10)}T00:00:00.000Z`);
+
+    const rows = await this.prisma.bookings.findMany({
+      where: {
+        store_id: storeId,
+        date: day,
+        status: { in: ['confirmed', 'arriving', 'attending'] as any },
+      },
+      select: {
+        id: true,
+        booking_number: true,
+        status: true,
+        customer_id: true,
+        provider_id: true,
+        date: true,
+        end_date: true,
+        start_time: true,
+        end_time: true,
+        arrival_at: true,
+        priority: true,
+        customer: { select: { first_name: true, last_name: true } },
+        product: { select: { name: true } },
+        provider: {
+          select: {
+            display_name: true,
+            employee: { select: { first_name: true, last_name: true } },
+            user: { select: { first_name: true, last_name: true } },
+          },
+        },
+      },
+      orderBy: [{ start_time: 'asc' }, { priority: 'asc' }, { created_at: 'asc' }],
+    });
+
+    const timezone = await resolveStoreTimezone(this.prisma, storeId);
+
+    const board = rows.map((row) => {
+      const startsAt = bookingInterval(row, timezone).startAt;
+      const checkedIn = row.arrival_at != null;
+      const providerName =
+        row.provider?.display_name ??
+        (row.provider?.employee
+          ? `${row.provider.employee.first_name} ${row.provider.employee.last_name ?? ''}`.trim()
+          : null) ??
+        (row.provider?.user
+          ? `${row.provider.user.first_name ?? ''} ${row.provider.user.last_name ?? ''}`.trim()
+          : null) ??
+        null;
+      const customerName =
+        `${row.customer?.first_name ?? ''} ${row.customer?.last_name ?? ''}`.trim() ||
+        `Reserva #${row.booking_number}`;
+      return {
+        booking_id: row.id,
+        booking_number: row.booking_number,
+        customer_name: customerName,
+        service_name: row.product?.name ?? null,
+        provider_name: providerName,
+        status: row.status as QueueBoardRow['status'],
+        checked_in: checkedIn,
+        start_time: row.start_time,
+        end_time: row.end_time,
+        starts_at: startsAt,
+        arrival_at: row.arrival_at ?? null,
+        minutes_to_start: Math.round((startsAt.getTime() - now.getTime()) / 60_000),
+        priority: row.priority ?? 0,
+      } satisfies QueueBoardRow;
+    });
+
+    const byQueueScore = (a: QueueBoardRow, b: QueueBoardRow) => {
+      const scoreA = a.arrival_at
+        ? Math.abs(a.starts_at.getTime() - a.arrival_at.getTime())
+        : Number.POSITIVE_INFINITY;
+      const scoreB = b.arrival_at
+        ? Math.abs(b.starts_at.getTime() - b.arrival_at.getTime())
+        : Number.POSITIVE_INFINITY;
+      return scoreA - scoreB || a.priority - b.priority || a.booking_id - b.booking_id;
+    };
+
+    return {
+      day: isoDay.slice(0, 10),
+      generated_at: now,
+      in_service: board.filter((r) => r.status === 'attending'),
+      waiting: board.filter((r) => r.status === 'arriving').sort(byQueueScore),
+      // Confirmadas que todavía no empiezan (status `confirmed` = no iniciada):
+      // incluye las que ya pasaron de hora sin check-in, que es justo lo que la
+      // recepción necesita ver para reaccionar.
+      upcoming: board
+        .filter((r) => r.status === 'confirmed')
+        .sort((a, b) => a.starts_at.getTime() - b.starts_at.getTime()),
+    };
   }
 
   /**

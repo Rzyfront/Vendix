@@ -95,7 +95,7 @@ export function schedulingConfigActions(flags: {
       // Configuración de disponibilidad: pestaña Configuración de Agenda.
       { label: 'Equipo de servicio', icon: 'user-cog', action: agendaUrl('configuracion', 'equipo') },
       { label: 'Disponibilidad', icon: 'calendar-clock', action: agendaUrl('configuracion', 'disponibilidad') },
-      { label: 'Cola de atención', icon: 'users', action: agendaUrl('configuracion', 'cola') },
+      { label: 'Cola de atención', icon: 'users', action: agendaUrl('cola') },
       { label: 'Horario de la tienda', icon: 'clock', action: agendaUrl('configuracion', 'horario') },
       { label: 'Solicitudes de reagenda', icon: 'inbox', action: '/admin/reservations/reschedule-requests' },
       { label: 'Solicitudes de pago', icon: 'receipt', action: '/admin/reservations/payment-requests' },

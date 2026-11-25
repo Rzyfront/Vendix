@@ -7,7 +7,6 @@ import {
 } from '../../../../../../shared/components/index';
 import { ScheduleManagementComponent } from '../../../reservations/components/schedule-management/schedule-management.component';
 import { ProviderAvailabilityComponent } from '../../../reservations/components/provider-availability/provider-availability.component';
-import { AppointmentQueuePanelComponent } from '../../../reservations/components/appointment-queue-panel/appointment-queue-panel.component';
 import { BusinessHoursComponent } from '../../../reservations/components/business-hours/business-hours.component';
 import { SchedulingSources } from '../../interfaces/scheduling.interface';
 import { SchedulingApiService } from '../../services/scheduling-api.service';
@@ -16,7 +15,6 @@ import { ConfigSection } from '../../scheduling-tabs';
 export const CONFIG_SECTION_TABS: { id: ConfigSection; label: string; icon: string }[] = [
   { id: 'equipo', label: 'Equipo de servicio', icon: 'user-cog' },
   { id: 'disponibilidad', label: 'Disponibilidad', icon: 'calendar-clock' },
-  { id: 'cola', label: 'Cola de atención', icon: 'users' },
   { id: 'horario', label: 'Horario de la tienda', icon: 'clock' },
 ];
 
@@ -24,8 +22,9 @@ export const CONFIG_SECTION_TABS: { id: ConfigSection; label: string; icon: stri
  * Agenda → Configuración (agenda-unificada F1). Toda la configuración de
  * disponibilidad de Reservas en un solo lugar, como secciones (capa 4,
  * `app-scrollable-tabs`): prestadores y equipo de servicio (horarios,
- * bloqueos y excepciones), disponibilidad de proveedores, cola de atención y
- * horario del negocio. Monta las pantallas de siempre sin cambiar su lógica.
+ * bloqueos y excepciones), disponibilidad de proveedores y horario del
+ * negocio. La cola de atención es pestaña propia desde 2026-11-24; monta las
+ * pantallas de siempre sin cambiar su lógica.
  * El resto de pantallas de Reservas y Pedidos ya se alcanzan desde el menú de
  * acciones de Agenda (Rafael, 2026-11-24: la rejilla «Otras pantallas» sobraba).
  */
@@ -38,7 +37,6 @@ export const CONFIG_SECTION_TABS: { id: ConfigSection; label: string; icon: stri
     EmptyStateComponent,
     ScheduleManagementComponent,
     ProviderAvailabilityComponent,
-    AppointmentQueuePanelComponent,
     BusinessHoursComponent,
   ],
   template: `
@@ -60,9 +58,6 @@ export const CONFIG_SECTION_TABS: { id: ConfigSection; label: string; icon: stri
             }
             @case ('disponibilidad') {
               <app-provider-availability [embedded]="true" />
-            }
-            @case ('cola') {
-              <app-appointment-queue-panel />
             }
             @case ('horario') {
               <app-business-hours />

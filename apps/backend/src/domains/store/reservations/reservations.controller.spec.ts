@@ -51,6 +51,7 @@ describe('ReservationsController — appointment redesign endpoints (smoke)', ()
 
     const appointmentQueueService = {
       computeQueueForStore: jest.fn().mockResolvedValue([]),
+      dayBoard: jest.fn().mockResolvedValue({ in_service: [], waiting: [], upcoming: [] }),
       refreshAndBroadcastQueue: jest.fn(),
     } as any;
 
@@ -139,6 +140,19 @@ describe('ReservationsController — appointment redesign endpoints (smoke)', ()
         1,
         '2026-07-18',
       );
+    } finally {
+      storeIdSpy.mockRestore();
+    }
+  });
+
+  it('getQueueBoard delegates to AppointmentQueueService.dayBoard', async () => {
+    const { controller, appointmentQueueService } = buildController();
+    const storeIdSpy = jest
+      .spyOn(RequestContextService, 'getStoreId')
+      .mockReturnValue(1);
+    try {
+      await controller.getQueueBoard('2026-07-18');
+      expect(appointmentQueueService.dayBoard).toHaveBeenCalledWith(1, '2026-07-18');
     } finally {
       storeIdSpy.mockRestore();
     }

@@ -516,6 +516,22 @@ export class ReservationsController {
     return this.responseService.success(result, 'Cola de reservas obtenida');
   }
 
+  // Tablero de la pestaña Cola: en atención, en sala (check-in) y la programación
+  // confirmada que todavía no empieza. Solo lectura, sin mover posiciones.
+  @Get('queue/board')
+  @Permissions('store:reservations:queue:read')
+  async getQueueBoard(@Query('day') day?: string) {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) {
+      throw new BadRequestException(
+        'No se pudo determinar la tienda del contexto de la solicitud',
+      );
+    }
+    const targetDay = day ?? new Date().toISOString().split('T')[0];
+    const result = await this.appointmentQueueService.dayBoard(storeId, targetDay);
+    return this.responseService.success(result, 'Tablero de la cola obtenido');
+  }
+
   @Get(':id')
   @Permissions('store:reservations:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {

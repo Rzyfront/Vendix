@@ -102,6 +102,73 @@ describe('AppointmentQueueService', () => {
     expect(ranked[0].starts_at).toEqual(new Date('2026-07-18T10:00:00Z'));
   });
 
+  describe('dayBoard', () => {
+    // 2026-07-18 09:00 en Bogotá (UTC-5).
+    const now = new Date('2026-07-18T14:00:00Z');
+    const row = (over: Record<string, any>) => ({
+      id: 1,
+      booking_number: 'BKG-1',
+      status: 'confirmed',
+      customer_id: 100,
+      provider_id: 1,
+      date: new Date('2026-07-18T00:00:00Z'),
+      end_date: null,
+      start_time: '11:00',
+      end_time: '12:00',
+      arrival_at: null,
+      priority: 0,
+      customer: { first_name: 'Ana', last_name: 'Díaz' },
+      product: { name: 'Corte' },
+      provider: { display_name: 'Laura', employee: null, user: null },
+      ...over,
+    });
+
+    it('separa en atención, en sala y la programación confirmada que no ha empezado', async () => {
+      const { service, findMany } = buildService([
+        row({ id: 1, status: 'attending', start_time: '09:00', end_time: '10:00', arrival_at: new Date('2026-07-18T13:50:00Z') }),
+        row({ id: 2, status: 'arriving', start_time: '10:00', end_time: '11:00', arrival_at: new Date('2026-07-18T13:30:00Z') }),
+        row({ id: 3, status: 'arriving', start_time: '10:00', end_time: '11:00', arrival_at: new Date('2026-07-18T13:55:00Z') }),
+        row({ id: 4, status: 'confirmed', start_time: '11:00', end_time: '12:00' }),
+        row({ id: 5, status: 'confirmed', start_time: '08:00', end_time: '09:00' }),
+      ]);
+
+      const board = await service.dayBoard(1, '2026-07-18', now);
+
+      expect(board.in_service.map((r) => r.booking_id)).toEqual([1]);
+      // En sala: el que llegó más cerca de su hora va primero.
+      expect(board.waiting.map((r) => r.booking_id)).toEqual([3, 2]);
+      // Las confirmadas van por hora, incluidas las que ya pasaron sin check-in.
+      expect(board.upcoming.map((r) => r.booking_id)).toEqual([5, 4]);
+      expect(findMany.mock.calls[0][0].where.status).toEqual({
+        in: ['confirmed', 'arriving', 'attending'],
+      });
+    });
+
+    it('compone el nombre del cliente y del prestador para el monitor', async () => {
+      const { service } = buildService([
+        row({
+          id: 9,
+          status: 'confirmed',
+          start_time: '11:00',
+          provider: { display_name: null, employee: { first_name: 'María', last_name: 'Paz' }, user: null },
+        }),
+      ]);
+      const board = await service.dayBoard(1, '2026-07-18', now);
+      expect(board.upcoming[0].customer_name).toBe('Ana Díaz');
+      expect(board.upcoming[0].provider_name).toBe('María Paz');
+      expect(board.upcoming[0].service_name).toBe('Corte');
+      expect(board.upcoming[0].minutes_to_start).toBe(120);
+      expect(board.upcoming[0].checked_in).toBeFalse();
+    });
+
+    it('nunca persiste posiciones: es solo lectura', async () => {
+      const { service, update, transaction } = buildService([row({ id: 4 })]);
+      await service.dayBoard(1, '2026-07-18', now);
+      expect(update).not.toHaveBeenCalled();
+      expect(transaction).not.toHaveBeenCalled();
+    });
+  });
+
   it('persists queue_position in a transaction and notifies the top of the queue', async () => {
     const candidates = [
       {

@@ -172,7 +172,7 @@ describe('Agenda unificada F1: URLs reales de Órdenes → Agenda', () => {
     ['/admin/scheduled-orders', '/admin/orders/agenda?tab=calendario'],
     ['/admin/reservations/schedules', '/admin/orders/agenda?tab=configuracion&seccion=equipo'],
     ['/admin/reservations/availability', '/admin/orders/agenda?tab=configuracion&seccion=disponibilidad'],
-    ['/admin/reservations/queue', '/admin/orders/agenda?tab=configuracion&seccion=cola'],
+    ['/admin/reservations/queue', '/admin/orders/agenda?tab=cola'],
     ['/admin/reservations/business-hours', '/admin/orders/agenda?tab=configuracion&seccion=horario'],
   ];
   for (const [from, to] of REDIRECTS) {
