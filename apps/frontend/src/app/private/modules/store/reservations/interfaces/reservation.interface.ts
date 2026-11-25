@@ -378,6 +378,8 @@ export interface ServiceProvider {
    * false = own weekly schedule. Absent (older API) reads as true.
    */
   uses_store_hours?: boolean;
+  /** Detail only: the provider has active own schedule rows saved. */
+  has_own_schedule?: boolean;
   employee?: { id: number; first_name: string; last_name: string; position?: string } | null;
   user?: ProviderUser | null;
   services?: ProviderServiceAssignment[];

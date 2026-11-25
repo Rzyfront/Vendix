@@ -64,13 +64,19 @@ describe('ProvidersService — proveedores como usuarios de tienda', () => {
     it('findOne muestra el horario de la tienda (heredado) a quien trabaja en él', async () => {
       prisma.service_providers.findFirst.mockResolvedValue({ id: 1, uses_store_hours: true, schedules: own });
       (service as any).businessHours.loadProviderBlocks.mockResolvedValue(inherited);
-      await expect(service.findOne(1)).resolves.toMatchObject({ uses_store_hours: true, schedules: inherited });
+      await expect(service.findOne(1)).resolves.toMatchObject({ uses_store_hours: true, schedules: inherited, has_own_schedule: true });
     });
 
     it('findOne deja el horario propio igual que antes', async () => {
       prisma.service_providers.findFirst.mockResolvedValue({ id: 1, uses_store_hours: false, schedules: own });
-      await expect(service.findOne(1)).resolves.toMatchObject({ schedules: own });
+      await expect(service.findOne(1)).resolves.toMatchObject({ schedules: own, has_own_schedule: true });
       expect((service as any).businessHours.loadProviderBlocks).not.toHaveBeenCalled();
+    });
+
+    it('findOne avisa que no hay horario propio guardado', async () => {
+      prisma.service_providers.findFirst.mockResolvedValue({ id: 1, uses_store_hours: true, schedules: [] });
+      (service as any).businessHours.loadProviderBlocks.mockResolvedValue(inherited);
+      await expect(service.findOne(1)).resolves.toMatchObject({ has_own_schedule: false });
     });
 
     it('update guarda la elección sin tocar los horarios propios', async () => {

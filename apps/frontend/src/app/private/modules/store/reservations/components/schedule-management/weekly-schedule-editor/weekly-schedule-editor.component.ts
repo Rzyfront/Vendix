@@ -63,6 +63,8 @@ export class WeeklyScheduleEditorComponent {
   /** The provider works the store hours: the store week (inherited rows) is shown, read-only. */
   readonly readOnly = input(false);
   readonly scheduleChanged = output<{ activeDays: number; weeklyHours: number }>();
+  /** Emitted after a successful save. */
+  readonly saved = output<void>();
 
   readonly days = signal<WeekHoursDay[]>([]);
   private readonly savedDays = signal<WeekHoursDay[]>([]);
@@ -168,6 +170,7 @@ export class WeeklyScheduleEditorComponent {
           this.savedDays.set(week);
           this.justSaved.set(true);
           this.toastService.success('Horario guardado');
+          this.saved.emit();
         },
         error: (err) => this.toastService.error(err?.error?.message || 'No se pudo guardar el horario'),
       });

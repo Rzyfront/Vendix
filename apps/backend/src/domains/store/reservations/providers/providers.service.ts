@@ -103,15 +103,22 @@ export class ProvidersService {
       throw new NotFoundException(`Proveedor #${id} no encontrado`);
     }
 
+    // Lets the panel tell whether choosing "own schedule" can take effect at
+    // once (saved rows exist) or must wait for the first save.
+    const has_own_schedule = (provider.schedules ?? []).some(
+      (row) => row.is_active !== false,
+    );
+
     // Parte 1: a provider that works the store hours shows the store blocks it
     // really offers (marked `inherited`), not its saved own rows.
     if (provider.uses_store_hours === true) {
       return {
         ...provider,
+        has_own_schedule,
         schedules: await this.businessHours.loadProviderBlocks([provider.id]),
       };
     }
-    return provider;
+    return { ...provider, has_own_schedule };
   }
 
   async create(dto: CreateProviderDto) {

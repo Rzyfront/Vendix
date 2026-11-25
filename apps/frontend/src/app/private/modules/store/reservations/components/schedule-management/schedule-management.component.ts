@@ -183,6 +183,14 @@ export class ScheduleManagementComponent {
 
   /** Parte 1: the provider works the store hours unless it chose its own schedule. */
   readonly usesStoreHours = computed(() => this.selectedProvider()?.uses_store_hours !== false);
+  /**
+   * "Own schedule" picked for a provider with no own rows saved yet: it is
+   * only a draft (prefilled with the store hours) until the first save, so the
+   * provider keeps the store hours and never ends up without availability.
+   */
+  readonly ownScheduleDraft = signal(false);
+  /** The own-schedule option is the one shown (saved, or as an unsaved draft). */
+  readonly showsOwnSchedule = computed(() => !this.usesStoreHours() || this.ownScheduleDraft());
   readonly savingScheduleSource = signal(false);
   /** Agenda → Configuración → Horario: where the store hours are edited. */
   readonly storeHoursRoute = '/admin/orders/agenda';
@@ -316,6 +324,7 @@ export class ScheduleManagementComponent {
   closeDetailModal(): void {
     this.isDetailModalOpen.set(false);
     this.selectedProvider.set(null);
+    this.ownScheduleDraft.set(false);
     this.activeTab.set('services');
     this.liveWeeklyHours.set(null);
     this.liveActiveDays.set(null);
@@ -344,6 +353,7 @@ export class ScheduleManagementComponent {
   }
 
   selectProvider(provider: ServiceProvider): void {
+    this.ownScheduleDraft.set(false);
     this.managingServices.set(false);
     this.editingBio.set(false);
     this.activeTab.set('services');
@@ -583,7 +593,18 @@ export class ScheduleManagementComponent {
    */
   setUsesStoreHours(value: boolean): void {
     const provider = this.selectedProvider();
-    if (!provider || this.usesStoreHours() === value) return;
+    if (!provider) return;
+    if (value && this.ownScheduleDraft()) {
+      // Nothing was saved: drop the draft, the provider never left the store hours.
+      this.ownScheduleDraft.set(false);
+      return;
+    }
+    if (this.usesStoreHours() === value) return;
+    if (!value && provider.has_own_schedule !== true) {
+      // Without saved own rows, "own schedule" waits for the first save.
+      this.ownScheduleDraft.set(true);
+      return;
+    }
     this.savingScheduleSource.set(true);
     this.reservationsService
       .updateProvider(provider.id, { uses_store_hours: value })
@@ -604,6 +625,16 @@ export class ScheduleManagementComponent {
         },
         error: () => this.toastService.error('No se pudo cambiar el horario del proveedor'),
       });
+  }
+
+  /** The first save of a draft own schedule is what switches the provider (the API sets it). */
+  onOwnScheduleSaved(): void {
+    const provider = this.selectedProvider();
+    if (!provider || !this.ownScheduleDraft()) return;
+    const merged = { ...provider, uses_store_hours: false, has_own_schedule: true };
+    this.selectedProvider.set(merged);
+    this.providers.set(this.providers().map((p) => (p.id === merged.id ? merged : p)));
+    this.ownScheduleDraft.set(false);
   }
 
   onScheduleChanged(stats: { activeDays: number; weeklyHours: number }): void {

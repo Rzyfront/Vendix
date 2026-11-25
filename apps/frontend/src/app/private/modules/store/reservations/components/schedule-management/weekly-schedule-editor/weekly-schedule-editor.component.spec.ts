@@ -57,7 +57,9 @@ describe('WeeklyScheduleEditorComponent — horario del prestador', () => {
   });
 
   it('guarda un bloque por tramo con el atajo nocturno y avisa el éxito', () => {
-    const { fixture, el, service, toast } = setup(false);
+    const { fixture, component, el, service, toast } = setup(false);
+    const savedSpy = jasmine.createSpy('saved');
+    component.saved.subscribe(savedSpy);
     (el.querySelector('[data-preset="night"]') as HTMLButtonElement).click();
     fixture.detectChanges();
     expect(el.querySelectorAll('[data-testid="ends-next-day"]').length).toBe(7);
@@ -67,6 +69,7 @@ describe('WeeklyScheduleEditorComponent — horario del prestador', () => {
     expect(items.length).toBe(7);
     expect(items[0]).toEqual({ day_of_week: 1, block_order: 0, is_active: true, start_time: '17:00', end_time: '04:00' });
     expect(toast.success).toHaveBeenCalled();
+    expect(savedSpy).toHaveBeenCalledTimes(1);
     expect(el.querySelector('.whe-footer__status')?.textContent).toContain('Horario guardado');
   });
 

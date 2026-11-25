@@ -430,8 +430,8 @@
                   role="radio"
                   class="schedule-option"
                   data-testid="schedule-source-store"
-                  [class.schedule-option--selected]="usesStoreHours()"
-                  [attr.aria-checked]="usesStoreHours()"
+                  [class.schedule-option--selected]="!showsOwnSchedule()"
+                  [attr.aria-checked]="!showsOwnSchedule()"
                   [disabled]="savingScheduleSource()"
                   (click)="setUsesStoreHours(true)"
                 >
@@ -444,7 +444,7 @@
                     <span class="schedule-option__hint">Atiende cuando la tienda está abierta. Si la tienda cambia su horario, el suyo cambia solo.</span>
                   </span>
                   <span class="schedule-option__check" aria-hidden="true">
-                    @if (usesStoreHours()) { <app-icon name="check" [size]="14"/> }
+                    @if (!showsOwnSchedule()) { <app-icon name="check" [size]="14"/> }
                   </span>
                 </button>
                 <button
@@ -452,8 +452,8 @@
                   role="radio"
                   class="schedule-option"
                   data-testid="schedule-source-own"
-                  [class.schedule-option--selected]="!usesStoreHours()"
-                  [attr.aria-checked]="!usesStoreHours()"
+                  [class.schedule-option--selected]="showsOwnSchedule()"
+                  [attr.aria-checked]="showsOwnSchedule()"
                   [disabled]="savingScheduleSource()"
                   (click)="setUsesStoreHours(false)"
                 >
@@ -463,13 +463,18 @@
                     <span class="schedule-option__hint">Para quien trabaja menos horas o en otro turno. Se guarda aparte y no se pierde si vuelves al de la tienda.</span>
                   </span>
                   <span class="schedule-option__check" aria-hidden="true">
-                    @if (!usesStoreHours()) { <app-icon name="check" [size]="14"/> }
+                    @if (showsOwnSchedule()) { <app-icon name="check" [size]="14"/> }
                   </span>
                 </button>
               </div>
             </div>
 
-            @if (usesStoreHours()) {
+            @if (ownScheduleDraft()) {
+              <div class="schedule-inherited" data-testid="own-schedule-draft-notice">
+                <app-icon name="info" [size]="14"/>
+                <span>Aún no guardado: mientras tanto sigue usando el horario de la tienda. Ajusta los días y pulsa Guardar.</span>
+              </div>
+            } @else if (usesStoreHours()) {
               <div class="schedule-inherited">
                 <app-icon name="info" [size]="14"/>
                 <span>Este es el horario de la tienda, solo lectura aquí.</span>
@@ -478,8 +483,9 @@
             }
             <app-weekly-schedule-editor
               [providerId]="p.id"
-              [readOnly]="usesStoreHours()"
-              (scheduleChanged)="onScheduleChanged($event)"/>
+              [readOnly]="!showsOwnSchedule()"
+              (scheduleChanged)="onScheduleChanged($event)"
+              (saved)="onOwnScheduleSaved()"/>
 
             <div class="schedule-exceptions">
               <app-exceptions-manager [providerId]="p.id"/>
