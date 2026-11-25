@@ -7,6 +7,7 @@ import { AvailabilityService } from './availability.service';
 // that module here — importing it would risk a DI cycle.
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createReservationsTools } from '../../../ai-engine/tools/domains/reservations.tools';
+import { createServiceTools } from '../../../ai-engine/tools/domains/services.tools';
 import { BookingConfirmationService } from './booking-confirmation.service';
 import { AppointmentQueueModule } from './appointment-queue/appointment-queue.module';
 import { BusinessHoursService } from './business-hours/business-hours.service';
@@ -43,6 +44,7 @@ import { BookingSeriesController } from './recurrence/booking-series.controller'
 import { BookingSeriesService } from './recurrence/booking-series.service';
 import { ServicePlansController } from './service-plans/service-plans.controller';
 import { ServicePlansService } from './service-plans/service-plans.service';
+import { ProductsService } from '../products/products.service';
 
 @Module({
   imports: [
@@ -116,6 +118,10 @@ export class ReservationsModule implements OnModuleInit {
     private readonly providersService: ProvidersService,
     private readonly providerScheduleService: ProviderScheduleService,
     private readonly businessHoursService: BusinessHoursService,
+    // Configuración de servicios y modo Plan desde Vex: ProductsService llega
+    // por ProductsModule (ya importado) y ServicePlansService es local.
+    private readonly productsService: ProductsService,
+    private readonly servicePlansService: ServicePlansService,
   ) {}
 
   onModuleInit(): void {
@@ -126,6 +132,13 @@ export class ReservationsModule implements OnModuleInit {
         providersService: this.providersService,
         providerScheduleService: this.providerScheduleService,
         businessHoursService: this.businessHoursService,
+      }),
+    );
+    this.toolRegistry.registerMany(
+      createServiceTools({
+        productsService: this.productsService,
+        providersService: this.providersService,
+        servicePlansService: this.servicePlansService,
       }),
     );
   }
