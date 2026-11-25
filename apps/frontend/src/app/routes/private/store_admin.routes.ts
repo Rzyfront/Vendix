@@ -834,6 +834,15 @@ export const storeAdminRoutes: Routes = [
               ),
           },
           {
+            // Galería de medios de las apps (apps-customization F1.2). Va antes
+            // de `:kind` para que no la capture el guard de tipos de app.
+            path: 'gallery',
+            loadComponent: () =>
+              import('../../private/modules/store/apps/pages/app-media-gallery/app-media-gallery.component').then(
+                (c) => c.AppMediaGalleryComponent,
+              ),
+          },
+          {
             path: ':kind',
             canActivate: [appKindGuard],
             loadComponent: () =>
