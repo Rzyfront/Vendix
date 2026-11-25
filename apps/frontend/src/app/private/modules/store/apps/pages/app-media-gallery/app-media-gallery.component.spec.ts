@@ -1,4 +1,4 @@
-import { TestBed, fakeAsync, tick } from '@angular/core/testing';
+import { TestBed } from '@angular/core/testing';
 import { of, throwError } from 'rxjs';
 import { AppMediaGalleryComponent } from './app-media-gallery.component';
 import { AppMediaItem, AppMediaService } from '../../services/app-media.service';
@@ -78,16 +78,18 @@ describe('AppMediaGalleryComponent', () => {
     expect(remove).not.toHaveBeenCalled();
   });
 
-  it('la búsqueda sigue funcionando después de un error', fakeAsync(() => {
+  it('la búsqueda sigue funcionando después de un error', async () => {
     list.and.returnValues(
       throwError(() => new Error('boom')),
       of({ data: [item({ id: 9, alt: 'Otra' })], total: 1, page: 1, limit: 24 }),
     );
     const component = setup();
-    tick(300);
+    const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    // La app corre sin zone.js: se espera el debounce con timers reales.
+    await wait(320);
     component.onSearch('fachada');
-    tick(300);
+    await wait(320);
     expect(component.items().map((row) => row.id)).toEqual([9]);
     expect(component.loading()).toBe(false);
-  }));
+  });
 });
