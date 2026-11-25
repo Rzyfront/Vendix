@@ -5,6 +5,7 @@ import { S3Module } from '@common/services/s3.module';
 import { AppsController } from './apps.controller';
 import { AppMediaController } from './media/app-media.controller';
 import { AppMediaService } from './media/app-media.service';
+import { AppMediaPublicController } from './media/app-media-public.controller';
 import { AppsService } from './apps.service';
 import { ProductPageAppController } from './product-page/product-page-app.controller';
 import { ProductPageAppService } from './product-page/product-page-app.service';
@@ -51,6 +52,7 @@ import { LandingLeadService } from './landing/landing-lead.service';
   controllers: [
     // Antes que AppsController: `store/apps/media` no debe caer en `:kind`.
     AppMediaController,
+    AppMediaPublicController,
     ProductPageAppController,
     ProductPagePublicController,
     ServicePageAppController,

@@ -1,50 +1,49 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   computed,
   effect,
   inject,
   input,
   output,
   signal,
+  untracked,
 } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
-import { IconComponent, SpinnerComponent } from '../../../../../../shared/components';
-import { ToastService } from '../../../../../../shared/components';
+import { Subject, debounceTime, switchMap, tap } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { IconComponent, ModalComponent, SpinnerComponent, ToastService } from '../../../../../../shared/components';
 import { AppMediaItem, AppMediaService } from '../../services/app-media.service';
 import type { PageAppKind } from '../../templates';
 
 /**
  * Galería de medios de las apps (apps-customization F1.1).
  *
- * Sube fotos al storage de la tienda (no URLs externas), las lista con su
- * miniatura y devuelve la elegida. Se usa desde Estilo para el logo y la
- * portada y, más adelante, desde cada bloque con imagen.
+ * Sube fotos al storage de la tienda, las lista con miniatura y devuelve la
+ * elegida. La URL que entrega es estable (la API firma al vuelo), así que la
+ * app publicada no se rompe cuando vence una firma.
  */
 @Component({
   selector: 'app-app-media-picker',
   standalone: true,
-  imports: [DecimalPipe, IconComponent, SpinnerComponent],
+  imports: [DecimalPipe, IconComponent, ModalComponent, SpinnerComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    @if (open()) {
-      <div class="amp-backdrop" (click)="close.emit()"></div>
-      <div class="amp-modal" role="dialog" aria-modal="true" aria-label="Galería de la app">
-        <header class="amp-head">
-          <div>
-            <h2>Galería de la app</h2>
-            <p>Fotos guardadas en tu tienda. Se usan en todas las apps sin depender de enlaces externos.</p>
-          </div>
-          <button type="button" class="amp-icon" (click)="close.emit()" aria-label="Cerrar">
-            <app-icon name="x" [size]="16"></app-icon>
-          </button>
-        </header>
-
+    <app-modal
+      [isOpen]="open()"
+      title="Galería de la app"
+      subtitle="Fotos guardadas en tu tienda: se usan en la app sin depender de enlaces externos."
+      size="xl-mid"
+      (closed)="close.emit()"
+    >
+      <div class="amp">
         <div class="amp-toolbar">
           <input
             type="search"
             class="amp-search"
             placeholder="Buscar por nombre…"
+            aria-label="Buscar en la galería"
             [value]="search()"
             (input)="onSearch($any($event.target).value)"
           />
@@ -72,7 +71,7 @@ import type { PageAppKind } from '../../templates';
           <ul class="amp-grid">
             @for (item of items(); track item.id) {
               <li class="amp-card">
-                <button type="button" class="amp-thumb" (click)="choose(item)" [title]="item.alt ?? ''">
+                <button type="button" class="amp-thumb" (click)="choose(item)" [attr.aria-label]="'Elegir ' + (item.alt ?? 'foto')">
                   @if (item.thumb_url || item.url) {
                     <img [src]="item.thumb_url || item.url" [alt]="item.alt ?? ''" loading="lazy" />
                   } @else {
@@ -89,7 +88,7 @@ import type { PageAppKind } from '../../templates';
                     aria-label="Texto alternativo"
                   />
                   <span class="amp-size">{{ item.size_bytes / 1024 | number: '1.0-0' }} KB</span>
-                  <button type="button" class="amp-icon" (click)="remove(item)" title="Eliminar">
+                  <button type="button" class="amp-icon" (click)="remove(item)" aria-label="Eliminar foto" title="Eliminar foto">
                     <app-icon name="trash-2" [size]="14"></app-icon>
                   </button>
                 </div>
@@ -103,18 +102,19 @@ import type { PageAppKind } from '../../templates';
           }
         }
       </div>
-    }
+    </app-modal>
   `,
   styleUrl: './app-media-picker.component.scss',
 })
 export class AppMediaPickerComponent {
   private readonly media = inject(AppMediaService);
   private readonly toast = inject(ToastService);
+  private readonly destroyRef = inject(DestroyRef);
 
   readonly open = input(false);
   readonly appKind = input<PageAppKind | null>(null);
   readonly close = output<void>();
-  /** La app recibe la URL firmada para pintarla y el id para referenciarla. */
+  /** La app recibe la URL estable para pintarla y el medio completo. */
   readonly picked = output<AppMediaItem>();
 
   readonly items = signal<AppMediaItem[]>([]);
@@ -123,37 +123,75 @@ export class AppMediaPickerComponent {
   readonly search = signal('');
   private page = 1;
   private total = 0;
+  private readonly queries = new Subject<{ term: string; page: number; replace: boolean }>();
+  private readonly lastQuery = signal<{ term: string; page: number; replace: boolean } | null>(null);
 
   readonly hasMore = computed(() => this.items().length < this.total);
 
   constructor() {
-    // Cada vez que se abre, la primera página fresca.
+    // Una sola tubería para búsqueda y paginación: debounce + cancelación, sin
+    // respuestas viejas pisando a la nueva.
+    this.queries
+      .pipe(
+        debounceTime(250),
+        tap(() => this.loading.set(true)),
+        switchMap((query) =>
+          this.media.list({
+            appKind: untracked(() => this.appKind()),
+            search: query.term,
+            page: query.page,
+            limit: 24,
+          }),
+        ),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: (result) => {
+          const last = this.lastQuery();
+          this.total = result.total;
+          this.items.set(last?.replace ? result.data : [...this.items(), ...result.data]);
+          this.loading.set(false);
+        },
+        error: () => {
+          this.loading.set(false);
+          this.toast.error('No se pudo cargar la galería');
+        },
+      });
+
+    // Al abrir, primera página fresca.
     effect(() => {
-      if (this.open()) this.reload();
+      if (this.open()) {
+        this.page = 1;
+        this.emitQuery(this.search(), 1, true);
+      }
     });
   }
 
   onSearch(value: string): void {
     this.search.set(value);
-    this.reload();
+    this.page = 1;
+    this.emitQuery(value, 1, true);
   }
 
   onFiles(files: FileList | null): void {
     const list = Array.from(files ?? []);
     if (list.length === 0) return;
     this.uploading.set(true);
-    this.media.upload(list, this.appKind()).subscribe({
-      next: (saved) => {
-        this.uploading.set(false);
-        this.items.set([...saved, ...this.items()]);
-        this.total += saved.length;
-        this.toast.success(saved.length === 1 ? 'Foto subida' : `${saved.length} fotos subidas`);
-      },
-      error: () => {
-        this.uploading.set(false);
-        this.toast.error('No se pudieron subir las fotos');
-      },
-    });
+    this.media
+      .upload(list, this.appKind())
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (saved) => {
+          this.uploading.set(false);
+          this.items.set([...saved, ...this.items()]);
+          this.total += saved.length;
+          this.toast.success(saved.length === 1 ? 'Foto subida' : `${saved.length} fotos subidas`);
+        },
+        error: () => {
+          this.uploading.set(false);
+          this.toast.error('No se pudieron subir las fotos');
+        },
+      });
   }
 
   choose(item: AppMediaItem): void {
@@ -162,47 +200,39 @@ export class AppMediaPickerComponent {
   }
 
   rename(item: AppMediaItem, alt: string): void {
-    this.media.updateAlt(item.id, alt || null).subscribe({
-      next: (updated) =>
-        this.items.set(this.items().map((row) => (row.id === updated.id ? updated : row))),
-      error: () => this.toast.error('No se pudo guardar el texto'),
-    });
+    this.media
+      .updateAlt(item.id, alt || null)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (updated) =>
+          this.items.set(this.items().map((row) => (row.id === updated.id ? updated : row))),
+        error: () => this.toast.error('No se pudo guardar el texto'),
+      });
   }
 
   remove(item: AppMediaItem): void {
-    this.media.remove(item.id).subscribe({
-      next: () => {
-        this.items.set(this.items().filter((row) => row.id !== item.id));
-        this.total = Math.max(0, this.total - 1);
-      },
-      error: () => this.toast.error('No se pudo eliminar la foto'),
-    });
+    if (!confirm('¿Quitar esta foto de la galería? La app publicada conserva la que ya usa.')) {
+      return;
+    }
+    this.media
+      .remove(item.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.items.set(this.items().filter((row) => row.id !== item.id));
+          this.total = Math.max(0, this.total - 1);
+        },
+        error: () => this.toast.error('No se pudo eliminar la foto'),
+      });
   }
 
   loadMore(): void {
     this.page += 1;
-    this.fetch(false);
+    this.emitQuery(this.search(), this.page, false);
   }
 
-  private reload(): void {
-    this.page = 1;
-    this.fetch(true);
-  }
-
-  private fetch(replace: boolean): void {
-    this.loading.set(true);
-    this.media
-      .list({ appKind: this.appKind(), search: this.search(), page: this.page, limit: 24 })
-      .subscribe({
-        next: (result) => {
-          this.total = result.total;
-          this.items.set(replace ? result.data : [...this.items(), ...result.data]);
-          this.loading.set(false);
-        },
-        error: () => {
-          this.loading.set(false);
-          this.toast.error('No se pudo cargar la galería');
-        },
-      });
+  private emitQuery(term: string, page: number, replace: boolean): void {
+    this.lastQuery.set({ term, page, replace });
+    this.queries.next({ term, page, replace });
   }
 }

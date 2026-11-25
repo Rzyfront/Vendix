@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS "store_app_media" (
   "width" INTEGER,
   "height" INTEGER,
   "alt" VARCHAR(200),
+  "deleted_at" TIMESTAMPTZ(6),
   "created_by_user_id" INTEGER,
   "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT now(),
   "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT now(),

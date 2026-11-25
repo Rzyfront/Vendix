@@ -29,11 +29,9 @@ describe('AppMediaService — biblioteca de medios (apps-customization F1.1)', (
           Object.assign(row, data);
           return row;
         }),
-        delete: jest.fn(async ({ where }: any) => {
-          const index = created.findIndex((r) => r.id === where.id);
-          const [row] = created.splice(index, 1);
-          return row;
-        }),
+        aggregate: jest.fn(async () => ({ _sum: { size_bytes: 0 } })),
+        delete: jest.fn(),
+
       },
     } as any;
     const s3 = {
@@ -74,8 +72,9 @@ describe('AppMediaService — biblioteca de medios (apps-customization F1.1)', (
         alt: 'fachada local',
       }),
     });
-    expect(row.url).toContain('https://signed.test/');
-    expect(row.thumb_url).toContain('_thumb');
+    // URL estable de la API: no vence como una firma.
+    expect(row.url).toBe('/public/apps/media/1');
+    expect(row.thumb_url).toBe('/public/apps/media/1?thumb=1');
   });
 
   it('guarda un PDF como documento y respeta la app destino', async () => {
@@ -103,12 +102,32 @@ describe('AppMediaService — biblioteca de medios (apps-customization F1.1)', (
     ).rejects.toBeInstanceOf(PayloadTooLargeException);
   });
 
-  it('al borrar quita la fila del almacén y el archivo de S3', async () => {
-    const { service, s3, created } = build();
+  it('borrar es lógico: no elimina el archivo que una app publicada ya usa', async () => {
+    const { service, prisma, s3, created } = build();
     await service.upload([file()]);
     const id = created[0].id;
     await service.remove(id);
-    expect(created).toHaveLength(0);
-    expect(s3.deleteFile).toHaveBeenCalled();
+    expect(prisma.store_app_media.update).toHaveBeenCalledWith({
+      where: { id },
+      data: { deleted_at: expect.any(Date) },
+    });
+    expect(s3.deleteFile).not.toHaveBeenCalled();
+  });
+
+  it('rechaza un PDF que no empieza por %PDF-', async () => {
+    const { service } = build();
+    await expect(
+      service.upload([file({ mimetype: 'application/pdf', buffer: Buffer.from('no soy pdf') })]),
+    ).rejects.toBeInstanceOf(UnsupportedMediaTypeException);
+  });
+
+  it('respeta el techo de 1 GB por tienda', async () => {
+    const { service, prisma } = build();
+    prisma.store_app_media.aggregate.mockResolvedValue({
+      _sum: { size_bytes: 1024 * 1024 * 1024 - 10 },
+    });
+    await expect(service.upload([file({ size: 5000 })])).rejects.toBeInstanceOf(
+      PayloadTooLargeException,
+    );
   });
 });

@@ -1337,6 +1337,9 @@ model store_app_media {
   width              Int?
   height             Int?
   alt                String?             @db.VarChar(200)
+  /// Borrado lógico: la galería deja de mostrarlo y las apps publicadas siguen
+  /// resolviendo su archivo por id.
+  deleted_at         DateTime?           @db.Timestamptz(6)
   created_by_user_id Int?
   created_at         DateTime            @default(now()) @db.Timestamptz(6)
   updated_at         DateTime            @default(now()) @updatedAt @db.Timestamptz(6)
