@@ -140,6 +140,7 @@ var MARKETING_NOINDEX_PREFIXES = [
   '/onboarding',
   '/reset-password',
   '/authenticate',
+  // Puente del signup de WhatsApp: Meta solo responde en vendix.online.
   '/integraciones'
 ];
 var STORE_NOINDEX_PREFIXES = [
