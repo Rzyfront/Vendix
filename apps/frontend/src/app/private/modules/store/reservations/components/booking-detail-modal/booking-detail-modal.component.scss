@@ -629,6 +629,29 @@
   }
 }
 
+// Money sections: one column on mobile/narrow desktop, two on wide screens so the
+// detail does not become a single endless stack (Rafael, 2026-11-24).
+.money-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+
+  @media (min-width: 1024px) {
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+    gap: 12px;
+    margin: 0 16px 12px;
+
+    > .deposit-block {
+      margin: 0;
+    }
+
+    > .deposit-hint {
+      grid-column: 1 / -1;
+      margin: 0;
+    }
+  }
+}
+
 // Deposit block (S15 / S17)
 .deposit-block {
   display: flex;
@@ -658,6 +681,7 @@
 
   &.paid { color: var(--color-success); }
   &.pending { color: var(--color-warning); }
+  &.muted { color: var(--color-text-muted); }
 }
 
 .deposit-figures {
@@ -668,6 +692,15 @@
   color: var(--color-text-secondary);
 
   strong { color: var(--color-text-primary); }
+}
+
+// Settled order: the figure row says so explicitly instead of printing a $0 balance.
+.deposit-settled {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  color: var(--color-success);
 }
 
 .deposit-hint {
