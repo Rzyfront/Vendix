@@ -2867,6 +2867,10 @@ export class AIEngineService implements OnModuleInit {
     const storeId = RequestContextService.getStoreId();
     if (!storeId) return;
     if (!featureCategory) return;
+    // Embeddings are platform enrichment, never a billed store feature
+    // (decision del dueño, 2026-11-24): no se consumen contadores ni topes, así
+    // que una tienda sin cupo de IA no puede romper su indexación.
+    if (featureCategory === 'rag_embeddings') return;
 
     // Quota unit policy:
     //   category          | feature consumed  | units              | requestId
@@ -2875,7 +2879,6 @@ export class AIEngineService implements OnModuleInit {
     //      counters in ai-agent.service.ts)
     //   text_generation   | text_generation   | token count        | base:callId
     //   async_queue       | async_queue       | 1 job              | base:callId
-    //   rag_embeddings    | rag_embeddings    | 1 (one document)   | base:callId
     //   streaming_chat    | streaming_chat    | 1 message          | base (no suffix)
     //   anything else     | no numeric quota
     // base = RequestContext request id, or `internal-<uuid>` when absent.
@@ -2903,7 +2906,6 @@ export class AIEngineService implements OnModuleInit {
           perCall = true;
           break;
         case 'async_queue':
-        case 'rag_embeddings':
           effectiveUnits = 1;
           perCall = true;
           break;

@@ -47,6 +47,7 @@ Source: `ai-engine/tools/tool-working-set.ts`, `tool-router.service.ts`, `tool-c
 - One canonical doc `tool:<name>:<version>`, global/tenant-null, hashed contract (no private prompts/customer examples). Indexed after decentralized `onModuleInit` (`onApplicationBootstrap` + worker barrier), job `index-knowledge`, logical retirement only.
 - Embeddings: separate app `agent_knowledge_embeddings`, `ai_feature_category='rag_embeddings'`, 1536 dims, global scope only via internal `storeGlobalKnowledgeEmbedding`. Store params never accept sentinel 0; business `semantic_search` never unions global rows.
 - Platform spend: `AI_KNOWLEDGE_DAILY_TOKEN_BUDGET` default 2,000,000 in code (no deploy variable); reservations not refunded; Redis unavailable fails closed; no merchant quota consumed. No live spend without owner approval.
+- Store embeddings (`EmbeddingService` / indexers): no store quota and no billing since 2026-11-24 (owner decision). `rag_embeddings` has no cap in `FEATURE_QUOTA_CONFIG`, the backfill route has no `AiAccessGuard`, and `consumeSubscriptionQuota` ignores that category, so an exhausted store plan can never break indexing.
 - Detail (indexing, retrieval/RRF, cache, discovery pagination contracts, verification limits): `references/knowledge-indexing.md` (leer bajo demanda).
 
 ## Domain scope and native tool search

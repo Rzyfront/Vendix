@@ -671,7 +671,7 @@ describe('AIEngineService.consumeSubscriptionQuota wiring', () => {
     expect(subscriptionAccess.consumeAIQuota).not.toHaveBeenCalled();
   });
 
-  it('charges one rag_embeddings unit per embedding regardless of tokens', async () => {
+  it('no cobra ni consume cupo por embeddings (enriquecimiento de la plataforma)', async () => {
     const { service, subscriptionAccess } = buildService();
     jest
       .spyOn(service as any, 'resolveApplicationExecution')
@@ -689,10 +689,8 @@ describe('AIEngineService.consumeSubscriptionQuota wiring', () => {
 
     await inRequest(() => service.runEmbedding('rag_embedder', {}, 'doc'));
 
-    expect(subscriptionAccess.consumeAIQuota).toHaveBeenCalledTimes(1);
-    const args = subscriptionAccess.consumeAIQuota.mock.calls[0];
-    expect(args.slice(0, 3)).toEqual([STORE_ID, 'rag_embeddings', 1]);
-    expect(args[3]).toMatch(new RegExp(`^${BASE}:.+`));
+    // Decisión del dueño (2026-11-24): los embeddings no se cobran ni se topan.
+    expect(subscriptionAccess.consumeAIQuota).not.toHaveBeenCalled();
   });
 });
 
