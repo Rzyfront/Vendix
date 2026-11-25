@@ -1,7 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
+import {
+  bankAccountAvailableInStoreWhere,
+  isBankAccountAvailableInStore,
+} from '../../../../common/helpers/bank-account-availability.helper';
 import { QueryUnassignedPaymentsDto } from './dto/query-unassigned-payments.dto';
 import {
   AssignableBankAccount,
@@ -173,13 +178,18 @@ export class UnassignedPaymentsService {
   }
 
   /**
-   * Cuentas bancarias activas de la organización para el selector de asignación.
-   * Proyección mínima `{id, name, bank_name, account_number}` — sin saldo ni
-   * datos de extracto. `bank_accounts` está org-scoped en `StorePrismaService`.
+   * Cuentas bancarias activas disponibles en la tienda actual para el selector
+   * de asignación (QUI-1061). Proyección mínima `{id, name, bank_name, account_number}`
+   * — sin saldo ni datos de extracto.
    */
   async findAssignableAccounts(): Promise<AssignableBankAccount[]> {
+    const context = RequestContextService.getContext();
+    const storeId = context?.store_id;
     return this.prisma.bank_accounts.findMany({
-      where: { status: 'active' },
+      where: {
+        status: 'active',
+        ...(storeId ? bankAccountAvailableInStoreWhere(storeId) : {}),
+      },
       orderBy: { name: 'asc' },
       select: { id: true, name: true, bank_name: true, account_number: true },
     });
@@ -248,16 +258,23 @@ export class UnassignedPaymentsService {
 
     const account = await this.prisma.bank_accounts.findFirst({
       where: { id: bank_account_id },
+      include: {
+        store_assignments: { select: { store_id: true } },
+      },
     });
 
     if (!account) {
       throw new VendixHttpException(ErrorCodes.BANK_ACCOUNT_NOT_FOUND);
     }
 
-    // Cuenta compartida (store_id NULL) o cuenta de la misma tienda del pago.
+    // QUI-1061 — cuenta propia de la tienda del pago o de la organización
+    // disponible en esa tienda (todas o asignada explícitamente).
     if (
-      account.store_id !== null &&
-      account.store_id !== payment.orders.store_id
+      !isBankAccountAvailableInStore(
+        account,
+        payment.orders.store_id,
+        account.organization_id,
+      )
     ) {
       throw new VendixHttpException(
         ErrorCodes.SYS_FORBIDDEN_001,

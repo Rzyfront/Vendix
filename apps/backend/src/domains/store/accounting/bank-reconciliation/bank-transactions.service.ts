@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { QueryBankTransactionDto } from './dto/query-bank-transaction.dto';
 import { BankAccountsService } from './bank-accounts.service';
@@ -19,6 +20,7 @@ export class BankTransactionsService {
   async findAll(query: QueryBankTransactionDto) {
     const {
       bank_account_id,
+      store_id,
       date_from,
       date_to,
       is_reconciled,
@@ -27,11 +29,15 @@ export class BankTransactionsService {
       limit,
     } = query;
 
+    // QUI-1061 — valida visibilidad de la cuenta bancaria en el contexto actual.
+    await this.bank_accounts_service.findOne(bank_account_id);
+
     const skip = ((page || 1) - 1) * (limit || 50);
     const take = limit || 50;
 
     const where: Prisma.bank_transactionsWhereInput = {
       bank_account_id,
+      ...(store_id !== undefined && { store_id }),
       ...(date_from && {
         transaction_date: {
           gte: new Date(date_from),
@@ -59,6 +65,9 @@ export class BankTransactionsService {
         take,
         orderBy: { transaction_date: 'desc' },
         include: {
+          store: {
+            select: { id: true, name: true },
+          },
           bank_reconciliation_matches: {
             select: {
               id: true,
@@ -116,9 +125,13 @@ export class BankTransactionsService {
       );
     }
 
+    const origin_store_id =
+      RequestContextService.getContext()?.store_id ?? account.store_id ?? null;
+
     // Prepare records for insert
     const records = parse_result.transactions.map((tx) => ({
       bank_account_id,
+      store_id: origin_store_id,
       transaction_date: tx.date,
       value_date: tx.value_date || null,
       description: tx.description,
@@ -206,6 +219,8 @@ export class BankTransactionsService {
     if (!transaction) {
       throw new VendixHttpException(ErrorCodes.BANK_TRANSACTION_NOT_FOUND);
     }
+
+    await this.bank_accounts_service.findOne(transaction.bank_account_id);
 
     if (transaction.is_reconciled) {
       throw new VendixHttpException(

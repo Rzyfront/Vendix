@@ -6,6 +6,7 @@ import { isSaleNature } from '../../store/products/services/product-usage-nature
 import { Injectable, Optional } from '@nestjs/common';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { bankAccountAvailableInStoreWhere } from '@common/helpers/bank-account-availability.helper';
 import { CartService } from '../cart/cart.service';
 import { TaxesService } from '../../store/taxes/taxes.service';
 // QUI-INC — el enum fiscal canónico, importado (no `string`) para que una
@@ -790,9 +791,8 @@ export class CheckoutService {
 
     const rows = await this.prisma.bank_accounts.findMany({
       where: {
-        organization_id: store.organization_id,
+        ...bankAccountAvailableInStoreWhere(storeId, store.organization_id),
         status: 'active',
-        OR: [{ store_id: null }, { store_id: storeId }],
         ...(configured !== null && { id: { in: configured } }),
       },
       orderBy: { bank_name: 'asc' },

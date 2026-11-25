@@ -7,6 +7,11 @@ export class QueryBankTransactionDto {
   bank_account_id: number;
 
   @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  store_id?: number;
+
+  @IsOptional()
   @IsString()
   date_from?: string;
 

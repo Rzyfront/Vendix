@@ -1,7 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
+import { FiscalScopeService } from '../../../../common/services/fiscal-scope.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
+import {
+  bankAccountAvailableInStoreWhere,
+  canViewAllOrganizationBankAccounts,
+  resolveBankAccountPolicy,
+} from '../../../../common/helpers/bank-account-availability.helper';
 import { CreateReconciliationDto } from './dto/create-reconciliation.dto';
 import { BankAccountsService } from './bank-accounts.service';
 
@@ -10,6 +16,7 @@ export class ReconciliationService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly bank_accounts_service: BankAccountsService,
+    private readonly fiscalScopeService: FiscalScopeService,
   ) {}
 
   private getContext() {
@@ -20,10 +27,31 @@ export class ReconciliationService {
     return context;
   }
 
+  private async getAccountVisibilityWhere() {
+    const context = this.getContext();
+    if (!context.organization_id || !context.store_id) {
+      return undefined;
+    }
+    const policy = await resolveBankAccountPolicy(this.fiscalScopeService, {
+      organization_id: context.organization_id,
+      store_id: context.store_id,
+      context,
+    });
+    if (canViewAllOrganizationBankAccounts(policy)) {
+      return { organization_id: policy.organization_id };
+    }
+    return bankAccountAvailableInStoreWhere(
+      policy.store_id,
+      policy.organization_id,
+    );
+  }
+
   async findAll(query: { bank_account_id?: number; status?: string }) {
+    const accountVisibility = await this.getAccountVisibilityWhere();
     const where: any = {
       ...(query.bank_account_id && { bank_account_id: query.bank_account_id }),
       ...(query.status && { status: query.status }),
+      ...(accountVisibility && { bank_account: accountVisibility }),
     };
 
     const reconciliations = await this.prisma.bank_reconciliations.findMany({
@@ -51,8 +79,12 @@ export class ReconciliationService {
   }
 
   async findOne(id: number) {
+    const accountVisibility = await this.getAccountVisibilityWhere();
     const reconciliation = await this.prisma.bank_reconciliations.findFirst({
-      where: { id },
+      where: {
+        id,
+        ...(accountVisibility && { bank_account: accountVisibility }),
+      },
       include: {
         bank_account: {
           select: {
@@ -185,8 +217,12 @@ export class ReconciliationService {
   }
 
   async complete(id: number) {
+    const accountVisibility = await this.getAccountVisibilityWhere();
     const reconciliation = await this.prisma.bank_reconciliations.findFirst({
-      where: { id },
+      where: {
+        id,
+        ...(accountVisibility && { bank_account: accountVisibility }),
+      },
     });
 
     if (!reconciliation) {
@@ -231,8 +267,12 @@ export class ReconciliationService {
   }
 
   async remove(id: number) {
+    const accountVisibility = await this.getAccountVisibilityWhere();
     const reconciliation = await this.prisma.bank_reconciliations.findFirst({
-      where: { id },
+      where: {
+        id,
+        ...(accountVisibility && { bank_account: accountVisibility }),
+      },
     });
 
     if (!reconciliation) {
