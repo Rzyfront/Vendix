@@ -38,18 +38,10 @@ export class ReconciliationMatchingService {
   async autoMatch(reconciliation_id: number): Promise<AutoMatchResult> {
     const context = this.getContext();
 
-    const reconciliation = await this.prisma.bank_reconciliations.findFirst({
-      where: { id: reconciliation_id },
-      include: {
-        bank_account: {
-          select: { chart_account_id: true },
-        },
-      },
-    });
-
-    if (!reconciliation) {
-      throw new VendixHttpException(ErrorCodes.BANK_RECONCILIATION_NOT_FOUND);
-    }
+    const reconciliation =
+      await this.reconciliation_service.assertCanModifyReconciliation(
+        reconciliation_id,
+      );
 
     if (reconciliation.status === ('completed' as any)) {
       throw new VendixHttpException(
@@ -290,13 +282,10 @@ export class ReconciliationMatchingService {
   async manualMatch(reconciliation_id: number, dto: ManualMatchDto) {
     const context = this.getContext();
 
-    const reconciliation = await this.prisma.bank_reconciliations.findFirst({
-      where: { id: reconciliation_id },
-    });
-
-    if (!reconciliation) {
-      throw new VendixHttpException(ErrorCodes.BANK_RECONCILIATION_NOT_FOUND);
-    }
+    const reconciliation =
+      await this.reconciliation_service.assertCanModifyReconciliation(
+        reconciliation_id,
+      );
 
     if (reconciliation.status === ('completed' as any)) {
       throw new VendixHttpException(
@@ -304,9 +293,12 @@ export class ReconciliationMatchingService {
       );
     }
 
-    // Validate bank transaction exists
+    // Validate bank transaction exists and belongs to the reconciliation's bank account
     const transaction = await this.prisma.bank_transactions.findFirst({
-      where: { id: dto.bank_transaction_id },
+      where: {
+        id: dto.bank_transaction_id,
+        bank_account_id: reconciliation.bank_account_id,
+      },
     });
 
     if (!transaction) {
@@ -345,13 +337,10 @@ export class ReconciliationMatchingService {
   }
 
   async unmatch(reconciliation_id: number, match_id: number) {
-    const reconciliation = await this.prisma.bank_reconciliations.findFirst({
-      where: { id: reconciliation_id },
-    });
-
-    if (!reconciliation) {
-      throw new VendixHttpException(ErrorCodes.BANK_RECONCILIATION_NOT_FOUND);
-    }
+    const reconciliation =
+      await this.reconciliation_service.assertCanModifyReconciliation(
+        reconciliation_id,
+      );
 
     if (reconciliation.status === ('completed' as any)) {
       throw new VendixHttpException(

@@ -8,6 +8,12 @@ import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
+import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
+import {
+  bankAccountAvailableInStoreWhere,
+  collectBankTransferAccountIds,
+  filterBankTransferConfigAccounts,
+} from '../../../../common/helpers/bank-account-availability.helper';
 import {
   EnablePaymentMethodDto,
   UpdateStorePaymentMethodDto,
@@ -65,7 +71,7 @@ export class StorePaymentMethodsService {
       orderBy: { display_order: 'asc' },
     });
 
-    return methods.map((method) => ({
+    const masked = methods.map((method) => ({
       ...method,
       custom_config: method.custom_config
         ? this.paymentEncryption.maskConfig(
@@ -74,6 +80,8 @@ export class StorePaymentMethodsService {
           )
         : method.custom_config,
     }));
+
+    return this.filterBankTransferMethodsForStore(masked);
   }
 
   /**
@@ -98,7 +106,7 @@ export class StorePaymentMethodsService {
       throw new NotFoundException('Payment method not found for this store');
     }
 
-    return {
+    const masked = {
       ...method,
       custom_config: method.custom_config
         ? this.paymentEncryption.maskConfig(
@@ -107,6 +115,9 @@ export class StorePaymentMethodsService {
           )
         : method.custom_config,
     };
+
+    const [filtered] = await this.filterBankTransferMethodsForStore([masked]);
+    return filtered;
   }
 
   /**
@@ -167,6 +178,15 @@ export class StorePaymentMethodsService {
 
     if (existing) {
       if (existing.state !== 'enabled') {
+        if (enable_dto.custom_config) {
+          this.validateConfig(providerType, enable_dto.custom_config);
+          if (providerType === 'bank_transfer') {
+            await this.validateBankTransferAccountAvailability(
+              store_id,
+              enable_dto.custom_config,
+            );
+          }
+        }
         // Encrypt custom_config if provided
         const encryptedConfig = enable_dto.custom_config
           ? this.paymentEncryption.encryptConfig(
@@ -206,6 +226,12 @@ export class StorePaymentMethodsService {
     // Validate configuration against provider-specific validator
     if (enable_dto.custom_config) {
       this.validateConfig(providerType, enable_dto.custom_config);
+      if (providerType === 'bank_transfer') {
+        await this.validateBankTransferAccountAvailability(
+          store_id,
+          enable_dto.custom_config,
+        );
+      }
     }
 
     // Encrypt sensitive fields in custom_config before storing
@@ -260,6 +286,19 @@ export class StorePaymentMethodsService {
         providerType,
         update_dto.custom_config as Record<string, any>,
       );
+      if (providerType === 'bank_transfer') {
+        const targetStoreId =
+          method.store_id ?? RequestContextService.getContext()?.store_id;
+        if (!targetStoreId) {
+          throw new ForbiddenException(
+            'Store context required for this operation',
+          );
+        }
+        await this.validateBankTransferAccountAvailability(
+          targetStoreId,
+          update_dto.custom_config as Record<string, any>,
+        );
+      }
     }
 
     // Encrypt sensitive fields in custom_config before storing
@@ -522,9 +561,22 @@ export class StorePaymentMethodsService {
           'Configuración inválida: cada cuenta de "accounts" debe ser un objeto.',
         );
       }
-      if (acc.id !== undefined && (typeof acc.id !== 'number' || acc.id < 1)) {
+      if (
+        acc.id !== undefined &&
+        (typeof acc.id !== 'number' || !Number.isInteger(acc.id) || acc.id < 1)
+      ) {
         throw new BadRequestException(
           'Configuración inválida: cada cuenta requiere un id numérico válido.',
+        );
+      }
+      if (
+        acc.bank_account_id !== undefined &&
+        (typeof acc.bank_account_id !== 'number' ||
+          !Number.isInteger(acc.bank_account_id) ||
+          acc.bank_account_id < 1)
+      ) {
+        throw new BadRequestException(
+          'Configuración inválida: cada cuenta requiere un bank_account_id numérico válido.',
         );
       }
       if (!acc.bank_name) {
@@ -537,6 +589,109 @@ export class StorePaymentMethodsService {
           'Configuración inválida: cada cuenta requiere un número de cuenta (account_number).',
         );
       }
+    }
+  }
+
+  private async resolveOrganizationIdForStore(
+    storeId: number,
+  ): Promise<number | null> {
+    const contextOrgId = RequestContextService.getContext()?.organization_id;
+    if (contextOrgId) return contextOrgId;
+
+    const store = await this.prisma.stores.findUnique({
+      where: { id: storeId },
+      select: { organization_id: true },
+    });
+    return store?.organization_id ?? null;
+  }
+
+  /**
+   * QUI-1061 — filtra `custom_config.accounts` en métodos `bank_transfer`
+   * contra las cuentas activas y disponibles para la tienda actual
+   * (`bankAccountAvailableInStoreWhere`), preservando entradas legacy sin id.
+   */
+  private async filterBankTransferMethodsForStore<
+    T extends {
+      store_id?: number;
+      custom_config: any;
+      system_payment_method?: { type?: string | null } | null;
+      [key: string]: any;
+    },
+  >(methods: T[]): Promise<T[]> {
+    const accountIds = new Set<number>();
+    for (const method of methods) {
+      if (method.system_payment_method?.type !== 'bank_transfer') continue;
+      for (const id of collectBankTransferAccountIds(method.custom_config)) {
+        accountIds.add(id);
+      }
+    }
+
+    if (accountIds.size === 0) return methods;
+
+    const storeId =
+      RequestContextService.getContext()?.store_id ?? methods[0]?.store_id;
+    const allowedIds = new Set<number>();
+
+    if (storeId) {
+      const organizationId = await this.resolveOrganizationIdForStore(storeId);
+      if (organizationId) {
+        const validAccounts = await this.prisma.bank_accounts.findMany({
+          where: {
+            id: { in: Array.from(accountIds) },
+            ...bankAccountAvailableInStoreWhere(storeId, organizationId),
+            status: 'active',
+          },
+          select: { id: true },
+        });
+        for (const row of validAccounts) {
+          allowedIds.add(row.id);
+        }
+      }
+    }
+
+    return methods.map((method) => {
+      if (method.system_payment_method?.type !== 'bank_transfer') return method;
+      return {
+        ...method,
+        custom_config: filterBankTransferConfigAccounts(
+          method.custom_config as Record<string, any> | null | undefined,
+          allowedIds,
+        ),
+      };
+    });
+  }
+
+  /**
+   * QUI-1061 — impide guardar en `custom_config.accounts` referencias a
+   * cuentas bancarias que pertenezcan a otra tienda, no estén asignadas a esta
+   * tienda o no estén activas.
+   */
+  private async validateBankTransferAccountAvailability(
+    storeId: number,
+    config: Record<string, any>,
+  ): Promise<void> {
+    const accountIds = collectBankTransferAccountIds(config);
+    if (accountIds.length === 0) return;
+
+    const organizationId = await this.resolveOrganizationIdForStore(storeId);
+    if (!organizationId) {
+      throw new ForbiddenException('Store context required for this operation');
+    }
+
+    const validAccounts = await this.prisma.bank_accounts.findMany({
+      where: {
+        id: { in: accountIds },
+        ...bankAccountAvailableInStoreWhere(storeId, organizationId),
+        status: 'active',
+      },
+      select: { id: true },
+    });
+
+    if (validAccounts.length !== accountIds.length) {
+      throw new VendixHttpException(
+        ErrorCodes.BANK_ACCOUNT_NOT_ASSIGNED_TO_STORE,
+        'Una o más cuentas bancarias seleccionadas no están disponibles o activas para esta tienda.',
+      );
     }
   }
 }

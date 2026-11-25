@@ -540,6 +540,7 @@ export class StorePrismaService extends BasePrismaService {
       'layaway_installments', // Relational
       'layaway_payments', // Relational
       'bank_accounts', // Org scoped
+      'bank_account_stores', // Org scoped (QUI-1061 — asignación de cuentas de org a tiendas)
       'fixed_asset_categories', // Org scoped
       'fixed_assets', // Org scoped
       'budgets', // Org scoped
@@ -851,6 +852,7 @@ export class StorePrismaService extends BasePrismaService {
       'payroll_novelties',
       'employee_advances',
       'bank_accounts',
+      'bank_account_stores',
       'fixed_asset_categories',
       'fixed_assets',
       'budgets',
@@ -1494,6 +1496,10 @@ export class StorePrismaService extends BasePrismaService {
   // Bank Reconciliation models
   get bank_accounts() {
     return this.scoped_client.bank_accounts;
+  }
+
+  get bank_account_stores() {
+    return this.scoped_client.bank_account_stores;
   }
 
   get bank_transactions() {

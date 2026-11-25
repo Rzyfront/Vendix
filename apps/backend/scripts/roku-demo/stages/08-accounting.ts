@@ -110,7 +110,13 @@ export const stage08Accounting: Stage = {
       where: { organization_id: orgId, code: '1110' }, // Bancos
     });
     const bank = await prisma.bank_accounts.upsert({
-      where: { organization_id_account_number: { organization_id: orgId, account_number: '123-456789-00' } },
+      where: {
+        organization_id_store_id_account_number: {
+          organization_id: orgId,
+          store_id: storeId,
+          account_number: '123-456789-00',
+        },
+      },
       update: {},
       create: {
         organization_id: orgId,

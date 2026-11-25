@@ -1,7 +1,16 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
+import { FiscalScopeService } from '../../../../common/services/fiscal-scope.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
+import {
+  BankAccountPolicy,
+  bankAccountAvailableInStoreWhere,
+  canModifyBankAccount,
+  canViewAllOrganizationBankAccounts,
+  resolveBankAccountPolicy,
+} from '../../../../common/helpers/bank-account-availability.helper';
 import { CreateReconciliationDto } from './dto/create-reconciliation.dto';
 import { BankAccountsService } from './bank-accounts.service';
 
@@ -10,6 +19,7 @@ export class ReconciliationService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly bank_accounts_service: BankAccountsService,
+    private readonly fiscalScopeService: FiscalScopeService,
   ) {}
 
   private getContext() {
@@ -20,10 +30,78 @@ export class ReconciliationService {
     return context;
   }
 
+  private async resolvePolicy(): Promise<BankAccountPolicy> {
+    const context = this.getContext();
+    const organization_id = context.organization_id;
+    const store_id = context.store_id ?? 0;
+
+    if (!organization_id) {
+      throw new VendixHttpException(
+        ErrorCodes.ORG_CONTEXT_001,
+        'Se requiere contexto de organización para operar conciliaciones bancarias.',
+      );
+    }
+
+    return resolveBankAccountPolicy(this.fiscalScopeService, {
+      organization_id,
+      store_id,
+      context,
+    });
+  }
+
+  private buildAccountVisibilityWhere(
+    policy: BankAccountPolicy,
+  ): Prisma.bank_accountsWhereInput {
+    if (canViewAllOrganizationBankAccounts(policy)) {
+      return { organization_id: policy.organization_id };
+    }
+    return bankAccountAvailableInStoreWhere(
+      policy.store_id,
+      policy.organization_id,
+    );
+  }
+
+  /**
+   * Valida que la conciliación pertenezca a una cuenta visible en el contexto
+   * actual Y que el usuario tenga permiso para modificarla (en scope
+   * ORGANIZATION, solo un usuario de organización puede mutar conciliaciones
+   * de cuentas de organización).
+   */
+  async assertCanModifyReconciliation(id: number) {
+    const policy = await this.resolvePolicy();
+    const reconciliation = await this.prisma.bank_reconciliations.findFirst({
+      where: {
+        id,
+        bank_account: this.buildAccountVisibilityWhere(policy),
+      },
+      include: {
+        bank_account: {
+          select: {
+            id: true,
+            store_id: true,
+            chart_account_id: true,
+          },
+        },
+      },
+    });
+
+    if (!reconciliation) {
+      throw new VendixHttpException(ErrorCodes.BANK_RECONCILIATION_NOT_FOUND);
+    }
+
+    if (!canModifyBankAccount(reconciliation.bank_account, policy)) {
+      throw new VendixHttpException(ErrorCodes.BANK_ACCOUNT_ORG_MANAGED);
+    }
+
+    return reconciliation;
+  }
+
   async findAll(query: { bank_account_id?: number; status?: string }) {
+    const policy = await this.resolvePolicy();
     const where: any = {
       ...(query.bank_account_id && { bank_account_id: query.bank_account_id }),
       ...(query.status && { status: query.status }),
+      bank_account: this.buildAccountVisibilityWhere(policy),
     };
 
     const reconciliations = await this.prisma.bank_reconciliations.findMany({
@@ -51,8 +129,12 @@ export class ReconciliationService {
   }
 
   async findOne(id: number) {
+    const policy = await this.resolvePolicy();
     const reconciliation = await this.prisma.bank_reconciliations.findFirst({
-      where: { id },
+      where: {
+        id,
+        bank_account: this.buildAccountVisibilityWhere(policy),
+      },
       include: {
         bank_account: {
           select: {
@@ -146,10 +228,13 @@ export class ReconciliationService {
   async create(create_dto: CreateReconciliationDto) {
     const context = this.getContext();
 
-    // Validate bank account exists
+    // Validate bank account exists and is modifiable by the current context
     const account = await this.bank_accounts_service.findOne(
       create_dto.bank_account_id,
     );
+    if (account.can_edit === false) {
+      throw new VendixHttpException(ErrorCodes.BANK_ACCOUNT_ORG_MANAGED);
+    }
 
     const opening_balance =
       create_dto.opening_balance !== undefined
@@ -185,13 +270,7 @@ export class ReconciliationService {
   }
 
   async complete(id: number) {
-    const reconciliation = await this.prisma.bank_reconciliations.findFirst({
-      where: { id },
-    });
-
-    if (!reconciliation) {
-      throw new VendixHttpException(ErrorCodes.BANK_RECONCILIATION_NOT_FOUND);
-    }
+    const reconciliation = await this.assertCanModifyReconciliation(id);
 
     if (reconciliation.status === ('completed' as any)) {
       throw new VendixHttpException(
@@ -231,13 +310,7 @@ export class ReconciliationService {
   }
 
   async remove(id: number) {
-    const reconciliation = await this.prisma.bank_reconciliations.findFirst({
-      where: { id },
-    });
-
-    if (!reconciliation) {
-      throw new VendixHttpException(ErrorCodes.BANK_RECONCILIATION_NOT_FOUND);
-    }
+    const reconciliation = await this.assertCanModifyReconciliation(id);
 
     if (reconciliation.status === ('completed' as any)) {
       throw new VendixHttpException(
@@ -252,8 +325,12 @@ export class ReconciliationService {
   }
 
   async recalculateBalance(id: number) {
+    const policy = await this.resolvePolicy();
     const reconciliation = await this.prisma.bank_reconciliations.findFirst({
-      where: { id },
+      where: {
+        id,
+        bank_account: this.buildAccountVisibilityWhere(policy),
+      },
     });
 
     if (!reconciliation) {

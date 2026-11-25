@@ -4,6 +4,7 @@ import { PaymentEncryptionService } from './payment-encryption.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { RequestContextService } from '../../../../common/context/request-context.service';
+import { ErrorCodes } from '../../../../common/errors';
 
 describe('StorePaymentMethodsService', () => {
   let service: StorePaymentMethodsService;
@@ -43,6 +44,7 @@ describe('StorePaymentMethodsService', () => {
     store_payment_methods: {
       findMany: jest.fn(),
       findFirst: jest.fn(),
+      findUnique: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
@@ -53,6 +55,12 @@ describe('StorePaymentMethodsService', () => {
     },
     store_users: {
       findFirst: jest.fn(),
+    },
+    stores: {
+      findUnique: jest.fn(),
+    },
+    bank_accounts: {
+      findMany: jest.fn(),
     },
     // enableForStore checks for an existing row through `withoutScope()`: the
     // store filter would hide a row belonging to the very store being enabled
@@ -244,6 +252,146 @@ describe('StorePaymentMethodsService', () => {
         success: true,
         message: 'Payment method removed from store',
       });
+    });
+  });
+
+  describe('bank_transfer store availability filtering & validation (QUI-1061)', () => {
+    beforeEach(() => {
+      jest.clearAllMocks();
+      jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({ store_id: 20, organization_id: 1 } as any);
+    });
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it('getEnabledForStore removes bank_transfer accounts no longer assigned to the store while preserving legacy entries', async () => {
+      mockPrismaService.store_payment_methods.findMany.mockResolvedValue([
+        {
+          id: 5,
+          store_id: 20,
+          display_name: 'Transferencia',
+          state: 'enabled',
+          custom_config: {
+            accounts: [
+              { id: 101, bank_name: 'Bancolombia', account_number: '111' },
+              { id: 202, bank_name: 'Davivienda', account_number: '222' },
+              { bank_name: 'Nequi Legacy', account_number: '300111', legacy: true },
+            ],
+          },
+          system_payment_method: {
+            id: 2,
+            name: 'Transferencia',
+            type: 'bank_transfer',
+            is_active: true,
+          },
+        },
+      ]);
+      mockPrismaService.bank_accounts.findMany.mockResolvedValue([{ id: 101 }]);
+
+      const result = await service.getEnabledForStore();
+
+      expect(mockPrismaService.bank_accounts.findMany).toHaveBeenCalledWith({
+        where: {
+          id: { in: [101, 202] },
+          organization_id: 1,
+          status: 'active',
+          OR: [
+            { store_id: 20 },
+            { store_id: null, available_in_all_stores: true },
+            { store_id: null, store_assignments: { some: { store_id: 20 } } },
+          ],
+        },
+        select: { id: true },
+      });
+      expect((result[0].custom_config as any).accounts).toEqual([
+        { id: 101, bank_name: 'Bancolombia', account_number: '111' },
+        { bank_name: 'Nequi Legacy', account_number: '300111', legacy: true },
+      ]);
+    });
+
+    it('updateStoreMethod rejects bank_account_id not assigned to the store', async () => {
+      mockPrismaService.store_payment_methods.findFirst.mockResolvedValue({
+        id: 5,
+        store_id: 20,
+        system_payment_method: { id: 2, type: 'bank_transfer', is_active: true },
+      });
+      mockPrismaService.bank_accounts.findMany.mockResolvedValue([]);
+
+      await expect(
+        service.updateStoreMethod(5, {
+          custom_config: {
+            accounts: [
+              { id: 999, bank_name: 'Ajena', account_number: '999-000' },
+            ],
+          },
+        }),
+      ).rejects.toMatchObject({
+        errorCode: ErrorCodes.BANK_ACCOUNT_NOT_ASSIGNED_TO_STORE.code,
+      });
+      expect(mockPrismaService.store_payment_methods.update).not.toHaveBeenCalled();
+    });
+
+    it('enableForStore rejects bank_account_id not assigned to the store', async () => {
+      mockPrismaService.system_payment_methods.findUnique.mockResolvedValue({
+        id: 2,
+        name: 'Transferencia',
+        type: 'bank_transfer',
+        is_active: true,
+        requires_config: true,
+      });
+      mockPrismaService.store_payment_methods.findFirst.mockResolvedValue(null);
+      mockPrismaService.bank_accounts.findMany.mockResolvedValue([]);
+
+      await expect(
+        service.enableForStore(2, {
+          custom_config: {
+            accounts: [
+              { id: 999, bank_name: 'Ajena', account_number: '999-000' },
+            ],
+          },
+        }),
+      ).rejects.toMatchObject({
+        errorCode: ErrorCodes.BANK_ACCOUNT_NOT_ASSIGNED_TO_STORE.code,
+      });
+      expect(mockPrismaService.store_payment_methods.create).not.toHaveBeenCalled();
+    });
+
+    it('getEnabledForStore and findOne preserve record properties (e.g. id) for non-bank_transfer methods such as Wompi', async () => {
+      const wompiRecord = {
+        id: 42,
+        store_id: 20,
+        display_name: 'Wompi',
+        state: 'enabled',
+        custom_config: { public_key: 'pub_test_123' },
+        system_payment_method: {
+          id: 7,
+          name: 'Wompi',
+          type: 'wompi',
+          is_active: true,
+        },
+      };
+      mockPrismaService.store_payment_methods.findMany.mockResolvedValue([
+        wompiRecord,
+      ]);
+      mockPrismaService.store_payment_methods.findUnique.mockResolvedValue(
+        wompiRecord,
+      );
+
+      const enabled = await service.getEnabledForStore();
+      const wompiMethod = enabled.find(
+        (m) => m.system_payment_method?.type === 'wompi',
+      );
+      expect(wompiMethod).toBeDefined();
+      const enabledId: number = wompiMethod!.id;
+      expect(enabledId).toBe(42);
+
+      const single = await service.findOne(42);
+      const singleId: number = single.id;
+      expect(singleId).toBe(42);
+      expect(single.display_name).toBe('Wompi');
     });
   });
 });

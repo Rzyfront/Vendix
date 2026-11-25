@@ -1,4 +1,13 @@
-import { IsString, IsOptional, IsNumber, MaxLength } from 'class-validator';
+import {
+  IsArray,
+  IsBoolean,
+  IsInt,
+  IsString,
+  IsOptional,
+  IsNumber,
+  MaxLength,
+  Min,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateBankAccountDto {
@@ -38,4 +47,15 @@ export class CreateBankAccountDto {
   @IsNumber()
   @Type(() => Number)
   store_id?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  available_in_all_stores?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  @Type(() => Number)
+  store_ids?: number[];
 }

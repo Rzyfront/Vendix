@@ -4,6 +4,8 @@ import { Observable } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 import {
   BankAccount,
+  BankAccountPayload,
+  BankAccountScopeContext,
   BankTransaction,
   BankReconciliation,
   ReconciliationMatch,
@@ -43,20 +45,26 @@ export class BankReconciliationService {
     );
   }
 
+  getBankAccountScopeContext(): Observable<ApiResponse<BankAccountScopeContext>> {
+    return this.http.get<ApiResponse<BankAccountScopeContext>>(
+      this.getApiUrl('accounts/scope-context'),
+    );
+  }
+
   getBankAccount(id: number): Observable<ApiResponse<BankAccount>> {
     return this.http.get<ApiResponse<BankAccount>>(
       this.getApiUrl(`accounts/${id}`),
     );
   }
 
-  createBankAccount(dto: Partial<BankAccount>): Observable<ApiResponse<BankAccount>> {
+  createBankAccount(dto: BankAccountPayload): Observable<ApiResponse<BankAccount>> {
     return this.http.post<ApiResponse<BankAccount>>(
       this.getApiUrl('accounts'),
       dto,
     );
   }
 
-  updateBankAccount(id: number, dto: Partial<BankAccount>): Observable<ApiResponse<BankAccount>> {
+  updateBankAccount(id: number, dto: BankAccountPayload): Observable<ApiResponse<BankAccount>> {
     return this.http.patch<ApiResponse<BankAccount>>(
       this.getApiUrl(`accounts/${id}`),
       dto,

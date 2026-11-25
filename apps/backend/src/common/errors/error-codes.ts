@@ -4774,6 +4774,24 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'A bank account with this account number already exists',
   },
+  // QUI-1061 — cuentas bancarias según el scope fiscal de la organización.
+  BANK_ACCOUNT_ORG_MANAGED: {
+    code: 'BANK_ACCOUNT_ORG_MANAGED',
+    httpStatus: 403,
+    devMessage:
+      'En esta organización las cuentas bancarias las administra un usuario con permisos de organización.',
+  },
+  BANK_ACCOUNT_NOT_ASSIGNED_TO_STORE: {
+    code: 'BANK_ACCOUNT_NOT_ASSIGNED_TO_STORE',
+    httpStatus: 409,
+    devMessage:
+      'Ya existe una cuenta de la organización con ese número, pero no está asignada a esta tienda. Asígnala desde Contabilidad → Bancos.',
+  },
+  BANK_ACCOUNT_INVALID_ASSIGNMENT: {
+    code: 'BANK_ACCOUNT_INVALID_ASSIGNMENT',
+    httpStatus: 400,
+    devMessage: 'La asignación de tiendas de la cuenta bancaria no es válida.',
+  },
   BANK_RECONCILIATION_NOT_FOUND: {
     code: 'BANK_RECONCILIATION_NOT_FOUND',
     httpStatus: 404,

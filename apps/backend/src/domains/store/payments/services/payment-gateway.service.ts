@@ -19,6 +19,7 @@ import { PaymentValidatorService } from './payment-validator.service';
 import { PaymentError, PaymentErrorCodes } from '../utils';
 import { BasePaymentProcessor } from '../interfaces/base-processor.interface';
 import { ErrorCodes, VendixHttpException, findErrorCodeEntry } from 'src/common/errors';
+import { isBankAccountAvailableInStore } from '@common/helpers/bank-account-availability.helper';
 import { OrderHistoryService } from '../../orders/order-history/order-history.service';
 import { lockOrderLifecycle } from '../../orders/order-flow/order-lifecycle-lock.util';
 import { serviceBudgetBlocks, serviceOrderTxOptions } from '../../orders/utils/service-budget-cap.util';
@@ -689,6 +690,9 @@ export class PaymentGatewayService {
   ): Promise<ResolvedBankAccount> {
     const account = await client.bank_accounts.findFirst({
       where: { id: bankAccountId },
+      include: {
+        store_assignments: { select: { store_id: true } },
+      },
     });
 
     if (!account) {
@@ -724,7 +728,9 @@ export class PaymentGatewayService {
       );
     }
 
-    if (account.store_id !== null && account.store_id !== storeId) {
+    if (
+      !isBankAccountAvailableInStore(account, storeId, store.organization_id)
+    ) {
       throw new PaymentError(
         PaymentErrorCodes.VALIDATION_FAILED,
         'La cuenta bancaria no pertenece a esta tienda',
