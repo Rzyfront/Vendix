@@ -161,7 +161,8 @@ export class LodgingCheckOutService {
     }
 
     // 1. The folio as it will be invoiced: every night slept is charged.
-    await this.postSleptNights(folio);
+    //    Departing now: the nights from today on leave the folio first.
+    await this.postSleptNights(folio, true);
     // H3.9 — exempt nights only while the holder still qualifies.
     await this.folios.assertVatExemptionHolds(folio);
 
@@ -576,14 +577,18 @@ export class LodgingCheckOutService {
     return folio;
   }
 
-  /** Nights before today (store day): the guest slept them, so they are billed. */
-  private async postSleptNights(folio: FolioRow): Promise<void> {
+  /**
+   * Nights before today (store day): the guest slept them, so they are billed.
+   * `departing` is true only from check-out: verifying the account mid-stay
+   * must not release the nights the guest is going to sleep.
+   */
+  private async postSleptNights(folio: FolioRow, departing = false): Promise<void> {
     const store_id = RequestContextService.getContext()?.store_id;
     if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     // QUI-1063 — the stay is posted from the confirmation: on an early
     // departure the nights from today on leave the folio before its review,
-    // so only the nights slept are invoiced.
-    await this.folios.releaseUnsleptNights(folio);
+    // so only the nights slept are invoiced. Mid-stay they stay billed.
+    if (departing) await this.folios.releaseUnsleptNights(folio);
     const today = localDateString(new Date(), await resolveStoreTimezone(this.prisma, store_id));
     await this.folios.postNightsThrough(folio, today, false);
     // H7.1 freezes the nights of a closed business day; a night the night
