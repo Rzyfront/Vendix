@@ -122,6 +122,24 @@ describe('ReservationsService — state machine (appointments redesign)', () => 
     );
   });
 
+  it('salir de la cola (arriving → attending) recarga la cola una sola vez', async () => {
+    const { service, bookings, emits } = buildService();
+    bookings.push({ id: 1, status: 'arriving', date: new Date('2026-07-18T00:00:00Z') });
+    await service.markAttending(1);
+    const queueEmits = emits.filter((e) => e.name === 'booking.arrival_recorded');
+    expect(queueEmits.length).toBe(1);
+    expect(queueEmits[0].payload).toEqual(
+      expect.objectContaining({ booking_id: 1, date: '2026-07-18' }),
+    );
+  });
+
+  it('entrar a la cola (confirmed → arriving) no recalcula la cola', async () => {
+    const { service, bookings, emits } = buildService();
+    bookings.push({ id: 1, status: 'confirmed', date: new Date('2026-07-18T00:00:00Z') });
+    await service.markArriving(1);
+    expect(emits.find((e) => e.name === 'booking.arrival_recorded')).toBeUndefined();
+  });
+
   it('markAttending rejects confirmed → attending (must go through arriving)', async () => {
     const { service, bookings } = buildService();
     bookings.push({ id: 1, status: 'confirmed' });

@@ -334,6 +334,11 @@ describe('AppointmentQueueService', () => {
     const { service, findFirst, notifications } = buildService([candidate]);
     findFirst.mockResolvedValue({ queue_position: 0 });
     await service.refreshAndBroadcastQueue(1, '2026-07-18');
+    // Consulta la posición previa del que quedaría primero, no la de otro.
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { id: 10 },
+      select: { queue_position: true },
+    });
     expect(notifications.createAndBroadcast).not.toHaveBeenCalled();
   });
 
