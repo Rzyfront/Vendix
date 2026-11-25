@@ -18,6 +18,14 @@
         Es una simulación: todavía no se ha escrito nada.
       </p>
 
+      @if (previewResult()!.price_tier_changes !== undefined) {
+        <p class="text-[11px] text-text-secondary" role="status">
+          <b class="text-text-primary">{{ previewResult()!.price_tier_changes }}</b>
+          {{ previewResult()!.price_tier_changes === 1 ? 'producto cambiará' : 'productos cambiarán' }}
+          de tarifas.
+        </p>
+      }
+
       @if (progress().totalBatches > 1) {
         <p class="text-[11px] text-text-secondary">
           Lote {{ progress().doneBatches }} de {{ progress().totalBatches }}
@@ -236,6 +244,14 @@
             </p>
           </div>
         </div>
+
+        @if (applyResult()!.price_tier_changes !== undefined) {
+          <p class="text-[11px] text-text-secondary" role="status">
+            <b class="text-text-primary">{{ applyResult()!.price_tier_changes }}</b>
+            {{ applyResult()!.price_tier_changes === 1 ? 'producto cambió' : 'productos cambiaron' }}
+            de tarifas.
+          </p>
+        }
 
         @if (applyResult()!.failed === 0) {
           <app-alert-banner variant="success" icon="circle-check">

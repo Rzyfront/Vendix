@@ -106,5 +106,35 @@ describe('bulk-editable-fields registry (QUI-752)', () => {
         }),
       ).toEqual({ mode: 'replace', ids: [19], tax_inclusive_map: { '19': true } });
     });
+
+    it('price_tier_action: { mode, ids } → payload sin duplicados ni basura', () => {
+      expect(
+        coerceBulkEditValue(field('price_tier_action'), {
+          mode: 'add',
+          ids: ['7', 7, 8, 0, 'x'],
+        }),
+      ).toEqual({ mode: 'add', ids: [7, 8] });
+      expect(
+        coerceBulkEditValue(field('price_tier_action'), {
+          mode: 'remove',
+          ids: [3],
+        }),
+      ).toEqual({ mode: 'remove', ids: [3] });
+    });
+
+    it('price_tier_action: sin tarifas o con modo inválido no se envía', () => {
+      expect(
+        coerceBulkEditValue(field('price_tier_action'), { mode: 'replace', ids: [] }),
+      ).toBeUndefined();
+      expect(
+        coerceBulkEditValue(field('price_tier_action'), { mode: 'merge', ids: [1] }),
+      ).toBeUndefined();
+    });
+  });
+
+  it('la sección price_tiers ofrece el selector de tarifas junto al interruptor', () => {
+    const keys = keysOf({ targetType: 'physical', industries: ['retail'] }, 'price_tiers');
+    expect(keys).toEqual(['has_multiple_price_tiers', 'price_tier_action']);
+    expect(findBulkEditableField('price_tier_action')?.control).toBe('price-tier-action');
   });
 });

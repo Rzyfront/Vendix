@@ -410,6 +410,16 @@ export const BULK_EDITABLE_FIELDS = [
     control: 'toggle',
     productTypes: ALL_TYPES,
   },
+  {
+    key: 'price_tier_action',
+    label: 'Tarifas',
+    description:
+      'Añade, quita o reemplaza tarifas del catálogo en los productos seleccionados. Asignar tarifas aquí ya activa multi-tarifa en esos productos.',
+    group: 'price_tiers',
+    control: 'price-tier-action',
+    productTypes: ALL_TYPES,
+    optionsRef: 'price-tiers',
+  },
 
   // ═══ availability ═════════════════════════════════════════════════════════
   {

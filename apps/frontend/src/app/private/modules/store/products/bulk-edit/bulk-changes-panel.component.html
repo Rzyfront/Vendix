@@ -120,6 +120,7 @@
             [active]="isActive(field.key)"
             [dynamicOptions]="dynamicOptionsFor(field)"
             [taxCategories]="taxCategories()"
+            [priceTiersLoaded]="priceTiersLoaded()"
             [dependencyPending]="dependencyPending(field)"
             (activeChange)="onFieldActiveChange(field.key, $event)"
           />

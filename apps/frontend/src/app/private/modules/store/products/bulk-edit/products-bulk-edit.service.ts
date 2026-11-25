@@ -620,10 +620,31 @@ export function mergePreviewResults(
       ok: acc.ok + (part?.ok ?? 0),
       warnings: acc.warnings + (part?.warnings ?? 0),
       errors: acc.errors + (part?.errors ?? 0),
+      ...sumPriceTierChanges(acc, part),
       items: [...acc.items, ...(part?.items ?? [])],
     }),
     { total: 0, ok: 0, warnings: 0, errors: 0, items: [] },
   );
+}
+
+/**
+ * `price_tier_changes` solo viaja con la acción de tarifas: se suma cuando
+ * algún lote lo trae y se omite en caso contrario.
+ */
+function sumPriceTierChanges(
+  acc: { price_tier_changes?: number },
+  part: { price_tier_changes?: number } | undefined,
+): { price_tier_changes?: number } {
+  if (
+    acc.price_tier_changes === undefined &&
+    part?.price_tier_changes === undefined
+  ) {
+    return {};
+  }
+  return {
+    price_tier_changes:
+      (acc.price_tier_changes ?? 0) + (part?.price_tier_changes ?? 0),
+  };
 }
 
 /** Suma los informes de aplicación de todos los lotes en uno solo. */
@@ -635,6 +656,7 @@ export function mergeApplyResults(
       total: acc.total + (part?.total ?? 0),
       successful: acc.successful + (part?.successful ?? 0),
       failed: acc.failed + (part?.failed ?? 0),
+      ...sumPriceTierChanges(acc, part),
       results: [...acc.results, ...(part?.results ?? [])],
     }),
     { total: 0, successful: 0, failed: 0, results: [] },

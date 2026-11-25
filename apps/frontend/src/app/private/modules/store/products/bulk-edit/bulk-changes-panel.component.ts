@@ -147,6 +147,10 @@ export class BulkChangesPanelComponent {
   readonly templateOptions = input<readonly SelectorOption[]>([]);
   /** Catálogo de categorías de impuestos (`optionsRef: 'tax-categories'`). */
   readonly taxOptions = input<readonly SelectorOption[]>([]);
+  /** Tarifas activas de la tienda (`optionsRef: 'price-tiers'`). */
+  readonly priceTierOptions = input<readonly SelectorOption[]>([]);
+  /** `true` cuando el catálogo de tarifas ya respondió. */
+  readonly priceTiersLoaded = input<boolean>(false);
   /** Lista completa de categorías de impuestos para chips y metadatos fiscales. */
   readonly taxCategories = input<readonly TaxCategory[]>([]);
   /** Cuántos productos hay en el stack, para el aviso de alcance. */
@@ -302,6 +306,8 @@ export class BulkChangesPanelComponent {
         return this.templateOptions();
       case 'tax-categories':
         return this.taxOptions();
+      case 'price-tiers':
+        return this.priceTierOptions();
       case 'kds-stations':
         return this.kdsOptions();
       default:
@@ -349,7 +355,10 @@ export class BulkChangesPanelComponent {
     if (control instanceof FormGroup) {
       if (key === 'dimensions') {
         control.reset({ length: null, width: null, height: null });
-      } else if (key === 'tax_category_action') {
+      } else if (
+        key === 'tax_category_action' ||
+        key === 'price_tier_action'
+      ) {
         control.reset({ mode: 'add', ids: [] });
       } else {
         control.reset();
