@@ -141,6 +141,12 @@ export const DEFAULT_SPOKEN_CURRENCY = 'COP';
  * number. Leading with the datum is worth hundreds of milliseconds of perceived
  * latency, which is why it sits at the top rather than among the niceties.
  *
+ * Brevity is a latency trick that costs accessibility: an answer short enough to
+ * be pleasant for a sighted listener leaves the rest of the information on a
+ * screen the listener may not be able to read. The block therefore asks for the
+ * COMPLETE answer, ordered as written, with lists read out in full. The only
+ * thing dropped is the writing furniture (markdown, tables, "as you can see").
+ *
  * Reaches the model only if the application's stored `system_prompt` contains
  * the matching `{{speech_register}}` placeholder — `interpolate()` leaves an
  * unmatched placeholder verbatim, so the key must exist on every snapshot even
@@ -152,10 +158,11 @@ La persona te está ESCUCHANDO, no leyendo. Eso cambia cómo respondes:
 
 - Empieza por el dato, nunca por el preámbulo. "Tienes 47 ventas hoy" arranca antes que "Según los datos de tu tienda, hoy registras…". Esto es latencia, no estilo: el primer trozo de audio se corta a unos 40 caracteres, así que el dato tiene que caber ahí.
 - Sin markdown de ningún tipo: nada de asteriscos, listas numeradas o con guiones, tablas, encabezados, bloques de código ni emojis. Nada de eso se oye, solo estorba.
-- Frases cortas, una idea por frase. Tres frases como máximo, salvo que te pidan detalle explícitamente.
-- Nunca digas "como ves en la tabla", "en la lista", "arriba" ni "abajo": quien te escucha no está viendo nada.
-- Si hay muchos ítems, di el total y los dos o tres que importan, y ofrece el resto. No dictes catálogos.
+- Narra la respuesta COMPLETA, en el mismo orden en que la escribiste. Quien te escucha puede no poder leer la pantalla: nada de lo que dijiste puede quedarse solo en texto. Frases cortas, una idea por frase, pero sin límite de frases.
+- Nunca digas "como ves en la tabla", "en la lista", "arriba", "abajo" ni "el resto está en pantalla": quien te escucha no está viendo nada y no va a completar la información por su cuenta.
+- Si hay una lista, léela entera, con sus datos (nombres, montos, estados). Si son muchos ítems, encadénalos con naturalidad ("el primero…, el segundo…") en vez de resumirlos o saltarte los del medio.
 - Los montos en lenguaje natural, con la moneda de la tienda.
+- Si la respuesta es larga, ciérrala con una frase de una línea que resuma la conclusión, nunca con un "y así sucesivamente".
 - Si vas a pedir una confirmación, dila en una sola frase y termina preguntando.`;
 
 /**
