@@ -16,6 +16,14 @@ import {
   PageAppKind,
 } from '../../private/modules/store/apps/templates';
 import { IconComponent } from '../../shared/components/icon/icon.component';
+import { AppPageProductsViewComponent } from './app-page-products-view.component';
+import {
+  AppPageProductItem,
+  blockProductIds,
+  blockProductsLayout,
+  blockProductsSelection,
+  blockShowVariants,
+} from './app-page-products.util';
 import {
   BlockItem,
   STAR_SLOTS,
@@ -72,7 +80,7 @@ const HIGHLIGHTS_ICON_SET = new Set<string>(APP_HIGHLIGHTS_ICON_OPTIONS.map((o) 
 @Component({
   selector: 'app-app-page-view',
   standalone: true,
-  imports: [NgTemplateOutlet, IconComponent],
+  imports: [NgTemplateOutlet, IconComponent, AppPageProductsViewComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     '[class.ap-themed]': 'themed()',
@@ -803,6 +811,19 @@ const HIGHLIGHTS_ICON_SET = new Set<string>(APP_HIGHLIGHTS_ICON_OPTIONS.map((o) 
                     }
                   </div>
                 }
+                @case ('products') {
+                  <app-page-products-view
+                    [title]="titleOf(item.block)"
+                    [selection]="productsSelection(item.block)"
+                    [productIds]="productsIds(item.block)"
+                    [autoProductIds]="autoProductIds()"
+                    [showVariants]="productsShowVariants(item.block)"
+                    [layout]="productsLayout(item.block)"
+                    [preview]="preview() || previewProducts() !== null"
+                    [previewItems]="previewProducts()"
+                    [allowCatalogFallback]="kind() === 'product_page'"
+                  />
+                }
               }
             </div>
           </section>
@@ -924,6 +945,10 @@ export class AppPageViewComponent {
   readonly blockIds = input(false);
   /** Element id the hero and cta buttons scroll to (the page's main content). */
   readonly mainId = input('app-page-main');
+  /** IDs automáticos de productos de la página (complementos/secundarios) para bloques `products` en modo `auto`. */
+  readonly autoProductIds = input<readonly number[]>([]);
+  /** Catálogo pre-resuelto para la vista previa del editor (sin peticiones HTTP). */
+  readonly previewProducts = input<readonly AppPageProductItem[] | null>(null);
 
   readonly starSlots = STAR_SLOTS;
 
@@ -1198,6 +1223,24 @@ export class AppPageViewComponent {
 
   highlightsExplicitVariant(block: AppPageBlock): AppHighlightsVariant | null {
     return blockEnum(block.props, 'variant', HIGHLIGHTS_VARIANTS);
+  }
+
+  // ---- Bloque de productos ----
+
+  productsSelection(block: AppPageBlock) {
+    return blockProductsSelection(block.props);
+  }
+
+  productsIds(block: AppPageBlock): number[] {
+    return blockProductIds(block.props);
+  }
+
+  productsShowVariants(block: AppPageBlock): boolean {
+    return blockShowVariants(block.props);
+  }
+
+  productsLayout(block: AppPageBlock) {
+    return blockProductsLayout(block.props);
   }
 
   highlightsVariant(block: AppPageBlock): AppHighlightsVariant {

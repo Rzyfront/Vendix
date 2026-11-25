@@ -1,6 +1,9 @@
-import { provideZonelessChangeDetection } from '@angular/core';
+import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { of } from 'rxjs';
 
+import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
+import { ProductsService } from '../../products/services/products.service';
 import { LANDING_BUILDER_CATALOG } from '../landing-builder/landing-builder.catalog';
 import { PRODUCT_PAGE_BUILDER_CATALOG } from '../page-builder/product-page/product-page-builder';
 import { BuilderInspectorComponent, BuilderPropChange } from './builder-inspector.component';
@@ -143,5 +146,42 @@ describe('BuilderInspectorComponent (F6-A)', () => {
     slider = el().querySelector('[data-field="overlay_opacity"] input[type="range"]') as HTMLInputElement;
     expect(slider.value).toBe('40');
     expect(slider.getAttribute('aria-valuetext')).toBe('40 %');
+  });
+
+  it('en el bloque products muestra selector de selección, variantes, diseño y solo abre app-product-selector en modo manual', async () => {
+    const productsSpy = jasmine.createSpyObj<ProductsService>('ProductsService', ['getProducts', 'getProductById']);
+    productsSpy.getProducts.and.returnValue(of({ data: [], meta: { total: 0, page: 1, limit: 25, total_pages: 1 } } as any));
+    productsSpy.getProductById.and.returnValue(of(null as any));
+
+    TestBed.configureTestingModule({
+      imports: [BuilderInspectorComponent],
+      providers: [
+        provideZonelessChangeDetection(),
+        { provide: ProductsService, useValue: productsSpy },
+        {
+          provide: CurrencyFormatService,
+          useValue: { currencyCode: signal('COP'), format: (v: number) => `$${v}`, loadCurrency: () => {} },
+        },
+      ],
+    });
+    fixture = TestBed.createComponent(BuilderInspectorComponent);
+    fixture.componentRef.setInput('catalog', PRODUCT_PAGE_BUILDER_CATALOG);
+    fixture.componentRef.setInput('block', { id: 'p1', type: 'products', props: { selection: 'auto' } });
+    changes = [];
+    fixture.componentInstance.propChange.subscribe((c) => changes.push(c));
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(el().querySelector('[data-field="selection"]')).not.toBeNull();
+    expect(el().querySelector('[data-field="show_variants"]')).not.toBeNull();
+    expect(el().querySelector('[data-field="layout"]')).not.toBeNull();
+    // En modo automático el selector manual de productos no se muestra
+    expect(el().querySelector('app-product-selector')).toBeNull();
+
+    // Al cambiar a manual aparece app-product-selector
+    fixture.componentRef.setInput('block', { id: 'p1', type: 'products', props: { selection: 'manual', product_ids: [5] } });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(el().querySelector('app-product-selector')).not.toBeNull();
   });
 });

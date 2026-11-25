@@ -41,7 +41,14 @@ const SELECTED_STYLE = `[data-preview-selected="true"]{outline:2px solid var(--c
         }
         @case ('product_page') {
           @if (productPage(); as view) {
-            <app-product-page-view [page]="view.page" [storeName]="view.storeName || 'Tienda'" [storeLogo]="view.storeLogoUrl" [blockIds]="true">
+            <app-product-page-view
+              [page]="view.page"
+              [storeName]="view.storeName || 'Tienda'"
+              [storeLogo]="view.storeLogoUrl"
+              [autoProductIds]="view.autoProductIds"
+              [previewProducts]="view.catalogProducts"
+              [blockIds]="true"
+            >
               <app-product-page-preview-body [preview]="view" />
             </app-product-page-view>
           }
@@ -56,6 +63,7 @@ const SELECTED_STYLE = `[data-preview-selected="true"]{outline:2px solid var(--c
                 [page]="view.page"
                 [storeName]="view.storeName"
                 [previewProducts]="view.products"
+                [previewCatalogProducts]="view.catalogProducts"
                 [blockIds]="true"
               />
             </app-service-page-view>

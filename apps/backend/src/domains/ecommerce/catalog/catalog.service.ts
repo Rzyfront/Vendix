@@ -554,6 +554,8 @@ export class CatalogService {
       }
     }
 
+    const includeVariants = String(query.include_variants) === 'true';
+
     const [data, total] = await Promise.all([
       this.prisma.products.findMany({
         where,
@@ -592,6 +594,18 @@ export class CatalogService {
               quantity_available: true,
             },
           },
+          ...(includeVariants
+            ? {
+                product_variants: {
+                  orderBy: { id: 'asc' },
+                  take: 24,
+                  include: {
+                    product_images: { select: { image_url: true } },
+                    stock_levels: { select: { quantity_available: true } },
+                  },
+                },
+              }
+            : {}),
           _count: { select: { product_variants: true } },
         },
       }),
@@ -609,6 +623,7 @@ export class CatalogService {
           product,
           activePromotionsByProductId.get(product.id) ?? null,
           availabilityByProductId.get(product.id) ?? null,
+          includeVariants,
         ),
       ),
     );
@@ -1306,6 +1321,7 @@ export class CatalogService {
     product: any,
     activePromotion: ActiveProductPromotion | null = null,
     availability: ProductAvailability | null = null,
+    includeVariants = false,
   ) {
     const raw_image_url = product.product_images?.[0]?.image_url || null;
     const signed_image_url = await this.s3Service.signUrl(raw_image_url);
@@ -1418,6 +1434,9 @@ export class CatalogService {
       categories:
         product.product_categories?.map((pc: any) => pc.categories) || [],
       variant_count: variantCount,
+      ...(includeVariants
+        ? { variants: await this.mapVariantsToResponse(product) }
+        : {}),
       product_type: product.product_type,
       requires_booking: product.requires_booking,
       // QUI-1060 F2: la tarjeta de un plan abre su ficha (no se reserva en línea).

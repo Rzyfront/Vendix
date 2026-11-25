@@ -1,5 +1,6 @@
 import type { Observable } from 'rxjs';
 
+import type { AppPageProductItem } from '../../../../../public/app-page/app-page-products.util';
 import type { BuilderCatalog } from '../builder/builder.types';
 import type { ProductPageCustomDomain, StoreAppDetail } from '../interfaces/store-app.interface';
 import type { AppPageDocument, PageAppKind } from '../templates';
@@ -60,6 +61,8 @@ export interface AppPagePreviewPayload<S = unknown, C = unknown> {
   context: C;
   storeName: string;
   storeLogoUrl: string | null;
+  /** Productos resueltos en vivo desde el selector del inspector (antes de guardar). */
+  catalogProducts?: AppPageProductItem[];
 }
 
 /** Route of the shared preview frame, outside the admin layout (`store_admin.routes.ts`). */

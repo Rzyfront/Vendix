@@ -171,5 +171,37 @@ describe('Apps F2 · app page templates', () => {
       );
       expect(roundTripped).toEqual(legacy);
     });
+
+    it('un bloque products con selección manual, show_variants y layout pasa contrato y round-trip en el builder', () => {
+      const doc = {
+        schema_version: 1 as const,
+        mode: 'sales' as const,
+        blocks: [
+          {
+            id: 'products',
+            type: 'products',
+            enabled: true,
+            props: {
+              title: 'Recomendados',
+              selection: 'manual',
+              product_ids: [9, 3, 5],
+              show_variants: true,
+              layout: 'carousel',
+            },
+          },
+        ],
+      };
+      const validated = validateAppPage('product_page', doc);
+      expect(validated.valid).toBeTrue();
+      expect(validated.errors).toEqual([]);
+
+      const roundTripped = blocksToPage(
+        'product_page',
+        PRODUCT_PAGE_BUILDER_CATALOG,
+        { schema_version: 1, mode: 'sales', blocks: [] },
+        pageToBlocks(doc),
+      );
+      expect(roundTripped).toEqual(doc);
+    });
   });
 });

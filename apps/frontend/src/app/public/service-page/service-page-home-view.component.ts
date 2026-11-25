@@ -10,6 +10,15 @@ import {
   modeSells,
 } from '../../private/modules/store/apps/templates/app-page.types';
 import { AppPageViewComponent } from '../app-page/app-page-view.component';
+import { AppPageProductsViewComponent } from '../app-page/app-page-products-view.component';
+import {
+  AppPageProductItem,
+  AppPageProductVariant,
+  blockProductIds,
+  blockProductsLayout,
+  blockProductsSelection,
+  blockShowVariants,
+} from '../app-page/app-page-products.util';
 import { ProductComplementsComponent } from '../product-page/components/product-complements.component';
 import {
   ServiceCardData,
@@ -36,7 +45,7 @@ import {
 @Component({
   selector: 'app-service-page-home-view',
   standalone: true,
-  imports: [RouterModule, IconComponent, CurrencyPipe, ProductComplementsComponent, AppPageViewComponent],
+  imports: [RouterModule, IconComponent, CurrencyPipe, ProductComplementsComponent, AppPageViewComponent, AppPageProductsViewComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -143,20 +152,48 @@ import {
   @if (showProducts()) {
     <div class="border-t border-border bg-surface-secondary/40" data-testid="service-page-products" [attr.data-block-id]="productsBlockId()">
       @if (previewProducts(); as picked) {
-        <section class="mx-auto w-full max-w-6xl px-4 py-6" data-testid="preview-products">
-          <h2 class="mb-3 text-lg font-semibold text-text-primary">{{ productsTitle() }}</h2>
-          <div class="grid grid-cols-2 gap-4 md:grid-cols-4">
-            @for (item of picked; track item.id) {
-              <article class="overflow-hidden rounded-xl border border-border bg-surface">
-                <div class="aspect-square bg-surface-secondary">
-                  @if (item.image_url) {
-                    <img [src]="item.image_url" [alt]="item.name" class="h-full w-full object-cover" />
-                  }
-                </div>
-                <p class="truncate px-3 py-2 text-sm font-medium text-text-primary">{{ item.name }}</p>
-              </article>
-            }
-          </div>
+        @if (hasAdvancedProductsProps()) {
+          <section class="mx-auto w-full max-w-6xl px-4 py-6">
+            <app-page-products-view
+              [title]="productsTitle()"
+              [selection]="productsSelection()"
+              [productIds]="productsManualIds()"
+              [autoProductIds]="productIds()"
+              [showVariants]="productsShowVariants()"
+              [layout]="productsLayout()"
+              [preview]="true"
+              [previewItems]="resolvedPreviewCatalog()"
+              [compact]="true"
+            />
+          </section>
+        } @else {
+          <section class="mx-auto w-full max-w-6xl px-4 py-6" data-testid="preview-products">
+            <h2 class="mb-3 text-lg font-semibold text-text-primary">{{ productsTitle() }}</h2>
+            <div class="grid grid-cols-2 gap-4 md:grid-cols-4">
+              @for (item of picked; track item.id) {
+                <article class="overflow-hidden rounded-xl border border-border bg-surface">
+                  <div class="aspect-square bg-surface-secondary">
+                    @if (item.image_url) {
+                      <img [src]="item.image_url" [alt]="item.name" class="h-full w-full object-cover" />
+                    }
+                  </div>
+                  <p class="truncate px-3 py-2 text-sm font-medium text-text-primary">{{ item.name }}</p>
+                </article>
+              }
+            </div>
+          </section>
+        }
+      } @else if (hasAdvancedProductsProps()) {
+        <section class="mx-auto w-full max-w-6xl px-4 py-8">
+          <app-page-products-view
+            [title]="productsTitle()"
+            [selection]="productsSelection()"
+            [productIds]="productsManualIds()"
+            [autoProductIds]="productIds()"
+            [showVariants]="productsShowVariants()"
+            [layout]="productsLayout()"
+            [compact]="true"
+          />
         </section>
       } @else {
         <app-product-complements [productIds]="productIds()" [title]="productsTitle()" [compact]="true" />
@@ -178,7 +215,21 @@ export class ServicePageHomeViewComponent {
   readonly page = input<AppPageDocument | null>(null);
   readonly storeName = input<string | null>(null);
   readonly blockIds = input(false);
-  readonly previewProducts = input<{ id: number; name: string; image_url: string | null }[] | null>(null);
+  readonly previewProducts = input<
+    | {
+        id: number;
+        name: string;
+        image_url: string | null;
+        slug?: string;
+        final_price?: number;
+        regular_final_price?: number | null;
+        is_on_sale?: boolean;
+        variants?: AppPageProductVariant[];
+      }[]
+    | null
+  >(null);
+  /** Catálogo pre-resuelto para vista previa del bloque `products` (incluye selección manual y variantes). */
+  readonly previewCatalogProducts = input<readonly AppPageProductItem[] | null>(null);
 
   readonly activeCategory = signal<number | null>(null);
   readonly featured = computed(() => new Set(this.featuredIds()));
@@ -202,10 +253,43 @@ export class ServicePageHomeViewComponent {
   readonly subheading = computed(
     () => this.text('services', 'subtitle') ?? 'Elige un servicio, el día y la hora que prefieras.',
   );
+  readonly productsSelection = computed(() => blockProductsSelection(this.blockProps('products')?.props ?? {}));
+  readonly productsManualIds = computed(() => blockProductIds(this.blockProps('products')?.props ?? {}));
+  readonly productsLayout = computed(() => blockProductsLayout(this.blockProps('products')?.props ?? {}));
+  readonly productsShowVariants = computed(() => blockShowVariants(this.blockProps('products')?.props ?? {}));
+  readonly hasAdvancedProductsProps = computed(
+    () =>
+      this.productsSelection() === 'manual' ||
+      this.productsShowVariants() ||
+      this.productsLayout() !== null,
+  );
+  readonly effectiveProductIds = computed(() =>
+    this.productsSelection() === 'manual' ? this.productsManualIds() : this.productIds(),
+  );
+  readonly resolvedPreviewCatalog = computed<AppPageProductItem[]>(() => {
+    const byId = new Map<number, AppPageProductItem>();
+    for (const item of this.previewProducts() ?? []) {
+      byId.set(item.id, {
+        id: item.id,
+        slug: item.slug ?? String(item.id),
+        name: item.name,
+        image_url: item.image_url,
+        final_price: item.final_price ?? 0,
+        regular_final_price: item.regular_final_price ?? null,
+        is_on_sale: Boolean(item.is_on_sale),
+        variants: item.variants ?? [],
+      });
+    }
+    for (const item of this.previewCatalogProducts() ?? []) {
+      byId.set(item.id, item);
+    }
+    return Array.from(byId.values());
+  });
   readonly showProducts = computed(() => {
-    if (this.productIds().length === 0) return false;
-    if (!this.page()) return true;
-    return modeSells(this.mode()) && this.blockProps('products')?.enabled !== false;
+    const enabled = !this.page() || (modeSells(this.mode()) && this.blockProps('products')?.enabled !== false);
+    if (!enabled) return false;
+    if (this.previewProducts() !== null && this.productsSelection() === 'manual') return true;
+    return this.effectiveProductIds().length > 0;
   });
   readonly productsTitle = computed(() => this.text('products', 'title') ?? 'También puedes comprar');
   readonly categories = computed<ServiceCategoryChip[]>(() => serviceCategories(this.services()));

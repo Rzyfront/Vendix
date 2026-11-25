@@ -92,7 +92,18 @@ export interface BuilderListFieldDef {
   emptyHint?: string;
 }
 
-export type BuilderFieldDef = BuilderScalarFieldDef | BuilderListFieldDef;
+export interface BuilderProductIdsFieldDef {
+  key: string;
+  label: string;
+  kind: 'product_ids';
+  max: number;
+  hint?: string;
+  /** Solo muestra el campo en el inspector cuando otra prop del bloque coincide. */
+  visibleWhen?: { key: string; value: unknown };
+  group?: 'appearance';
+}
+
+export type BuilderFieldDef = BuilderScalarFieldDef | BuilderListFieldDef | BuilderProductIdsFieldDef;
 
 export interface BuilderCategory {
   id: string;

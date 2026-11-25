@@ -96,7 +96,7 @@ function scalarField(def: ScalarFieldDef): BuilderScalarFieldDef {
         group: def.group,
       };
     case 'bool':
-      return { key: def.key, label: def.label, kind: 'toggle', group: def.group };
+      return { key: def.key, label: def.label, kind: 'toggle', hint: def.hint, group: def.group };
     case 'int':
       return { key: def.key, label: def.label, kind: 'number', min: def.min, max: def.max, group: def.group };
   }
@@ -133,6 +133,15 @@ export function builderField(def: FieldDef): BuilderFieldDef {
         itemLabel: 'Imagen',
         max: def.max,
         item: [{ key: SCALAR_ITEM_KEY, label: 'Imagen', kind: 'media', placeholder: 'O pega una URL https://…' }],
+      };
+    case 'product_ids':
+      return {
+        key: def.key,
+        label: def.label,
+        kind: 'product_ids',
+        max: def.max,
+        hint: def.hint,
+        visibleWhen: def.visibleWhen,
       };
     default:
       return scalarField(def);
@@ -234,6 +243,26 @@ export function cleanBlockProps(fields: readonly FieldDef[], props: Record<strin
       out[def.key] = cleanTypedItems(builderField(def) as BuilderListFieldDef, value);
     } else if (def.kind === 'text_list' || def.kind === 'url_list' || def.kind === 'media_list') {
       out[def.key] = cleanScalarItems(builderField(def) as BuilderListFieldDef, value);
+    } else if (def.kind === 'product_ids') {
+      const cleaned = cleanProductIds(value, def.max);
+      if (cleaned.length > 0) out[def.key] = cleaned;
+      else delete out[def.key];
+    }
+  }
+  return out;
+}
+
+/** Conserva enteros positivos únicos en orden, hasta el máximo permitido por el contrato. */
+function cleanProductIds(raw: unknown, max: number): number[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<number>();
+  const out: number[] = [];
+  for (const item of raw) {
+    if (out.length >= max) break;
+    if (typeof item !== 'number' || !Number.isInteger(item) || item < 1) continue;
+    if (!seen.has(item)) {
+      seen.add(item);
+      out.push(item);
     }
   }
   return out;

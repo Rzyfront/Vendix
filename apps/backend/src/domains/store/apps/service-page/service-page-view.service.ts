@@ -1,19 +1,20 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { S3Service } from '@common/services/s3.service';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
+import {
+  PREVIEW_IMAGE_ORDER,
+  PreviewProductCard,
+  PreviewProductRow,
+  buildPreviewProductSelect,
+  extractBlockProductIds,
+  mapPreviewProductCard,
+} from '../shared/app-page-products.helper';
 import {
   onlineServicesWhere,
   orderServices,
   parseServicePageConfig,
   secondaryProductsWhere,
 } from './service-page.reader';
-
-const IMAGE_ORDER = [
-  { is_main: 'desc' as const },
-  { sort_order: 'asc' as const },
-  { id: 'asc' as const },
-];
 
 /** What the service page paints from the store's catalog: services (featured first) and secondary products. */
 export interface ServicePageViewData {
@@ -33,12 +34,9 @@ export interface ServicePageViewData {
     categories: { id: number; name: string; slug: string }[];
   }[];
   featured_service_ids: number[];
-  products: {
-    id: number;
-    slug: string;
-    name: string;
-    image_url: string | null;
-  }[];
+  products: PreviewProductCard[];
+  /** Productos elegidos manualmente en el bloque `products` (en el orden configurado). */
+  block_products?: PreviewProductCard[];
 }
 
 /**
@@ -62,18 +60,14 @@ export class ServicePageViewService {
 
   async read(storeId: number, rawConfig: unknown): Promise<ServicePageViewData> {
     const config = parseServicePageConfig(rawConfig);
+    const blockProductIds = extractBlockProductIds(rawConfig);
+    const allProductIds = Array.from(new Set([...config.product_ids, ...blockProductIds]));
     const image = {
       select: { image_url: true },
-      orderBy: IMAGE_ORDER,
+      orderBy: PREVIEW_IMAGE_ORDER,
       take: 1,
     };
 
-    const productsSelect = {
-      id: true,
-      slug: true,
-      name: true,
-      product_images: image,
-    } as const;
     const [rows, productRows] = await Promise.all([
       this.globalPrisma.products.findMany({
         where: onlineServicesWhere(storeId),
@@ -96,7 +90,7 @@ export class ServicePageViewService {
         },
         orderBy: [{ name: 'asc' }, { id: 'asc' }],
       }),
-      this.findProducts(storeId, config.product_ids, productsSelect),
+      this.findProducts(storeId, allProductIds),
     ]);
 
     const { services, featuredIds } = orderServices(rows, config.featured_service_ids);
@@ -126,26 +120,36 @@ export class ServicePageViewService {
     for (const id of config.product_ids) {
       const p = byId.get(id);
       if (!p) continue;
-      products.push({
-        id: p.id,
-        slug: p.slug,
-        name: p.name,
-        image_url: await sign(p.product_images[0]?.image_url),
-      });
+      products.push(await mapPreviewProductCard(p, this.s3));
     }
 
-    return { services: serviceViews, featured_service_ids: featuredIds, products };
+    if (blockProductIds.length === 0) {
+      return { services: serviceViews, featured_service_ids: featuredIds, products };
+    }
+
+    const blockProducts: PreviewProductCard[] = [];
+    for (const id of blockProductIds) {
+      const p = byId.get(id);
+      if (!p) continue;
+      blockProducts.push(await mapPreviewProductCard(p, this.s3));
+    }
+
+    return {
+      services: serviceViews,
+      featured_service_ids: featuredIds,
+      products,
+      block_products: blockProducts,
+    };
   }
 
-  private async findProducts<T extends Prisma.productsSelect>(
+  private async findProducts(
     storeId: number,
     ids: number[],
-    select: T,
-  ) {
-    if (ids.length === 0) return [] as Prisma.productsGetPayload<{ select: T }>[];
-    return this.globalPrisma.products.findMany({
+  ): Promise<PreviewProductRow[]> {
+    if (ids.length === 0) return [];
+    return (await this.globalPrisma.products.findMany({
       where: secondaryProductsWhere(storeId, ids),
-      select,
-    });
+      select: buildPreviewProductSelect(false) as any,
+    })) as unknown as PreviewProductRow[];
   }
 }

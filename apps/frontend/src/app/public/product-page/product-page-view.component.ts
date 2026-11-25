@@ -7,6 +7,7 @@ import {
   modeSells,
 } from '../../private/modules/store/apps/templates/app-page.types';
 import { AppPageViewComponent } from '../app-page/app-page-view.component';
+import type { AppPageProductItem } from '../app-page/app-page-products.util';
 
 /** Heading of the complements section when the owner left it empty. */
 export const DEFAULT_COMPLEMENTS_TITLE = 'Complementa tu compra';
@@ -72,7 +73,14 @@ export function complementsTitleOf(page: AppPageDocument | null | undefined): st
       </main>
 
       @if (page() && featuredRoute()) {
-        <app-app-page-view kind="product_page" [page]="page()" part="blocks" [blockIds]="blockIds()" />
+        <app-app-page-view
+          kind="product_page"
+          [page]="page()"
+          part="blocks"
+          [blockIds]="blockIds()"
+          [autoProductIds]="autoProductIds()"
+          [previewProducts]="previewProducts()"
+        />
       }
 
       <footer class="border-t border-border py-6 text-center text-xs text-text-secondary">
@@ -92,6 +100,10 @@ export class ProductPageViewComponent {
   /** Whether the featured product's own route is shown (not cart, checkout or orders). */
   readonly featuredRoute = input(true);
   readonly blockIds = input(false);
+  /** IDs automáticos (complementos) para bloques `products` en modo `auto`. */
+  readonly autoProductIds = input<readonly number[]>([]);
+  /** Productos resueltos para la vista previa del editor (sin peticiones HTTP). */
+  readonly previewProducts = input<readonly AppPageProductItem[] | null>(null);
 
   readonly headerLogo = computed(() => this.page()?.brand?.logo_url || this.storeLogo());
 

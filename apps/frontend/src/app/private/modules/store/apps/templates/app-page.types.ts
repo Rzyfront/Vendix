@@ -394,6 +394,9 @@ export type AppGalleryAspectRatio = '1:1' | '4:3' | '16:9';
 export type AppHighlightsVariant = 'cards' | 'list' | 'band';
 export type AppBlockSpacing = 'compact' | 'normal' | 'spacious';
 export type AppTextAlign = 'left' | 'center' | 'right';
+export type AppProductsSelection = 'auto' | 'manual';
+export type AppProductsLayout = 'grid' | 'list' | 'carousel';
+export const MAX_BLOCK_PRODUCT_IDS = 50;
 export type AppHighlightsIcon =
   | 'sparkles'
   | 'star'
@@ -474,6 +477,17 @@ export const APP_TEXT_ALIGN_OPTIONS: readonly FieldOption[] = [
   { value: 'right', label: 'Derecha' },
 ];
 
+export const APP_PRODUCTS_SELECTION_OPTIONS: readonly FieldOption[] = [
+  { value: 'auto', label: 'Automática' },
+  { value: 'manual', label: 'Manual' },
+];
+
+export const APP_PRODUCTS_LAYOUT_OPTIONS: readonly FieldOption[] = [
+  { value: 'grid', label: 'Cuadrícula' },
+  { value: 'list', label: 'Lista' },
+  { value: 'carousel', label: 'Carrusel' },
+];
+
 export interface AppPageHero {
   eyebrow?: string;
   title?: string;
@@ -538,7 +552,7 @@ export type ScalarFieldDef =
       hint?: string;
       group?: 'appearance';
     }
-  | { key: string; label: string; kind: 'bool'; group?: 'appearance' }
+  | { key: string; label: string; kind: 'bool'; hint?: string; group?: 'appearance' }
   | { key: string; label: string; kind: 'int'; min: number; max: number; group?: 'appearance' };
 
 export type FieldDef =
@@ -546,7 +560,15 @@ export type FieldDef =
   | { key: string; label: string; kind: 'list'; max: number; itemLabel: string; item: ScalarFieldDef[] }
   | { key: string; label: string; kind: 'text_list'; max: number; itemMax: number }
   | { key: string; label: string; kind: 'url_list'; max: number }
-  | { key: string; label: string; kind: 'media_list'; max: number };
+  | { key: string; label: string; kind: 'media_list'; max: number }
+  | {
+      key: string;
+      label: string;
+      kind: 'product_ids';
+      max: number;
+      hint?: string;
+      visibleWhen?: { key: string; value: unknown };
+    };
 
 export interface BlockDef {
   type: string;
@@ -779,6 +801,41 @@ export const ctaFields = (): FieldDef[] => [
   { key: 'text', label: 'Texto', kind: 'text', max: 300, multiline: true },
   { key: 'button_label', label: 'Texto del botón', kind: 'text', max: 40 },
   { key: 'image_url', label: 'Imagen', kind: 'media' },
+];
+
+/** Campos configurables del bloque de productos (selección automática/manual, variantes y diseño). */
+export const productsFields = (): FieldDef[] => [
+  titleField(),
+  {
+    key: 'selection',
+    label: 'Selección de productos',
+    kind: 'select',
+    display: 'chips',
+    options: APP_PRODUCTS_SELECTION_OPTIONS,
+    emptyLabel: 'Por defecto',
+  },
+  {
+    key: 'product_ids',
+    label: 'Productos elegidos',
+    kind: 'product_ids',
+    max: MAX_BLOCK_PRODUCT_IDS,
+    hint: 'El orden de la lista se respeta en la página pública y en la vista previa.',
+    visibleWhen: { key: 'selection', value: 'manual' },
+  },
+  {
+    key: 'show_variants',
+    label: 'Mostrar selector de variantes',
+    kind: 'bool',
+    hint: 'Las tarjetas permiten elegir variante y ver su precio al instante.',
+  },
+  {
+    key: 'layout',
+    label: 'Diseño',
+    kind: 'select',
+    display: 'chips',
+    options: APP_PRODUCTS_LAYOUT_OPTIONS,
+    emptyLabel: 'Por defecto',
+  },
 ];
 
 /** Hero fields, common to every app page. */

@@ -94,4 +94,9 @@ export class CatalogQueryDto {
   @IsOptional()
   @IsString()
   fill?: string;
+
+  /** Opcional: cuando es 'true', incluye las variantes con precio resuelto en el listado. */
+  @IsOptional()
+  @IsString()
+  include_variants?: string;
 }

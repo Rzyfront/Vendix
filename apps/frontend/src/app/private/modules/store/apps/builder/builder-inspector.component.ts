@@ -2,8 +2,10 @@ import { NgTemplateOutlet } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
 
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import type { AppPageProductItem } from '../../../../../public/app-page/app-page-products.util';
 import { AppMediaFieldComponent } from '../components/app-media-field/app-media-field.component';
 import { AppMediaPickerComponent } from '../components/app-media-picker/app-media-picker.component';
+import { AppProductSelectorComponent } from '../components/app-product-selector/app-product-selector.component';
 import type { AppMediaItem } from '../services/app-media.service';
 import type { PageAppKind } from '../templates/app-page.types';
 import { BuilderListItem, blockDef, readListItems } from './builder-blocks';
@@ -12,6 +14,7 @@ import type {
   BuilderCatalog,
   BuilderFieldDef,
   BuilderListFieldDef,
+  BuilderProductIdsFieldDef,
   BuilderScalarFieldDef,
 } from './builder.types';
 
@@ -37,7 +40,7 @@ export interface BuilderPropChange {
 @Component({
   selector: 'app-builder-inspector',
   standalone: true,
-  imports: [NgTemplateOutlet, IconComponent, AppMediaFieldComponent, AppMediaPickerComponent],
+  imports: [NgTemplateOutlet, IconComponent, AppMediaFieldComponent, AppMediaPickerComponent, AppProductSelectorComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (block(); as b) {
@@ -65,7 +68,9 @@ export interface BuilderPropChange {
           }
 
           @for (field of mainFields(); track field.key) {
-            <ng-container *ngTemplateOutlet="fieldTpl; context: { b: b, field: field }" />
+            @if (isFieldVisible(b, field)) {
+              <ng-container *ngTemplateOutlet="fieldTpl; context: { b: b, field: field }" />
+            }
           }
 
           @if (appearanceFields().length > 0) {
@@ -106,7 +111,21 @@ export interface BuilderPropChange {
 
     <!-- Plantilla de un campo del bloque -->
     <ng-template #fieldTpl let-b="b" let-field="field">
-      @if (isList(field)) {
+      @if (isProductIds(field)) {
+        <div class="block" [attr.data-field]="field.key">
+          <app-product-selector
+            [selectedIds]="productIds(b, field.key)"
+            [max]="field.max"
+            [label]="field.label"
+            [excludeServices]="appKind() === 'service_page'"
+            (selectedIdsChange)="setProductIds(b, field.key, $event)"
+            (productsResolved)="productsResolved.emit($event)"
+          />
+          @if (field.hint) {
+            <span class="mt-1 block text-[11px] text-[var(--color-text-secondary)]">{{ field.hint }}</span>
+          }
+        </div>
+      } @else if (isList(field)) {
         <fieldset class="space-y-2" [attr.data-field]="field.key">
           <legend class="flex w-full items-center justify-between text-xs font-semibold text-[var(--color-text-primary)]">
             <span>{{ field.label }}</span>
@@ -389,6 +408,8 @@ export class BuilderInspectorComponent {
   readonly appKind = input<PageAppKind | null>(null);
 
   readonly propChange = output<BuilderPropChange>();
+  /** Propaga productos resueltos por `app-product-selector` hacia el constructor para vista previa en vivo. */
+  readonly productsResolved = output<AppPageProductItem[]>();
 
   /** Lista de imágenes esperando una nueva foto elegida desde la galería. */
   readonly pendingMediaList = signal<{ block: BuilderBlock; field: BuilderListFieldDef } | null>(null);
@@ -417,6 +438,26 @@ export class BuilderInspectorComponent {
 
   isList(field: BuilderFieldDef): field is BuilderListFieldDef {
     return field.kind === 'list';
+  }
+
+  isProductIds(field: BuilderFieldDef): field is BuilderProductIdsFieldDef {
+    return field.kind === 'product_ids';
+  }
+
+  isFieldVisible(block: BuilderBlock, field: BuilderFieldDef): boolean {
+    if (!('visibleWhen' in field) || !field.visibleWhen) return true;
+    return block.props[field.visibleWhen.key] === field.visibleWhen.value;
+  }
+
+  productIds(block: BuilderBlock, key: string): number[] {
+    const raw = block.props[key];
+    return Array.isArray(raw)
+      ? raw.filter((v): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 1)
+      : [];
+  }
+
+  setProductIds(block: BuilderBlock, key: string, ids: number[]): void {
+    this.propChange.emit({ blockId: block.id, key, value: ids.length > 0 ? ids : undefined });
   }
 
   isPureMediaList(field: BuilderListFieldDef): boolean {

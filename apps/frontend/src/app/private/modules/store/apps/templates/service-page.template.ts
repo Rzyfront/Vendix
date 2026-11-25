@@ -5,6 +5,7 @@ import {
   faqFields,
   galleryFields,
   highlightsFields,
+  productsFields,
   stepsFields,
   subtitleField,
   testimonialsFields,
@@ -110,10 +111,10 @@ export const SERVICE_PAGE_TEMPLATE: AppPageTemplate = {
     {
       type: 'products',
       label: 'También puedes comprar',
-      description: 'Los productos que elegiste en "Servicios y dominio" (solo si la página vende).',
+      description: 'Productos de tu tienda (automáticos desde General o elegidos manualmente).',
       icon: 'shopping-bag',
       existing: true,
-      fields: [titleField()],
+      fields: productsFields(),
     },
     {
       type: 'cta',

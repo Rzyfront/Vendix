@@ -80,6 +80,38 @@ describe('ProductPageViewService (F6-B)', () => {
       complements: [],
     });
   });
+
+  it('proyecta block_products en orden manual con precios finales e impuestos resueltos por variante', async () => {
+    const { service } = build([
+      row(10, {
+        base_price: '10000.00',
+        product_tax_assignments: [
+          { is_inclusive: false, tax_categories: { tax_rates: [{ rate: '0.19', is_inclusive: false }] } },
+        ],
+        product_variants: [
+          { id: 101, name: '250 ml', sku: 'V-250', price_override: '12000.00', is_on_sale: false, sale_price: null },
+          { id: 102, name: '500 ml', sku: 'V-500', price_override: '20000.00', is_on_sale: true, sale_price: '15000.00' },
+        ],
+      }),
+      row(20, { base_price: '5000.00', product_tax_assignments: [] }),
+    ]);
+
+    const data = await service.read(7, {
+      product_id: null,
+      complement_product_ids: [],
+      page: {
+        schema_version: 1,
+        blocks: [{ id: 'p', type: 'products', enabled: true, props: { selection: 'manual', product_ids: [20, 10] } }],
+      },
+    });
+
+    expect(data.block_products?.map((p) => p.id)).toEqual([20, 10]);
+    expect(data.block_products?.[1].final_price).toBe(11900);
+    expect(data.block_products?.[1].variants).toEqual([
+      expect.objectContaining({ id: 101, name: '250 ml', final_price: 14280 }),
+      expect.objectContaining({ id: 102, name: '500 ml', final_price: 17850, regular_final_price: 23800, is_on_sale: true }),
+    ]);
+  });
 });
 
 describe('ProductPageAppService.previewContext (F6-B)', () => {

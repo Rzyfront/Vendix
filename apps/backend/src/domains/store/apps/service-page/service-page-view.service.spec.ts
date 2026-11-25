@@ -103,6 +103,33 @@ describe('ServicePageViewService (F6-B)', () => {
     expect(data).toEqual({ services: [], featured_service_ids: [], products: [] });
     expect(findMany).toHaveBeenCalledTimes(1);
   });
+
+  it('proyecta block_products en orden manual con variantes y precios finales', async () => {
+    const { view } = build(
+      [],
+      [
+        product(8, {
+          base_price: '20000.00',
+          product_variants: [{ id: 81, name: 'Chica', sku: 'C', price_override: '25000.00', is_on_sale: false }],
+        }),
+        product(5, { base_price: '10000.00' }),
+      ],
+    );
+
+    const data = await view.read(7, {
+      featured_service_ids: [],
+      product_ids: [],
+      page: {
+        schema_version: 1,
+        blocks: [{ id: 'products', type: 'products', enabled: true, props: { selection: 'manual', product_ids: [5, 8] } }],
+      },
+    });
+
+    expect(data.block_products?.map((p) => p.id)).toEqual([5, 8]);
+    expect(data.block_products?.[1].variants).toEqual([
+      expect.objectContaining({ id: 81, name: 'Chica', final_price: 25000 }),
+    ]);
+  });
 });
 
 describe('ServicePageAppService.previewContext (F6-B)', () => {
