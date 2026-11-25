@@ -1,5 +1,15 @@
 -- Apps — biblioteca de medios por tienda (apps-customization F1).
--- Aditiva e idempotente: el tipo y la tabla solo se crean si no existen.
+--
+-- DATA IMPACT:
+--   Tables affected:
+--     store_app_media: tabla NUEVA (14 columnas), 1 FK a stores con ON DELETE
+--       CASCADE y 2 índices. `app_media_kind_enum` es un tipo nuevo.
+--   Expected row changes: 0. No UPDATE, no INSERT, no DELETE: las filas
+--     existentes de otras tablas no se tocan.
+--   Destructive operations: none (no DROP, no TRUNCATE). El borrado es lógico
+--     (`deleted_at`); solo se pierde el registro si se borra la tienda, igual
+--     que el resto de sus datos.
+--   Idempotency: tipo y tabla con guarda `IF NOT EXISTS`; los índices también.
 
 DO $$
 BEGIN
