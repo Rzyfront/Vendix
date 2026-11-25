@@ -15,10 +15,10 @@ import type {
   FireConfirmPayload,
 } from '../restaurant-ops/kds/interfaces';
 import { KitchenConfirmModalComponent } from '../restaurant-ops/kds/components/kitchen-confirm-modal/kitchen-confirm-modal.component';
-import { take, switchMap, catchError, map } from 'rxjs/operators';
+import { take, switchMap, catchError, map, tap, finalize } from 'rxjs/operators';
 import { of as rxjsOf } from 'rxjs';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
-import { firstValueFrom, Observable, Subject } from 'rxjs';
+import { EMPTY, firstValueFrom, Observable, Subject } from 'rxjs';
 import {
   VexiPosBridgeService,
   type VexiPosActionResult,
@@ -429,6 +429,8 @@ export function resolvePosPaymentCustomerName(
             (bookingsChanged)="onBookingsChanged($event)"
             (openCustomerModal)="onOpenCustomerModal()"
             (clearCustomer)="onClearCustomer()"
+            [customerTier]="customerTier()"
+            (applyCustomerTier)="onApplyCustomerTier()"
           ></app-pos-cart>
         </div>
 
@@ -541,6 +543,8 @@ export function resolvePosPaymentCustomerName(
         (charge)="onCharge()"
         (openCustomerModal)="onOpenCustomerModal()"
         (clearCustomer)="onClearCustomer()"
+        [customerTier]="customerTier()"
+        (applyCustomerTier)="onApplyCustomerTier()"
         (quote)="onQuote()"
         (layaway)="onLayaway()"
         (customerSelected)="onCustomerSelected($event)"
@@ -911,8 +915,13 @@ export class PosComponent {
   selectedCustomer = signal<PosCustomer | null>(null);
   /** Aviso de tarifa preferencial pendiente (S6); `null` = cerrado. */
   readonly customerTierPromptState = signal<CustomerTierPrompt | null>(null);
-  /** Tarifa del cliente actual y el cliente al que pertenece. */
-  private currentCustomerTier: CustomerTierRef | null = null;
+  /**
+   * Tarifa del cliente actual y el cliente al que pertenece. Señal porque el
+   * carrito la usa para ofrecer aplicarla desde la orden.
+   */
+  readonly customerTier = signal<CustomerTierRef | null>(null);
+  /** Evita aplicar dos veces la tarifa del cliente con doble toque. */
+  private applyingCustomerTier = false;
   private lastTierCustomerId: number | null | undefined = undefined;
   private seenCustomerSelections = 0;
   loading = signal(false);
@@ -1878,13 +1887,13 @@ export class PosComponent {
     const id = customer?.id && customer.id > 0 ? Number(customer.id) : null;
     if (id === this.lastTierCustomerId) return;
     this.lastTierCustomerId = id;
-    const previousTier = this.currentCustomerTier;
+    const previousTier = this.customerTier();
 
     (id ? this.customerService.getCustomerPriceTier(id) : rxjsOf(null))
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((tier) => {
         if (this.lastTierCustomerId !== id) return; // otro cliente ya llegó
-        this.currentCustomerTier = tier;
+        this.customerTier.set(tier);
         if (!chosenByCashier) return;
         this.customerTierPromptState.set(
           customerTierPrompt({
@@ -1910,6 +1919,62 @@ export class PosComponent {
     const prompt = this.customerTierPromptState();
     this.customerTierPromptState.set(null);
     if (!prompt || itemIds.length === 0) return;
+    this.applyCustomerTierPrompt(prompt, itemIds).subscribe();
+  }
+
+  /**
+   * Acceso desde la orden (botón junto al cliente del carrito): vuelve a leer
+   * la tarifa del cliente, por si cambió, y la aplica a todas las líneas
+   * elegibles que aún no la llevan con el mismo flujo del aviso.
+   */
+  onApplyCustomerTier(): void {
+    const id = this.lastTierCustomerId;
+    if (!id || this.applyingCustomerTier) return;
+    this.applyingCustomerTier = true;
+    this.customerService
+      .getCustomerPriceTier(id)
+      .pipe(
+        switchMap((tier) => {
+          if (this.lastTierCustomerId !== id) return rxjsOf(null);
+          if (!tier) {
+            this.toastService.error('El cliente ya no tiene una tarifa asignada');
+            return rxjsOf(null);
+          }
+          this.customerTier.set(tier);
+          const prompt = customerTierPrompt({
+            items: this.cartService.getCurrentState().items,
+            previousTier: null,
+            nextTier: tier,
+            canApplyTier: this.hasPermission(
+              'store:products:apply_pricing_tier',
+            ),
+          });
+          if (!prompt) {
+            this.toastService.info(
+              `La tarifa "${tier.name}" ya está aplicada a toda la orden`,
+            );
+            return rxjsOf(null);
+          }
+          return this.applyCustomerTierPrompt(
+            prompt,
+            prompt.lines.map((line) => line.itemId),
+          );
+        }),
+        finalize(() => (this.applyingCustomerTier = false)),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe();
+  }
+
+  /**
+   * Aplica (o restaura) la tarifa del aviso a `itemIds`, verificando que siga
+   * activa, y avisa con el toast. Compartido por el aviso y el acceso desde la
+   * orden. Los errores se informan aquí y no se propagan.
+   */
+  private applyCustomerTierPrompt(
+    prompt: CustomerTierPrompt,
+    itemIds: string[],
+  ): Observable<unknown> {
     const followUp = followUpRestorePrompt(prompt, itemIds);
 
     const tier$: Observable<PriceTier | null | undefined> =
@@ -1924,30 +1989,29 @@ export class PosComponent {
               ),
             );
 
-    tier$
-      .pipe(
-        switchMap((tier) => {
-          if (tier === undefined) {
-            throw new Error(`La tarifa ${prompt.tier.name} ya no está activa`);
-          }
-          return this.cartService.applyTierToCartItems(itemIds, tier);
-        }),
-        takeUntilDestroyed(this.destroyRef),
-      )
-      .subscribe({
-        next: () => {
-          this.toastService.success(
-            prompt.mode === 'restore'
-              ? 'Precio regular restaurado'
-              : `Tarifa "${prompt.tier.name}" aplicada a ${itemIds.length} producto(s)`,
-          );
-          if (followUp) this.customerTierPromptState.set(followUp);
-        },
-        error: (error: Error) =>
-          this.toastService.error(
-            error?.message || 'No se pudo aplicar la tarifa del cliente',
-          ),
-      });
+    return tier$.pipe(
+      switchMap((tier) => {
+        if (tier === undefined) {
+          throw new Error(`La tarifa ${prompt.tier.name} ya no está activa`);
+        }
+        return this.cartService.applyTierToCartItems(itemIds, tier);
+      }),
+      tap(() => {
+        this.toastService.success(
+          prompt.mode === 'restore'
+            ? 'Precio regular restaurado'
+            : `Tarifa "${prompt.tier.name}" aplicada a ${itemIds.length} producto(s)`,
+        );
+        if (followUp) this.customerTierPromptState.set(followUp);
+      }),
+      catchError((error: Error) => {
+        this.toastService.error(
+          error?.message || 'No se pudo aplicar la tarifa del cliente',
+        );
+        return EMPTY;
+      }),
+      takeUntilDestroyed(this.destroyRef),
+    );
   }
 
   private hasPermission(permission: string): boolean {
