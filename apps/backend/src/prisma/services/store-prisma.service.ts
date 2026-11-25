@@ -254,6 +254,7 @@ export class StorePrismaService extends BasePrismaService {
     // ===== Apps (odd/tasks/apps-module.md) =====
     // `store_id` propio NOT NULL → scoping directo por tienda.
     'store_apps',
+    'store_app_media',
     // ===== Flujos y Documentos (odd/tasks/flujos-documental.md) =====
     // Flujos (T3/S3): todas llevan `store_id` propio NOT NULL → scoping directo.
     'workflow_definitions',
@@ -2570,6 +2571,11 @@ export class StorePrismaService extends BasePrismaService {
   // ===== Apps (odd/tasks/apps-module.md) — scoped getter =====
   get store_apps() {
     return this.scoped_client.store_apps;
+  }
+
+  // ===== Apps media (odd/tasks/apps-customization.md F1.1) — scoped getter =====
+  get store_app_media() {
+    return this.scoped_client.store_app_media;
   }
 
   // Email reception remains scoped to the operational tenant, not a shared NIT.
