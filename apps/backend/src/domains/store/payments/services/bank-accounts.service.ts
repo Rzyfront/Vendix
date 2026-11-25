@@ -188,6 +188,9 @@ export class BankAccountsService {
 
     let ownerStoreId: number | null = storeId;
     if (policy.fiscal_scope === 'ORGANIZATION') {
+      if (!policy.can_manage_organization_accounts) {
+        throw new VendixHttpException(ErrorCodes.BANK_ACCOUNT_ORG_MANAGED);
+      }
       const orgLevel = await this.prisma.bank_accounts.findFirst({
         where: {
           organization_id: store.organization_id,
@@ -200,9 +203,6 @@ export class BankAccountsService {
         throw new VendixHttpException(
           ErrorCodes.BANK_ACCOUNT_NOT_ASSIGNED_TO_STORE,
         );
-      }
-      if (!policy.can_manage_organization_accounts) {
-        throw new VendixHttpException(ErrorCodes.BANK_ACCOUNT_ORG_MANAGED);
       }
       ownerStoreId = null;
     }

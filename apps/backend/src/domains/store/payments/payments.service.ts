@@ -104,6 +104,11 @@ import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
 import { findLinesAwaitingKitchenDelivery } from '../kitchen-fire/kitchen-superseded-rows.util';
 import { TableSessionsService } from '../tables/table-sessions.service';
 import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
+import {
+  bankAccountAvailableInStoreWhere,
+  collectBankTransferAccountIds,
+  filterBankTransferConfigAccounts,
+} from '../../../common/helpers/bank-account-availability.helper';
 import { resolveLineDestinations } from '../orders/utils/line-destination.loader';
 import {
   lineConsumesOwnStock,
@@ -8015,7 +8020,7 @@ export class PaymentsService {
     // Use standardized validation method
     await this.validateUserAccess(user, storeId);
 
-    return this.prisma.store_payment_methods.findMany({
+    const methods = await this.prisma.store_payment_methods.findMany({
       where: {
         store_id: storeId,
         state: 'enabled',
@@ -8024,6 +8029,75 @@ export class PaymentsService {
         system_payment_method: true,
       },
       orderBy: { display_order: 'asc' },
+    });
+
+    return this.filterBankTransferAccountsForStore(
+      methods,
+      storeId,
+      user?.organization_id,
+    );
+  }
+
+  /**
+   * QUI-1061 — filtra `custom_config.accounts` en métodos `bank_transfer`
+   * contra el predicado canónico de disponibilidad por tienda y `status: 'active'`,
+   * conservando entradas legacy sin `id`. Así si una cuenta de organización deja
+   * de estar asignada a esta sucursal, desaparece inmediatamente del POS.
+   */
+  private async filterBankTransferAccountsForStore<
+    T extends {
+      custom_config: any;
+      system_payment_method?: { type?: string | null } | null;
+    },
+  >(
+    methods: T[],
+    storeId: number,
+    organizationIdHint?: number,
+  ): Promise<T[]> {
+    const accountIds = new Set<number>();
+    for (const method of methods) {
+      if (method.system_payment_method?.type !== 'bank_transfer') continue;
+      for (const id of collectBankTransferAccountIds(method.custom_config)) {
+        accountIds.add(id);
+      }
+    }
+
+    if (accountIds.size === 0) return methods;
+
+    let organizationId =
+      organizationIdHint ?? RequestContextService.getContext()?.organization_id;
+    if (!organizationId) {
+      const store = await this.prisma.stores.findUnique({
+        where: { id: storeId },
+        select: { organization_id: true },
+      });
+      organizationId = store?.organization_id;
+    }
+
+    const allowedIds = new Set<number>();
+    if (organizationId) {
+      const validAccounts = await this.prisma.bank_accounts.findMany({
+        where: {
+          id: { in: Array.from(accountIds) },
+          ...bankAccountAvailableInStoreWhere(storeId, organizationId),
+          status: 'active',
+        },
+        select: { id: true },
+      });
+      for (const row of validAccounts) {
+        allowedIds.add(row.id);
+      }
+    }
+
+    return methods.map((method) => {
+      if (method.system_payment_method?.type !== 'bank_transfer') return method;
+      return {
+        ...method,
+        custom_config: filterBankTransferConfigAccounts(
+          method.custom_config as Record<string, any> | null | undefined,
+          allowedIds,
+        ),
+      };
     });
   }
 

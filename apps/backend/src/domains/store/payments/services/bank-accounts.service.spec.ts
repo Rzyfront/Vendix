@@ -228,7 +228,7 @@ describe('Payments BankAccountsService (QUI-1061)', () => {
       );
     });
 
-    it('blocks non-org store admin from creating an org account', async () => {
+    it('blocks non-org store admin from creating an org account without revealing unassigned org accounts', async () => {
       setContext({
         store_id: 10,
         organization_id: 1,
@@ -239,7 +239,9 @@ describe('Payments BankAccountsService (QUI-1061)', () => {
       });
       prisma.stores.findUnique.mockResolvedValue({ organization_id: 1 });
       prisma.bank_accounts.findMany.mockResolvedValue([]);
-      prisma.bank_accounts.findFirst.mockResolvedValue(null);
+      // Even if an unassigned org account with the same number exists, store admin
+      // must receive BANK_ACCOUNT_ORG_MANAGED (403), never NOT_ASSIGNED_TO_STORE (409).
+      prisma.bank_accounts.findFirst.mockResolvedValue({ id: 301 });
 
       await expect(
         service.create({
@@ -250,6 +252,7 @@ describe('Payments BankAccountsService (QUI-1061)', () => {
       ).rejects.toMatchObject({
         errorCode: ErrorCodes.BANK_ACCOUNT_ORG_MANAGED.code,
       });
+      expect(prisma.bank_accounts.findFirst).not.toHaveBeenCalled();
     });
 
     it('returns BANK_ACCOUNT_NOT_ASSIGNED_TO_STORE when org account exists but is not assigned to current store', async () => {
