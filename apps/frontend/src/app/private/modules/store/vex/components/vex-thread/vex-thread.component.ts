@@ -187,6 +187,27 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
                     />
                   }
                 }
+                @if (
+                  message.pending_continuation &&
+                  !message.streaming &&
+                  !message.error &&
+                  $last
+                ) {
+                  <div class="flex flex-wrap items-center gap-2">
+                    <p class="text-sm text-text-secondary" role="status">
+                      {{ threadCopy.pending_note }}
+                    </p>
+                    <app-button
+                      variant="outline"
+                      size="sm"
+                      [disabled]="store.is_agent_typing()"
+                      (clicked)="store.continuePending(message.id)"
+                    >
+                      <app-icon slot="icon" name="play" [size]="14"></app-icon>
+                      {{ threadCopy.pending_continue }}
+                    </app-button>
+                  </div>
+                }
                 @if (message.error) {
                   <p
                     class="rounded-xl border border-error bg-error/10 px-3 py-2 text-sm text-error"

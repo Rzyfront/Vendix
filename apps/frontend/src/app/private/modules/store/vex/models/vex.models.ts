@@ -333,6 +333,11 @@ export interface VexMessage {
   attachment_ids?: string[];
   /** The answer was cut: offer «Reintentar» (resends the last user message). */
   can_retry?: boolean;
+  /**
+   * The turn closed without doing what it announced (backend turn-close
+   * contract, `pending_continuation`): offer «Continuar».
+   */
+  pending_continuation?: boolean;
   /** Follow-ups Vex suggested in this turn (at most one per turn). */
   followups?: VexFollowup[];
 }
