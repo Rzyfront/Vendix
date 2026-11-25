@@ -129,6 +129,10 @@ export const VEX_COPY = {
     copied_code: 'Copiado',
     copy_code_aria: 'Copiar el código',
     send_failed: 'No se envió',
+    pending_note: 'Quedó pendiente. ¿Continúo?',
+    pending_continue: 'Continuar',
+    /** What «Continuar» sends as the next turn. */
+    pending_prompt: 'Continúa con lo que quedó pendiente.',
   },
   analysis: {
     summary: 'Ver código del análisis',

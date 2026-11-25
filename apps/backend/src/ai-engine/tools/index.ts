@@ -31,6 +31,7 @@ export { createPaymentTools } from './domains/payments.tools';
 export { createPurchasingTools } from './domains/purchasing.tools';
 export { createSupplierTools } from './domains/suppliers.tools';
 export { createReservationsTools } from './domains/reservations.tools';
+export { createServiceTools } from './domains/services.tools';
 export { createPricingTools } from './domains/pricing.tools';
 export { createReturnTools } from './domains/returns.tools';
 export { createEcommerceSupportTools } from './domains/ecommerce-support.tools';
@@ -77,6 +78,7 @@ export { uiTools } from './domains/ui.tools';
 export * from './interfaces/tool.interface';
 
 export { createDiscoveryTools } from './domains/discovery.tools';
+export { createTurnTools, FINISH_TURN_TOOL } from './domains/turn.tools';
 export { ToolRouterService } from './tool-router.service';
 
 export { createPlaybookTools } from './domains/playbook.tools';

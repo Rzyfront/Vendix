@@ -2328,7 +2328,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
       domain: 'products',
       requiresConfirmation: true,
       description:
-        'Agrega (add) o quita (remove) imágenes de un producto. add necesita product_id (obtenlo con find_product) e image_url, y solo procede en productos activos; remove necesita image_id (míralo en get_product) y borra también el archivo guardado. Marcar is_main mueve la imagen principal.',
+        'Agrega (add) o quita (remove) imágenes de un producto. add necesita product_id (obtenlo con find_product) e image_url, y solo procede en productos activos; remove necesita image_id (míralo en get_product) y borra también el archivo guardado. Marcar is_main mueve la imagen principal; si el producto no tiene principal, la imagen agregada queda como principal aunque no se marque.',
       parameters: {
         type: 'object',
         properties: {
@@ -2412,7 +2412,12 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
               data: {
                 product_id: change.productId,
                 image_id: (created as any)?.id ?? null,
-                is_main: change.isMain === true,
+                // addImage promotes the image to main when the product had
+                // none, so report what was saved, not only what was asked.
+                is_main:
+                  typeof (created as any)?.is_main === 'boolean'
+                    ? (created as any).is_main
+                    : change.isMain === true,
               },
             });
           }

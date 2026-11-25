@@ -100,6 +100,7 @@ import { SubscriptionAccessService } from '../domains/store/subscriptions/servic
 import { ErrorCodes, VendixHttpException } from '../common/errors';
 import { VexiUiChannelService } from '../domains/store/vexi/vexi-ui-channel.service';
 import { PROPOSE_PLAN_TOOL } from './tools/domains/planning.tools';
+import { FINISH_TURN_TOOL } from './tools/domains/turn.tools';
 import { DISCREPANCY_GUIDANCE_BLOCK } from './tools/discrepancy-signal';
 import {
   isForeignSurfaceTool,
@@ -415,6 +416,12 @@ export interface AgentResult {
    */
   plan_continue?: boolean;
   /**
+   * Turn-close contract: the chat turn ended in prose without running a tool
+   * nor calling `finish_turn`, twice (one resume spent). The text is kept;
+   * the client offers «Continuar». Absent on every legitimately closed turn.
+   */
+  pending_continuation?: boolean;
+  /**
    * A write the agent proposed but did not execute, waiting on the user.
    *
    * Surfaced separately from `content` because the UI renders it as a diff
@@ -501,6 +508,17 @@ export const WRITE_BATCH_ROUTING_RULE = [
   'Lo irreversible (anular, eliminar, pagos, DIAN, envíos) no entra al lote: va solo, con su propia confirmación.',
   'Nada se aplica hasta que la persona aprueba la tarjeta con su botón; un mensaje dictado o escrito no aprueba cambios, y nunca digas que algo se aplicó antes de esa aprobación.',
 ].join(' ');
+
+/**
+ * Turn-close contract (chat turns of Vex/Vexi). Two lines on purpose: it rides
+ * in every chat turn's prefix.
+ */
+export const TURN_CLOSE_RULE =
+  'No anuncies una acción futura: o la ejecutas en este mismo turno o la planteas como pregunta. Para cerrar, llama a `finish_turn`.';
+
+/** The single resume of a turn that ended in prose with no tool and no close. */
+export const TURN_CLOSE_NUDGE =
+  'No cerraste el turno y no ejecutaste nada. Si tenías algo que hacer, hazlo ahora con la herramienta que corresponda; si ya terminaste, llama a finish_turn.';
 
 /**
  * What the model reads when a second loose write lands in a Vex turn that
@@ -1718,6 +1736,7 @@ export class AIAgentService {
           d.function.name !== 'run_analysis') ||
           !!params.durable) &&
         (d.function.name !== CODE_TOOL || scriptsOffered) &&
+        (d.function.name !== FINISH_TURN_TOOL || !!params.stream_id) &&
         !isForeignSurfaceTool(d.function.name, params.agent_key),
     );
   }
@@ -1922,6 +1941,7 @@ export class AIAgentService {
           d.function.name !== 'run_analysis') ||
           !!params.durable) &&
         (d.function.name !== CODE_TOOL || scriptsOffered) &&
+        (d.function.name !== FINISH_TURN_TOOL || !!params.stream_id) &&
         !isForeignSurfaceTool(d.function.name, params.agent_key),
     );
 
@@ -2166,6 +2186,19 @@ export class AIAgentService {
     if (writeBatchOffered)
       messages.push({ role: 'system', content: WRITE_BATCH_ROUTING_RULE });
 
+    // Turn-close contract: only chat turns of Vex/Vexi (the surface with a
+    // stream to resume and a «Continuar» to offer) and only when `finish_turn`
+    // is in this turn's authority — a close the model cannot call is not
+    // demanded. Off, the turn is byte-identical to before.
+    const turnContract =
+      !!params.stream_id &&
+      ['vex', 'vexi'].includes(params.agent_key ?? 'vexi') &&
+      (routingSession ? routingAuthority : filteredTools).some(
+        (d) =>
+          this.toolRegistry.canonicalName(d.function.name) === FINISH_TURN_TOOL,
+      );
+    if (turnContract) messages.push({ role: 'system', content: TURN_CLOSE_RULE });
+
     // Procedural/playbook instructions name only the tools this turn offers
     // (routed: authority ∩ session-backed core; otherwise the offered list).
     const offeredDiscovery = new Set(
@@ -2376,6 +2409,13 @@ export class AIAgentService {
     let iteration = 0;
     let timedOut = false;
     let planNudges = 0;
+    // Turn-close contract state: tool calls the model made this turn (the
+    // close tool excluded), whether it called `finish_turn`, whether the one
+    // allowed resume was spent, and whether the turn closes flagged pending.
+    let toolCallsThisTurn = 0;
+    let finishCalled = false;
+    let closeResumed = false;
+    let pendingContinuation = false;
     // Time spent blocked on the browser (`ui_*` results). It is the person's
     // screen latency, not the model's work, so it must not eat the turn budget.
     let waitedMs = 0;
@@ -2782,6 +2822,21 @@ export class AIAgentService {
           );
         }
 
+        // Turn-close contract: `finish_turn` is the explicit close. Alone it
+        // ends the turn through the normal close below (no extra round trip to
+        // run a no-op); next to other tools it runs like any tool.
+        if (turnContract && response.tool_calls?.length) {
+          const closers = response.tool_calls.filter(
+            (call) =>
+              this.toolRegistry.canonicalName(call.function.name) ===
+              FINISH_TURN_TOOL,
+          ).length;
+          if (closers > 0) finishCalled = true;
+          toolCallsThisTurn += response.tool_calls.length - closers;
+          if (closers === response.tool_calls.length)
+            response = { ...response, tool_calls: undefined };
+        }
+
         // Tool calls are honoured whatever `finish_reason` says: several
         // providers answer 'stop' with tool_calls attached, and closing the turn
         // on that dropped the calls and left compound requests half done.
@@ -2818,6 +2873,42 @@ export class AIAgentService {
               });
               continue;
             }
+          }
+
+          // Turn-close gate (structural, never a reading of the text): a chat
+          // turn that ends in prose having run no tool and without calling
+          // `finish_turn` is incomplete — typically «ya voy a buscar…» and
+          // nothing behind it. It is resumed ONCE; failing again it closes
+          // flagged `pending_continuation` so the UI offers «Continuar». A
+          // turn that ran any tool is never gated: its work is done.
+          if (
+            turnContract &&
+            !finishCalled &&
+            toolCallsThisTurn === 0 &&
+            !pendingConfirmation &&
+            response.content?.trim()
+          ) {
+            const canResume =
+              !closeResumed &&
+              iteration < maxIterations &&
+              Date.now() - startTime - waitedMs < timeoutMs;
+            this.logger.warn(
+              JSON.stringify({
+                event: 'agent_turn_close_gate',
+                outcome: canResume ? 'resumed' : 'pending_continuation',
+                store_id: context?.store_id ?? null,
+                stream_id: params.stream_id ?? null,
+                agent_key: params.agent_key ?? 'vexi',
+                iteration,
+              }),
+            );
+            if (canResume) {
+              closeResumed = true;
+              messages.push({ role: 'assistant', content: response.content });
+              messages.push({ role: 'system', content: TURN_CLOSE_NUDGE });
+              continue;
+            }
+            pendingContinuation = true;
           }
 
           this.eventEmitter.emit('ai.agent.completed', {
@@ -2878,6 +2969,7 @@ export class AIAgentService {
               completionTokens: 0,
               totalTokens,
             },
+            ...(pendingContinuation ? { pending_continuation: true } : {}),
           };
 
           return {
@@ -2887,6 +2979,7 @@ export class AIAgentService {
             total_tokens: totalTokens,
             success: true,
             pending_confirmation: pendingConfirmation,
+            ...(pendingContinuation ? { pending_continuation: true } : {}),
           };
         }
 

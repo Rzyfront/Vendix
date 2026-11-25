@@ -404,6 +404,51 @@ describe('AIChatService — plan interno de Vexi', () => {
     expect(roles).toEqual(['user']);
   });
 
+  it('pending_continuation: persiste la marca y el texto en metadata y la lleva en done', async () => {
+    const text = 'Ya voy a revisar el inventario.';
+    const run = agentGen(
+      [
+        { type: 'text', content: text },
+        { type: 'done', pending_continuation: true },
+      ],
+      { tools_used: [], content: text, pending_continuation: true },
+    );
+    const b = build({ plan: null, run });
+    withIntent(b, { content: 'revisa el inventario' });
+    const frames = await collect(b.service, null);
+    expect(frames.find((f) => f.type === 'done')?.pending_continuation).toBe(
+      true,
+    );
+    const assistant = b.prisma.ai_messages.create.mock.calls
+      .map((c: any) => c[0].data)
+      .find((d: any) => d.role === 'assistant');
+    expect(assistant.content).toBe(text);
+    expect(assistant.metadata).toEqual(
+      expect.objectContaining({
+        pending_continuation: true,
+        pending_text: text,
+      }),
+    );
+  });
+
+  it('turno cerrado con normalidad: metadata sin pending_continuation', async () => {
+    const run = agentGen(
+      [{ type: 'text', content: 'Hola.' }, { type: 'done' }],
+      { tools_used: [], content: 'Hola.' },
+    );
+    const b = build({ plan: null, run });
+    withIntent(b, { content: 'hola' });
+    const frames = await collect(b.service, null);
+    expect(
+      frames.find((f) => f.type === 'done')?.pending_continuation,
+    ).toBeUndefined();
+    const assistant = b.prisma.ai_messages.create.mock.calls
+      .map((c: any) => c[0].data)
+      .find((d: any) => d.role === 'assistant');
+    expect(assistant.metadata?.pending_continuation).toBeUndefined();
+    expect(assistant.metadata?.pending_text).toBeUndefined();
+  });
+
   it('aborted: conserva un terminal honesto sin afirmar rollback', async () => {
     const run = agentGen([], { tools_used: [], content: '', aborted: true });
     const b = build({ plan: null, run });

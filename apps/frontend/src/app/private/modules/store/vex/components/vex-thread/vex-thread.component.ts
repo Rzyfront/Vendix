@@ -19,7 +19,11 @@ import { VexAnalysisCodeComponent } from '../vex-blocks/vex-analysis-code/vex-an
 import { VexScriptRunComponent } from '../vex-blocks/vex-script-run/vex-script-run.component';
 import { VEX_COPY } from '../../vex-copy';
 import { VEXI_RESTART_LABEL } from '../../../../../../core/store/vexi/vexi-user-copy.utils';
-import { VexBlockInteraction, VexUiBlock } from '../../models/vex.models';
+import {
+  VexBlockInteraction,
+  VexMessage,
+  VexUiBlock,
+} from '../../models/vex.models';
 import { VexMarkdownComponent } from '../vex-markdown/vex-markdown.component';
 import { VexBlockHostComponent } from '../vex-blocks/vex-block-host.component';
 import { VexToolTraceComponent } from '../vex-tool-trace/vex-tool-trace.component';
@@ -183,6 +187,27 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
                     />
                   }
                 }
+                @if (
+                  message.pending_continuation &&
+                  !message.streaming &&
+                  !message.error &&
+                  $last
+                ) {
+                  <div class="flex flex-wrap items-center gap-2">
+                    <p class="text-sm text-text-secondary" role="status">
+                      {{ threadCopy.pending_note }}
+                    </p>
+                    <app-button
+                      variant="outline"
+                      size="sm"
+                      [disabled]="store.is_agent_typing()"
+                      (clicked)="store.continuePending(message.id)"
+                    >
+                      <app-icon slot="icon" name="play" [size]="14"></app-icon>
+                      {{ threadCopy.pending_continue }}
+                    </app-button>
+                  </div>
+                }
                 @if (message.error) {
                   <p
                     class="rounded-xl border border-error bg-error/10 px-3 py-2 text-sm text-error"
@@ -269,6 +294,24 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
                         <span>Escuchar</span>
                       }
                     </button>
+                    <button
+                      type="button"
+                      class="min-h-8 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] text-xs font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+                      [attr.aria-label]="
+                        copied_id() === message.id
+                          ? 'Mensaje copiado'
+                          : 'Copiar este mensaje'
+                      "
+                      (click)="copyMessage(message)"
+                    >
+                      @if (copied_id() === message.id) {
+                        <app-icon name="check" [size]="14" />
+                        <span>Copiado</span>
+                      } @else {
+                        <app-icon name="copy" [size]="14" />
+                        <span>Copiar</span>
+                      }
+                    </button>
                   </div>
                 }
               </div>
@@ -333,6 +376,45 @@ export class VexThreadComponent {
   protected readonly attachmentCopy = VEX_COPY.attachment_viewer;
   readonly viewerHandle = signal<string | null>(null);
   readonly viewerOpen = signal(false);
+
+  /** Message whose text was just copied, for the transient «Copiado» label. */
+  protected readonly copied_id = signal<string | null>(null);
+  private copied_timer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * Copies the whole answer, not only what the browser lets the user select:
+   * the same reason the spoken answer reads the full text. Falls back to the
+   * old selection trick when the clipboard API is blocked (plain HTTP, older
+   * WebViews) so the button never dies silently.
+   */
+  protected async copyMessage(message: VexMessage): Promise<void> {
+    const text = (message.content ?? '').trim();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      this.copyWithSelection(text);
+    }
+    this.copied_id.set(message.id);
+    if (this.copied_timer) clearTimeout(this.copied_timer);
+    this.copied_timer = setTimeout(() => this.copied_id.set(null), 1800);
+  }
+
+  private copyWithSelection(text: string): void {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.top = '-1000px';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    try {
+      document.execCommand('copy');
+    } finally {
+      document.body.removeChild(area);
+    }
+  }
 
   openAttachment(handle: string): void {
     this.viewerHandle.set(handle);

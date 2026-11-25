@@ -6238,32 +6238,59 @@ export class ProductsService {
   // Gestión de variantes
 
   // Gestión de imágenes
+  /**
+   * Adds one image to a product keeping the invariant "a product with images
+   * has exactly one main image". POS, product list and ecommerce cards read
+   * only `is_main = true`, so an image added without that flag to a product
+   * with no main image would stay invisible. The create/update editor flows
+   * already enforce this on their full image list ("Asegurar que solo haya un
+   * is_main"); this path (used by Vex `manage_product_images`) did not.
+   *
+   * The product row is locked (`FOR UPDATE`) inside the transaction so two
+   * concurrent additions are serialized: the second one sees the first main
+   * image and stays secondary.
+   */
   async addImage(productId: number, imageDto: ProductImageDto) {
-    // Verificar que el producto existe y está activo
-    const product = await this.prisma.products.findFirst({
-      where: {
-        id: productId,
-        state: ProductState.ACTIVE,
-      },
-    });
-
-    if (!product) {
-      throw new VendixHttpException(ErrorCodes.PROD_FIND_001);
-    }
-
-    // Si es imagen principal, quitar el flag de las demás
-    if (imageDto.is_main) {
-      await this.prisma.product_images.updateMany({
-        where: { product_id: productId },
-        data: { is_main: false },
+    return this.prisma.$transaction(async (tx) => {
+      // Verificar que el producto existe y está activo (consulta con scope de tienda)
+      const product = await tx.products.findFirst({
+        where: {
+          id: productId,
+          state: ProductState.ACTIVE,
+        },
+        select: { id: true },
       });
-    }
 
-    return await this.prisma.product_images.create({
-      data: {
-        product_id: productId,
-        ...imageDto,
-      },
+      if (!product) {
+        throw new VendixHttpException(ErrorCodes.PROD_FIND_001);
+      }
+
+      // Serializa altas concurrentes sobre el mismo producto
+      await tx.$queryRaw`SELECT id FROM products WHERE id = ${productId} FOR UPDATE`;
+
+      let isMain = imageDto.is_main === true;
+      if (isMain) {
+        // Si es imagen principal, quitar el flag de las demás
+        await tx.product_images.updateMany({
+          where: { product_id: productId },
+          data: { is_main: false },
+        });
+      } else {
+        // Sin principal en el producto: la nueva pasa a ser la principal
+        const currentMain = await tx.product_images.findFirst({
+          where: { product_id: productId, is_main: true },
+          select: { id: true },
+        });
+        isMain = !currentMain;
+      }
+
+      return tx.product_images.create({
+        data: {
+          product_id: productId,
+          ...imageDto,
+          is_main: isMain,
+        },
+      });
     });
   }
 
