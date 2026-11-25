@@ -172,7 +172,11 @@ export function mapAdminProductToItem(product: Product): AppPageProductItem {
         : null,
     is_on_sale: Boolean(v.is_on_sale),
     image_url: safeUrl(v.image_url ?? undefined),
-    is_available: true,
+    // Relleno temporal mientras el servidor responde: si el endpoint admin ya
+    // trae disponibilidad se respeta; si no, se asume disponible para no
+    // bloquear la previsualización de lo que el usuario acaba de elegir.
+    is_available:
+      (v as ProductVariant & { is_available?: boolean }).is_available !== false,
   }));
 
   const thumb = product.image_url ?? product.product_images?.[0]?.image_url ?? product.images?.[0]?.image_url;

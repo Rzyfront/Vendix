@@ -326,11 +326,10 @@ export async function resolvePreviewProductCards(
 
       const finalPrice = hasFlatPromo ? promo.promotional_price : base.finalPrice;
       const regularFinalPrice = hasFlatPromo ? base.finalPrice : base.regularFinalPrice;
-      // Misma regla que el público: `is_on_sale` es la fuente de verdad; no se
-      // exige `sale_price > 0` (una tienda puede marcar la oferta sin precio
-      // rebajado y el público lo pintaría en verde).
-      const isOnSale =
-        hasFlatPromo || regularFinalPrice > finalPrice || Boolean(row.is_on_sale);
+      // Regla IDÉNTICA al público (`mapEcommerceProductToItem`): promo plana o
+      // el flag tal cual. No se exige `sale_price` ni se compara contra el
+      // regular: los dos precios salen del mismo motor, así que sobra.
+      const isOnSale = hasFlatPromo || Boolean(row.is_on_sale);
 
       const imageUrl =
         (await deps.s3.signUrl(row.product_images?.[0]?.image_url ?? undefined)) ?? null;
