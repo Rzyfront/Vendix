@@ -206,6 +206,11 @@ export interface AIStreamChunk {
    * `ai_messages.cost_usd`; absent means unknown, never "free".
    */
   cost_usd?: number;
+  /**
+   * Present (true) on `done` when the chat turn closed incomplete: no tool run
+   * and no `finish_turn`, even after one resume. The client offers «Continuar».
+   */
+  pending_continuation?: boolean;
   context_budget?: {
     estimated_input_tokens: number;
     omitted_messages: number;

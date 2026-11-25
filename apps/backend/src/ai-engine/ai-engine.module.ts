@@ -50,6 +50,7 @@ import { createAiToolboxTools } from './tools/domains/ai-toolbox.tools';
 import { CapabilityRegistryService } from './tools/bridge/capability-registry.service';
 import { createCapabilityTools } from './tools/bridge/capability.tools';
 import { createPlanningTools } from './tools/domains/planning.tools';
+import { createTurnTools } from './tools/domains/turn.tools';
 import { createReportTools } from './tools/domains/reports.tools';
 import { AIAgentProcessor } from './queue/processors/ai-agent.processor';
 import { AgentObjectiveRepository } from './tasks/agent-objective.repository';
@@ -217,6 +218,7 @@ export class AIEngineModule implements OnModuleInit {
       }),
     );
     this.toolRegistry.registerMany(createPlanningTools());
+    this.toolRegistry.registerMany(createTurnTools());
     this.toolRegistry.registerMany(createReportTools({ s3: this.s3 }));
   }
 }

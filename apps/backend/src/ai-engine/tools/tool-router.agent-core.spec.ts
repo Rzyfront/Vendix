@@ -22,6 +22,7 @@ import { createInvoicingTools } from './domains/invoicing.tools';
 import { createOrdersTools } from './domains/orders.tools';
 import { createPaymentTools } from './domains/payments.tools';
 import { createPlanningTools } from './domains/planning.tools';
+import { createTurnTools } from './domains/turn.tools';
 import { createPlaybookTools } from './domains/playbook.tools';
 import { createProductTools } from './domains/products.tools';
 import { createPurchasingTools } from './domains/purchasing.tools';
@@ -54,6 +55,7 @@ function realRegistry(): AIToolRegistry {
   registry.registerMany(createDiscoveryTools());
   registry.registerMany(createPlaybookTools());
   registry.registerMany(createPlanningTools());
+  registry.registerMany(createTurnTools());
   registry.registerMany(uiTools);
   registry.registerMany(
     createApiBridgeTools({ catalog: deps, attachments: deps }),
@@ -150,9 +152,11 @@ describe('ToolRouterService: núcleo fijo por agente + conjunto dinámico (regis
     // arithmetic). Cost measured from the definitions: ~3.2k schema chars,
     // ~800 tokens on every Vex turn. Raise only for a tool the Vex prompt names
     // by exact identifier; everything else arrives through discovery.
+    // +1 read_attachment (F6/T43, the Vex prompt names it) and +1 finish_turn
+    // (turn-close contract: TURN_CLOSE_RULE names it in every chat turn).
     expect(
       CORE_DISCOVERY.length + AGENT_TOOL_CORE.vex.length,
-    ).toBeLessThanOrEqual(16);
+    ).toBeLessThanOrEqual(18);
     // F5/T34: the batch circuit is reached through discovery and playbooks,
     // never by widening the fixed core.
     expect(AGENT_TOOL_CORE.vex).not.toContain('propose_write_batch');
