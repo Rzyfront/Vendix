@@ -131,7 +131,10 @@ export const FEATURE_QUOTA_CONFIG: Record<
   // `monthly_tool_calls_cap` limita las ejecuciones del periodo. Sin cap declarado el contador sigue escribiéndose pero el
   // gate nunca bloquea por cuota (cap ausente = ilimitado).
   tool_agents: { capField: 'monthly_tool_calls_cap', period: 'monthly' },
-  rag_embeddings: { capField: 'indexed_docs_cap', period: 'monthly' },
+  // Embeddings no se cobran ni se topan por tienda (decisión del dueño,
+  // 2026-11-24): son enriquecimiento de la plataforma. Sin cap, ningún gate
+  // puede bloquear la indexación de una tienda.
+  rag_embeddings: null,
   async_queue: { capField: 'monthly_jobs_cap', period: 'monthly' },
   realtime_voice: {
     capField: 'monthly_voice_seconds_cap',
