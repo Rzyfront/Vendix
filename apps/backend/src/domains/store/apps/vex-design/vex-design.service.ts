@@ -76,6 +76,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * antes de aceptarlo, y jamás escribe ni publica en `store_apps`: solo el
  * dueño desde el editor guarda o publica.
  */
+/** Tope del respaldo en memoria (solo se usa cuando Redis falla). */
+const MAX_MEMORY_SESSIONS = 200;
+
 @Injectable()
 export class VexDesignService {
   private readonly logger = new Logger(VexDesignService.name);
@@ -1231,12 +1234,18 @@ export class VexDesignService {
         const raw = await this.redis.get(key);
         if (raw) {
           const parsed = JSON.parse(raw) as VexDesignSession;
-          if (parsed.store_id === storeId) {
-            this.memorySessions.set(key, parsed);
-            return parsed;
+          if (parsed.store_id !== storeId) {
+            this.memorySessions.delete(key);
+            return null;
           }
-          return null;
+          this.memorySessions.set(key, parsed);
+          return parsed;
         }
+        // Redis es la fuente de verdad: si la clave venció (TTL de la sesión),
+        // la copia en memoria también se descarta. Sin esto la sesión revivía
+        // para siempre y el mapa crecía sin tope.
+        this.memorySessions.delete(key);
+        return null;
       } catch (err) {
         this.logger.warn(
           `Redis read fallback for ${key}: ${(err as Error).message}`,
@@ -1250,6 +1259,12 @@ export class VexDesignService {
   private async saveSession(session: VexDesignSession): Promise<void> {
     const key = this.sessionKey(session.store_id, session.conversation_id);
     this.memorySessions.set(key, session);
+    // Tope defensivo: el respaldo en memoria es solo para cuando Redis falla,
+    // así que se descartan las sesiones más viejas si crece demasiado.
+    if (this.memorySessions.size > MAX_MEMORY_SESSIONS) {
+      const oldest = this.memorySessions.keys().next().value;
+      if (oldest !== undefined) this.memorySessions.delete(oldest);
+    }
     if (this.redis) {
       try {
         await this.redis.set(

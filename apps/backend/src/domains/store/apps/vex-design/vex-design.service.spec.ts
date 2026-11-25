@@ -565,4 +565,35 @@ describe('VexDesignService (F4 historial y contrato)', () => {
     );
     expect(fallbackState?.app_kind).toBe('product_page');
   });
+
+  it('no revive la sesión de memoria cuando la clave venció en Redis', async () => {
+    const store = new Map<string, string>();
+    const redisMock = {
+      get: jest.fn(async (key: string) => store.get(key) ?? null),
+      set: jest.fn(async (key: string, value: string) => {
+        store.set(key, value);
+        return 'OK';
+      }),
+    };
+
+    const writerService = new VexDesignService(prisma as any, redisMock as any);
+    await writerService.initOrSyncSession({
+      storeId,
+      userId,
+      conversationId,
+      appKind: 'product_page',
+      draft: makeDraft(),
+    });
+
+    // Simula el vencimiento del TTL: Redis deja de devolver la clave.
+    store.clear();
+
+    // La memoria no debe revivirla: el TTL de la sesión se respeta.
+    const state = await writerService.getLatestState(
+      storeId,
+      conversationId,
+      'product_page',
+    );
+    expect(state).toBeNull();
+  });
 });

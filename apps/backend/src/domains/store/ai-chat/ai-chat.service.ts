@@ -941,6 +941,27 @@ export class AIChatService {
 
     let conversation = await this.getConversation(conversationId);
 
+    // Un stream de diseño exige que el hilo sea de esa superficie y de esa app:
+    // reutilizar el hilo general de Vex (que sigue en su listado) o el de otra
+    // app no debe colarse por aquí.
+    if (expectedDesignAppKind) {
+      const metadata = conversation.metadata as
+        | Record<string, unknown>
+        | null
+        | undefined;
+      if (
+        metadata?.surface !== VEX_DESIGN_CONVERSATION_SURFACE ||
+        metadata?.app_kind !== expectedDesignAppKind
+      ) {
+        yield {
+          type: 'error',
+          error:
+            'La conversación no corresponde a una sesión de diseño válida para esta app.',
+        };
+        return;
+      }
+    }
+
     if (conversation.status === 'archived') {
       yield { type: 'error', error: 'Conversation is archived' };
       return;

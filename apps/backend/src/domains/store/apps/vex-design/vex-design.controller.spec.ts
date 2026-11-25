@@ -141,6 +141,55 @@ describe('VexDesignController (F4 endpoint y SSE)', () => {
     expect(chatService.createDesignStreamIntent).not.toHaveBeenCalled();
   });
 
+  it('rechaza un hilo del chat general de Vex o de otra app aunque el agente sea vex', async () => {
+    chatService.getConversation.mockResolvedValueOnce({
+      id: 778,
+      metadata: { agent_key: 'vex', surface: 'admin_chat' },
+    });
+    await RequestContextService.run(ctx, async () => {
+      await expect(
+        controller.createStreamIntent('product_page', {
+          conversation_id: 778,
+          content: 'Cambia el color',
+          draft: sampleDraft() as any,
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    chatService.getConversation.mockResolvedValueOnce({
+      id: 779,
+      metadata: {
+        agent_key: 'vex',
+        surface: 'apps_design',
+        app_kind: 'booking',
+      },
+    });
+    await RequestContextService.run(ctx, async () => {
+      await expect(
+        controller.createStreamIntent('product_page', {
+          conversation_id: 779,
+          content: 'Cambia el color',
+          draft: sampleDraft() as any,
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    expect(chatService.createDesignStreamIntent).not.toHaveBeenCalled();
+  });
+
+  it('rechaza un mensaje vacío antes de crear el turno', async () => {
+    await RequestContextService.run(ctx, async () => {
+      await expect(
+        controller.createStreamIntent('product_page', {
+          content: '   ',
+          draft: sampleDraft() as any,
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    expect(chatService.createDesignStreamIntent).not.toHaveBeenCalled();
+  });
+
   it('emite el frame design_draft tras un tool_result exitoso de vex_design_patch y exige expectedDesignAppKind', async () => {
     await service.initOrSyncSession({
       storeId: ctx.store_id,

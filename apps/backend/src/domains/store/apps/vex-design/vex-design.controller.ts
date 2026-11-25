@@ -78,12 +78,19 @@ export class VexDesignController {
       const existing = await this.chatService.getConversation(
         dto.conversation_id,
       );
-      const existingAgent = (
-        existing?.metadata as Record<string, unknown> | null | undefined
-      )?.agent_key;
-      if (existingAgent !== 'vex') {
+      const metadata = existing?.metadata as
+        | Record<string, unknown>
+        | null
+        | undefined;
+      // Un hilo del chat general de Vex (o el de otra app) no puede reutilizarse
+      // aquí: se validan agente, superficie y app, no solo el agente.
+      if (
+        metadata?.agent_key !== 'vex' ||
+        metadata?.surface !== VEX_DESIGN_CONVERSATION_SURFACE ||
+        metadata?.app_kind !== kind
+      ) {
         throw new BadRequestException(
-          'La conversación no pertenece al agente Vex y no puede usarse en el chat de diseño.',
+          'La conversación no pertenece a una sesión de diseño de Vex para esta app.',
         );
       }
       conversationId = dto.conversation_id;
@@ -126,9 +133,16 @@ export class VexDesignController {
       );
     }
 
+    const content = dto.content.trim();
+    if (!content) {
+      throw new BadRequestException(
+        'Escribe qué quieres cambiar antes de enviar el mensaje a Vex.',
+      );
+    }
+
     const streamId = await this.chatService.createDesignStreamIntent(
       conversationId,
-      dto.content.trim(),
+      content,
       {
         app_kind: kind,
         prompt_context: promptContext,

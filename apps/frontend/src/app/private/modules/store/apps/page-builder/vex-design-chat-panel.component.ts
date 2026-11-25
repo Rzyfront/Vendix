@@ -222,7 +222,7 @@ const SUGGESTIONS: Record<DesignChatAppKind, readonly string[]> = {
                   </div>
 
                   <div class="mt-2 flex flex-wrap items-center gap-2">
-                    @if (proposal.status !== 'applied') {
+                    @if (canApplyProposal(msg)) {
                       <button
                         type="button"
                         class="inline-flex items-center gap-1 rounded-lg bg-[var(--color-primary)] px-2.5 py-1 text-[11px] font-semibold text-[var(--color-text-on-primary,#fff)] hover:opacity-90 disabled:opacity-50"
@@ -233,6 +233,13 @@ const SUGGESTIONS: Record<DesignChatAppKind, readonly string[]> = {
                         <app-icon name="check" [size]="12" />
                         Aplicar
                       </button>
+                    } @else if (proposal.status === 'pending') {
+                      <span
+                        class="text-[10px] font-medium text-[var(--color-text-secondary)]"
+                        data-testid="vex-design-stale"
+                      >
+                        Propuesta desactualizada
+                      </span>
                     }
                     <button
                       type="button"
@@ -391,6 +398,23 @@ export class VexDesignChatPanelComponent {
     }
     return null;
   });
+
+  /**
+   * Solo se puede aplicar la propuesta pendiente más reciente y mientras el
+   * borrador siga igual que cuando se generó. Reaplicar una propuesta vieja (o
+   * una ya descartada) reemplazaría el documento completo y borraría en
+   * silencio cambios posteriores o ediciones manuales.
+   */
+  canApplyProposal(msg: VexDesignChatMessage): boolean {
+    const proposal = msg.proposal;
+    if (!proposal || proposal.status !== 'pending') return false;
+    if (msg.id !== this.latestActiveProposalMessageId()) return false;
+    const previous = proposal.previousDocument;
+    if (!previous) return true;
+    return (
+      JSON.stringify(clonePage(previous)) === JSON.stringify(clonePage(this.draft()))
+    );
+  }
 
   canDiscardProposal(msg: VexDesignChatMessage): boolean {
     const proposal = msg.proposal;
