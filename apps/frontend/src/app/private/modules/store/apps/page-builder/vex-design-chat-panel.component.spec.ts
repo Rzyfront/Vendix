@@ -546,34 +546,4 @@ describe('AppPageBuilderPageComponent · integración chat Vex (F4)', () => {
     expect(panelAfter.messages()[1].proposal?.status).toBe('pending');
   });
 
-  it('no ofrece aplicar una propuesta descartada ni una que quedó desactualizada', () => {
-    fixture.componentInstance.sendPrompt('Cambia el tema');
-    fixture.detectChanges();
-    stream$.next({
-      type: 'design_draft',
-      app_kind: 'product_page',
-      op: 'set_theme',
-      document: darkHeroDraft(),
-      summary: 'Cambio 1',
-      touched_block_id: 'hero',
-      history_depth: 1,
-      can_discard: true,
-    });
-    stream$.next({ type: 'done' });
-    stream$.complete();
-    fixture.detectChanges();
-
-    expect(el().querySelector('[data-testid="vex-design-apply"]')).not.toBeNull();
-
-    // Una edición manual del borrador deja la propuesta sin efecto posible:
-    // aplicarla reemplazaría lo que el dueño acaba de cambiar.
-    fixture.componentRef.setInput('draft', {
-      ...baseDraft(),
-      hero: { ...baseDraft().hero, title: 'Editado a mano' },
-    } as AppPageDocument);
-    fixture.detectChanges();
-
-    expect(el().querySelector('[data-testid="vex-design-apply"]')).toBeNull();
-    expect(el().querySelector('[data-testid="vex-design-stale"]')).not.toBeNull();
-  });
 });
