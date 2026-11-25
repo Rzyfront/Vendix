@@ -11,8 +11,14 @@ import {
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 
-/** Tope máximo de identificadores permitidos en `GET /ecommerce/catalog?ids=...`. */
-export const MAX_CATALOG_QUERY_IDS = 50;
+/**
+ * Tope máximo de identificadores permitidos en `GET /ecommerce/catalog?ids=...`.
+ *
+ * Va alineado con el `@Max(100)` de `limit`: la página pública de servicios
+ * pide hasta `MAX_LISTED_SERVICES` (60) ids en una sola llamada y, con un tope
+ * menor, respondía 400 y la página caía en «no disponible».
+ */
+export const MAX_CATALOG_QUERY_IDS = 100;
 
 function hasAtMostMaxCatalogIds(value: unknown): boolean {
   if (typeof value !== 'string') return false;
@@ -93,13 +99,13 @@ export class CatalogQueryDto {
   @Max(100)
   limit?: number = 20;
 
-  /** Lista CSV de IDs de productos (máx. 50 para evitar respuestas gigantes en el endpoint público). */
+  /** Lista CSV de IDs de productos (máx. 100, igual que `limit`, para evitar respuestas gigantes en el endpoint público). */
   @IsOptional()
   @IsString()
-  // El tope real es la cantidad de ids (50). El largo se deja holgado para no
-  // rechazar 50 ids válidos largos, pero acotado para que un valor absurdo
+  // El tope real es la cantidad de ids (100). El largo se deja holgado para no
+  // rechazar 100 ids válidos largos, pero acotado para que un valor absurdo
   // (`1,,,,…`) no llegue al parser.
-  @MaxLength(1200)
+  @MaxLength(2400)
   @ValidateBy({
     name: 'maxCatalogIds',
     validator: {
