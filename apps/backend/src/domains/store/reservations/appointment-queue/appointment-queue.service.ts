@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { bookingInterval } from '@common/utils/schedule-window.util';
-import { resolveStoreTimezone } from '@common/utils/store-timezone.util';
+import { localDateString, resolveStoreTimezone } from '@common/utils/store-timezone.util';
 
 /** Fila del tablero de la pestaña Cola (agenda-unificada, 2026-11-24). */
 export interface QueueBoardRow {
@@ -146,7 +146,7 @@ export class AppointmentQueueService {  private readonly logger = new Logger(App
    */
   async dayBoard(
     storeId: number,
-    isoDay: string,
+    isoDay?: string,
     now: Date = new Date(),
   ): Promise<{
     day: string;
@@ -155,7 +155,11 @@ export class AppointmentQueueService {  private readonly logger = new Logger(App
     waiting: QueueBoardRow[];
     upcoming: QueueBoardRow[];
   }> {
-    const day = new Date(`${isoDay.slice(0, 10)}T00:00:00.000Z`);
+    // El día por defecto es HOY en la zona de la tienda: con un `toISOString()`
+    // (UTC) un tablero abierto a las 20:00 de Bogotá mostraba el día siguiente.
+    const timezone = await resolveStoreTimezone(this.prisma, storeId);
+    const targetDay = (isoDay ?? localDateString(now, timezone)).slice(0, 10);
+    const day = new Date(`${targetDay}T00:00:00.000Z`);
 
     const rows = await this.prisma.bookings.findMany({
       where: {
@@ -187,8 +191,6 @@ export class AppointmentQueueService {  private readonly logger = new Logger(App
       },
       orderBy: [{ start_time: 'asc' }, { priority: 'asc' }, { created_at: 'asc' }],
     });
-
-    const timezone = await resolveStoreTimezone(this.prisma, storeId);
 
     const board = rows.map((row) => {
       const startsAt = bookingInterval(row, timezone).startAt;
@@ -233,7 +235,7 @@ export class AppointmentQueueService {  private readonly logger = new Logger(App
     };
 
     return {
-      day: isoDay.slice(0, 10),
+      day: targetDay,
       generated_at: now,
       in_service: board.filter((r) => r.status === 'attending'),
       waiting: board.filter((r) => r.status === 'arriving').sort(byQueueScore),

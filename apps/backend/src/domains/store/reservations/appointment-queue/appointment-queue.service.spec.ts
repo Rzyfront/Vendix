@@ -161,6 +161,14 @@ describe('AppointmentQueueService', () => {
       expect(board.upcoming[0].checked_in).toBeFalse();
     });
 
+    it('sin día usa HOY en la zona de la tienda, no la fecha UTC', async () => {
+      const { service } = buildService([]);
+      // 2026-07-19 02:00Z = 18 de julio, 21:00 en Bogotá.
+      const lateEvening = new Date('2026-07-19T02:00:00Z');
+      const board = await service.dayBoard(1, undefined, lateEvening);
+      expect(board.day).toBe('2026-07-18');
+    });
+
     it('nunca persiste posiciones: es solo lectura', async () => {
       const { service, update, transaction } = buildService([row({ id: 4 })]);
       await service.dayBoard(1, '2026-07-18', now);

@@ -527,8 +527,8 @@ export class ReservationsController {
         'No se pudo determinar la tienda del contexto de la solicitud',
       );
     }
-    const targetDay = day ?? new Date().toISOString().split('T')[0];
-    const result = await this.appointmentQueueService.dayBoard(storeId, targetDay);
+    // Sin `day`, el service resuelve HOY en la zona de la tienda.
+    const result = await this.appointmentQueueService.dayBoard(storeId, day);
     return this.responseService.success(result, 'Tablero de la cola obtenido');
   }
 
