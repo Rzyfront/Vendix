@@ -329,4 +329,96 @@ describe('vex-design tools contract (F4)', () => {
     );
     expect(res.error).toMatch(/no admite el chat de diseño/i);
   });
+
+  it('exige context.conversation_id y jamás acepta fallback desde args.conversation_id', async () => {
+    const read = registry.get('vex_design_read')!;
+    const patch = registry.get('vex_design_patch')!;
+    const discard = registry.get('vex_design_discard')!;
+
+    const ctxWithoutConversation = {
+      store_id: storeId,
+      user_id: userId,
+      roles: ['owner'],
+    };
+
+    const readRes = JSON.parse(
+      await read.handler!({ conversation_id: conversationId }, ctxWithoutConversation),
+    );
+    expect(readRes.error).toMatch(/conversación activa/i);
+
+    const patchRes = JSON.parse(
+      await patch.handler!(
+        {
+          conversation_id: conversationId,
+          op: 'set_theme',
+          tokens: { surface_color: '#0F172A' },
+        },
+        ctxWithoutConversation,
+      ),
+    );
+    expect(patchRes.error).toMatch(/conversación activa/i);
+
+    const discardRes = JSON.parse(
+      await discard.handler!(
+        { conversation_id: conversationId },
+        ctxWithoutConversation,
+      ),
+    );
+    expect(discardRes.error).toMatch(/conversación activa/i);
+  });
+
+  it('rechaza URLs externas en subcampos de listas al usar add_block', async () => {
+    const patch = registry.get('vex_design_patch')!;
+    const res = JSON.parse(
+      await patch.handler!(
+        {
+          op: 'add_block',
+          block_type: 'highlights',
+          props: {
+            title: 'Destacados',
+            items: [
+              {
+                title: 'Calidad',
+                text: 'Premium',
+                image_url: 'https://evil.example.com/pic.png',
+              },
+            ],
+          },
+        },
+        ctx,
+      ),
+    );
+    expect(res.error).toMatch(/set_block_media/i);
+  });
+
+  it('rechaza item_index negativo o fuera de rango en gallery.image_urls', async () => {
+    const patch = registry.get('vex_design_patch')!;
+    const resNeg = JSON.parse(
+      await patch.handler!(
+        {
+          op: 'set_block_media',
+          block_id: 'gallery',
+          prop: 'image_urls',
+          media_id: 101,
+          item_index: -1,
+        },
+        ctx,
+      ),
+    );
+    expect(resNeg.error).toMatch(/no existe/i);
+
+    const resOob = JSON.parse(
+      await patch.handler!(
+        {
+          op: 'set_block_media',
+          block_id: 'gallery',
+          prop: 'image_urls',
+          media_id: 101,
+          item_index: 3,
+        },
+        ctx,
+      ),
+    );
+    expect(resOob.error).toMatch(/no existe/i);
+  });
 });

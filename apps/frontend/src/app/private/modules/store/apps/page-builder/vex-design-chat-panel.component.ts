@@ -237,7 +237,14 @@ const SUGGESTIONS: Record<DesignChatAppKind, readonly string[]> = {
                     <button
                       type="button"
                       class="inline-flex items-center gap-1 rounded-lg border border-[var(--color-border)] px-2.5 py-1 text-[11px] font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-background)] disabled:opacity-50"
-                      [disabled]="streaming() || proposal.status === 'discarded'"
+                      [disabled]="streaming() || !canDiscardProposal(msg)"
+                      [title]="
+                        proposal.status === 'applied' && msg.id !== latestAppliedMessageId()
+                          ? 'Descarta primero el cambio más reciente'
+                          : proposal.status === 'pending'
+                            ? 'Descartar esta propuesta sin cambiar el borrador'
+                            : 'Revertir este cambio en el borrador'
+                      "
                       (click)="discardProposal(msg.id)"
                       data-testid="vex-design-discard"
                     >
@@ -367,6 +374,30 @@ export class VexDesignChatPanelComponent {
   readonly hasAppliedChanges = computed(() =>
     this.messages().some((m) => m.proposal?.status === 'applied'),
   );
+  /** Id del mensaje con la propuesta aplicada más reciente; solo esta puede revertir el borrador. */
+  readonly latestAppliedMessageId = computed<string | null>(() => {
+    const list = this.messages();
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (list[i].proposal?.status === 'applied') return list[i].id;
+    }
+    return null;
+  });
+  /** Id de la propuesta activa más reciente (pendiente o aplicada) para mantener sincronizada la pila de Redis. */
+  private readonly latestActiveProposalMessageId = computed<string | null>(() => {
+    const list = this.messages();
+    for (let i = list.length - 1; i >= 0; i--) {
+      const status = list[i].proposal?.status;
+      if (status === 'pending' || status === 'applied') return list[i].id;
+    }
+    return null;
+  });
+
+  canDiscardProposal(msg: VexDesignChatMessage): boolean {
+    const proposal = msg.proposal;
+    if (!proposal || proposal.status === 'discarded') return false;
+    if (proposal.status === 'pending') return true;
+    return msg.id === this.latestAppliedMessageId();
+  }
 
   constructor() {
     this.destroyRef.onDestroy(() => this.cancelActiveStream());
@@ -534,10 +565,17 @@ export class VexDesignChatPanelComponent {
     const msg = this.messages().find((m) => m.id === messageId);
     if (!msg?.proposal) return;
     const proposal = msg.proposal;
+    const previousBeforeApply = clonePage(this.draft());
 
     this.updateMessage(messageId, (current) => ({
       ...current,
-      proposal: current.proposal ? { ...current.proposal, status: 'applied' } : undefined,
+      proposal: current.proposal
+        ? {
+            ...current.proposal,
+            previousDocument: previousBeforeApply,
+            status: 'applied',
+          }
+        : undefined,
     }));
 
     this.applyDraft.emit({
@@ -548,20 +586,53 @@ export class VexDesignChatPanelComponent {
     this.liveStatus.set(`Cambio aplicado en la vista previa: ${proposal.summary}`);
   }
 
-  /** Descarta el cambio del mensaje y revierte el borrador al documento previo. */
+  /** Descarta una propuesta pendiente (sin tocar el borrador) o revierte la última propuesta aplicada. */
   discardProposal(messageId: string): void {
     const msg = this.messages().find((m) => m.id === messageId);
     if (!msg?.proposal) return;
     const proposal = msg.proposal;
+    if (proposal.status === 'discarded') return;
+
     const convId = this.conversationId();
+
+    // Una propuesta pendiente nunca se aplicó al borrador del editor:
+    // solo se marca descartada y no emite `discardDraft`.
+    if (proposal.status === 'pending') {
+      const isTopActive = msg.id === this.latestActiveProposalMessageId();
+      this.updateMessage(messageId, (current) => ({
+        ...current,
+        proposal: current.proposal ? { ...current.proposal, status: 'discarded' } : undefined,
+      }));
+      if (convId && isTopActive) {
+        this.chatService
+          .discardLast(this.kind(), convId)
+          .pipe(takeUntilDestroyed(this.destroyRef))
+          .subscribe({
+            error: () => {
+              // Si el servidor ya la reconcilió, prevalece el estado local.
+            },
+          });
+      }
+      this.liveStatus.set('Propuesta descartada. El borrador no cambió.');
+      return;
+    }
+
+    // Una propuesta aplicada anterior a otra más reciente no puede revertirse
+    // fuera de orden porque sobrescribiría cambios posteriores.
+    if (msg.id !== this.latestAppliedMessageId()) {
+      return;
+    }
+
+    const isTopActive = msg.id === this.latestActiveProposalMessageId();
 
     this.updateMessage(messageId, (current) => ({
       ...current,
       proposal: current.proposal ? { ...current.proposal, status: 'discarded' } : undefined,
     }));
 
-    if (convId) {
-      // Mantiene la pila del backend sincronizada sin bloquear la reversión local.
+    if (convId && isTopActive) {
+      // Como todos los parches de un turno se agrupan en una sola entrada de
+      // la pila del backend, una llamada descarta todo el turno.
       this.chatService
         .discardLast(this.kind(), convId)
         .pipe(takeUntilDestroyed(this.destroyRef))

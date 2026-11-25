@@ -108,6 +108,8 @@ import {
   extractSuggestedFollowups,
   Followup,
 } from '../../../ai-engine/tools/domains/followup.tools';
+import { VEX_DESIGN_TOOL_NAMES } from '../../../ai-engine/tools/domains/vex-design.tools';
+import { VEX_DESIGN_CONVERSATION_SURFACE } from '../apps/vex-design/vex-design.types';
 import { vexLearningBlockKind } from '../../../ai-engine/tools/domains/vex-learning-blocks.kinds';
 import {
   ConversationTitleFrame,
@@ -333,7 +335,10 @@ export class AIChatService {
     @Optional() private readonly vexAttachments?: VexiAttachmentsService,
   ) {}
 
-  async createConversation(dto: CreateConversationDto) {
+  async createConversation(
+    dto: CreateConversationDto,
+    internalMetadata?: Record<string, unknown>,
+  ) {
     const context = RequestContextService.getContext();
 
     // `StorePrismaService` injects `store_id` on create, but not
@@ -365,6 +370,11 @@ export class AIChatService {
     // (rol + toggle + plan), no solo hablar en él.
     await this.assertVexTurnAccess(dto.agent_key ?? null);
 
+    const metadata: Record<string, unknown> = {
+      ...(internalMetadata ?? {}),
+      ...(dto.agent_key ? { agent_key: dto.agent_key } : {}),
+    };
+
     const conversation = await this.prisma.ai_conversations.create({
       data: {
         organization_id: context.organization_id,
@@ -372,8 +382,8 @@ export class AIChatService {
         title: dto.title || null,
         app_key: dto.app_key || null,
         status: 'active',
-        ...(dto.agent_key && {
-          metadata: { agent_key: dto.agent_key },
+        ...(Object.keys(metadata).length > 0 && {
+          metadata: metadata as Prisma.InputJsonValue,
         }),
       },
     });
@@ -455,6 +465,27 @@ export class AIChatService {
         { NOT: { metadata: { path: ['agent_key'], equals: VEX_AGENT_KEY } } },
       ];
     }
+
+    // Excluye hilos internos del chat de diseño del editor de apps
+    // (`metadata.surface = 'apps_design'`) del listado general de Vex/Vexi.
+    // En JSONB, `NOT (path = ...)` evalúa NULL cuando falta la clave o
+    // `metadata` es NULL, por eso se incluyen las ramas con `Prisma.AnyNull`.
+    where.AND = [
+      {
+        OR: [
+          { metadata: { equals: Prisma.AnyNull } },
+          { metadata: { path: ['surface'], equals: Prisma.AnyNull } },
+          {
+            NOT: {
+              metadata: {
+                path: ['surface'],
+                equals: VEX_DESIGN_CONVERSATION_SURFACE,
+              },
+            },
+          },
+        ],
+      },
+    ];
 
     const [data, total] = await Promise.all([
       this.prisma.ai_conversations.findMany({
@@ -764,6 +795,11 @@ export class AIChatService {
     }
 
     const agentKey = this.turnAgentKey(conversation);
+    if (agentKey !== VEX_AGENT_KEY) {
+      throw new BadRequestException(
+        'La conversación no pertenece al agente Vex y no puede usarse en el chat de diseño.',
+      );
+    }
     await this.assertVexTurnAccess(agentKey);
     await this.assertVexTurnQuota(agentKey);
 
@@ -791,6 +827,7 @@ export class AIChatService {
     streamId: string,
     signal?: AbortSignal,
     replay: ChatReplayRequest = {},
+    options?: { expectedDesignAppKind?: string },
   ): AsyncGenerator<ChatStreamFrame> {
     // Revalidate owner, tenant, archive and Vex gates on EVERY attach, before
     // looking up transport frames. A cached frame never retains authorization.
@@ -800,7 +837,16 @@ export class AIChatService {
     const conversation = await this.getConversation(conversationId);
     if (conversation.status === 'archived')
       throw new VendixHttpException(ErrorCodes.AI_CHAT_002);
-    await this.assertVexTurnAccess(this.turnAgentKey(conversation));
+    const agentKey = this.turnAgentKey(conversation);
+    if (options?.expectedDesignAppKind && agentKey !== VEX_AGENT_KEY) {
+      yield {
+        type: 'error',
+        error:
+          'La conversación no pertenece al agente Vex y no puede abrir un stream de diseño.',
+      };
+      return;
+    }
+    await this.assertVexTurnAccess(agentKey);
     for await (const frame of this.streamReplay.open(
       streamId,
       {
@@ -808,6 +854,9 @@ export class AIChatService {
         organization_id: context.organization_id,
         user_id: context.user_id,
         conversation_id: conversationId,
+        ...(options?.expectedDesignAppKind
+          ? { design_app_kind: options.expectedDesignAppKind }
+          : {}),
       },
       replay,
       (runSignal, checkpoint) =>
@@ -816,6 +865,7 @@ export class AIChatService {
           streamId,
           runSignal,
           checkpoint,
+          options?.expectedDesignAppKind,
         ),
       signal,
     )) {
@@ -847,6 +897,7 @@ export class AIChatService {
     checkpoint?: (
       read: () => { objective_id: string; checkpoint: number },
     ) => void,
+    expectedDesignAppKind?: string,
   ): AsyncGenerator<ChatStreamFrame> {
     // Every timing mark is relative to this. Taken before the first await so it
     // includes the intent lookup the browser is already waiting through.
@@ -860,6 +911,30 @@ export class AIChatService {
         type: 'error',
         error:
           'La sesión de chat expiró o ya se consumió. Vuelve a enviar el mensaje.',
+      };
+      return;
+    }
+
+    // Valida el alcance de diseño del intent contra el `:kind` esperado de la ruta:
+    // un stream del editor exige `design_context` con el mismo `app_kind`, y un
+    // stream general rechaza intents creados para el editor de diseño.
+    if (expectedDesignAppKind) {
+      if (
+        !intent.design_context ||
+        intent.design_context.app_kind !== expectedDesignAppKind
+      ) {
+        yield {
+          type: 'error',
+          error:
+            'El stream no corresponde a una sesión de diseño válida para esta app.',
+        };
+        return;
+      }
+    } else if (intent.design_context) {
+      yield {
+        type: 'error',
+        error:
+          'Este stream pertenece al editor de diseño y no puede abrirse desde el chat general.',
       };
       return;
     }
@@ -1076,7 +1151,12 @@ export class AIChatService {
       const storedPlan = activePlan
         ? null
         : await this.planState.get(conversationId);
-      const rawBase = this.resolveAgentLoopArgs(chatAgent, conversation, vexTurn);
+      const rawBase = this.resolveAgentLoopArgs(
+        chatAgent,
+        conversation,
+        vexTurn,
+        Boolean(intent.design_context),
+      );
       const base = intent.design_context?.allowed_tools?.length
         ? {
             ...rawBase,
@@ -2204,6 +2284,7 @@ export class AIChatService {
     agent: ResolvedChatAgent | null,
     conversation: ConversationWithMessages,
     vexTurn?: VexTurnCollection | null,
+    hasDesignContext = false,
   ): {
     app_key?: string;
     system_prompt?: string;
@@ -2224,6 +2305,13 @@ export class AIChatService {
     const tools =
       agent.allowed_tools.length > 0 ? agent.allowed_tools : undefined;
     const max_iterations = agent.max_iterations ?? undefined;
+    // Las herramientas `vex_design_*` solo pertenecen al editor de diseño: en
+    // cualquier turno normal de `/admin/vex` (sin `intent.design_context`) se
+    // excluyen explícitamente vía `agent_denied_tools`.
+    const deniedTools =
+      agent.key === VEX_AGENT_KEY && !hasDesignContext
+        ? Array.from(new Set([...agent.denied_tools, ...VEX_DESIGN_TOOL_NAMES]))
+        : agent.denied_tools;
     const scope = {
       // Solo viaja cuando la fila lo define: sin valor el loop usa su default
       // y la forma de los argumentos no cambia para los demás agentes.
@@ -2233,8 +2321,7 @@ export class AIChatService {
       agent_key: agent.key,
       agent_allowed_tools:
         agent.allowed_tools.length > 0 ? agent.allowed_tools : undefined,
-      agent_denied_tools:
-        agent.denied_tools.length > 0 ? agent.denied_tools : undefined,
+      agent_denied_tools: deniedTools.length > 0 ? deniedTools : undefined,
       conversation_id: conversation.id,
     };
     // Solo Vex propone planes completos y compacta a bloques: el cableado viaja

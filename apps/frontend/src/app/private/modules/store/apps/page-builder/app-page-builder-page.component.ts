@@ -146,61 +146,64 @@ function snapshot(value: unknown): string {
           </div>
         }
 
-        <!-- Contenido y Vista previa comparten la misma vista previa (un solo iframe) -->
-        @if (tab() === 'content' || tab() === 'preview') {
-          <div class="grid gap-3 p-3 md:px-6"
-               [class]="contentGridClass()">
-            @if (tab() === 'content') {
-              <aside class="min-h-0 overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] lg:h-full">
-                <app-builder-outline
-                  [catalog]="adapter().catalog"
-                  [mode]="mode()"
-                  [blocks]="blocks()"
-                  [selectedId]="selectedId()"
-                  (select)="selectedId.set($event)"
-                  (add)="addBlock($event)"
-                  (move)="move($event.from, $event.to)"
-                  (duplicate)="duplicate($event)"
-                  (toggleHidden)="toggleHidden($event)"
-                  (remove)="remove($event)"
-                />
-              </aside>
-              <section class="min-h-0 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] lg:h-full" aria-label="Campos de la sección">
-                <app-builder-inspector
-                  [catalog]="adapter().catalog"
-                  [block]="selectedBlock()"
-                  [appKind]="adapter().kind"
-                  (propChange)="setProp($event)"
-                  (productsResolved)="onProductsResolved($event)"
-                />
-              </section>
-            }
-            <section class="min-h-[32rem] overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-background)] lg:h-full"
-                     [class.hidden]="tab() === 'content'"
-                     [class.lg:block]="tab() === 'content'"
-                     aria-label="Vista previa">
-              <app-builder-preview-pane
-                [frameSrc]="frameSrc()"
-                [payload]="previewPayload()"
-                [selectedBlockId]="selectedId()"
-                [(device)]="device"
-                (blockSelect)="onPreviewSelect($event)"
+        <!-- Contenido y Vista previa comparten la misma vista previa (un solo iframe) y mantienen montado el panel de Vex al cambiar de pestaña u ocultarlo -->
+        <div
+          [class]="tab() === 'content' || tab() === 'preview' ? 'grid gap-3 p-3 md:px-6 ' + contentGridClass() : 'hidden'"
+          [attr.aria-hidden]="tab() !== 'content' && tab() !== 'preview' ? 'true' : null"
+        >
+          @if (tab() === 'content') {
+            <aside class="min-h-0 overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] lg:h-full">
+              <app-builder-outline
+                [catalog]="adapter().catalog"
+                [mode]="mode()"
+                [blocks]="blocks()"
+                [selectedId]="selectedId()"
+                (select)="selectedId.set($event)"
+                (add)="addBlock($event)"
+                (move)="move($event.from, $event.to)"
+                (duplicate)="duplicate($event)"
+                (toggleHidden)="toggleHidden($event)"
+                (remove)="remove($event)"
+              />
+            </aside>
+            <section class="min-h-0 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] lg:h-full" aria-label="Campos de la sección">
+              <app-builder-inspector
+                [catalog]="adapter().catalog"
+                [block]="selectedBlock()"
+                [appKind]="adapter().kind"
+                (propChange)="setProp($event)"
+                (productsResolved)="onProductsResolved($event)"
               />
             </section>
-            @if (canUseDesignChat() && designChatOpen() && designChatKind(); as chatKind) {
-              <div class="min-h-[28rem] lg:h-full lg:min-h-0">
-                <app-vex-design-chat-panel
-                  [kind]="chatKind"
-                  [draft]="page()"
-                  [open]="designChatOpen()"
-                  (close)="designChatOpen.set(false)"
-                  (applyDraft)="onDesignChatApply($event)"
-                  (discardDraft)="onDesignChatDiscard($event)"
-                />
-              </div>
-            }
-          </div>
-        }
+          }
+          <section class="min-h-[32rem] overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-background)] lg:h-full"
+                   [class.hidden]="tab() === 'content'"
+                   [class.lg:block]="tab() === 'content'"
+                   aria-label="Vista previa">
+            <app-builder-preview-pane
+              [frameSrc]="frameSrc()"
+              [payload]="previewPayload()"
+              [selectedBlockId]="selectedId()"
+              [(device)]="device"
+              (blockSelect)="onPreviewSelect($event)"
+            />
+          </section>
+          @if (canUseDesignChat() && designChatMounted() && designChatKind(); as chatKind) {
+            <div
+              [class]="designChatOpen() ? 'min-h-[28rem] lg:h-full lg:min-h-0' : 'hidden'"
+              [attr.aria-hidden]="!designChatVisible() ? 'true' : null"
+            >
+              <app-vex-design-chat-panel
+                [kind]="chatKind"
+                [draft]="page()"
+                [open]="designChatVisible()"
+                (close)="designChatOpen.set(false)"
+                (applyDraft)="onDesignChatApply($event)"
+                (discardDraft)="onDesignChatDiscard($event)"
+              />
+            </div>
+          }
+        </div>
 
         <div class="mx-auto max-w-3xl p-3 md:px-6 md:py-4" [class.hidden]="tab() !== 'general'">
           <app-app-page-general-panel
@@ -281,6 +284,8 @@ export class AppPageBuilderPageComponent<S = unknown, C = unknown> implements On
   readonly selectedId = signal<string | null>(null);
   readonly highlightedBlockId = signal<string | null>(null);
   readonly designChatOpen = signal(false);
+  /** Se activa la primera vez que se abre el panel y se mantiene montado oculto para preservar historial y conversación. */
+  readonly designChatMounted = signal(false);
   readonly device = signal<BuilderDevice>('mobile');
   private highlightTimer: ReturnType<typeof setTimeout> | null = null;
   /** Caché local de productos resueltos por `app-product-selector` para refrescar la vista previa en vivo. */
@@ -296,8 +301,15 @@ export class AppPageBuilderPageComponent<S = unknown, C = unknown> implements On
     if (!this.designChatKind()) return false;
     return this.auth.hasPermission?.('store:apps:manage') === true;
   });
+  /** Indica si el panel de Vex está realmente visible en la pestaña actual. */
+  readonly designChatVisible = computed(
+    () =>
+      this.canUseDesignChat() &&
+      this.designChatOpen() &&
+      (this.tab() === 'content' || this.tab() === 'preview'),
+  );
   readonly contentGridClass = computed(() => {
-    const chatVisible = this.canUseDesignChat() && this.designChatOpen();
+    const chatVisible = this.designChatVisible();
     if (this.tab() === 'content') {
       return chatVisible
         ? 'lg:h-[calc(100dvh-10.5rem)] lg:grid-cols-[minmax(0,15rem)_minmax(0,19rem)_minmax(0,1fr)_minmax(0,21rem)]'
@@ -365,7 +377,7 @@ export class AppPageBuilderPageComponent<S = unknown, C = unknown> implements On
     if (this.canUseDesignChat()) {
       actions.push({
         id: 'design-chat',
-        label: this.designChatOpen() ? 'Ocultar Vex' : 'Diseñar con Vex',
+        label: this.designChatVisible() ? 'Ocultar Vex' : 'Diseñar con Vex',
         variant: 'outline',
         icon: 'sparkles',
         title: 'Abrir o cerrar el chat de diseño con Vex',
@@ -554,9 +566,13 @@ export class AppPageBuilderPageComponent<S = unknown, C = unknown> implements On
 
   toggleDesignChat(): void {
     if (!this.canUseDesignChat()) return;
-    const next = !this.designChatOpen();
-    this.designChatOpen.set(next);
-    if (next && this.tab() !== 'content' && this.tab() !== 'preview') {
+    if (this.designChatVisible()) {
+      this.designChatOpen.set(false);
+      return;
+    }
+    this.designChatMounted.set(true);
+    this.designChatOpen.set(true);
+    if (this.tab() !== 'content' && this.tab() !== 'preview') {
       this.tab.set('content');
     }
   }

@@ -65,9 +65,12 @@ export function createVexDesignTools({
       };
     }
 
-    const conversationId = Number(
-      context.conversation_id ?? args.conversation_id,
-    );
+    // Regla de seguridad: exige `context.conversation_id` fijado por el servidor,
+    // sin aceptar fallback desde los argumentos que envía el modelo.
+    const conversationId =
+      typeof context.conversation_id === 'number'
+        ? context.conversation_id
+        : Number.NaN;
     if (!Number.isInteger(conversationId) || conversationId < 1) {
       return {
         ok: false,

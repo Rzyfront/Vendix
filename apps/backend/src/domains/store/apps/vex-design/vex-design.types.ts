@@ -24,6 +24,9 @@ export function isDesignChatAppKind(kind: unknown): kind is DesignChatAppKind {
 /** Tope de cambios en la pila de historial del borrador por conversación. */
 export const VEX_DESIGN_MAX_HISTORY = 20;
 
+/** Marca en `ai_conversations.metadata.surface` que identifica hilos del editor de apps. */
+export const VEX_DESIGN_CONVERSATION_SURFACE = 'apps_design';
+
 export const VEX_DESIGN_OPERATIONS = [
   'set_theme',
   'set_block_prop',
@@ -92,12 +95,24 @@ export type VexDesignOperation =
   | VexDesignApplyPresetOp;
 
 export interface VexDesignChangeEntry {
+  /** Identificador del turno que agrupa varios parches como un solo punto de deshacer. */
+  turn_id?: string;
   previous: AppPageDocument;
   document: AppPageDocument;
   summary: string;
+  /** Resumen del último parche individual aplicado en el turno. */
+  last_patch_summary?: string;
   touched_block_id: string | null;
+  /** Último bloque tocado por el parche individual más reciente del turno. */
+  last_patch_touched_block_id?: string | null;
   op: VexDesignOpName;
   created_at: string;
+}
+
+export interface VexDesignDiscardedInfo {
+  summary: string;
+  touched_block_id: string | null;
+  discarded_at: string;
 }
 
 export interface VexDesignSession {
@@ -108,6 +123,10 @@ export interface VexDesignSession {
   initial_document: AppPageDocument;
   current_document: AppPageDocument;
   history: VexDesignChangeEntry[];
+  /** Turno activo para agrupar sus parches en una única entrada del historial. */
+  active_turn_id?: string | null;
+  /** Última entrada descartada para propagar su `touched_block_id` en el stream SSE. */
+  last_discarded?: VexDesignDiscardedInfo | null;
   media_base_url?: string;
   updated_at: string;
 }

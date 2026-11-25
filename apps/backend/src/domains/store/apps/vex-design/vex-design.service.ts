@@ -28,6 +28,7 @@ import {
   VexDesignAddBlockOp,
   VexDesignApplyPresetOp,
   VexDesignChangeEntry,
+  VexDesignDiscardedInfo,
   VexDesignDiscardResult,
   VexDesignGalleryMediaSummary,
   VexDesignOperation,
@@ -48,11 +49,15 @@ const SESSION_TTL_SECONDS = 7200;
 
 const BLOCK_ID_SAFE_RE = /^[a-z0-9][a-z0-9_-]{0,39}$/;
 
-/** Propiedades de URL prohibidas en `set_block_prop` para evitar URLs externas. */
+/** Propiedades de URL prohibidas en escritura directa para evitar URLs externas. */
 const URL_PROP_KINDS = new Set<FieldSpec['kind']>(['url', 'url_list']);
 
 function cloneDoc(doc: AppPageDocument): AppPageDocument {
   return JSON.parse(JSON.stringify(doc)) as AppPageDocument;
+}
+
+function canonicalDoc(doc: AppPageDocument): string {
+  return JSON.stringify(doc);
 }
 
 function emptyDraft(): AppPageDocument {
@@ -85,6 +90,11 @@ export class VexDesignService {
    * Inicializa o sincroniza la sesión del borrador para `(storeId, conversationId)`.
    * Valida que la app admita chat (excluye `store_home`) y que el borrador
    * entrante cumpla `app-page.contract.ts`.
+   *
+   * Si el borrador entrante difiere del `current_document` almacenado (por una
+   * edición manual en el editor o una propuesta no aplicada), reconcilia la
+   * pila de `history` truncando snapshots obsoletos para que descartar nunca
+   * restaure un documento desactualizado.
    */
   async initOrSyncSession(params: {
     storeId: number;
@@ -93,6 +103,7 @@ export class VexDesignService {
     appKind: string;
     draft?: unknown;
     mediaBaseUrl?: string;
+    turnId?: string;
   }): Promise<VexDesignSession> {
     if (!isDesignChatAppKind(params.appKind)) {
       throw new Error(
@@ -123,9 +134,18 @@ export class VexDesignService {
           'Esta conversación pertenece a otro usuario de la tienda.',
         );
       }
+
+      const reconciledHistory = this.reconcileHistoryForDraft(
+        existing,
+        incomingDraft,
+      );
+
       const next: VexDesignSession = {
         ...existing,
-        current_document: incomingDraft,
+        current_document: cloneDoc(incomingDraft),
+        history: reconciledHistory,
+        active_turn_id: params.turnId ?? null,
+        last_discarded: null,
         media_base_url: params.mediaBaseUrl ?? existing.media_base_url,
         updated_at: new Date().toISOString(),
       };
@@ -141,6 +161,8 @@ export class VexDesignService {
       initial_document: cloneDoc(incomingDraft),
       current_document: cloneDoc(incomingDraft),
       history: [],
+      active_turn_id: params.turnId ?? null,
+      last_discarded: null,
       media_base_url: params.mediaBaseUrl,
       updated_at: new Date().toISOString(),
     };
@@ -200,6 +222,7 @@ export class VexDesignService {
     document: AppPageDocument;
     initial_document: AppPageDocument;
     latest_change: VexDesignChangeEntry | null;
+    last_discarded: VexDesignDiscardedInfo | null;
     history_depth: number;
     can_discard: boolean;
   } | null> {
@@ -215,6 +238,7 @@ export class VexDesignService {
         session.history.length > 0
           ? session.history[session.history.length - 1]
           : null,
+      last_discarded: session.last_discarded ?? null,
       history_depth: session.history.length,
       can_discard: session.history.length > 0,
     };
@@ -224,12 +248,17 @@ export class VexDesignService {
    * Aplica UNA operación acotada al borrador de la conversación.
    * Si la validación del contrato falla, devuelve error legible y deja el
    * borrador y la pila completamente intactos.
+   *
+   * Cuando hay un turno activo (`turnId` o `session.active_turn_id`), varios
+   * parches del mismo turno se agrupan en una única entrada de `history` para
+   * que un solo «Descartar» revierta todo el turno sin dejar residuos en Redis.
    */
   async patchDraft(
     storeId: number,
     conversationId: number,
     operation: VexDesignOperation,
     expectedAppKind?: DesignChatAppKind,
+    options?: { turnId?: string },
   ): Promise<VexDesignPatchResult> {
     const session = await this.loadSession(storeId, conversationId);
     if (!session) {
@@ -323,26 +352,53 @@ export class VexDesignService {
     }
 
     const nextDoc = validation.value;
-    const entry: VexDesignChangeEntry = {
-      previous,
-      document: cloneDoc(nextDoc),
-      summary,
-      touched_block_id: touchedBlockId,
-      op: operation.op,
-      created_at: new Date().toISOString(),
-    };
+    const now = new Date().toISOString();
+    const effectiveTurnId = options?.turnId ?? session.active_turn_id ?? undefined;
+    const topEntry =
+      session.history.length > 0
+        ? session.history[session.history.length - 1]
+        : null;
 
-    const nextHistory = [...session.history, entry];
-    // Tope de 20 elementos en la pila de historial del borrador.
-    while (nextHistory.length > VEX_DESIGN_MAX_HISTORY) {
-      nextHistory.shift();
+    let nextHistory: VexDesignChangeEntry[];
+    if (effectiveTurnId && topEntry && topEntry.turn_id === effectiveTurnId) {
+      // Agrupa todos los parches de un mismo turno en un solo punto de la pila,
+      // conservando el `previous` previo al turno para revertirlos en bloque.
+      const merged: VexDesignChangeEntry = {
+        ...topEntry,
+        document: cloneDoc(nextDoc),
+        summary: topEntry.summary ? `${topEntry.summary}; ${summary}` : summary,
+        last_patch_summary: summary,
+        touched_block_id: touchedBlockId ?? topEntry.touched_block_id,
+        last_patch_touched_block_id: touchedBlockId,
+        op: operation.op,
+        created_at: now,
+      };
+      nextHistory = [...session.history.slice(0, -1), merged];
+    } else {
+      const entry: VexDesignChangeEntry = {
+        ...(effectiveTurnId ? { turn_id: effectiveTurnId } : {}),
+        previous,
+        document: cloneDoc(nextDoc),
+        summary,
+        last_patch_summary: summary,
+        touched_block_id: touchedBlockId,
+        last_patch_touched_block_id: touchedBlockId,
+        op: operation.op,
+        created_at: now,
+      };
+      nextHistory = [...session.history, entry];
+      // Tope de 20 elementos en la pila de historial del borrador.
+      while (nextHistory.length > VEX_DESIGN_MAX_HISTORY) {
+        nextHistory.shift();
+      }
     }
 
     const updatedSession: VexDesignSession = {
       ...session,
       current_document: cloneDoc(nextDoc),
       history: nextHistory,
-      updated_at: new Date().toISOString(),
+      last_discarded: null,
+      updated_at: now,
     };
     await this.saveSession(updatedSession);
 
@@ -387,12 +443,18 @@ export class VexDesignService {
     const nextHistory = [...session.history];
     const popped = nextHistory.pop()!;
     const restored = cloneDoc(popped.previous);
+    const now = new Date().toISOString();
 
     const updatedSession: VexDesignSession = {
       ...session,
       current_document: restored,
       history: nextHistory,
-      updated_at: new Date().toISOString(),
+      last_discarded: {
+        summary: popped.summary,
+        touched_block_id: popped.touched_block_id,
+        discarded_at: now,
+      },
+      updated_at: now,
     };
     await this.saveSession(updatedSession);
 
@@ -432,6 +494,8 @@ export class VexDesignService {
       ...session,
       current_document: restored,
       history: [],
+      active_turn_id: null,
+      last_discarded: null,
       updated_at: new Date().toISOString(),
     };
     await this.saveSession(updatedSession);
@@ -519,11 +583,14 @@ export class VexDesignService {
         };
       }
       // Las imágenes deben ir por `set_block_media` (nunca URLs externas libres).
-      if (URL_PROP_KINDS.has(fieldSpec.kind) && op.value !== null && op.value !== '') {
-        return {
-          ok: false,
-          error: `Para cambiar la imagen "${prop}" usa la operación "set_block_media" con un media_id de la galería de la tienda, nunca una URL directa.`,
-        };
+      const urlError = this.rejectExternalUrlValue(
+        prop,
+        fieldSpec,
+        op.value,
+        'set_block_prop',
+      );
+      if (urlError) {
+        return { ok: false, error: urlError };
       }
       const nextHero: Record<string, unknown> = { ...(draft.hero ?? {}) };
       if (op.value === null || op.value === '') {
@@ -576,37 +643,14 @@ export class VexDesignService {
       };
     }
 
-    if (
-      URL_PROP_KINDS.has(fieldSpec.kind) &&
-      op.value !== null &&
-      op.value !== '' &&
-      !(Array.isArray(op.value) && op.value.length === 0)
-    ) {
-      return {
-        ok: false,
-        error: `Para asignar imágenes en "${prop}" usa la operación "set_block_media" con un media_id de la galería de la tienda.`,
-      };
-    }
-
-    // Si es lista de ítems con campos `url` (ej. `highlights.items[].image_url` o `team.items[].photo_url`),
-    // impedimos inyectar URLs externas por esta vía.
-    if (fieldSpec.kind === 'list' && Array.isArray(op.value)) {
-      const urlKeys = Object.entries(fieldSpec.item)
-        .filter(([, sub]) => sub.kind === 'url')
-        .map(([k]) => k);
-      if (urlKeys.length > 0) {
-        for (const item of op.value) {
-          if (!isPlainObject(item)) continue;
-          for (const key of urlKeys) {
-            if (typeof item[key] === 'string' && item[key].trim()) {
-              return {
-                ok: false,
-                error: `Las imágenes de "${prop}.${key}" solo pueden asignarse desde la galería con "set_block_media".`,
-              };
-            }
-          }
-        }
-      }
+    const urlError = this.rejectExternalUrlValue(
+      prop,
+      fieldSpec,
+      op.value,
+      'set_block_prop',
+    );
+    if (urlError) {
+      return { ok: false, error: urlError };
     }
 
     const nextProps: Record<string, unknown> = { ...block.props };
@@ -736,12 +780,18 @@ export class VexDesignService {
       const current = Array.isArray(block.props['image_urls'])
         ? [...(block.props['image_urls'] as string[])]
         : [];
-      if (
-        typeof op.item_index === 'number' &&
-        Number.isInteger(op.item_index) &&
-        op.item_index >= 0 &&
-        op.item_index < current.length
-      ) {
+      if (op.item_index !== undefined) {
+        if (
+          typeof op.item_index !== 'number' ||
+          !Number.isInteger(op.item_index) ||
+          op.item_index < 0 ||
+          op.item_index >= current.length
+        ) {
+          return {
+            ok: false,
+            error: `El índice ${String(op.item_index)} no existe en "${block.id}.image_urls".`,
+          };
+        }
         current[op.item_index] = stableUrl;
       } else {
         if (current.length >= field.max) {
@@ -853,11 +903,14 @@ export class VexDesignService {
           error: `La propiedad "${key}" no existe en el catálogo del bloque "${blockType}".`,
         };
       }
-      if (URL_PROP_KINDS.has(fieldSpec.kind) && val !== null && val !== '') {
-        return {
-          ok: false,
-          error: `Para agregar imágenes al bloque usa "set_block_media" después de crearlo.`,
-        };
+      const urlError = this.rejectExternalUrlValue(
+        key,
+        fieldSpec,
+        val,
+        'add_block',
+      );
+      if (urlError) {
+        return { ok: false, error: urlError };
       }
     }
 
@@ -996,6 +1049,81 @@ export class VexDesignService {
   // ---------------------------------------------------------------------------
   // Helpers privados
   // ---------------------------------------------------------------------------
+
+  /**
+   * Valida que una propiedad del catálogo no inyecte URLs externas ni en
+   * campos de primer nivel (`url`/`url_list`) ni en subcampos `url` dentro de
+   * `kind: 'list'` (por ejemplo `highlights.items[].image_url` o
+   * `team.items[].photo_url`).
+   */
+  private rejectExternalUrlValue(
+    prop: string,
+    fieldSpec: FieldSpec,
+    value: unknown,
+    context: 'set_block_prop' | 'add_block',
+  ): string | null {
+    const isEmptyValue = (candidate: unknown): boolean =>
+      candidate === undefined ||
+      candidate === null ||
+      candidate === '' ||
+      (typeof candidate === 'string' && candidate.trim() === '') ||
+      (Array.isArray(candidate) && candidate.length === 0);
+
+    if (URL_PROP_KINDS.has(fieldSpec.kind)) {
+      if (!isEmptyValue(value)) {
+        return context === 'add_block'
+          ? `Para agregar imágenes en "${prop}" usa "set_block_media" después de crear el bloque.`
+          : `Para asignar imágenes en "${prop}" usa la operación "set_block_media" con un media_id de la galería de la tienda, nunca una URL directa.`;
+      }
+      return null;
+    }
+
+    if (fieldSpec.kind === 'list' && Array.isArray(value)) {
+      const urlKeys = Object.entries(fieldSpec.item)
+        .filter(([, sub]) => URL_PROP_KINDS.has(sub.kind))
+        .map(([k]) => k);
+      if (urlKeys.length > 0) {
+        for (const item of value) {
+          if (!isPlainObject(item)) continue;
+          for (const key of urlKeys) {
+            if (!isEmptyValue(item[key])) {
+              return context === 'add_block'
+                ? `Las imágenes de "${prop}.${key}" no pueden enviarse al crear el bloque; usa "set_block_media" después de crearlo.`
+                : `Las imágenes de "${prop}.${key}" solo pueden asignarse desde la galería con "set_block_media".`;
+            }
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Reconcilia la pila de `history` cuando el editor sincroniza un borrador
+   * distinto al `current_document` de Redis:
+   * - Si coincide con el actual, mantiene intacta la pila.
+   * - Si coincide con una entrada anterior de la pila (p. ej. una propuesta
+   *   pendiente nunca aplicada), trunca solo los pasos posteriores.
+   * - Si el borrador divergió por una edición manual en el editor, trunca la
+   *   pila a `[]` para marcar un punto base limpio y evitar restaurar snapshots
+   *   obsoletos al descartar.
+   */
+  private reconcileHistoryForDraft(
+    existing: VexDesignSession,
+    incomingDraft: AppPageDocument,
+  ): VexDesignChangeEntry[] {
+    const incomingKey = canonicalDoc(incomingDraft);
+    if (incomingKey === canonicalDoc(existing.current_document)) {
+      return existing.history;
+    }
+    for (let i = existing.history.length - 1; i >= 0; i--) {
+      if (canonicalDoc(existing.history[i].document) === incomingKey) {
+        return existing.history.slice(0, i + 1);
+      }
+    }
+    return [];
+  }
 
   private async resolveValidatedDraft(
     storeId: number,

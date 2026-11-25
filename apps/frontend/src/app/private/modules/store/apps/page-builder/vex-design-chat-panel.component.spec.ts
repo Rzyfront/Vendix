@@ -215,6 +215,109 @@ describe('VexDesignChatPanelComponent (F4)', () => {
     fixture.detectChanges();
     expect(closedCount).toBe(1);
   });
+
+  it('descartar una propuesta pendiente la marca descartada sin emitir discardDraft ni tocar el borrador', () => {
+    fixture.componentInstance.sendPrompt('Propuesta sin aplicar');
+    fixture.detectChanges();
+
+    stream$.next({
+      type: 'design_draft',
+      app_kind: 'product_page',
+      op: 'set_theme',
+      document: darkHeroDraft(),
+      summary: 'Portada: fondo oscuro',
+      touched_block_id: 'hero',
+      history_depth: 1,
+      can_discard: true,
+    });
+    stream$.next({ type: 'done' });
+    stream$.complete();
+    fixture.detectChanges();
+
+    // Sin pulsar «Aplicar», la propuesta sigue `pending`.
+    const proposalCard = el().querySelector('[data-testid="vex-design-proposal"]');
+    expect(proposalCard?.getAttribute('data-status')).toBe('pending');
+
+    const discardBtn = el().querySelector('[data-testid="vex-design-discard"]') as HTMLButtonElement;
+    discardBtn.click();
+    fixture.detectChanges();
+
+    expect(discarded.length).toBe(0);
+    expect(proposalCard?.getAttribute('data-status')).toBe('discarded');
+    expect(chatService.discardLast).toHaveBeenCalledWith('product_page', 77);
+  });
+
+  it('impide descartar una propuesta aplicada anterior cuando existe otra aplicada más reciente', () => {
+    // Turno 1 -> aplicar
+    fixture.componentInstance.sendPrompt('Primer cambio');
+    fixture.detectChanges();
+    stream$.next({
+      type: 'design_draft',
+      app_kind: 'product_page',
+      op: 'set_theme',
+      document: darkHeroDraft(),
+      summary: 'Cambio 1',
+      touched_block_id: 'hero',
+      history_depth: 1,
+      can_discard: true,
+    });
+    stream$.next({ type: 'done' });
+    stream$.complete();
+    fixture.detectChanges();
+
+    const applyButtons1 = el().querySelectorAll('[data-testid="vex-design-apply"]');
+    (applyButtons1[0] as HTMLButtonElement).click();
+    fixture.componentRef.setInput('draft', darkHeroDraft());
+    fixture.detectChanges();
+
+    // Turno 2 -> aplicar
+    const stream2$ = new Subject<VexDesignStreamChunk>();
+    chatService.streamDesign.and.returnValue(stream2$.asObservable());
+    const secondDraft: AppPageDocument = {
+      ...darkHeroDraft(),
+      hero: { ...darkHeroDraft().hero, title: 'Segundo título' },
+    };
+
+    fixture.componentInstance.sendPrompt('Segundo cambio');
+    fixture.detectChanges();
+    stream2$.next({
+      type: 'design_draft',
+      app_kind: 'product_page',
+      op: 'set_block_prop',
+      document: secondDraft,
+      summary: 'Cambio 2',
+      touched_block_id: 'hero',
+      history_depth: 2,
+      can_discard: true,
+    });
+    stream2$.next({ type: 'done' });
+    stream2$.complete();
+    fixture.detectChanges();
+
+    const applyButtons2 = el().querySelectorAll('[data-testid="vex-design-apply"]');
+    (applyButtons2[0] as HTMLButtonElement).click();
+    fixture.componentRef.setInput('draft', secondDraft);
+    fixture.detectChanges();
+
+    // La propuesta 1 ya no puede descartarse mientras la propuesta 2 siga aplicada.
+    const discardButtons = el().querySelectorAll('[data-testid="vex-design-discard"]');
+    expect(discardButtons.length).toBe(2);
+    expect((discardButtons[0] as HTMLButtonElement).disabled).toBe(true);
+    expect((discardButtons[1] as HTMLButtonElement).disabled).toBe(false);
+
+    // Incluso llamando el método directamente, no revierte la propuesta 1.
+    const firstMsgId = fixture.componentInstance.messages().find((m) => m.proposal)?.id!;
+    fixture.componentInstance.discardProposal(firstMsgId);
+    expect(discarded.length).toBe(0);
+
+    // Al descartar la propuesta 2, restaura el estado previo al turno 2 (`darkHeroDraft`)
+    // y vuelve a habilitar el descarte de la propuesta 1.
+    (discardButtons[1] as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(discarded.length).toBe(1);
+    expect(discarded[0].document.hero?.title).toBe('Portada inicial');
+    expect((el().querySelectorAll('[data-testid="vex-design-discard"]')[0] as HTMLButtonElement).disabled).toBe(false);
+  });
 });
 
 @Component({
@@ -354,5 +457,61 @@ describe('AppPageBuilderPageComponent · integración chat Vex (F4)', () => {
 
     expect(cmp.previewPayload().page.theme).toBeUndefined();
     expect(apps.savePage).not.toHaveBeenCalled();
+  });
+
+  it('preserva historial, conversationId y propuestas al ocultar el panel o cambiar de pestaña', async () => {
+    const { fixture } = await mount('product_page', true);
+    const cmp = fixture.componentInstance;
+
+    // Abre el panel y carga estado en la instancia montada.
+    cmp.onAction('design-chat');
+    fixture.detectChanges();
+
+    const panelDebug = fixture.debugElement.query(
+      (de) => de.componentInstance instanceof VexDesignChatPanelComponent,
+    );
+    expect(panelDebug).toBeTruthy();
+    const panel = panelDebug.componentInstance as VexDesignChatPanelComponent;
+    panel.conversationId.set(912);
+    panel.messages.set([
+      { id: 'u1', role: 'user', content: 'Cambia el fondo' },
+      {
+        id: 'a1',
+        role: 'assistant',
+        content: 'Listo.',
+        proposal: {
+          document: darkHeroDraft(),
+          previousDocument: baseDraft(),
+          summary: 'Portada: fondo oscuro',
+          touchedBlockId: 'hero',
+          status: 'pending',
+        },
+      },
+    ]);
+    fixture.detectChanges();
+
+    // 1. Ocultar el panel con el botón del encabezado no destruye su estado.
+    cmp.onAction('design-chat');
+    fixture.detectChanges();
+    expect(cmp.designChatOpen()).toBe(false);
+
+    // 2. Cambiar a Estilo y General y volver a Contenido mantiene la misma instancia.
+    cmp.setTab('style');
+    fixture.detectChanges();
+    cmp.setTab('general');
+    fixture.detectChanges();
+    cmp.onAction('design-chat');
+    fixture.detectChanges();
+
+    expect(cmp.tab()).toBe('content');
+    expect(cmp.designChatVisible()).toBe(true);
+
+    const panelAfter = fixture.debugElement.query(
+      (de) => de.componentInstance instanceof VexDesignChatPanelComponent,
+    )?.componentInstance as VexDesignChatPanelComponent;
+    expect(panelAfter).toBe(panel);
+    expect(panelAfter.conversationId()).toBe(912);
+    expect(panelAfter.messages().length).toBe(2);
+    expect(panelAfter.messages()[1].proposal?.status).toBe('pending');
   });
 });

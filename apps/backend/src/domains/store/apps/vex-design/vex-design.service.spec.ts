@@ -233,4 +233,336 @@ describe('VexDesignService (F4 historial y contrato)', () => {
       }
     }
   });
+
+  it('bloquea URLs externas dentro de subcampos de listas al usar add_block y set_block_prop', async () => {
+    await service.initOrSyncSession({
+      storeId,
+      userId,
+      conversationId,
+      appKind: 'service_page',
+      draft: makeDraft({ blocks: [] }),
+    });
+
+    const addHighlightsWithUrl = await service.patchDraft(
+      storeId,
+      conversationId,
+      {
+        op: 'add_block',
+        block_type: 'highlights',
+        props: {
+          title: 'Destacados',
+          items: [
+            {
+              title: 'Rápido',
+              text: 'Entrega inmediata',
+              image_url: 'https://evil.example.com/img.jpg',
+            },
+          ],
+        },
+      },
+    );
+    expect(addHighlightsWithUrl.ok).toBe(false);
+    if (!addHighlightsWithUrl.ok) {
+      expect(addHighlightsWithUrl.error).toMatch(/set_block_media/i);
+    }
+
+    const addTeamWithPhotoUrl = await service.patchDraft(
+      storeId,
+      conversationId,
+      {
+        op: 'add_block',
+        block_type: 'team',
+        props: {
+          title: 'Equipo',
+          items: [
+            {
+              name: 'Ana',
+              role: 'Estilista',
+              photo_url: 'https://evil.example.com/ana.jpg',
+            },
+          ],
+        },
+      },
+    );
+    expect(addTeamWithPhotoUrl.ok).toBe(false);
+    if (!addTeamWithPhotoUrl.ok) {
+      expect(addTeamWithPhotoUrl.error).toMatch(/set_block_media/i);
+    }
+
+    // Sin URL en subcampos sí permite crear el bloque normalmente.
+    const validTeam = await service.patchDraft(storeId, conversationId, {
+      op: 'add_block',
+      block_type: 'team',
+      props: {
+        title: 'Equipo',
+        items: [{ name: 'Ana', role: 'Estilista' }],
+      },
+    });
+    expect(validTeam.ok).toBe(true);
+    if (!validTeam.ok) return;
+
+    // También bloquea URL externa en `set_block_prop` sobre `team.items[].photo_url`.
+    const setTeamPhotoUrl = await service.patchDraft(storeId, conversationId, {
+      op: 'set_block_prop',
+      block_id: validTeam.touched_block_id!,
+      prop: 'items',
+      value: [
+        {
+          name: 'Ana',
+          role: 'Estilista',
+          photo_url: 'https://evil.example.com/ana2.jpg',
+        },
+      ],
+    });
+    expect(setTeamPhotoUrl.ok).toBe(false);
+    if (!setTeamPhotoUrl.ok) {
+      expect(setTeamPhotoUrl.error).toMatch(/set_block_media/i);
+    }
+  });
+
+  it('valida límites de item_index en gallery.image_urls sin hacer push silencioso', async () => {
+    prisma.store_app_media.findFirst.mockResolvedValue({
+      id: 55,
+      public_token: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      alt: 'Foto válida',
+    });
+
+    await service.initOrSyncSession({
+      storeId,
+      userId,
+      conversationId,
+      appKind: 'product_page',
+      draft: makeDraft({
+        blocks: [
+          {
+            id: 'gallery',
+            type: 'gallery',
+            enabled: true,
+            props: {
+              title: 'Galería',
+              image_urls: ['https://api.vendix.online/api/public/apps/media/existing-1'],
+            },
+          },
+        ],
+      }),
+      mediaBaseUrl: 'https://api.vendix.online/api',
+    });
+
+    const negativeIdx = await service.patchDraft(storeId, conversationId, {
+      op: 'set_block_media',
+      block_id: 'gallery',
+      prop: 'image_urls',
+      media_id: 55,
+      item_index: -1,
+    });
+    expect(negativeIdx.ok).toBe(false);
+
+    const outOfRangeIdx = await service.patchDraft(storeId, conversationId, {
+      op: 'set_block_media',
+      block_id: 'gallery',
+      prop: 'image_urls',
+      media_id: 55,
+      item_index: 5,
+    });
+    expect(outOfRangeIdx.ok).toBe(false);
+
+    // Índice válido reemplaza en sitio (mantiene largo 1).
+    const replaceRes = await service.patchDraft(storeId, conversationId, {
+      op: 'set_block_media',
+      block_id: 'gallery',
+      prop: 'image_urls',
+      media_id: 55,
+      item_index: 0,
+    });
+    expect(replaceRes.ok).toBe(true);
+    if (replaceRes.ok) {
+      const urls = replaceRes.document.blocks[0].props['image_urls'] as string[];
+      expect(urls).toEqual([
+        'https://api.vendix.online/api/public/apps/media/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      ]);
+    }
+
+    // Sin item_index agrega al final (largo 2).
+    const appendRes = await service.patchDraft(storeId, conversationId, {
+      op: 'set_block_media',
+      block_id: 'gallery',
+      prop: 'image_urls',
+      media_id: 55,
+    });
+    expect(appendRes.ok).toBe(true);
+    if (appendRes.ok) {
+      const urls = appendRes.document.blocks[0].props['image_urls'] as string[];
+      expect(urls).toHaveLength(2);
+    }
+  });
+
+  it('agrupa múltiples parches de un mismo turno en una sola entrada y los revierte juntos al descartar', async () => {
+    await service.initOrSyncSession({
+      storeId,
+      userId,
+      conversationId,
+      appKind: 'product_page',
+      draft: makeDraft(),
+      turnId: 'turn-1',
+    });
+
+    const p1 = await service.patchDraft(storeId, conversationId, {
+      op: 'set_theme',
+      tokens: { surface_color: '#0F172A' },
+    });
+    const p2 = await service.patchDraft(storeId, conversationId, {
+      op: 'set_block_prop',
+      block_id: 'hero',
+      prop: 'title',
+      value: 'Título del turno 1',
+    });
+
+    expect(p1.ok && p2.ok).toBe(true);
+    if (!p2.ok) return;
+    // Dos parches en el mismo turno ocupan una única entrada en la pila.
+    expect(p2.history_depth).toBe(1);
+
+    // Un solo discardLast revierte ambos parches y registra el bloque tocado descartado.
+    const d1 = await service.discardLast(storeId, conversationId);
+    expect(d1.ok).toBe(true);
+    if (!d1.ok) return;
+    expect(d1.history_depth).toBe(0);
+    expect(d1.touched_block_id).toBe('hero');
+    expect(d1.document.theme).toBeUndefined();
+    expect(d1.document.hero?.title).toBe('Título original');
+
+    const latest = await service.getLatestState(storeId, conversationId, 'product_page');
+    expect(latest?.last_discarded?.touched_block_id).toBe('hero');
+  });
+
+  it('reconcilia history en initOrSyncSession cuando el borrador sincronizado difiere del tope', async () => {
+    const d0 = makeDraft();
+    await service.initOrSyncSession({
+      storeId,
+      userId,
+      conversationId,
+      appKind: 'product_page',
+      draft: d0,
+      turnId: 'turn-1',
+    });
+    const p1 = await service.patchDraft(storeId, conversationId, {
+      op: 'set_block_prop',
+      block_id: 'hero',
+      prop: 'title',
+      value: 'Cambio turno 1',
+    });
+    expect(p1.ok).toBe(true);
+    if (!p1.ok) return;
+    const d1 = p1.document;
+
+    // Turno 2 produce d2 en Redis, pero el usuario nunca lo aplica en el editor.
+    await service.initOrSyncSession({
+      storeId,
+      userId,
+      conversationId,
+      appKind: 'product_page',
+      draft: d1,
+      turnId: 'turn-2',
+    });
+    await service.patchDraft(storeId, conversationId, {
+      op: 'set_block_prop',
+      block_id: 'hero',
+      prop: 'subtitle',
+      value: 'Subtítulo no aplicado',
+    });
+
+    // Turno 3 sincroniza d1 (el borrador real del editor): trunca turno 2 y conserva turno 1.
+    const syncedPrefix = await service.initOrSyncSession({
+      storeId,
+      userId,
+      conversationId,
+      appKind: 'product_page',
+      draft: d1,
+      turnId: 'turn-3',
+    });
+    expect(syncedPrefix.history).toHaveLength(1);
+    expect(syncedPrefix.current_document.hero?.title).toBe('Cambio turno 1');
+    expect(syncedPrefix.current_document.hero?.subtitle).toBe('Subtítulo original');
+
+    // Si el dueño edita a mano algo distinto a cualquier snapshot, history se trunca a []
+    // para que descartar jamás restaure un borrador obsoleto.
+    const manualDraft = makeDraft({
+      hero: { title: 'Editado a mano por el dueño', variant: 'centered' },
+    });
+    const syncedManual = await service.initOrSyncSession({
+      storeId,
+      userId,
+      conversationId,
+      appKind: 'product_page',
+      draft: manualDraft,
+      turnId: 'turn-4',
+    });
+    expect(syncedManual.history).toHaveLength(0);
+    const discardRes = await service.discardLast(storeId, conversationId);
+    expect(discardRes.ok).toBe(false);
+  });
+
+  it('persiste y recupera sesiones por la ruta real de Redis (TTL, lectura entre instancias y fallback)', async () => {
+    const store = new Map<string, string>();
+    const redisMock = {
+      get: jest.fn(async (key: string) => store.get(key) ?? null),
+      set: jest.fn(async (key: string, value: string) => {
+        store.set(key, value);
+        return 'OK';
+      }),
+    };
+
+    const writerService = new VexDesignService(prisma as any, redisMock as any);
+    await writerService.initOrSyncSession({
+      storeId,
+      userId,
+      conversationId,
+      appKind: 'product_page',
+      draft: makeDraft(),
+      turnId: 'redis-turn-1',
+    });
+    await writerService.patchDraft(storeId, conversationId, {
+      op: 'set_theme',
+      tokens: { surface_color: '#111827' },
+    });
+
+    const expectedKey = `vex:design-session:${storeId}:${conversationId}`;
+    expect(redisMock.set).toHaveBeenCalledWith(
+      expectedKey,
+      expect.any(String),
+      'EX',
+      7200,
+    );
+    expect(store.has(expectedKey)).toBe(true);
+
+    // Una segunda instancia sin caché en memoria lee el estado completo desde Redis.
+    const readerService = new VexDesignService(prisma as any, redisMock as any);
+    const state = await readerService.getLatestState(
+      storeId,
+      conversationId,
+      'product_page',
+    );
+    expect(state?.document.theme?.surface_color).toBe('#111827');
+    expect(state?.history_depth).toBe(1);
+
+    // Descartar desde la segunda instancia actualiza Redis y mantiene consistencia.
+    const undone = await readerService.discardLast(storeId, conversationId);
+    expect(undone.ok).toBe(true);
+    const afterUndo = await writerService.getLatestState(
+      storeId,
+      conversationId,
+      'product_page',
+    );
+    expect(afterUndo?.history_depth).toBe(0);
+    expect(afterUndo?.document.theme).toBeUndefined();
+
+    // Si Redis falla al leer, degrada al respaldo en memoria sin romper la sesión.
+    redisMock.get.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+    const fallbackState = await readerService.getLatestState(
+      storeId,
+      conversationId,
+      'product_page',
+    );
+    expect(fallbackState?.app_kind).toBe('product_page');
+  });
 });

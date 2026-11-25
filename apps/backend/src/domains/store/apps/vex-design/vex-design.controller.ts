@@ -12,6 +12,7 @@ import {
   Sse,
   UseGuards,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { Observable } from 'rxjs';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ResponseService } from '@common/responses/response.service';
@@ -30,6 +31,7 @@ import { VexDesignService } from './vex-design.service';
 import {
   DESIGN_CHAT_APP_KINDS,
   DesignChatAppKind,
+  VEX_DESIGN_CONVERSATION_SURFACE,
   isDesignChatAppKind,
 } from './vex-design.types';
 
@@ -68,22 +70,38 @@ export class VexDesignController {
     const kind = this.requireDesignKind(rawKind);
     const { storeId, userId } = this.requireActor();
 
-    // `conversation_id` es opcional en el DTO: o llega una conversación de la
-    // tienda (se verifica propiedad) o se crea una nueva. El resultado es
-    // siempre un número para el resto del turno.
+    // `conversation_id` es opcional en el DTO: o llega una conversación de Vex
+    // perteneciente a esta tienda o se crea una nueva marcada como superficie
+    // de diseño para no mezclarla con el historial general de `/admin/vex`.
     let conversationId: number;
     if (dto.conversation_id) {
-      // Verifica propiedad y existencia de la conversación en esta tienda.
-      await this.chatService.getConversation(dto.conversation_id);
+      const existing = await this.chatService.getConversation(
+        dto.conversation_id,
+      );
+      const existingAgent = (
+        existing?.metadata as Record<string, unknown> | null | undefined
+      )?.agent_key;
+      if (existingAgent !== 'vex') {
+        throw new BadRequestException(
+          'La conversación no pertenece al agente Vex y no puede usarse en el chat de diseño.',
+        );
+      }
       conversationId = dto.conversation_id;
     } else {
-      const conversation = await this.chatService.createConversation({
-        agent_key: 'vex',
-        title: `Diseño de ${kind}`,
-      });
+      const conversation = await this.chatService.createConversation(
+        {
+          agent_key: 'vex',
+          title: `Diseño de ${kind}`,
+        },
+        {
+          surface: VEX_DESIGN_CONVERSATION_SURFACE,
+          app_kind: kind,
+        },
+      );
       conversationId = conversation.id;
     }
 
+    const turnId = randomUUID();
     let session;
     try {
       session = await this.design.initOrSyncSession({
@@ -92,6 +110,7 @@ export class VexDesignController {
         conversationId,
         appKind: kind,
         draft: dto.draft,
+        turnId,
       });
     } catch (err) {
       throw new BadRequestException((err as Error).message);
@@ -182,6 +201,7 @@ export class VexDesignController {
                 ? { after_sequence: Number(afterSequence ?? lastEventId) }
                 : {}),
             },
+            { expectedDesignAppKind: kind },
           )) {
             subscriber.next({
               data: JSON.stringify(chunk),
@@ -204,22 +224,31 @@ export class VexDesignController {
                 kind,
               );
               if (latest) {
+                const isDiscard = chunk.tool.name === 'vex_design_discard';
+                const touchedBlockId = isDiscard
+                  ? (latest.last_discarded?.touched_block_id ?? null)
+                  : latest.latest_change?.last_patch_touched_block_id !==
+                      undefined
+                    ? latest.latest_change.last_patch_touched_block_id
+                    : (latest.latest_change?.touched_block_id ?? null);
+                const summary = isDiscard
+                  ? latest.last_discarded?.summary
+                    ? `Descartado: ${latest.last_discarded.summary}`
+                    : 'Último cambio descartado'
+                  : (latest.latest_change?.last_patch_summary ??
+                    latest.latest_change?.summary ??
+                    'Borrador actualizado');
+
                 subscriber.next({
                   data: JSON.stringify({
                     type: 'design_draft',
                     app_kind: latest.app_kind,
-                    op:
-                      chunk.tool.name === 'vex_design_discard'
-                        ? 'discard'
-                        : latest.latest_change?.op ?? 'patch',
+                    op: isDiscard
+                      ? 'discard'
+                      : (latest.latest_change?.op ?? 'patch'),
                     document: latest.document,
-                    summary:
-                      chunk.tool.name === 'vex_design_discard'
-                        ? 'Último cambio descartado'
-                        : latest.latest_change?.summary ??
-                          'Borrador actualizado',
-                    touched_block_id:
-                      latest.latest_change?.touched_block_id ?? null,
+                    summary,
+                    touched_block_id: touchedBlockId,
                     history_depth: latest.history_depth,
                     can_discard: latest.can_discard,
                   }),
