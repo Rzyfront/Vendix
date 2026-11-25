@@ -170,6 +170,22 @@ describe('AllExceptionsFilter — bot de monitoreo (QUI-1010)', () => {
     );
   });
 
+  it('en una ruta pública usa la tienda resuelta por dominio', () => {
+    const sink = { captureHttpFailure: jest.fn() };
+    const filter = new AllExceptionsFilter(sink);
+    const { host } = hostFor({
+      method: 'POST',
+      originalUrl: '/api/public/ecommerce/checkout',
+      domain_context: { store_id: 105, organization_id: 82 },
+    });
+
+    filter.catch(new Error('boom'), host as any);
+
+    expect(sink.captureHttpFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ storeId: 105, organizationId: 82, userId: null }),
+    );
+  });
+
   it('los 4xx no se reportan', () => {
     const sink = { captureHttpFailure: jest.fn() };
     const { host } = hostFor({ method: 'GET', url: '/api/x' });

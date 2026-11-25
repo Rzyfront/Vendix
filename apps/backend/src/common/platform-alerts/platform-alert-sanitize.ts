@@ -48,6 +48,8 @@ const ALLOWED_PARAM_KEY =
 const NUMERIC_PARAM = /^\d{1,20}$/;
 const UUID_PARAM =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SLUG_PARAM = /^[a-z0-9-]{1,60}$/i;
+const DATE_PARAM = /^\d{4}-\d{2}-\d{2}$/;
 
 export function safeRouteParams(
   params: Record<string, unknown> | undefined | null,
@@ -58,7 +60,11 @@ export function safeRouteParams(
     if (!ALLOWED_PARAM_KEY.test(key)) continue;
     if (value === null || value === undefined) continue;
     const text = String(value);
-    if (!NUMERIC_PARAM.test(text) && !UUID_PARAM.test(text)) continue;
+    const looksLikeSlug = key.toLowerCase() === 'slug' && SLUG_PARAM.test(text);
+    const looksLikeDate = key.toLowerCase() === 'date' && DATE_PARAM.test(text);
+    if (!NUMERIC_PARAM.test(text) && !UUID_PARAM.test(text) && !looksLikeSlug && !looksLikeDate) {
+      continue;
+    }
     safe[key] = text;
   }
   return Object.keys(safe).length > 0 ? safe : null;
@@ -74,7 +80,7 @@ export function alertIdentityFromRequest(req: unknown): {
   const user = record.user ?? {};
   // En rutas públicas (checkout, catálogo) no hay usuario: el middleware de
   // dominio ya resolvió la tienda por hostname o `x-store-id`.
-  const domain = record.domain_context ?? record.domainContext ?? {};
+  const domain = record.domain_context ?? {};
   const num = (value: unknown): number | null => {
     if (typeof value === 'number') {
       return Number.isInteger(value) && value > 0 ? value : null;
@@ -83,9 +89,14 @@ export function alertIdentityFromRequest(req: unknown): {
     const parsed = Number(value);
     return parsed > 0 ? parsed : null;
   };
+  // Una sola fuente: mezclar usuario y dominio podría atribuir la alerta a una
+  // pareja organización/tienda que no existe.
+  const userOrg = num(user.organization_id);
+  const userStore = num(user.store_id);
+  const useUser = userOrg !== null || userStore !== null;
   return {
-    organizationId: num(user.organization_id) ?? num(domain.organization_id),
-    storeId: num(user.store_id) ?? num(domain.store_id),
+    organizationId: useUser ? userOrg : num(domain.organization_id),
+    storeId: useUser ? userStore : num(domain.store_id),
     userId: num(user.id ?? user.user_id),
   };
 }

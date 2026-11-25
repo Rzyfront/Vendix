@@ -102,6 +102,16 @@ describe('platform-alert-sanitize (S7: sin contraseñas, tokens ni datos de clie
     ).toEqual({ organizationId: 82, storeId: 105, userId: null });
   });
 
+  it('alertIdentityFromRequest no mezcla usuario y dominio de tenants distintos', () => {
+    // Un admin de organización sin tienda no debe heredar la tienda del dominio.
+    expect(
+      alertIdentityFromRequest({
+        user: { id: 7, organization_id: 82 },
+        domain_context: { store_id: 105, organization_id: 111 },
+      }),
+    ).toEqual({ organizationId: 82, storeId: null, userId: 7 });
+  });
+
   it('alertIdentityFromRequest descarta ids raros', () => {
     expect(
       alertIdentityFromRequest({

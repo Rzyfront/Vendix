@@ -236,6 +236,9 @@ describe('PlatformAlertService', () => {
           route: '/api/store/invoicing/orders/:orderId',
           durationMs: 60_000,
           statusCode: 200,
+          organizationId: null,
+          storeId: null,
+          userId: null,
         });
       },
     );
