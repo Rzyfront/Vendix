@@ -19,7 +19,9 @@
  *   they can never contradict it.
  * - `brand`: logo, colors, font, cover. `seo`: title, description, image.
  * - `theme` (Apps F3): style tokens (palette, heading/body fonts, corner
- *   radius, density, button and image treatment, content width). Every token
+ *   radius, density, button and image treatment, content width) and, since
+ *   F7, border color, type size and heading scale, section gap, card style
+ *   and shadow, image ratio and overlay, and hero height. Every token
  *   is optional and closed; a missing one keeps the look the page has today.
  *   The hostname is the app's domain (settings panel), not part of the page.
  *
@@ -64,6 +66,16 @@ export const APP_THEME_DENSITIES = ['compact', 'comfortable', 'spacious'] as con
 export const APP_THEME_BUTTON_STYLES = ['solid', 'outline'] as const;
 export const APP_THEME_IMAGE_STYLES = ['square', 'rounded'] as const;
 export const APP_THEME_CONTENT_WIDTHS = ['narrow', 'normal', 'wide'] as const;
+/** Apps F7 — extended tokens; all optional, a missing one keeps today's look. */
+export const APP_THEME_FONT_SIZES = ['sm', 'md', 'lg'] as const;
+export const APP_THEME_HEADING_SCALES = ['compact', 'normal', 'display'] as const;
+export const APP_THEME_SECTION_GAPS = ['tight', 'normal', 'airy'] as const;
+export const APP_THEME_CARD_STYLES = ['flat', 'outline', 'soft'] as const;
+export const APP_THEME_SHADOWS = ['none', 'soft', 'strong'] as const;
+export const APP_THEME_IMAGE_RATIOS = ['square', '4:3', '16:9', 'auto'] as const;
+export const APP_THEME_HERO_HEIGHTS = ['auto', 'compact', 'full'] as const;
+/** Max opacity (%) of the veil over hero and gallery images. */
+export const APP_THEME_MAX_IMAGE_OVERLAY = 80;
 
 /** Color tokens of `page.theme`, all `#RRGGBB`. */
 export const APP_THEME_COLOR_KEYS = [
@@ -72,6 +84,7 @@ export const APP_THEME_COLOR_KEYS = [
   'surface_color',
   'text_color',
   'accent_color',
+  'border_color',
 ] as const;
 
 /**
@@ -337,6 +350,15 @@ const THEME: FieldsSpec = {
   button_style: oneOf(APP_THEME_BUTTON_STYLES),
   image_style: oneOf(APP_THEME_IMAGE_STYLES),
   content_width: oneOf(APP_THEME_CONTENT_WIDTHS),
+  border_color: text(7),
+  base_font_size: oneOf(APP_THEME_FONT_SIZES),
+  heading_scale: oneOf(APP_THEME_HEADING_SCALES),
+  section_gap: oneOf(APP_THEME_SECTION_GAPS),
+  card_style: oneOf(APP_THEME_CARD_STYLES),
+  shadow: oneOf(APP_THEME_SHADOWS),
+  image_ratio: oneOf(APP_THEME_IMAGE_RATIOS),
+  image_overlay: int(0, APP_THEME_MAX_IMAGE_OVERLAY),
+  hero_height: oneOf(APP_THEME_HERO_HEIGHTS),
 };
 
 const SEO: FieldsSpec = {
@@ -404,6 +426,16 @@ export interface AppPageTheme {
   button_style?: (typeof APP_THEME_BUTTON_STYLES)[number];
   image_style?: (typeof APP_THEME_IMAGE_STYLES)[number];
   content_width?: (typeof APP_THEME_CONTENT_WIDTHS)[number];
+  border_color?: string;
+  base_font_size?: (typeof APP_THEME_FONT_SIZES)[number];
+  heading_scale?: (typeof APP_THEME_HEADING_SCALES)[number];
+  section_gap?: (typeof APP_THEME_SECTION_GAPS)[number];
+  card_style?: (typeof APP_THEME_CARD_STYLES)[number];
+  shadow?: (typeof APP_THEME_SHADOWS)[number];
+  image_ratio?: (typeof APP_THEME_IMAGE_RATIOS)[number];
+  /** Opacity (0..80 %) of the veil over hero and gallery images. */
+  image_overlay?: number;
+  hero_height?: (typeof APP_THEME_HERO_HEIGHTS)[number];
 }
 
 export interface AppPageDocument {

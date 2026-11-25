@@ -243,6 +243,80 @@ describe('AppPageViewComponent (apps-f2 T3)', () => {
       expect(getComputedStyle(el.querySelector('.ap-card')!).borderTopLeftRadius).toBe('16px');
     });
 
+    describe('extended tokens (apps-f7)', () => {
+      const md = () => window.matchMedia('(min-width: 768px)').matches;
+      const withGallery = (theme: AppPageDocument['theme']) =>
+        page({
+          theme,
+          brand: { cover_url: 'https://cdn.test/cover.jpg' },
+          blocks: [
+            ...page().blocks,
+            { id: 'gallery', type: 'gallery', enabled: true, props: { image_urls: ['https://cdn.test/a.jpg'] } },
+          ],
+        });
+
+      it('an F3-only theme binds no F7 marker and keeps today\'s computed look', () => {
+        const el = render(withGallery({ density: 'spacious' }));
+        const host = fixture.nativeElement as HTMLElement;
+        for (const name of ['data-ap-type', 'data-ap-card', 'data-ap-shadow', 'data-ap-overlay', 'data-ap-hero']) {
+          expect(host.hasAttribute(name)).withContext(name).toBeFalse();
+        }
+        expect(getComputedStyle(el.querySelector('section[data-block="benefits"]')!).paddingTop).toBe('48px');
+        const card = el.querySelector<HTMLElement>('.ap-card')!;
+        expect(getComputedStyle(card).boxShadow).toBe('none');
+        expect(getComputedStyle(card.querySelector('p')!).fontSize).toBe('14px');
+        const img = el.querySelector<HTMLElement>('.ap-img')!;
+        expect(getComputedStyle(img).aspectRatio).toBe('1 / 1');
+        expect(getComputedStyle(img).filter).toBe('none');
+        const veil = el.querySelector<HTMLElement>('.ap-cover-veil')!;
+        expect(getComputedStyle(veil).backgroundColor).toBe('rgba(0, 0, 0, 0.4)');
+        const inner = el.querySelector<HTMLElement>('.ap-hero-inner')!;
+        expect(getComputedStyle(inner).paddingTop).toBe(md() ? '64px' : '48px');
+      });
+
+      it('applies border, type scale, section gap, cards, shadow, image ratio, veil and hero height', () => {
+        const el = render(
+          withGallery({
+            density: 'spacious',
+            border_color: '#123456',
+            base_font_size: 'lg',
+            heading_scale: 'display',
+            section_gap: 'airy',
+            card_style: 'flat',
+            shadow: 'strong',
+            image_ratio: '16:9',
+            image_overlay: 40,
+            hero_height: 'full',
+          }),
+        );
+        const host = fixture.nativeElement as HTMLElement;
+        expect(host.style.getPropertyValue('--color-border')).toBe('#123456');
+        // spacious 3rem (md 4.5rem) × airy 1.5
+        expect(getComputedStyle(el.querySelector('section[data-block="benefits"]')!).paddingTop).toBe(md() ? '108px' : '72px');
+        const card = el.querySelector<HTMLElement>('.ap-card')!;
+        expect(getComputedStyle(card).borderTopColor).toBe('rgba(0, 0, 0, 0)');
+        expect(getComputedStyle(card).boxShadow).not.toBe('none');
+        expect(getComputedStyle(card.querySelector('p')!).fontSize).toBe('14.875px');
+        const title = el.querySelector<HTMLElement>('[data-testid="hero-title"]')!;
+        // text-3xl (md:text-5xl) × lg 1.0625 × display 1.25
+        expect(parseFloat(getComputedStyle(title).fontSize)).toBeCloseTo(md() ? 63.75 : 39.84, 1);
+        const img = el.querySelector<HTMLElement>('.ap-img')!;
+        expect(getComputedStyle(img).aspectRatio).toBe('16 / 9');
+        expect(getComputedStyle(img).filter).toBe('brightness(0.6)');
+        expect(getComputedStyle(el.querySelector('.ap-cover-veil')!).backgroundColor).toBe('rgba(0, 0, 0, 0.4)');
+        const hero = el.querySelector<HTMLElement>('[data-testid="app-page-hero"]')!;
+        expect(getComputedStyle(hero).display).toBe('flex');
+        expect(parseFloat(getComputedStyle(hero).minHeight)).toBeGreaterThan(0);
+      });
+
+      it('card styles: outline drops the fill, soft drops the border', () => {
+        let el = render(page({ theme: { card_style: 'outline' } }));
+        expect(getComputedStyle(el.querySelector('.ap-card')!).backgroundColor).toBe('rgba(0, 0, 0, 0)');
+        el = render(page({ theme: { card_style: 'soft' } }));
+        expect(getComputedStyle(el.querySelector('.ap-card')!).borderTopColor).toBe('rgba(0, 0, 0, 0)');
+      });
+    });
+
     it('renders a template variant in its own block order', () => {
       const clinical = APP_PAGE_VARIANTS.product_page[2];
       const el = render(clinical.page);

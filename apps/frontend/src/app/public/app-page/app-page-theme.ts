@@ -1,9 +1,16 @@
 import type {
   AppPageDocument,
   AppPageTheme,
+  AppThemeCardStyle,
   AppThemeContentWidth,
   AppThemeDensity,
+  AppThemeFontSize,
+  AppThemeHeadingScale,
+  AppThemeHeroHeight,
+  AppThemeImageRatio,
   AppThemeRadius,
+  AppThemeSectionGap,
+  AppThemeShadow,
 } from '../../private/modules/store/apps/templates/app-page.types';
 import { fontStack, safeColor } from './app-page-view.util';
 
@@ -44,6 +51,46 @@ const WIDTH: Record<AppThemeContentWidth, string> = {
   normal: '72rem',
   wide: '84rem',
 };
+
+// ---- Apps F7: extended tokens ------------------------------------------------
+// Every value below is only bound when its token is set; the CSS rules that
+// read them fall back to today's value (scale 1, square gallery, no veil…).
+
+/** Multiplier of the body text sizes. `md` is today's size. */
+const FONT_SCALE: Record<AppThemeFontSize, string> = { sm: '0.9375', md: '1', lg: '1.0625' };
+
+/** Multiplier of the heading sizes (on top of the body one). `normal` is today's size. */
+const HEADING_SCALE: Record<AppThemeHeadingScale, string> = { compact: '0.85', normal: '1', display: '1.25' };
+
+/** Multiplier of the vertical padding of each section. `normal` is today's spacing. */
+const SECTION_GAP: Record<AppThemeSectionGap, string> = { tight: '0.6', normal: '1', airy: '1.5' };
+
+const SHADOW: Record<AppThemeShadow, string> = {
+  none: 'none',
+  soft: '0 1px 2px rgba(15, 23, 42, 0.06), 0 4px 12px rgba(15, 23, 42, 0.06)',
+  strong: '0 4px 8px rgba(15, 23, 42, 0.08), 0 16px 32px rgba(15, 23, 42, 0.16)',
+};
+
+/** CSS `aspect-ratio` of gallery and hero images. `auto` keeps each image's own shape. */
+const IMAGE_RATIO: Record<AppThemeImageRatio, string> = {
+  square: '1 / 1',
+  '4:3': '4 / 3',
+  '16:9': '16 / 9',
+  auto: 'auto',
+};
+
+/** Vertical padding of the hero (mobile / desktop). `auto` is today's (py-12 / md:py-16). */
+const HERO_PADDING: Record<AppThemeHeroHeight, { py: string; pyMd: string }> = {
+  auto: { py: '3rem', pyMd: '4rem' },
+  compact: { py: '2rem', pyMd: '2.5rem' },
+  full: { py: '3rem', pyMd: '4rem' },
+};
+
+/** A border closer than this to the background (WCAG ratio) is hard to see. */
+export const MIN_BORDER_CONTRAST = 1.15;
+
+/** Max opacity (%) of the image veil, as in the contract. */
+const MAX_IMAGE_OVERLAY = 80;
 
 // ---- color math (WCAG 2.x) ---------------------------------------------------
 
@@ -175,7 +222,75 @@ export function themeStyle(page: AppPageDocument | null | undefined): Record<str
     set('--ap-gap', d.gap);
   }
   if (t.content_width && t.content_width in WIDTH) set('--ap-max-width', WIDTH[t.content_width]);
+
+  // Apps F7 — extended tokens.
+  const border = safeColor(t.border_color);
+  if (border) {
+    set('--ap-border', border);
+    set('--color-border', border);
+  }
+  if (t.base_font_size && t.base_font_size in FONT_SCALE) set('--ap-font-scale', FONT_SCALE[t.base_font_size]);
+  if (t.heading_scale && t.heading_scale in HEADING_SCALE) set('--ap-heading-scale', HEADING_SCALE[t.heading_scale]);
+  if (t.section_gap && t.section_gap in SECTION_GAP) set('--ap-section-gap', SECTION_GAP[t.section_gap]);
+  if (t.shadow && t.shadow in SHADOW) set('--ap-card-shadow', SHADOW[t.shadow]);
+  if (t.image_ratio && t.image_ratio in IMAGE_RATIO) set('--ap-image-ratio', IMAGE_RATIO[t.image_ratio]);
+  const overlay = imageOverlay(t);
+  if (overlay !== null) {
+    set('--ap-image-overlay', String(overlay / 100));
+    set('--ap-image-brightness', String(Math.round((1 - overlay / 100) * 100) / 100));
+  }
+  if (t.hero_height && t.hero_height in HERO_PADDING) {
+    set('--ap-hero-py', HERO_PADDING[t.hero_height].py);
+    set('--ap-hero-py-md', HERO_PADDING[t.hero_height].pyMd);
+  }
   return vars;
+}
+
+/** The image veil (0..80 %), or `null` when the theme does not set a valid one. */
+function imageOverlay(theme: AppPageTheme): number | null {
+  const value = theme.image_overlay;
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= MAX_IMAGE_OVERLAY
+    ? value
+    : null;
+}
+
+/**
+ * Apps F7 — markers of the page container (as `data-*` attributes) that turn
+ * on the rules without a neutral fallback: typography, card style, shadow,
+ * image veil and hero height. `null` = the attribute is not bound, so a page
+ * without these tokens keeps exactly its current rules.
+ */
+export interface ThemeMarkers {
+  type: '' | null;
+  card: AppThemeCardStyle | null;
+  shadow: '' | null;
+  overlay: '' | null;
+  hero: AppThemeHeroHeight | null;
+}
+
+export function themeMarkers(page: AppPageDocument | null | undefined): ThemeMarkers {
+  const t = page?.theme ?? {};
+  const card = t.card_style === 'flat' || t.card_style === 'outline' || t.card_style === 'soft' ? t.card_style : null;
+  const hero = t.hero_height === 'auto' || t.hero_height === 'compact' || t.hero_height === 'full' ? t.hero_height : null;
+  return {
+    type: (t.base_font_size && t.base_font_size in FONT_SCALE) || (t.heading_scale && t.heading_scale in HEADING_SCALE) ? '' : null,
+    card,
+    shadow: t.shadow && t.shadow in SHADOW ? '' : null,
+    overlay: imageOverlay(t) !== null ? '' : null,
+    hero,
+  };
+}
+
+/**
+ * Apps F7 — contrast of the border color against the background. `null`
+ * when the theme sets no (valid) border color.
+ */
+export function borderContrast(theme: AppPageTheme | undefined): { ratio: number; ok: boolean } | null {
+  const border = safeColor(theme?.border_color);
+  if (!border) return null;
+  const surface = safeColor(theme?.surface_color) ?? DEFAULT_SURFACE;
+  const ratio = Math.round(contrastRatio(border, surface) * 100) / 100;
+  return { ratio, ok: ratio >= MIN_BORDER_CONTRAST };
 }
 
 /** One readability check of a theme, for the editor and the preset specs. */
