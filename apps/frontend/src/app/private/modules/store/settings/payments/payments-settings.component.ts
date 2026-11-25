@@ -4,6 +4,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom } from 'rxjs';
 import { HttpClient } from '@angular/common/http';
 import { environment } from '../../../../../../environments/environment';
+import { parseApiError } from '../../../../../core/utils/parse-api-error';
 
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup } from '@angular/forms';
@@ -1494,8 +1495,10 @@ onSearchChange(term: string): void {
    * (spinner eterno, modal inservible) justo en el caso que este fix expone.
    */
   private reportBankAccountPersistError(error: unknown): void {
+    const parsed = parseApiError(error);
     const httpMessage = (error as { error?: { message?: string } })?.error?.message;
     const message =
+      (parsed.errorCode ? parsed.userMessage : null) ||
       httpMessage ||
       (error instanceof Error ? error.message : null) ||
       'No se pudieron registrar las cuentas bancarias.';

@@ -123,6 +123,13 @@ export const ERROR_MESSAGES: Record<string, string> = {
   AUTH_DUP_001: 'Ya existe un usuario con este email.',
   AUTH_PERM_001: 'No tiene permisos para realizar esta accion.',
   BANK_ACCOUNT_NOT_FOUND: 'No se encontro la cuenta bancaria.',
+  BANK_ACCOUNT_DUPLICATE: 'Ya existe una cuenta bancaria con ese numero.',
+  BANK_ACCOUNT_ORG_MANAGED:
+    'En esta organizacion las cuentas bancarias las administra un usuario con permisos de organizacion.',
+  BANK_ACCOUNT_NOT_ASSIGNED_TO_STORE:
+    'Ya existe una cuenta de la organizacion con ese numero, pero no esta asignada a esta tienda. Asignala desde Contabilidad → Bancos.',
+  BANK_ACCOUNT_INVALID_ASSIGNMENT:
+    'Selecciona al menos una tienda valida para asignar esta cuenta bancaria.',
   PAYMENT_NOT_OWNED: 'No puedes operar este pago: pertenece a otra persona.',
   PRODUCT_VARIANT_MISMATCH: 'La variante seleccionada no corresponde al producto.',
   AUTH_TOKEN_001: 'Token invalido o expirado.',
