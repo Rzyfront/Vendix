@@ -31,6 +31,7 @@ export { createPaymentTools } from './domains/payments.tools';
 export { createPurchasingTools } from './domains/purchasing.tools';
 export { createSupplierTools } from './domains/suppliers.tools';
 export { createReservationsTools } from './domains/reservations.tools';
+export { createServiceTools } from './domains/services.tools';
 export { createPricingTools } from './domains/pricing.tools';
 export { createReturnTools } from './domains/returns.tools';
 export { createEcommerceSupportTools } from './domains/ecommerce-support.tools';

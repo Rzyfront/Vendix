@@ -65,6 +65,7 @@ export const CODEMODE_ALLOWLIST: readonly CodeModeAllowlistEntry[] = Object.free
   { name: 'get_recent_journal_entries', domain: 'accounting', version: '1', permissions: ['store:accounting:journal_entries:read'], parameters_hash: '10c7d7d38b647b762ac1c781608f5bf09748611ea42a805e625ac3e49da9d7ef' },
   { name: 'get_role_permissions', domain: 'settings-admin', version: '1', permissions: ['store:users:read'], parameters_hash: 'a7bfbe57f9dee50e6eb8a5158610d92f48accb130052341e19e4d7f720711fcf' },
   { name: 'get_sales_report', domain: 'sales', version: '1', permissions: ['store:analytics:read'], parameters_hash: '0398374dd2a896a7ef636f1bc4e8beb32af035d6b0b018bb1cb59b8cde026767' },
+  { name: 'get_service_plan', domain: 'reservations', version: '1', permissions: ['store:products:read', 'store:reservations:read'], parameters_hash: 'ba5a31cee2957ef4b9f8025a3db6570ec56fa43a8e8529a6c22939a4934a1ca3' },
   { name: 'get_sourcing_suggestion', domain: 'inventory', version: '1', permissions: ['store:inventory:stock_levels:read'], parameters_hash: 'ce97b66b0a6a6814c20dfb1823a1221a783fceb63133df97a4c6ee684109b8a5' },
   { name: 'get_stock_adjustments', domain: 'inventory', version: '1', permissions: ['store:inventory:adjustments:read'], parameters_hash: '6089a4ab89e432d5a94a3eccd009e3d011081a6426a2bf5f44684eee3142da37' },
   { name: 'get_stock_levels', domain: 'inventory', version: '1', permissions: ['store:inventory:stock_levels:read'], parameters_hash: '5dc026b1d8e91f54a1e89db8407cbd25ee176e6ceb1b9e7cf96ec0dbc09b5900' },
