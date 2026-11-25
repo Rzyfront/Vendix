@@ -88,7 +88,9 @@ var MARKETING_PREFIXES = [
   '/repartos',
   '/onboarding',
   '/reset-password',
-  '/authenticate'
+  '/authenticate',
+  // Puente del signup de WhatsApp: Meta solo responde en vendix.online.
+  '/integraciones'
 ];
 
 function isMarketingAppRoute(uri) {
@@ -132,7 +134,9 @@ var MARKETING_NOINDEX_PREFIXES = [
   '/repartos',
   '/onboarding',
   '/reset-password',
-  '/authenticate'
+  '/authenticate',
+  // Puente del signup de WhatsApp: Meta solo responde en vendix.online.
+  '/integraciones'
 ];
 var STORE_NOINDEX_PREFIXES = [
   '/cart',
