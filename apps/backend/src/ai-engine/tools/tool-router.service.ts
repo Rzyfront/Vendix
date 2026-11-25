@@ -60,6 +60,8 @@ export const AGENT_TOOL_CORE: Readonly<Record<string, readonly string[]>> = {
     'bulk_prepare',
     'ai_extract_document',
     'validate_extraction',
+    // Turn-close contract: the loop demands it on a chat turn that ran no tool.
+    'finish_turn',
   ],
   vex: [
     'vex_render_table',
@@ -77,6 +79,8 @@ export const AGENT_TOOL_CORE: Readonly<Record<string, readonly string[]>> = {
     'compute',
     // F6/T43: spreadsheets and documents the owner uploads to /admin/vex.
     'read_attachment',
+    // Turn-close contract: the loop demands it on a chat turn that ran no tool.
+    'finish_turn',
   ],
 };
 /**

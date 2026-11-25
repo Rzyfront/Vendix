@@ -78,6 +78,7 @@ export { uiTools } from './domains/ui.tools';
 export * from './interfaces/tool.interface';
 
 export { createDiscoveryTools } from './domains/discovery.tools';
+export { createTurnTools, FINISH_TURN_TOOL } from './domains/turn.tools';
 export { ToolRouterService } from './tool-router.service';
 
 export { createPlaybookTools } from './domains/playbook.tools';

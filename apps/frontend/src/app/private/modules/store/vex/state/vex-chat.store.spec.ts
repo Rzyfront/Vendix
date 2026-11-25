@@ -360,6 +360,59 @@ describe('VexChatStore', () => {
     });
   });
 
+  describe('turn closed incomplete: «Continuar» (pending_continuation)', () => {
+    async function askAndLeavePending(): Promise<void> {
+      await open('1');
+      store.sendMessage('Revisa el inventario');
+      await settle();
+      const stream = api.streams.at(-1)!;
+      stream.next({ type: 'text', content: 'Ya voy a revisar.' } as VexStreamChunk);
+      stream.next({ type: 'done', pending_continuation: true } as VexStreamChunk);
+      stream.complete();
+      await settle();
+    }
+
+    it('marks the answer when the done frame says the turn stayed pending', async () => {
+      await askAndLeavePending();
+      const last = store.active_conversation()?.messages.at(-1);
+      expect(last?.role).toBe('agent');
+      expect(last?.pending_continuation).toBeTrue();
+      expect(last?.streaming).toBeFalse();
+    });
+
+    it('a normally closed answer offers nothing', async () => {
+      await open('1');
+      store.sendMessage('Hola');
+      await settle();
+      api.streams.at(-1)!.next({ type: 'done' } as VexStreamChunk);
+      api.streams.at(-1)!.complete();
+      await settle();
+      expect(store.active_conversation()?.messages.at(-1)?.pending_continuation).toBeFalsy();
+    });
+
+    it('«Continuar» sends the next turn through sendMessage and drops the offer', async () => {
+      await askAndLeavePending();
+      const pending = store.active_conversation()!.messages.at(-1)!;
+
+      store.continuePending(pending.id);
+      await settle();
+
+      expect(api.intents.length).toBe(2);
+      expect(api.intents[1].content).toBe('Continúa con lo que quedó pendiente.');
+      const messages = store.active_conversation()?.messages ?? [];
+      expect(messages.find((m) => m.id === pending.id)?.pending_continuation).toBeFalse();
+      expect(messages.at(-1)?.streaming).toBeTrue();
+    });
+
+    it('a reload keeps the offer from the persisted metadata', async () => {
+      const pending = message(14, 'assistant', 'Ya voy a revisar.');
+      pending.metadata = { pending_continuation: true, pending_text: 'Ya voy a revisar.' };
+      api.rows[0].messages = [message(13, 'user', 'Revisa el inventario'), pending];
+      await open('1');
+      expect(store.active_conversation()?.messages.at(-1)?.pending_continuation).toBeTrue();
+    });
+  });
+
   describe('message read aloud (T6)', () => {
     it('points at the answer of the spoken turn, even after a newer written one', async () => {
       await open('1');

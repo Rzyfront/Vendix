@@ -316,6 +316,9 @@ function adaptMessage(row: VexBackendMessage): {
       blocks: hydrated.length > 0 ? hydrated : undefined,
       plan,
       followups: followups.length > 0 ? followups : undefined,
+      ...(meta['pending_continuation'] === true
+        ? { pending_continuation: true }
+        : {}),
     },
     refs,
   };
@@ -2061,6 +2064,21 @@ export class VexChatStore {
       });
   }
 
+  /**
+   * «Continuar» on a turn that closed incomplete: sends the next turn through
+   * the normal send path (the agent reads its own pending answer in the
+   * history) and drops the offer from that message.
+   */
+  continuePending(message_id: string): void {
+    if (this._is_agent_typing()) return;
+    const conversation = this.active_conversation();
+    if (!conversation?.messages.some((m) => m.id === message_id)) return;
+    this.patchMessage(conversation.id, message_id, {
+      pending_continuation: false,
+    });
+    this.sendMessage(VEX_COPY.thread.pending_prompt);
+  }
+
   /** Resends a user message that never reached the server (same text and attachments). */
   retrySend(message_id: string): void {
     if (this._is_agent_typing()) return;
@@ -2482,6 +2500,8 @@ export class VexChatStore {
       type: string;
       content?: string;
       context_budget?: VexContextBudget;
+      /** `done`: the turn closed incomplete; offer «Continuar». */
+      pending_continuation?: boolean;
       summary?: string;
       summary_through_message_id?: number;
       tool?: {
@@ -2681,7 +2701,15 @@ export class VexChatStore {
                   ...c,
                   updated_at: now,
                   messages: c.messages.map((m) =>
-                    m.id === message_id ? { ...m, streaming: false } : m,
+                    m.id === message_id
+                      ? {
+                          ...m,
+                          streaming: false,
+                          ...(chunk.pending_continuation === true
+                            ? { pending_continuation: true }
+                            : {}),
+                        }
+                      : m,
                   ),
                 }
               : c,

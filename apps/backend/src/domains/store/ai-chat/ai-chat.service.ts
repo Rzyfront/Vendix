@@ -997,6 +997,10 @@ export class AIChatService {
      * endpoint y no deja rastro en la conversación hasta que se aplica.
      */
     let pendingProposal: string | null = null;
+    // Turn-close contract: the agent closed this turn incomplete (no tool and
+    // no `finish_turn`, even after its one resume). Persisted so a reload
+    // still offers «Continuar».
+    let pendingContinuation = false;
     // Colector del turno Vex (`null` en cualquier otro agente: su cierre no
     // cambia). El sink y los frames lo llenan mientras el turno corre.
     const vexTurn: VexTurnCollection | null =
@@ -1166,6 +1170,7 @@ export class AIChatService {
       // Recibo autoritativo del plan (el frame ya lo llevó al panel): manda
       // sobre lo capturado por frames si ambos existen.
       vexPlan = result.pending_plan ?? null;
+      pendingContinuation = result.pending_continuation === true;
       // `plan_continue`: el turno terminó a propósito sin texto (el cliente
       // encadena otro); `aborted`: otro turno lo reemplazó. En ambos casos el
       // silencio es correcto y el fallback sería ruido.
@@ -1324,6 +1329,9 @@ export class AIChatService {
       const metadata = {
         ...{ stream_id: streamId },
         ...(pendingProposal ? { pending_confirmation: pendingProposal } : {}),
+        ...(pendingContinuation
+          ? { pending_continuation: true, pending_text: fullContent }
+          : {}),
         ...vexMetadata,
         // T21: lo que el anillo pinta tras recargar y lo que decide la
         // compactación del turno siguiente (una sola medida).
