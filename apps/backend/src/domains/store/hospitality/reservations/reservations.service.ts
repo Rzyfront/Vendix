@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { lodging_reservation_status_enum, Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
@@ -21,6 +21,7 @@ import {
 } from './deposits/deposits.service';
 import { dateOnlyToDb, formatShortDate, stayNights } from './stay-dates';
 import { lodgingBusinessDate } from './folio/folio-nights';
+import { LodgingFolioService } from './folio/folio.service';
 import { loadPlanPricing, PlanTerms } from '../rates/rate-plans.service';
 import {
   asPolicySnapshot,
@@ -216,11 +217,43 @@ type PenaltyClient = Pick<Prisma.TransactionClient, 'lodging_reservations'>;
  */
 @Injectable()
 export class LodgingReservationsService {
+  private readonly logger = new Logger(LodgingReservationsService.name);
+
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly availability: LodgingAvailabilityService,
     private readonly deposits: LodgingDepositsService,
+    // QUI-1063 — the order (folio) a confirmed reservation is born with.
+    @Optional() private readonly folios?: LodgingFolioService,
   ) {}
+
+  /**
+   * QUI-1063 / QUI-1064 — a confirmed reservation gets its draft order with
+   * the whole stay. Runs after the sale committed: a failure never undoes the
+   * reservation (the check-in creates the order when it is missing).
+   */
+  private async ensureOrder(reservation_id: number): Promise<void> {
+    if (!this.folios) return;
+    try {
+      await this.folios.ensureReservationOrder(reservation_id);
+    } catch (error: unknown) {
+      this.logger.error(
+        `Reservation ${reservation_id}: creating its order failed: ${error instanceof Error ? error.message : error}`,
+      );
+    }
+  }
+
+  /** QUI-1063 — after a change of the nights sold, the folio follows them. */
+  private async syncOrder(reservation_id: number): Promise<void> {
+    if (!this.folios) return;
+    try {
+      await this.folios.syncReservationNights(reservation_id);
+    } catch (error: unknown) {
+      this.logger.error(
+        `Reservation ${reservation_id}: syncing its order failed: ${error instanceof Error ? error.message : error}`,
+      );
+    }
+  }
 
   /** Search by guest/number, status and stay dates, newest first. */
   async findAll(query: ReservationQueryDto) {
@@ -377,7 +410,9 @@ export class LodgingReservationsService {
    * False when the hold is no longer tentative (expired or cancelled).
    */
   async confirmHold(id: number, reason: string): Promise<boolean> {
-    return this.applyTransition(id, 'confirmed', reason, null, { from: ['tentative'] });
+    const confirmed = await this.applyTransition(id, 'confirmed', reason, null, { from: ['tentative'] });
+    if (confirmed) await this.ensureOrder(id);
+    return confirmed;
   }
 
   /**
@@ -484,6 +519,13 @@ export class LodgingReservationsService {
       // H3.5 — a Wompi link still pending is not collected after the stay ends.
       if (to === 'cancelled' || to === 'no_show') {
         cancelledLinks = await this.deposits.cancelPendingLinksInTx(tx, id);
+        // QUI-1063 — its order stays in Orders as "Cancelada"; the folio closes.
+        await LodgingFolioService.cancelReservationFolioInTx(tx, {
+          store_id: current.store_id,
+          reservation_id: id,
+          reason,
+          now,
+        });
       }
       if (
         NIGHT_HOLDING_STATUSES.includes(current.status) &&
@@ -777,6 +819,8 @@ export class LodgingReservationsService {
       return reservation.id;
     }, SALE_TX_OPTIONS);
 
+    // QUI-1063 — a tentative web hold gets its order when it is paid (`confirmHold`).
+    if (!hold) await this.ensureOrder(id);
     return this.findOne(id);
   }
 
@@ -864,6 +908,8 @@ export class LodgingReservationsService {
       });
       return reservation.id;
     }, SALE_TX_OPTIONS);
+    // QUI-1063 — the cancelled room's nights leave the order.
+    await this.syncOrder(reservationId);
     return this.findOne(reservationId);
   }
 

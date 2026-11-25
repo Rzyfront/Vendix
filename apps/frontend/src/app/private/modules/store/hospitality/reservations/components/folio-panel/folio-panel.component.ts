@@ -119,7 +119,7 @@ function newRequestId(): string {
         }
         @if (editable() && !action()) {
           <div class="flex flex-wrap gap-1">
-            @if (canSplit()) {
+            @if (paymentsAllowed() && canSplit()) {
               <app-button variant="outline" size="sm" customClasses="min-h-11 sm:min-h-0" (clicked)="splitOpen.set(true)" data-testid="folio-split">
                 <app-icon slot="icon" name="split" [size]="14" />
                 Dividir cuenta
@@ -144,7 +144,7 @@ function newRequestId(): string {
               <app-icon slot="icon" name="plus" [size]="14" />
               Agregar cargo
             </app-button>
-            @if ((folio()?.deposit_available ?? 0) > 0) {
+            @if (paymentsAllowed() && (folio()?.deposit_available ?? 0) > 0) {
               <app-button
                 variant="outline"
                 size="sm"
@@ -157,6 +157,7 @@ function newRequestId(): string {
                 Aplicar anticipo
               </app-button>
             }
+            @if (paymentsAllowed()) {
             <app-button
               variant="outline"
               size="sm"
@@ -168,6 +169,7 @@ function newRequestId(): string {
               <app-icon slot="icon" name="banknote" [size]="14" />
               Registrar pago
             </app-button>
+            }
             <app-button
               variant="ghost"
               size="sm"
@@ -180,7 +182,7 @@ function newRequestId(): string {
               {{ folio()?.charges_blocked ? 'Permitir cargos' : 'Bloquear cargos' }}
             </app-button>
             }
-            @if (!folio()?.verified_current) {
+            @if (paymentsAllowed() && !folio()?.verified_current) {
               <app-button
                 variant="ghost"
                 size="sm"
@@ -212,6 +214,12 @@ function newRequestId(): string {
       @if (editable() && !action() && !split() && postNightsHint()) {
         <p class="border-b border-border px-3 py-1.5 text-xs text-text-secondary" data-testid="folio-post-nights-hint">
           {{ postNightsHint() }}
+        </p>
+      }
+
+      @if (editable() && folio() && !paymentsAllowed()) {
+        <p class="border-b border-border px-3 py-1.5 text-xs text-text-secondary" data-testid="folio-payments-hint">
+          Los pagos se registran al hacer check-in; antes, usa Anticipos.
         </p>
       }
 
@@ -331,7 +339,7 @@ function newRequestId(): string {
           <dd class="text-right">{{ money(f.total) }}</dd>
           <dt class="text-text-secondary">Pagado</dt>
           <dd class="text-right">{{ money(f.paid) }}</dd>
-          @if (editable() && (f.deposit_available ?? 0) > 0) {
+          @if (paymentsAllowed() && (f.deposit_available ?? 0) > 0) {
             <dt class="text-text-secondary">Anticipo disponible</dt>
             <dd class="text-right" data-testid="folio-deposit-available">{{ money(f.deposit_available ?? 0) }}</dd>
           }
@@ -341,7 +349,27 @@ function newRequestId(): string {
           }
           <dt class="font-semibold text-text-primary">Saldo</dt>
           <dd class="text-right font-semibold" data-testid="folio-balance">{{ money(due()) }}</dd>
+          @if ((f.advances_available ?? 0) > 0) {
+            <dt class="text-text-secondary">Anticipos disponibles</dt>
+            <dd class="text-right" data-testid="folio-advances-available">{{ money(f.advances_available ?? 0) }}</dd>
+            <dt class="font-semibold text-text-primary">Saldo tras anticipos</dt>
+            <dd class="text-right font-semibold" data-testid="folio-balance-after-advances">
+              {{ money(f.balance_after_advances ?? 0) }}
+            </dd>
+          }
         </dl>
+        @if (f.order_id) {
+          <div class="flex justify-end border-t border-border px-3 py-2">
+            <a
+              class="inline-flex min-h-11 items-center gap-1 text-sm font-medium text-primary underline sm:min-h-0"
+              [routerLink]="['/admin/orders', f.order_id]"
+              data-testid="folio-view-order"
+            >
+              <app-icon name="receipt" [size]="14" />
+              Ver orden {{ f.order_number }}
+            </a>
+          </div>
+        }
       }
 
       @if (split(); as sp) {
@@ -394,7 +422,7 @@ function newRequestId(): string {
                     <app-icon slot="icon" name="download" [size]="14" />
                     Descargar factura
                   </app-button>
-                } @else if (editable() && Number(account.remaining_balance) > 0 && action() === null) {
+                } @else if (paymentsAllowed() && editable() && Number(account.remaining_balance) > 0 && action() === null) {
                   <app-button variant="primary" size="sm" customClasses="min-h-11 sm:min-h-0" (clicked)="startSplitPay(account)" data-testid="folio-split-pay">
                     Cobrar
                   </app-button>
@@ -692,7 +720,10 @@ export class FolioPanelComponent {
     initialValue: this.voidReason.status,
   });
 
-  readonly editable = computed(() => this.inHouse() && this.folio()?.status === 'open');
+  /** Open folio: charges, voids and the like are allowed, also before check-in. */
+  readonly editable = computed(() => this.folio()?.status === 'open');
+  /** Payments, advances and online payments only while the guest is in house. */
+  readonly paymentsAllowed = computed(() => this.folio()?.payments_allowed ?? this.inHouse());
   /** "Estadía proyectada $X · cargado $Y · por cargar N noches"; display only. */
   readonly projection = computed(() => {
     const total = this.projectedTotal();

@@ -5993,6 +5993,12 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'A required service booking could not be allocated during checkout',
   },
+  // QUI-1063 — "Agregar cargo" of a service booking onto its order.
+  BOOKING_CHARGE_001: {
+    code: 'BOOKING_CHARGE_001',
+    httpStatus: 400,
+    devMessage: 'The charge cannot be added to the booking order',
+  },
   SERVICE_BUDGET_001: {
     code: 'SERVICE_BUDGET_001',
     httpStatus: 409,

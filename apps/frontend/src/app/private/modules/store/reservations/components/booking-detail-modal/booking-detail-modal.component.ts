@@ -11,13 +11,15 @@ import { ModalComponent, IconComponent, SpinnerComponent, TooltipComponent } fro
 import { ToastService } from '../../../../../../shared/components';
 import { ReservationsService } from '../../services/reservations.service';
 import { DataCollectionSubmissionsService } from '../../../data-collection/services/data-collection-submissions.service';
-import { Booking, BookingDeposit, BookingPrepay, BookingStatus, AvailabilitySlot, ProviderDateInfo, ServiceProvider } from '../../interfaces/reservation.interface';
+import { Booking, BookingDeposit, BookingOrderSummary, BookingPrepay, BookingStatus, AvailabilitySlot, ProviderDateInfo, ServiceProvider } from '../../interfaces/reservation.interface';
 import { BookingDepositDialogComponent } from './booking-deposit-dialog/booking-deposit-dialog.component';
 import { RegisterPrepayDialogComponent } from './register-prepay-dialog/register-prepay-dialog.component';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { finalize } from 'rxjs';
 import { environment } from '../../../../../../../environments/environment';
 import { bookingPaymentUrl, bookingSeriesLabel } from '../../utils/booking-display.util';
+import { ProductsService } from '../../../products/services/products.service';
+import { Product } from '../../../products/interfaces/product.interface';
 import { ServicePlansService, PlanBookingTask } from '../../../products/services/service-plans.service';
 import { isPlanBooking } from '../../utils/plan-receipt.util';
 import {
@@ -27,6 +29,18 @@ import {
   sortPlanTasks,
 } from '../../utils/plan-tasks.util';
 import { windowMinutes } from '../../../../../../shared/utils/schedule-window.util';
+
+const ORDER_STATE_LABELS: Record<string, string> = {
+  draft: 'Borrador',
+  created: 'Creada',
+  pending_payment: 'Pago pendiente',
+  processing: 'Procesando',
+  shipped: 'Enviada',
+  delivered: 'Entregada',
+  cancelled: 'Cancelada',
+  refunded: 'Reembolsada',
+  finished: 'Finalizada',
+};
 
 @Component({
   selector: 'app-booking-detail-modal',
@@ -49,6 +63,7 @@ export class BookingDetailModalComponent {
   private router = inject(Router);
   private plansService = inject(ServicePlansService);
   private http = inject(HttpClient);
+  private productsService = inject(ProductsService);
 
   readonly isOpen = input<boolean>(false);
   readonly booking = input<Booking | null>(null);
@@ -278,6 +293,33 @@ export class BookingDetailModalComponent {
     if (!['pending', 'confirmed', 'arriving', 'attending'].includes(b.status)) return false;
     return !!dep.decision_due_at || this.hasStarted(b);
   });
+
+  // --- Order of the booking (normal payment flow) and extra charges ---
+  /** `order` block of the detail endpoint; null when the booking has no order. */
+  order = signal<BookingOrderSummary | null>(null);
+  /** The detail finished loading, so a missing order is a real "no order". */
+  orderLoaded = signal(false);
+  orderStateLabel = computed(() => {
+    const state = this.order()?.state;
+    return state ? ORDER_STATE_LABELS[state] ?? state : '';
+  });
+  /** Charges only while the order is still open for edits. */
+  canAddCharge = computed(() => {
+    const state = this.order()?.state;
+    return !!state && ['created', 'pending_payment', 'draft'].includes(state);
+  });
+  chargeOpen = signal(false);
+  chargeProducts = signal<Product[]>([]);
+  chargeProductId = signal<number | null>(null);
+  chargeQuantity = signal(1);
+  chargeBusy = signal(false);
+  /** Only products the booking can take: services or items without inventory. */
+  chargeOptions = computed(() =>
+    this.chargeProducts().filter((p) => p.product_type === 'service' || !p.track_inventory),
+  );
+  canSubmitCharge = computed(
+    () => this.chargeProductId() !== null && this.chargeQuantity() >= 1 && !this.chargeBusy(),
+  );
 
   /** QUI-1060 F3: tareas del CRM de una reserva de plan; vacío oculta la sección. */
   readonly planTasks = signal<PlanBookingTask[]>([]);
@@ -681,7 +723,9 @@ export class BookingDetailModalComponent {
     this.prepayAmount.set(null);
     this.prepay.set(b.prepay ?? null);
     this.deposit.set(b.deposit ?? null);
-    if (!b.product?.requires_station && !b.station_id) return;
+    this.order.set(b.order && b.order.state ? b.order : null);
+    this.orderLoaded.set(false);
+    this.chargeOpen.set(false);
     this.reservationsService
       .getReservation(b.id)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -689,9 +733,67 @@ export class BookingDetailModalComponent {
         next: (detail) => {
           this.deposit.set(detail?.deposit ?? null);
           this.prepay.set(detail?.prepay ?? null);
+          this.order.set(detail?.order ?? null);
+          this.orderLoaded.set(true);
         },
         error: () => this.deposit.set(b.deposit ?? null),
       });
+  }
+
+  protected toNumber(value: number | string | null | undefined): number {
+    return Number(value ?? 0);
+  }
+
+  /** Opens the inline "Agregar cargo" form and loads the catalog once. */
+  openCharge(): void {
+    this.chargeProductId.set(null);
+    this.chargeQuantity.set(1);
+    this.chargeOpen.set(true);
+    if (this.chargeProducts().length > 0) return;
+    this.productsService
+      .getProducts({ limit: 100, state: 'active' as Product['state'], is_sellable: true })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (page) => this.chargeProducts.set(page.data ?? []),
+        error: () => this.toastService.error('No se pudieron cargar los productos'),
+      });
+  }
+
+  onChargeProductChange(value: string | number | null): void {
+    this.chargeProductId.set(value ? Number(value) : null);
+  }
+
+  onChargeQuantityChange(value: string | number): void {
+    this.chargeQuantity.set(Math.max(0, Math.trunc(Number(value) || 0)));
+  }
+
+  /** Posts the charge and refreshes the order block with the answered detail. */
+  submitCharge(): void {
+    const b = this.booking();
+    const productId = this.chargeProductId();
+    if (!b || productId === null || !this.canSubmitCharge()) return;
+    this.chargeBusy.set(true);
+    this.reservationsService
+      .addCharge(b.id, { product_id: productId, quantity: this.chargeQuantity() })
+      .pipe(finalize(() => this.chargeBusy.set(false)), takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (detail) => {
+          this.order.set(detail?.order ?? this.order());
+          this.deposit.set(detail?.deposit ?? this.deposit());
+          this.prepay.set(detail?.prepay ?? this.prepay());
+          this.chargeOpen.set(false);
+          this.toastService.success('Cargo agregado');
+        },
+        error: (err) => this.toastService.error(extractApiErrorMessage(err) || 'No se pudo agregar el cargo'),
+      });
+  }
+
+  /** Normal payment flow: the order detail page. */
+  goToOrder(): void {
+    const id = this.order()?.id;
+    if (!id) return;
+    this.closed.emit();
+    this.router.navigate(['/admin/orders', id]);
   }
 
   /** Date-only strings are read as local calendar parts, never through `new Date('YYYY-MM-DD')` (UTC shift). */

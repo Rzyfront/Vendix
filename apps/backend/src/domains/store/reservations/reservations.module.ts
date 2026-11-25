@@ -21,6 +21,7 @@ import { AutoNoShowJob } from './jobs/auto-no-show.job';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { OrdersModule } from '../orders/orders.module';
+import { BookingChargesService } from './booking-charges.service';
 import { S3Module } from '@common/services/s3.module';
 import { ProductsModule } from '../products/products.module';
 import { TablesModule } from '../tables/tables.module';
@@ -71,6 +72,7 @@ import { ServicePlansService } from './service-plans/service-plans.service';
   ],
   providers: [
     ReservationsService,
+    BookingChargesService,
     ReservationsExportService,
     AvailabilityService,
     BookingConfirmationService,

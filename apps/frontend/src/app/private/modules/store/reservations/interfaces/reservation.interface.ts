@@ -30,7 +30,7 @@ export interface Booking {
   product?: { id: number; name: string; service_duration_minutes?: number; image_url?: string; base_price?: number; is_consultation?: boolean; requires_station?: boolean; booking_mode?: string };
   product_variant?: { id: number; name?: string; sku?: string };
   created_by?: { id: number; first_name: string; last_name: string };
-  order?: { id: number; order_number: string };
+  order?: BookingOrderSummary;
   provider_id?: number;
   station_id?: number;
   provider?: { id: number; display_name?: string; avatar_url?: string; user?: { first_name: string | null; last_name: string | null } | null; employee?: { first_name: string; last_name: string } | null };
@@ -53,6 +53,23 @@ export interface Booking {
   payment_path?: string | null;
   /** Absolute payment page on the store's public domain; null when the store has none. */
   payment_url?: string | null;
+}
+
+/** `order` block of the booking detail; Decimal fields may arrive as strings. */
+export interface BookingOrderSummary {
+  id: number;
+  order_number: string;
+  state?: string;
+  grand_total?: number | string;
+  total_paid?: number | string;
+  remaining_balance?: number | string;
+}
+
+/** Body of `POST /store/reservations/:id/charges`. */
+export interface AddBookingChargeDto {
+  product_id: number;
+  product_variant_id?: number;
+  quantity: number;
 }
 
 /** `deposit` block of a booking (field names mirror `BookingDepositBlock` of the backend). */

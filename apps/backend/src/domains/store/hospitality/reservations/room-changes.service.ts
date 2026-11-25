@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { lodging_reservation_status_enum, Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
@@ -9,6 +9,7 @@ import { assertCapacity } from './reservations.service';
 import { dateOnlyToDb, formatShortDate, stayNights } from './stay-dates';
 import { activeBlocksWhere, occupiedNightsWhere } from '../units/unit-availability.util';
 import { lodgingBusinessDate } from './folio/folio-nights';
+import { LodgingFolioService } from './folio/folio.service';
 import { NIGHT_HOLDING_STATUSES } from './reservation-status';
 import { loadPlanPricing } from '../rates/rate-plans.service';
 import { resolveNightRate } from '../rates/lodging-rate-resolver';
@@ -96,9 +97,13 @@ interface ChangePlan {
  */
 @Injectable()
 export class LodgingRoomChangesService {
+  private readonly logger = new Logger(LodgingRoomChangesService.name);
+
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly availability: LodgingAvailabilityService,
+    // QUI-1063 — the reservation's order follows the nights it sells.
+    @Optional() private readonly folios?: LodgingFolioService,
   ) {}
 
   async quote(room_id: number, dto: RoomChangeDto) {
@@ -118,8 +123,9 @@ export class LodgingRoomChangesService {
     const store_id = this.requireStoreId();
     const user_id = RequestContextService.getContext()?.user_id ?? null;
     let targetCode: string | null = null;
+    let reservationId: number;
     try {
-      return await this.prisma.$transaction(async (tx) => {
+      reservationId = await this.prisma.$transaction(async (tx) => {
         // Same lock as a sale: availability and unit checks cannot interleave
         // with another sale or change of the store.
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`lodging_reservations:${store_id}`}))`;
@@ -148,6 +154,16 @@ export class LodgingRoomChangesService {
       }
       throw error;
     }
+    // QUI-1063 — dropped, added or re-typed nights are taken off / posted on
+    // the reservation's order (when it has one). Never undoes the change.
+    if (this.folios) {
+      await this.folios.syncReservationNights(reservationId).catch((error: unknown) => {
+        this.logger.error(
+          `Room change ${room_id}: syncing the order failed: ${error instanceof Error ? error.message : error}`,
+        );
+      });
+    }
+    return reservationId;
   }
 
   private requireStoreId(): number {

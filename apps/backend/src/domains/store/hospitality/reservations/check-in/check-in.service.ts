@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
 import { localDateString, resolveStoreTimezone } from '@common/utils/store-timezone.util';
@@ -12,29 +12,33 @@ import { formatShortDate } from '../stay-dates';
 import { LODGING_CHECKED_IN_EVENT } from '../stay-events';
 import { CheckInDto } from './check-in.dto';
 import { isSellableHousekeeping } from '../../housekeeping/housekeeping-status';
+import { LodgingFolioService } from '../folio/folio.service';
+import { createReservationFolioInTx } from '../folio/reservation-folio';
 
-/** Order number of a folio: one per reservation, so unique per store. */
-export function folioOrderNumber(reservation_number: string): string {
-  return `F-${reservation_number}`;
-}
+export { folioOrderNumber } from '../folio/reservation-folio';
 
 /**
  * Hospitality Suite (H3.2) — check-in of an arrival: the reservation goes
  * "En casa", its rooms get their physical room and the guest folio opens.
  *
  * Opening the folio copies the `table_sessions` pattern
- * (`createOpenSessionInTx`): a `draft` POS order of the holder at $0 linked
- * 1:1 by `lodging_folios`. The status change is a conditional update, so a
- * double click opens one folio only and the second request gets the same
- * result.
+ * (`createOpenSessionInTx`): a `draft` POS order of the holder linked 1:1 by
+ * `lodging_folios`. QUI-1063: a reservation confirmed after that change
+ * already has it (born at the confirmation with the stay posted), so the
+ * check-in reuses it; one confirmed before gets it here, as always. The
+ * status change is a conditional update, so a double click opens one folio
+ * only and the second request gets the same result.
  */
 @Injectable()
 export class LodgingCheckInService {
+  private readonly logger = new Logger(LodgingCheckInService.name);
+
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly reservations: LodgingReservationsService,
     private readonly roomChanges: LodgingRoomChangesService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly folios: LodgingFolioService,
   ) {}
 
   async checkIn(id: number, dto: CheckInDto) {
@@ -151,29 +155,28 @@ export class LodgingCheckInService {
         data: { status: 'checked_in', updated_at: now },
       });
       if (updated.count !== 1) return false;
-      const order = await tx.orders.create({
-        data: {
+      // QUI-1063 — the folio born at the confirmation opens now (one only:
+      // `lodging_folios.reservation_id` is unique); an older one is created.
+      const existing = await tx.lodging_folios.findFirst({
+        where: { reservation_id: id, store_id },
+        select: { id: true },
+      });
+      if (existing) {
+        await tx.lodging_folios.update({
+          where: { id: existing.id },
+          data: { opened_at: now, updated_at: now },
+        });
+      } else {
+        await createReservationFolioInTx(tx, {
           store_id,
-          created_by_user_id: user_id,
+          reservation_id: id,
+          reservation_number: reservation.reservation_number,
           customer_id: reservation.customer_id,
-          order_number: folioOrderNumber(reservation.reservation_number),
-          state: 'draft',
-          channel: 'pos',
+          user_id,
           currency,
-          subtotal_amount: 0,
-          tax_amount: 0,
-          shipping_cost: 0,
-          discount_amount: 0,
-          grand_total: 0,
-          total_paid: 0,
-          remaining_balance: 0,
-          internal_notes: `Folio de la reserva ${reservation.reservation_number}`,
-          updated_at: now,
-        },
-      });
-      await tx.lodging_folios.create({
-        data: { store_id, reservation_id: id, order_id: order.id, opened_at: now },
-      });
+          now,
+        });
+      }
       await tx.lodging_reservation_events.create({
         data: {
           store_id,
@@ -186,6 +189,17 @@ export class LodgingCheckInService {
       });
       return true;
     });
+
+    // QUI-1063 / QUI-1064 — the order carries the whole stay from now on (a
+    // folio born at the confirmation already has it: nothing is posted twice).
+    // A failure leaves the nights to the night audit, as before.
+    if (checkedIn) {
+      await this.folios.syncReservationNights(id).catch((error: unknown) => {
+        this.logger.error(
+          `Check-in ${id}: posting the stay failed: ${error instanceof Error ? error.message : error}`,
+        );
+      });
+    }
 
     // H4.1 — the TRA report listens after commit; it never blocks the desk.
     if (checkedIn) {

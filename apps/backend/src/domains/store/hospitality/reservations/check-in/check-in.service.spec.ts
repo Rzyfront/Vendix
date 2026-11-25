@@ -19,7 +19,12 @@ function build(options: Options = {}) {
   const tx = {
     lodging_reservations: { updateMany: jest.fn(async () => ({ count: options.moved ?? 1 })) },
     orders: { create: jest.fn(async ({ data }: any) => ({ id: 500, ...data })) },
-    lodging_folios: { create: jest.fn(async ({ data }: any) => ({ id: 70, ...data })) },
+    lodging_folios: {
+      // QUI-1063 — the folio born at the confirmation (when `folio`).
+      findFirst: jest.fn(async () => (options.folio ? { id: 70 } : null)),
+      create: jest.fn(async ({ data }: any) => ({ id: 70, ...data })),
+      update: jest.fn(async ({ data }: any) => ({ id: 70, ...data })),
+    },
     lodging_reservation_events: { create: jest.fn(async () => ({ id: 1 })) },
   };
   const prisma = {
@@ -64,8 +69,15 @@ function build(options: Options = {}) {
   };
   const roomChanges = { apply: jest.fn(async () => 1) };
   const eventEmitter = { emit: jest.fn() };
-  const service = new LodgingCheckInService(prisma as any, reservations as any, roomChanges as any, eventEmitter as any);
-  return { service, prisma, tx, reservations, roomChanges, eventEmitter };
+  const folios = { syncReservationNights: jest.fn(async () => 2) };
+  const service = new LodgingCheckInService(
+    prisma as any,
+    reservations as any,
+    roomChanges as any,
+    eventEmitter as any,
+    folios as any,
+  );
+  return { service, prisma, tx, reservations, roomChanges, eventEmitter, folios };
 }
 
 async function errorOf(promise: Promise<unknown>): Promise<VendixHttpException> {
@@ -104,7 +116,7 @@ describe('LodgingCheckInService (H3.2)', () => {
         data: expect.objectContaining({ status: 'checked_in' }),
       }),
     );
-    expect(tx.orders.create).toHaveBeenCalledWith({
+    expect(tx.orders.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         store_id: 3,
         customer_id: 9,
@@ -116,10 +128,10 @@ describe('LodgingCheckInService (H3.2)', () => {
         grand_total: 0,
         remaining_balance: 0,
       }),
-    });
-    expect(tx.lodging_folios.create).toHaveBeenCalledWith({
+    }));
+    expect(tx.lodging_folios.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ store_id: 3, reservation_id: 1, order_id: 500 }),
-    });
+    }));
     expect(tx.lodging_reservation_events.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ from_status: 'confirmed', to_status: 'checked_in', user_id: 42 }),
     });
@@ -129,6 +141,41 @@ describe('LodgingCheckInService (H3.2)', () => {
       store_id: 3,
       reservation_id: 1,
     });
+    expect(result.status).toBe('checked_in');
+  });
+
+  it('QUI-1063 — a reservation confirmed with its order reuses it: no second order, the folio opens now', async () => {
+    const { service, tx, folios } = build({ folio: true });
+
+    const result = await service.checkIn(1, {});
+
+    expect(result.status).toBe('checked_in');
+    expect(tx.orders.create).not.toHaveBeenCalled();
+    expect(tx.lodging_folios.create).not.toHaveBeenCalled();
+    expect(tx.lodging_folios.update).toHaveBeenCalledWith({
+      where: { id: 70 },
+      data: expect.objectContaining({ opened_at: expect.any(Date) }),
+    });
+    // The stay is (re)synced: nights already posted are not posted again.
+    expect(folios.syncReservationNights).toHaveBeenCalledWith(1);
+  });
+
+  it('QUI-1063 — a reservation confirmed before (no order yet) gets it at check-in with its stay', async () => {
+    const { service, tx, folios } = build();
+
+    await service.checkIn(1, {});
+
+    expect(tx.orders.create).toHaveBeenCalledTimes(1);
+    expect(tx.lodging_folios.create).toHaveBeenCalledTimes(1);
+    expect(folios.syncReservationNights).toHaveBeenCalledWith(1);
+  });
+
+  it('QUI-1063 — posting the stay failing never undoes the check-in (the night audit posts later)', async () => {
+    const { service, folios } = build();
+    folios.syncReservationNights.mockRejectedValueOnce(new Error('lock timeout'));
+
+    const result = await service.checkIn(1, {});
+
     expect(result.status).toBe('checked_in');
   });
 
