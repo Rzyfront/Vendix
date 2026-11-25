@@ -189,7 +189,7 @@ export class CustomersBulkEditService {
   ): Observable<BulkCustomerResult> {
     const batches = this.startPhase('apply', ids);
     if (batches.length === 0) {
-      return of({ total: 0, successful: 0, failed: 0, results: [] });
+      return of({ total: 0, successful: 0, skipped: 0, failed: 0, results: [] });
     }
 
     return from(batches).pipe(
@@ -278,7 +278,7 @@ export class CustomersBulkEditService {
       code: errorCode ?? undefined,
       message: userMessage,
     }));
-    return { total: batch.length, successful: 0, failed: batch.length, results };
+    return { total: batch.length, successful: 0, skipped: 0, failed: batch.length, results };
   }
 
   /**
@@ -386,9 +386,10 @@ export function mergeApplyResults(
     (acc, part) => ({
       total: acc.total + (part?.total ?? 0),
       successful: acc.successful + (part?.successful ?? 0),
+      skipped: acc.skipped + (part?.skipped ?? 0),
       failed: acc.failed + (part?.failed ?? 0),
       results: [...acc.results, ...(part?.results ?? [])],
     }),
-    { total: 0, successful: 0, failed: 0, results: [] },
+    { total: 0, successful: 0, skipped: 0, failed: 0, results: [] },
   );
 }

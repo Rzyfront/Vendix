@@ -429,7 +429,11 @@ export class BulkCustomerPreviewResultDto {
 export class BulkCustomerResultItemDto {
   id: number;
   name: string;
-  status: Exclude<BulkCustomerItemStatus, 'warning'>;
+  /**
+   * `skipped`: el cliente ya tenía esos valores, así que no se escribió nada
+   * (evita reportar como «editado» un no-op y reescribir `updated_at`).
+   */
+  status: 'ok' | 'skipped' | 'error';
   code?: string;
   message?: string;
 }
@@ -437,6 +441,7 @@ export class BulkCustomerResultItemDto {
 export class BulkCustomerResultDto {
   total: number;
   successful: number;
+  skipped: number;
   failed: number;
   results: BulkCustomerResultItemDto[];
 }

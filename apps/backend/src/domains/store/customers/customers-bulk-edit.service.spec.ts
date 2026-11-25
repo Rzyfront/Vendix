@@ -251,6 +251,21 @@ describe('CustomersBulkEditService', () => {
     });
   });
 
+  it('un cliente que ya tenía los valores se reporta como omitido y no se escribe', async () => {
+    const { service, prisma, customersService } = createService();
+    prisma.users.findMany.mockResolvedValue([
+      row({ phone: '3009998877' }),
+    ]);
+
+    const result = await service.apply(2, dto({ changes: { phone: '3009998877' } }));
+
+    expect(result).toMatchObject({ total: 1, successful: 0, skipped: 1, failed: 0 });
+    expect(result.results[0]).toMatchObject({ id: 10, status: 'skipped' });
+    // Reenviar el mismo valor no debe tocar `updated_at` ni disparar queries
+    // de escritura: el resumen tiene que decir «omitido», no «editado».
+    expect(customersService.update).not.toHaveBeenCalled();
+  });
+
   it('la fila que falla no aborta el resto y se reporta con su motivo', async () => {
     const { service, prisma, customersService } = createService();
     prisma.users.findMany.mockResolvedValue([row({ id: 10 }), row({ id: 11 })]);

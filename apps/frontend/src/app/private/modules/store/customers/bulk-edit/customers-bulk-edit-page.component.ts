@@ -525,13 +525,20 @@ export class CustomersBulkEditPageComponent {
       .filter((row) => row.status === 'ok')
       .map((row) => row.id);
 
-    if (touched.length > 0) {
+    // Un fallo tras la escritura escalar (p. ej. las etiquetas) deja al cliente
+    // con parte de los cambios: la ficha cacheada tampoco sirve y se invalida.
+    const stale = result.results
+      .filter((row) => row.status === 'error')
+      .map((row) => row.id);
+
+    if (touched.length > 0 || stale.length > 0) {
       this.rowCache.update((prev) => {
         const next = new Map(prev);
         touched.forEach((id) => {
           next.delete(id);
           this.requestedIds.delete(id);
         });
+        stale.forEach((id) => next.delete(id));
         return next;
       });
     }

@@ -242,12 +242,16 @@
           <app-alert-banner variant="success" icon="circle-check">
             Los {{ applyResult()!.successful }} clientes quedaron con los cambios
             aplicados.
+            @if (applyResult()!.skipped > 0) {
+              {{ applyResult()!.skipped }} ya tenían esos valores y no se tocaron.
+            }
           </app-alert-banner>
         } @else {
           <app-alert-banner variant="warning" icon="alert-triangle">
             {{ applyResult()!.successful }} clientes se editaron y
-            {{ applyResult()!.failed }} no. Los que fallaron quedaron
-            exactamente como estaban.
+            {{ applyResult()!.failed }} fallaron. Los que fallaron pueden haber
+            quedado con parte de los cambios guardada: revisa el detalle de cada
+            uno antes de repetir el lote.
           </app-alert-banner>
 
           <div class="max-h-[35vh] overflow-y-auto rounded-xl border border-border">

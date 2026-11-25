@@ -91,7 +91,8 @@ export interface BulkCustomerPreviewResult {
 export interface BulkCustomerResultItem {
   id: number;
   name: string;
-  status: Exclude<BulkCustomerItemStatus, 'warning'>;
+  /** `skipped`: ya tenía esos valores, no se escribió nada. */
+  status: 'ok' | 'skipped' | 'error';
   code?: string;
   message?: string;
 }
@@ -100,6 +101,7 @@ export interface BulkCustomerResultItem {
 export interface BulkCustomerResult {
   total: number;
   successful: number;
+  skipped: number;
   failed: number;
   results: BulkCustomerResultItem[];
 }

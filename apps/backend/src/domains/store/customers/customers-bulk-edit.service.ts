@@ -260,6 +260,20 @@ export class CustomersBulkEditService {
         }
 
         // Tarifa: batch-level ya validada; aquí solo se decide si se toca.
+        const currentTagIds = currentTags.get(id) ?? [];
+        const diff = this.buildDiff(row, changes, tier, tagContext, currentTagIds);
+
+        // Nada que cambiar: no se escribe (no se toca `updated_at`) y se
+        // reporta como omitido, no como editado.
+        if (diff.length === 0) {
+          results.push({
+            id,
+            name: this.displayName(row),
+            status: 'skipped',
+          });
+          continue;
+        }
+
         const payload = this.buildUpdatePayload(row, changes, tier);
         await this.customersService.update(storeId, id, payload);
 
@@ -269,10 +283,7 @@ export class CustomersBulkEditService {
         // fallo total: los datos del cliente YA se guardaron, y decir lo
         // contrario mandaría al operador a repetir una escritura que ya ocurrió.
         if (tagContext) {
-          const nextTags = this.applyTagAction(
-            currentTags.get(id) ?? [],
-            tagContext.action,
-          );
+          const nextTags = this.applyTagAction(currentTagIds, tagContext.action);
           try {
             await this.replaceCustomerTags(storeId, id, nextTags);
           } catch (tagError) {
@@ -310,6 +321,7 @@ export class CustomersBulkEditService {
     return {
       total: results.length,
       successful: results.filter((result) => result.status === 'ok').length,
+      skipped: results.filter((result) => result.status === 'skipped').length,
       failed: results.filter((result) => result.status === 'error').length,
       results,
     };
