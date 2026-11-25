@@ -146,7 +146,8 @@ export const QUEUE_CATALOG: Readonly<Record<string, QueueEntry>> = {
   'ai-embedding': {
     module: 'Búsqueda con IA',
     action: 'indexar contenido para la búsqueda con IA',
-    aiFeature: 'rag_embeddings',
+    // Sin `aiFeature`: la indexación ya no consume cupo de IA (2026-11-24), así
+    // que sus alertas no deben hablar de un plan agotado.
     describe: (jobName, data) => {
       if (jobName === 'index-knowledge') {
         return {
