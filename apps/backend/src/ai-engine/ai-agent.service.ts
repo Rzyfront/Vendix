@@ -522,6 +522,58 @@ export const TURN_CLOSE_NUDGE =
   'No cerraste el turno y no ejecutaste nada. Si tenías algo que hacer, hazlo ahora con la herramienta que corresponda; si ya terminaste, llama a finish_turn.';
 
 /**
+ * T4 — Vex never promises work: either a write is persisted for approval in
+ * this same turn (a `propose_write_batch` card or a single write's
+ * confirmation) or there is no promise. With no tool for the request it says
+ * so in one sentence and offers to ask the Vendix team for it.
+ */
+export function honestyRule(capabilityRequestOffered: boolean): string {
+  return [
+    'Honestidad: nunca digas que vas a hacer, aplicar o encargarte de algo si en este turno no dejaste una tarjeta para aprobar (propose_write_batch o la confirmación de una escritura); sin tarjeta no hay promesa.',
+    capabilityRequestOffered
+      ? 'Si no tienes herramienta para lo que pide, dilo en UNA frase y ofrece pedirla al equipo de Vendix (request_capability, solo si la persona acepta); no sigas explorando.'
+      : 'Si no tienes herramienta para lo que pide, dilo en UNA frase y no sigas explorando.',
+  ].join(' ');
+}
+
+/**
+ * A first-person announcement of a future write: «voy a aplicar…», «ahora
+ * mismo actualizo…», «te aviso cuando termine». Read-only announcements
+ * («voy a revisar») are left to the turn-close gate.
+ */
+const PROMISED_WRITE_PATTERN =
+  /\b(?:voy a|vamos a|procedo a|me encargo de|ahora mismo|enseguida|en un momento|ya mismo|estoy)\s+(?:[\wáéíóúñ]+\s+){0,3}?(?:aplic|asign|actualiz|cambi|modific|carg|ejecut|proces|quit|agreg|cre[oaáé]|hag[oa]|pong[oa])\w*|\bte aviso cuando\b/i;
+
+export function promisesUnbackedWrite(text: string | undefined): boolean {
+  return !!text && PROMISED_WRITE_PATTERN.test(text);
+}
+
+/** The single resume after a write promise with nothing persisted behind it. */
+export const HONESTY_NUDGE =
+  'Prometiste un cambio pero en este turno no dejaste ninguna tarjeta para aprobar, así que no va a pasar nada. Si tienes la herramienta, propón ahora el cambio (propose_write_batch o la escritura); si no la tienes, dilo en una frase. No prometas trabajo futuro.';
+
+/** What the person reads if the model promises again after the resume. */
+export const HONEST_NO_WRITE_FALLBACK =
+  'No dejé ningún cambio listo para aprobar en este turno, así que no se aplicó nada. Si quieres, lo intento de nuevo o te digo qué me falta para hacerlo.';
+
+/**
+ * True when this turn left a write behind the words: a proposed batch, an
+ * applied write, or a write awaiting its confirmation.
+ */
+export function turnHasPersistedWrite(
+  toolsUsed: AgentResult['tools_used'],
+  pendingConfirmation: unknown,
+): boolean {
+  if (pendingConfirmation) return true;
+  return (toolsUsed ?? []).some(
+    (use: any) =>
+      (use?.name === 'propose_write_batch' &&
+        use?.execution?.status === 'ok') ||
+      use?.execution?.effect_status === 'applied',
+  );
+}
+
+/**
  * What the model reads when a second loose write lands in a Vex turn that
  * already proposed one. With the batch circuit on offer it is sent to ONE
  * batch for everything that is left, instead of another card per write.
@@ -2187,6 +2239,20 @@ export class AIAgentService {
     if (writeBatchOffered)
       messages.push({ role: 'system', content: WRITE_BATCH_ROUTING_RULE });
 
+    // T4: honesty contract, Vex only. Names request_capability only when the
+    // turn can call it.
+    if (isVex)
+      messages.push({
+        role: 'system',
+        content: honestyRule(
+          (routingSession ? routingAuthority : filteredTools).some(
+            (d) =>
+              this.toolRegistry.canonicalName(d.function.name) ===
+              'request_capability',
+          ),
+        ),
+      });
+
     // Turn-close contract: only chat turns of Vex/Vexi (the surface with a
     // stream to resume and a «Continuar» to offer) and only when `finish_turn`
     // is in this turn's authority — a close the model cannot call is not
@@ -2417,6 +2483,9 @@ export class AIAgentService {
     let finishCalled = false;
     let closeResumed = false;
     let pendingContinuation = false;
+    // T4: the one resume allowed after a write promise with nothing behind it.
+    let honestyResumed = false;
+    let honestyFallback = false;
     // Time spent blocked on the browser (`ui_*` results). It is the person's
     // screen latency, not the model's work, so it must not eat the turn budget.
     let waitedMs = 0;
@@ -2495,6 +2564,22 @@ export class AIAgentService {
         const text = (lastCall?.content ?? '').trim();
         if (LEAKED_TOOL_MARKUP.test(text))
           this.logger.warn('Closing inference leaked tool-call markup');
+        // T4: a tool-free closing cannot persist anything, so a write promise
+        // in it is false by construction; it never reaches the person.
+        if (
+          isVex &&
+          promisesUnbackedWrite(text) &&
+          !turnHasPersistedWrite(toolsUsed, pendingConfirmation)
+        ) {
+          this.logger.warn(
+            JSON.stringify({
+              event: 'agent_honesty_gate',
+              outcome: 'closing_replaced',
+              store_id: context?.store_id ?? null,
+            }),
+          );
+          return HONEST_NO_WRITE_FALLBACK;
+        }
         return lastCall?.success !== false &&
           text &&
           !LEAKED_TOOL_MARKUP.test(text) &&
@@ -2876,6 +2961,37 @@ export class AIAgentService {
             }
           }
 
+          // T4 honesty gate (Vex): a reply that promises a write when this
+          // turn persisted none (no batch card, no confirmation, nothing
+          // applied) is resumed ONCE; promising again, the reply is replaced
+          // by an honest sentence. Never runs with a write awaiting approval.
+          if (
+            isVex &&
+            promisesUnbackedWrite(response.content) &&
+            !turnHasPersistedWrite(toolsUsed, pendingConfirmation)
+          ) {
+            const canResume =
+              !honestyResumed &&
+              iteration < maxIterations &&
+              Date.now() - startTime - waitedMs < timeoutMs;
+            this.logger.warn(
+              JSON.stringify({
+                event: 'agent_honesty_gate',
+                outcome: canResume ? 'resumed' : 'replaced',
+                store_id: context?.store_id ?? null,
+                agent_key: params.agent_key ?? 'vexi',
+                iteration,
+              }),
+            );
+            if (canResume) {
+              honestyResumed = true;
+              messages.push({ role: 'assistant', content: response.content! });
+              messages.push({ role: 'system', content: HONESTY_NUDGE });
+              continue;
+            }
+            honestyFallback = true;
+          }
+
           // Turn-close gate (structural, never a reading of the text): a chat
           // turn that ends in prose having run no tool and without calling
           // `finish_turn` is incomplete — typically «ya voy a buscar…» and
@@ -2928,7 +3044,9 @@ export class AIAgentService {
           // loses a little; a false report about the business would cost more.
           let narration = pendingConfirmation
             ? this.describePendingWrite(pendingConfirmation)
-            : response.content?.trim();
+            : honestyFallback
+              ? HONEST_NO_WRITE_FALLBACK
+              : response.content?.trim();
           if (narration && LEAKED_TOOL_MARKUP.test(narration)) {
             this.logger.warn(
               `Leaked tool-call markup as final answer at iteration ${iteration}; closing inference`,
