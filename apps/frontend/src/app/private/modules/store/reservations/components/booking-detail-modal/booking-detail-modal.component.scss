@@ -636,7 +636,7 @@
   grid-template-columns: 1fr;
 
   @media (min-width: 1024px) {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     align-items: start;
     gap: 12px;
     margin: 0 16px 12px;
@@ -645,11 +645,16 @@
       margin: 0;
     }
 
-    > .deposit-hint {
+    > .deposit-hint,
+    > .order-missing {
       grid-column: 1 / -1;
       margin: 0;
     }
   }
+}
+
+.order-missing {
+  margin: 0 16px 12px;
 }
 
 // Deposit block (S15 / S17)

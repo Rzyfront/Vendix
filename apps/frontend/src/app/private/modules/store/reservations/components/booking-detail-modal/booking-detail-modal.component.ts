@@ -765,7 +765,8 @@ export class BookingDetailModalComponent {
   }
 
   protected toNumber(value: number | string | null | undefined): number {
-    return Number(value ?? 0);
+    const parsed = Number(value ?? 0);
+    return Number.isFinite(parsed) ? parsed : 0;
   }
 
   /** Opens the inline "Agregar cargo" form and loads the catalog once. */

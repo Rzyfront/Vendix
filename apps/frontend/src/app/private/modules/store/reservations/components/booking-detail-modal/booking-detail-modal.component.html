@@ -197,7 +197,9 @@
               <span class="deposit-badge" [ngClass]="orderIsPaid() ? 'paid' : orderClosed() ? 'muted' : ''">{{ orderBadgeLabel() }}</span>
             </div>
             @if (orderTotal() <= 0) {
-              <p class="deposit-hint">La orden todavía no tiene cargos: agrega un producto o servicio para poder cobrarla.</p>
+              @if (canAddCharge()) {
+                <p class="deposit-hint">La orden todavía no tiene cargos: agrega un producto o servicio para poder cobrarla.</p>
+              }
             } @else {
               <div class="deposit-figures">
                 <span>Total <strong>{{ orderTotal() | currency }}</strong></span>
@@ -253,7 +255,7 @@
             }
           </div>
         } @else if (orderLoaded()) {
-          <p class="deposit-hint" style="margin: 0 16px 12px" data-testid="booking-no-order">Esta reserva no tiene orden asociada.</p>
+          <p class="deposit-hint order-missing" data-testid="booking-no-order">Esta reserva no tiene orden asociada.</p>
         }
 
         <!-- Deposit block (S15 / S17) -->
@@ -264,8 +266,10 @@
                 <app-icon name="wallet" [size]="13"></app-icon>
                 Anticipo
               </span>
-              @if (dep.received > 0) {
+              @if (dep.balance > 0) {
                 <span class="deposit-badge paid">Pagado</span>
+              } @else if (dep.received > 0) {
+                <span class="deposit-badge muted">Aplicado</span>
               } @else if (pendingDepositRequest()) {
                 <span class="deposit-badge pending">Esperando pago</span>
               }
