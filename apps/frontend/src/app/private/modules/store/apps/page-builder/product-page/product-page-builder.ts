@@ -1,6 +1,7 @@
 import { Observable, forkJoin, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 
+import type { AppPageProductItem, AppPageProductVariant } from '../../../../../../public/app-page/app-page-products.util';
 import { complementsTitleOf } from '../../../../../../public/product-page/product-page-view.component';
 import type { Product } from '../../../products/interfaces/product.interface';
 import type { ProductsService } from '../../../products/services/products.service';
@@ -37,7 +38,20 @@ export interface ProductPageContext {
     image_url: string | null;
     variants: { id: number; name: string }[];
   } | null;
-  complements: { id: number; slug: string; name: string; image_url: string | null }[];
+  complements: {
+    id: number;
+    slug: string;
+    name: string;
+    image_url: string | null;
+    final_price?: number;
+    regular_final_price?: number | null;
+    is_on_sale?: boolean;
+    variants?: AppPageProductVariant[];
+  }[];
+  /** Productos elegidos manualmente en bloques `products` activos, resueltos por el backend. */
+  block_products?: AppPageProductItem[];
+  /** Hasta 8 productos recientes del catálogo para bloques `products` en modo `auto` (no repite complementos). */
+  auto_products?: AppPageProductItem[];
 }
 
 export const EMPTY_PRODUCT_PAGE_CONTEXT: ProductPageContext = { product: null, complements: [] };
@@ -57,6 +71,7 @@ const CATEGORIES: readonly BuilderCategory[] = [
  */
 const META: Record<string, PageBlockMeta> = {
   benefits: { category: 'product' },
+  highlights: { category: 'product' },
   how_it_works: { category: 'product' },
   specifications: { category: 'product' },
   gallery: { category: 'product' },
@@ -68,6 +83,10 @@ const META: Record<string, PageBlockMeta> = {
     pinned: 'start',
     removable: false,
     liveData: 'Los productos complementarios que elegiste en General.',
+  },
+  products: {
+    category: 'sales',
+    liveData: 'En modo automático muestra hasta 8 productos recientes de tu tienda; en manual muestra los que elijas.',
   },
   cta: { category: 'sales' },
 };
@@ -86,6 +105,10 @@ export interface ProductPagePreview {
   complementsTitle: string;
   /** Id of the «Complementos» block, to select it from the preview; `null` when the page has none. */
   complementsBlockId: string | null;
+  /** IDs automáticos (hasta 8 productos recientes de la tienda) para bloques `products` en modo `auto`. */
+  autoProductIds: number[];
+  /** Productos resueltos (contexto del servidor + selección en vivo) para bloques `products` en vista previa. */
+  catalogProducts: AppPageProductItem[];
 }
 
 /**
@@ -111,6 +134,30 @@ export function productPagePreview(
     image_url: context.complements.find((k) => k.id === c.id)?.image_url ?? null,
   }));
   const block = page.blocks.find((b) => b.type === 'complements');
+  // Los datos resueltos por el servidor siempre ganan (incluyen impuestos, promociones y
+  // presentación por defecto); el selector del editor solo rellena huecos de productos nuevos.
+  const catalogById = new Map<number, AppPageProductItem>();
+  for (const item of payload.catalogProducts ?? []) {
+    catalogById.set(item.id, item);
+  }
+  for (const c of context.complements) {
+    catalogById.set(c.id, {
+      id: c.id,
+      slug: c.slug,
+      name: c.name,
+      image_url: c.image_url,
+      final_price: c.final_price ?? 0,
+      regular_final_price: c.regular_final_price ?? null,
+      is_on_sale: Boolean(c.is_on_sale),
+      variants: c.variants ?? [],
+    });
+  }
+  for (const item of context.auto_products ?? []) {
+    catalogById.set(item.id, item);
+  }
+  for (const item of context.block_products ?? []) {
+    catalogById.set(item.id, item);
+  }
   return {
     page,
     storeName: payload.storeName,
@@ -120,6 +167,10 @@ export function productPagePreview(
     showComplements: !!product && complements.length > 0 && block?.enabled !== false,
     complementsTitle: complementsTitleOf(page),
     complementsBlockId: block?.id ?? null,
+    // En Product Page el bloque `products` en modo `auto` muestra los 8 productos recientes
+    // del catálogo (sin repetir `complements`, que ya tiene su propia sección).
+    autoProductIds: (context.auto_products ?? []).map((p) => p.id),
+    catalogProducts: Array.from(catalogById.values()),
   };
 }
 

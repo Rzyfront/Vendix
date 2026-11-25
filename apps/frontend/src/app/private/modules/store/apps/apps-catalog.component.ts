@@ -36,6 +36,16 @@ import { MenuFilterService } from '../../../../core/services/menu-filter.service
         </p>
       </header>
 
+      <a
+        routerLink="/admin/apps/gallery"
+        class="mb-4 inline-flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm font-semibold text-[var(--color-text-primary)] no-underline"
+        data-testid="apps-media-gallery-link"
+      >
+        <app-icon name="image" [size]="16" />
+        Galería de medios
+        <span class="text-xs font-normal text-[var(--color-text-secondary)]">fotos de tus apps, con enlace para copiar</span>
+      </a>
+
       @if (!appsEnabled()) {
         <div
           class="mb-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 text-sm text-[var(--color-text-secondary)]"

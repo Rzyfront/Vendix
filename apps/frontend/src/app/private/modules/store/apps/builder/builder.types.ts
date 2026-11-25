@@ -22,6 +22,11 @@ export interface BuilderBlock {
   hidden?: boolean;
 }
 
+export interface BuilderFieldOption {
+  value: string;
+  label: string;
+}
+
 export type BuilderScalarFieldDef =
   | {
       key: string;
@@ -30,12 +35,43 @@ export type BuilderScalarFieldDef =
       max: number;
       placeholder?: string;
       hint?: string;
+      group?: 'appearance';
     }
-  | { key: string; label: string; kind: 'url'; placeholder?: string; hint?: string }
+  | { key: string; label: string; kind: 'url'; placeholder?: string; hint?: string; group?: 'appearance' }
+  /** Selector de imagen conectado a la galería de medios de la tienda (`app-media-field`). */
+  | { key: string; label: string; kind: 'media'; placeholder?: string; hint?: string; group?: 'appearance' }
+  /** Color hexadecimal `#RRGGBB` con selector nativo y limpieza. */
+  | { key: string; label: string; kind: 'color'; placeholder?: string; hint?: string; group?: 'appearance' }
+  /** Selección cerrada en desplegable o chips. */
+  | {
+      key: string;
+      label: string;
+      kind: 'select' | 'chips';
+      options: readonly BuilderFieldOption[];
+      emptyLabel?: string;
+      hint?: string;
+      group?: 'appearance';
+    }
+  /** Rango entero con control deslizante (ej. velo 0-80 %, columnas 2-4). */
+  | {
+      key: string;
+      label: string;
+      kind: 'range';
+      min: number;
+      max: number;
+      step?: number;
+      unit?: string;
+      /** Valor efectivo cuando la prop no está definida (p. ej. 40 % para el velo). */
+      defaultValue?: number;
+      /** Valor por defecto según el valor de otra prop del mismo bloque (p. ej. `variant: { background: 45 }`). */
+      defaultByProp?: { key: string; values: Readonly<Record<string, number>> };
+      hint?: string;
+      group?: 'appearance';
+    }
   /** F6-B: a whole number within `min`..`max` (e.g. a 1-5 rating). Stored as a number. */
-  | { key: string; label: string; kind: 'number'; min: number; max: number; hint?: string }
+  | { key: string; label: string; kind: 'number'; min: number; max: number; hint?: string; group?: 'appearance' }
   /** F6-B: a yes/no switch (e.g. show the price). Stored as a boolean; block fields only, not list items. */
-  | { key: string; label: string; kind: 'toggle'; hint?: string };
+  | { key: string; label: string; kind: 'toggle'; hint?: string; group?: 'appearance' };
 
 /**
  * A repeatable list of items (benefits, testimonials, questions, photos).
@@ -56,7 +92,18 @@ export interface BuilderListFieldDef {
   emptyHint?: string;
 }
 
-export type BuilderFieldDef = BuilderScalarFieldDef | BuilderListFieldDef;
+export interface BuilderProductIdsFieldDef {
+  key: string;
+  label: string;
+  kind: 'product_ids';
+  max: number;
+  hint?: string;
+  /** Solo muestra el campo en el inspector cuando otra prop del bloque coincide. */
+  visibleWhen?: { key: string; value: unknown };
+  group?: 'appearance';
+}
+
+export type BuilderFieldDef = BuilderScalarFieldDef | BuilderListFieldDef | BuilderProductIdsFieldDef;
 
 export interface BuilderCategory {
   id: string;

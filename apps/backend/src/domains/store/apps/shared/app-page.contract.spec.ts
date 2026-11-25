@@ -273,7 +273,7 @@ describe('app page contract', () => {
           button_style: 'ghost',
           image_style: 'circle',
           content_width: 'full',
-          shadow: 'lg',
+          sparkle: 'lg',
         },
         blocks: [],
       });
@@ -287,9 +287,102 @@ describe('app page contract', () => {
           'theme.button_style debe ser uno de: solid, outline.',
           'theme.image_style debe ser uno de: square, rounded.',
           'theme.content_width debe ser uno de: narrow, normal, wide.',
-          'theme.shadow no es un campo permitido.',
+          'theme.sparkle no es un campo permitido.',
         ]),
       );
+    });
+
+    describe('extended tokens (Apps F7)', () => {
+      const extended = {
+        border_color: '#E5DED5',
+        base_font_size: 'lg',
+        heading_scale: 'display',
+        section_gap: 'airy',
+        card_style: 'soft',
+        shadow: 'strong',
+        image_ratio: '16:9',
+        image_overlay: 40,
+        hero_height: 'full',
+      };
+
+      it('accepts every extended token next to the F3 ones and keeps it as sent', () => {
+        const result = validateAppPage('product_page', {
+          schema_version: 1,
+          theme: { ...fullTheme, ...extended },
+          blocks: [],
+        });
+        expect(result.errors).toEqual([]);
+        expect(result.value?.theme).toEqual({ ...fullTheme, ...extended });
+      });
+
+      it('accepts the bounds of the image veil and every image ratio', () => {
+        for (const image_overlay of [0, 80]) {
+          expect(
+            validateAppPage('booking', { schema_version: 1, theme: { image_overlay }, blocks: [] }).value?.theme,
+          ).toEqual({ image_overlay });
+        }
+        for (const image_ratio of ['square', '4:3', '16:9', 'auto']) {
+          expect(
+            validateAppPage('service_page', { schema_version: 1, theme: { image_ratio }, blocks: [] }).valid,
+          ).toBe(true);
+        }
+      });
+
+      it('rejects values outside the closed catalogs, a malformed border and an out-of-range veil', () => {
+        const result = validateAppPage('service_page', {
+          schema_version: 1,
+          theme: {
+            border_color: 'gray',
+            base_font_size: 'xl',
+            heading_scale: 'huge',
+            section_gap: 'wide',
+            card_style: 'glass',
+            shadow: 'lg',
+            image_ratio: '3:2',
+            image_overlay: 81,
+            hero_height: 'half',
+          },
+          blocks: [],
+        });
+        expect(result.valid).toBe(false);
+        expect(result.value).toBeNull();
+        expect(result.errors).toEqual(
+          expect.arrayContaining([
+            'theme.border_color debe ser un color #RRGGBB.',
+            'theme.base_font_size debe ser uno de: sm, md, lg.',
+            'theme.heading_scale debe ser uno de: compact, normal, display.',
+            'theme.section_gap debe ser uno de: tight, normal, airy.',
+            'theme.card_style debe ser uno de: flat, outline, soft.',
+            'theme.shadow debe ser uno de: none, soft, strong.',
+            'theme.image_ratio debe ser uno de: square, 4:3, 16:9, auto.',
+            'theme.image_overlay debe ser un entero entre 0 y 80.',
+            'theme.hero_height debe ser uno de: auto, compact, full.',
+          ]),
+        );
+      });
+
+      it('rejects a veil that is negative, fractional or text', () => {
+        for (const image_overlay of [-1, 12.5, '40']) {
+          const result = validateAppPage('booking', {
+            schema_version: 1,
+            theme: { image_overlay },
+            blocks: [],
+          });
+          expect(result.errors).toEqual(['theme.image_overlay debe ser un entero entre 0 y 80.']);
+        }
+      });
+
+      it('an old page without extended tokens is returned exactly as before', () => {
+        const result = validateAppPage('product_page', {
+          schema_version: 1,
+          theme: fullTheme,
+          blocks: [],
+        });
+        expect(result.value?.theme).toEqual(fullTheme);
+        for (const key of Object.keys(extended)) {
+          expect(result.value?.theme).not.toHaveProperty(key);
+        }
+      });
     });
 
     it('drops an empty theme, so the page keeps its pre-F3 look', () => {
@@ -324,6 +417,303 @@ describe('app page contract', () => {
           page: { schema_version: 1, theme: { radius: 'huge' }, blocks: [] },
         }),
       ).toBeNull();
+    });
+  });
+
+  describe('section variants and appearance (apps-sections)', () => {
+    it('accepts hero variants, gallery layouts, highlights with media/icon/accent, cta image and block appearance', () => {
+      const result = validateAppPage('product_page', {
+        schema_version: 1,
+        hero: {
+          title: 'Producto estrella',
+          variant: 'background',
+          background_image_url: 'https://api.vendix.online/api/public/apps/media/10',
+          overlay_opacity: 45,
+          height: 'full',
+          align: 'center',
+        },
+        blocks: [
+          {
+            id: 'gal',
+            type: 'gallery',
+            props: {
+              title: 'Fotos',
+              variant: 'carousel',
+              columns: 4,
+              aspect_ratio: '16:9',
+              image_urls: [
+                'https://api.vendix.online/api/public/apps/media/1',
+                'https://api.vendix.online/api/public/apps/media/2',
+              ],
+              background_color: '#F8FAFC',
+              spacing: 'spacious',
+              align: 'center',
+            },
+          },
+          {
+            id: 'hl',
+            type: 'highlights',
+            props: {
+              title: 'Destacados',
+              variant: 'band',
+              accent_color: '#0EA5E9',
+              background_image_url: 'https://api.vendix.online/api/public/apps/media/3',
+              overlay_opacity: 0,
+              spacing: 'compact',
+              align: 'left',
+              items: [
+                {
+                  title: 'Envío rápido',
+                  text: 'En 24 horas',
+                  image_url: 'https://api.vendix.online/api/public/apps/media/4',
+                  icon: 'truck',
+                },
+              ],
+            },
+          },
+          {
+            id: 'cta',
+            type: 'cta',
+            props: {
+              title: 'Compra hoy',
+              button_label: 'Comprar',
+              image_url: 'https://api.vendix.online/api/public/apps/media/5',
+            },
+          },
+        ],
+      });
+
+      expect(result.errors).toEqual([]);
+      expect(result.valid).toBe(true);
+      expect(result.value?.hero).toEqual({
+        title: 'Producto estrella',
+        variant: 'background',
+        background_image_url: 'https://api.vendix.online/api/public/apps/media/10',
+        overlay_opacity: 45,
+        height: 'full',
+        align: 'center',
+      });
+      expect(result.value?.blocks[1].props['overlay_opacity']).toBe(0);
+      expect(result.value?.blocks[1].props['accent_color']).toBe('#0EA5E9');
+    });
+
+    it('rejects invalid enums, out-of-range sliders, bad colors and non-https media URLs', () => {
+      const result = validateAppPage('service_page', {
+        schema_version: 1,
+        hero: {
+          title: 'Servicios',
+          variant: 'split',
+          background_image_url: 'http://inseguro.co/bg.jpg',
+          overlay_opacity: 95,
+          height: 'giant',
+          align: 'justify',
+        },
+        blocks: [
+          {
+            id: 'gal',
+            type: 'gallery',
+            props: {
+              variant: 'masonry',
+              columns: 5,
+              aspect_ratio: '21:9',
+              image_urls: ['http://inseguro.co/a.jpg'],
+              background_color: 'azul',
+              spacing: 'huge',
+              align: 'middle',
+            },
+          },
+          {
+            id: 'hl',
+            type: 'highlights',
+            props: {
+              variant: 'pills',
+              accent_color: '#123',
+              overlay_opacity: -5,
+              items: [{ title: 'Uno', image_url: 'ftp://x.co/1.png', icon: 'invalid-icon' }],
+            },
+          },
+        ],
+      });
+
+      expect(result.valid).toBe(false);
+      expect(result.errors).toEqual(
+        expect.arrayContaining([
+          'hero.variant debe ser uno de: centered, image_right, background.',
+          'hero.background_image_url debe ser una URL https.',
+          'hero.overlay_opacity debe ser un entero entre 0 y 80.',
+          'hero.height debe ser uno de: auto, compact, full.',
+          'hero.align debe ser uno de: left, center, right.',
+          'blocks[0].props.variant debe ser uno de: grid, carousel, mosaic.',
+          'blocks[0].props.columns debe ser un entero entre 2 y 4.',
+          'blocks[0].props.aspect_ratio debe ser uno de: 1:1, 4:3, 16:9.',
+          'blocks[0].props.image_urls[0] debe ser una URL https.',
+          'blocks[0].props.background_color debe ser un color #RRGGBB.',
+          'blocks[0].props.spacing debe ser uno de: compact, normal, spacious.',
+          'blocks[0].props.align debe ser uno de: left, center, right.',
+          'blocks[1].props.variant debe ser uno de: cards, list, band.',
+          'blocks[1].props.accent_color debe ser un color #RRGGBB.',
+          'blocks[1].props.overlay_opacity debe ser un entero entre 0 y 80.',
+          'blocks[1].props.items[0].image_url debe ser una URL https.',
+          'blocks[1].props.items[0].icon debe ser uno de: sparkles, star, check, shield-check, truck, clock, heart, award, zap, flame, gift, map-pin, crown, thumbs-up.',
+        ]),
+      );
+    });
+
+    it('keeps store_home blocks and hero isolated from the new section customization props', () => {
+      const okHero = validateAppPage('store_home', {
+        schema_version: 1,
+        hero: {
+          eyebrow: 'Bienvenidos',
+          title: 'Mi tienda',
+          subtitle: 'Todo en un lugar',
+          image_url: 'https://cdn.x.co/home.jpg',
+          button_label: 'Explorar',
+        },
+        blocks: [],
+      });
+      expect(okHero.valid).toBe(true);
+
+      const result = validateAppPage('store_home', {
+        schema_version: 1,
+        hero: {
+          title: 'Mi tienda',
+          variant: 'background',
+          background_image_url: 'https://cdn.x.co/bg.jpg',
+          overlay_opacity: 40,
+          height: 'full',
+          align: 'center',
+        },
+        blocks: [{ id: 'hl', type: 'highlights', props: { variant: 'band', spacing: 'compact' } }],
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors).toEqual(
+        expect.arrayContaining([
+          'hero.variant no es un campo permitido.',
+          'hero.background_image_url no es un campo permitido.',
+          'hero.overlay_opacity no es un campo permitido.',
+          'hero.height no es un campo permitido.',
+          'hero.align no es un campo permitido.',
+          'blocks[0].props.variant no es un campo permitido.',
+          'blocks[0].props.spacing no es un campo permitido.',
+        ]),
+      );
+    });
+
+    it('rejects javascript: and data: URLs in background_image_url (hero and block)', () => {
+      for (const badUrl of ['javascript:alert(1)', 'data:image/svg+xml,<svg onload=alert(1)>']) {
+        const result = validateAppPage('product_page', {
+          schema_version: 1,
+          hero: { title: 'Producto', background_image_url: badUrl },
+          blocks: [
+            {
+              id: 'faq1',
+              type: 'faq',
+              props: { title: 'FAQ', background_image_url: badUrl },
+            },
+          ],
+        });
+        expect(result.valid).toBe(false);
+        expect(result.errors).toEqual([
+          'hero.background_image_url debe ser una URL https.',
+          'blocks[0].props.background_image_url debe ser una URL https.',
+        ]);
+      }
+    });
+  });
+
+  describe('bloque products con selectores avanzados (apps-selectors)', () => {
+    it('acepta selection, product_ids (en orden y sin duplicados), show_variants y layout en product_page y service_page', () => {
+      for (const kind of ['product_page', 'service_page'] as const) {
+        const result = validateAppPage(kind, {
+          schema_version: 1,
+          blocks: [
+            {
+              id: 'products',
+              type: 'products',
+              props: {
+                title: 'Destacados',
+                selection: 'manual',
+                product_ids: [14, 3, 9, 3],
+                show_variants: true,
+                layout: 'carousel',
+              },
+            },
+          ],
+        });
+        expect(result.errors).toEqual([]);
+        expect(result.valid).toBe(true);
+        expect(result.value?.blocks[0].props).toEqual({
+          title: 'Destacados',
+          selection: 'manual',
+          product_ids: [14, 3, 9],
+          show_variants: true,
+          layout: 'carousel',
+        });
+      }
+    });
+
+    it('acepta hasta 50 product_ids y rechaza más de 50', () => {
+      const fifty = Array.from({ length: 50 }, (_, i) => i + 1);
+      const ok = validateAppPage('product_page', {
+        schema_version: 1,
+        blocks: [{ id: 'p', type: 'products', props: { selection: 'manual', product_ids: fifty } }],
+      });
+      expect(ok.valid).toBe(true);
+      expect(ok.value?.blocks[0].props['product_ids']).toEqual(fifty);
+
+      const fiftyOne = Array.from({ length: 51 }, (_, i) => i + 1);
+      const bad = validateAppPage('service_page', {
+        schema_version: 1,
+        blocks: [{ id: 'p', type: 'products', props: { selection: 'manual', product_ids: fiftyOne } }],
+      });
+      expect(bad.valid).toBe(false);
+      expect(bad.errors).toEqual(['blocks[0].props.product_ids admite máximo 50 elementos.']);
+    });
+
+    it('rechaza ids inválidos, selection desconocida, show_variants no booleano y layout desconocido', () => {
+      const result = validateAppPage('product_page', {
+        schema_version: 1,
+        blocks: [
+          {
+            id: 'p',
+            type: 'products',
+            props: {
+              selection: 'random',
+              product_ids: [0, -4, 2.5, '7'],
+              show_variants: 'sí',
+              layout: 'masonry',
+            },
+          },
+        ],
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors).toEqual(
+        expect.arrayContaining([
+          'blocks[0].props.selection debe ser uno de: auto, manual.',
+          'blocks[0].props.product_ids[0] debe ser un identificador entero positivo.',
+          'blocks[0].props.product_ids[1] debe ser un identificador entero positivo.',
+          'blocks[0].props.product_ids[2] debe ser un identificador entero positivo.',
+          'blocks[0].props.product_ids[3] debe ser un identificador entero positivo.',
+          'blocks[0].props.show_variants debe ser verdadero o falso.',
+          'blocks[0].props.layout debe ser uno de: grid, list, carousel.',
+        ]),
+      );
+    });
+
+    it('mantiene intacto un bloque products sin props nuevas y no altera booking.products', () => {
+      const legacy = validateAppPage('service_page', {
+        schema_version: 1,
+        blocks: [{ id: 'products', type: 'products', props: { title: 'También puedes comprar' } }],
+      });
+      expect(legacy.valid).toBe(true);
+      expect(legacy.value?.blocks[0].props).toEqual({ title: 'También puedes comprar' });
+
+      const bookingReject = validateAppPage('booking', {
+        schema_version: 1,
+        blocks: [{ id: 'products', type: 'products', props: { layout: 'carousel' } }],
+      });
+      expect(bookingReject.valid).toBe(false);
+      expect(bookingReject.errors).toEqual(['blocks[0].props.layout no es un campo permitido.']);
     });
   });
 });

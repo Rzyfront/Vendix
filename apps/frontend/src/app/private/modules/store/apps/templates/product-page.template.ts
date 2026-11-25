@@ -1,10 +1,11 @@
 import {
   APP_PAGE_SCHEMA_VERSION,
   AppPageTemplate,
-  cardsFields,
   ctaFields,
   faqFields,
   galleryFields,
+  highlightsFields,
+  productsFields,
   stepsFields,
   testimonialsFields,
   titleField,
@@ -28,9 +29,16 @@ export const PRODUCT_PAGE_TEMPLATE: AppPageTemplate = {
     {
       type: 'benefits',
       label: 'Beneficios',
-      description: 'Por qué elegir el producto, en tarjetas cortas.',
+      description: 'Por qué elegir el producto, en tarjetas, lista o banda.',
       icon: 'sparkles',
-      fields: cardsFields('Beneficio'),
+      fields: highlightsFields('Beneficio'),
+    },
+    {
+      type: 'highlights',
+      label: 'Destacados',
+      description: 'Puntos clave del producto con imagen, icono y color de acento.',
+      icon: 'award',
+      fields: highlightsFields('Destacado'),
     },
     {
       type: 'how_it_works',
@@ -80,6 +88,13 @@ export const PRODUCT_PAGE_TEMPLATE: AppPageTemplate = {
       icon: 'package-plus',
       existing: true,
       fields: [titleField()],
+    },
+    {
+      type: 'products',
+      label: 'Productos',
+      description: 'Vitrina de productos (automático: hasta 8 recientes de la tienda; manual: tu selección), variantes y diseño.',
+      icon: 'shopping-bag',
+      fields: productsFields(),
     },
     {
       type: 'shipping_warranty',

@@ -1,4 +1,6 @@
 import { RequestContextService } from '@common/context/request-context.service';
+import { StorefrontPriceService } from '../../../ecommerce/shared/services/storefront-price.service';
+import { PriceResolverService } from '../../products/services/price-resolver.service';
 import { ProductPageAppService } from './product-page-app.service';
 import { ProductPageViewService } from './product-page-view.service';
 
@@ -7,17 +9,51 @@ const row = (id: number, over: Record<string, unknown> = {}) => ({
   slug: `p-${id}`,
   name: `Producto ${id}`,
   description: null,
+  base_price: '0.00',
+  sale_price: null,
+  is_on_sale: false,
+  track_inventory: false,
   product_images: [],
+  product_categories: [],
+  product_tax_assignments: [],
   product_variants: [],
   ...over,
 });
 
 describe('ProductPageViewService (F6-B)', () => {
-  const build = (rows: unknown[]) => {
+  const storefrontPrice = new StorefrontPriceService(new PriceResolverService());
+
+  const build = (
+    rows: unknown[],
+    opts: {
+      tierAssignments?: unknown[];
+      tierOverrides?: unknown[];
+      promotions?: Map<number, any>;
+    } = {},
+  ) => {
     const findMany = jest.fn().mockResolvedValue(rows);
     const s3 = { signUrl: jest.fn(async (key?: string) => (key ? `signed:${key}` : undefined)) };
-    const service = new ProductPageViewService({ products: { findMany } } as any, s3 as any);
-    return { service, findMany, s3 };
+    const prisma = {
+      products: { findMany },
+      product_price_tier_assignments: {
+        findMany: jest.fn().mockResolvedValue(opts.tierAssignments ?? []),
+      },
+      product_price_tier_overrides: {
+        findMany: jest.fn().mockResolvedValue(opts.tierOverrides ?? []),
+      },
+    };
+    const promotionEngine = {
+      findActiveAutoPromotionsForProducts: jest
+        .fn()
+        .mockResolvedValue(opts.promotions ?? new Map()),
+    };
+    const service = new ProductPageViewService(
+      prisma as any,
+      s3 as any,
+      storefrontPrice,
+      promotionEngine as any,
+    );
+    return { service, findMany, s3, prisma, promotionEngine };
   };
 
   it('filters the catalog by the store and the sold-online rule', async () => {
@@ -79,6 +115,87 @@ describe('ProductPageViewService (F6-B)', () => {
       product: null,
       complements: [],
     });
+  });
+
+  it('proyecta block_products en orden manual con precios finales, impuestos y promociones activas iguales al público', async () => {
+    const { service } = build(
+      [
+        row(10, {
+          base_price: '10000.00',
+          product_tax_assignments: [
+            { is_inclusive: false, tax_categories: { tax_rates: [{ rate: '0.19', is_inclusive: false }] } },
+          ],
+          product_variants: [
+            { id: 101, name: '250 ml', sku: 'V-250', price_override: '12000.00', is_on_sale: false, sale_price: null },
+            { id: 102, name: '500 ml', sku: 'V-500', price_override: '20000.00', is_on_sale: true, sale_price: '15000.00' },
+          ],
+        }),
+        row(20, { base_price: '5000.00', product_tax_assignments: [] }),
+      ],
+      {
+        promotions: new Map([
+          [
+            20,
+            {
+              id: 77,
+              name: 'Descuento 10%',
+              type: 'percentage',
+              scope: 'product',
+              discount_percentage: 10,
+              promotional_price: 4500,
+              badge_label: '-10% OFF',
+              priority: 1,
+            },
+          ],
+        ]),
+      },
+    );
+
+    const data = await service.read(7, {
+      product_id: null,
+      complement_product_ids: [],
+      page: {
+        schema_version: 1,
+        blocks: [
+          { id: 'hidden', type: 'products', enabled: false, props: { selection: 'manual', product_ids: [99] } },
+          { id: 'p', type: 'products', enabled: true, props: { selection: 'manual', product_ids: [20, 10] } },
+        ],
+      },
+    });
+
+    expect(data.block_products?.map((p) => p.id)).toEqual([20, 10]);
+    expect(data.block_products?.[0]).toMatchObject({
+      final_price: 4500,
+      regular_final_price: 5000,
+      is_on_sale: true,
+    });
+    expect(data.block_products?.[1].final_price).toBe(11900);
+    expect(data.block_products?.[1].variants).toEqual([
+      expect.objectContaining({ id: 101, name: '250 ml', final_price: 14280 }),
+      expect.objectContaining({ id: 102, name: '500 ml', final_price: 17850, regular_final_price: 23800, is_on_sale: true }),
+    ]);
+  });
+
+  it('en bloque products en modo auto carga auto_products (hasta 8 recientes) sin repetir complementos', async () => {
+    const { service, findMany } = build([]);
+    findMany.mockResolvedValueOnce([row(30, { base_price: '12000.00' }), row(31, { base_price: '15000.00' })]);
+
+    const data = await service.read(7, {
+      product_id: null,
+      complement_product_ids: [],
+      page: {
+        schema_version: 1,
+        blocks: [{ id: 'auto_p', type: 'products', enabled: true, props: { selection: 'auto' } }],
+      },
+    });
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        take: 8,
+        orderBy: { created_at: 'desc' },
+      }),
+    );
+    expect(data.auto_products?.map((p) => p.id)).toEqual([30, 31]);
   });
 });
 

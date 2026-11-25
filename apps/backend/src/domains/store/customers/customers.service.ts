@@ -2524,11 +2524,66 @@ export class CustomersService {
     };
   }
 
-  async update(storeId: number, id: number, dto: UpdateCustomerDto) {
-    const user = await this.findOne(storeId, id);
-    const priceTierId = await this.resolveCustomerPriceTierId(
-      dto.price_tier_id,
-    );
+  /**
+   * Columnas que `update()` necesita del cliente. Con `lean` se leen solo
+   * estas en vez de pasar por `findOne()`, que agrega las stats de `orders` y
+   * firma el avatar en S3: en la edición masiva eso eran hasta 100
+   * agregaciones y 100 firmas por lote.
+   */
+  private static readonly CUSTOMER_UPDATE_SELECT = {
+    id: true,
+    organization_id: true,
+    document_type: true,
+    document_number: true,
+    verification_digit: true,
+    first_name: true,
+    last_name: true,
+    person_type: true,
+  } as const;
+
+  async update(
+    storeId: number,
+    id: number,
+    dto: UpdateCustomerDto,
+    // Permite que el llamador envuelva la escritura (dos tablas) en una
+    // transacción propia, p. ej. la edición masiva.
+    tx?: Prisma.TransactionClient,
+    options: {
+      /**
+       * Lectura mínima y sin re-consultar la tarifa. No relaja ninguna
+       * validación de escritura: solo evita el trabajo que el llamador ya hizo.
+       */
+      lean?: boolean;
+      /** Tarifa ya resuelta por el llamador (`null` = sin tarifa). */
+      resolvedPriceTierId?: number | null;
+    } = {},
+  ) {
+    const db = tx ?? this.prisma;
+    const user = options.lean
+      ? await this.prisma.users.findFirst({
+          where: {
+            id,
+            store_users: { some: { store_id: storeId } },
+            user_roles: { some: { roles: { name: 'customer' } } },
+          },
+          select: {
+            ...CustomersService.CUSTOMER_UPDATE_SELECT,
+            // Solo para devolver la tarifa vigente cuando el payload no la
+            // toca; `findOne` la aplana con `withPriceTierId`.
+            store_users: {
+              where: { store_id: storeId },
+              select: { price_tier_id: true },
+            },
+          },
+        })
+      : await this.findOne(storeId, id);
+    if (!user) {
+      throw new VendixHttpException(ErrorCodes.CUST_FIND_001);
+    }
+    const priceTierId =
+      options.resolvedPriceTierId !== undefined
+        ? options.resolvedPriceTierId
+        : await this.resolveCustomerPriceTierId(dto.price_tier_id);
     const effectiveEmail =
       dto.email !== undefined
         ? this.resolveCustomerEmail(dto.email)
@@ -2691,7 +2746,7 @@ export class CustomersService {
       lastNameUpdate = '';
     }
 
-    const updated = await this.prisma.users.update({
+    const updated = await db.users.update({
       where: { id: user.id },
       data: {
         first_name:
@@ -2747,18 +2802,22 @@ export class CustomersService {
     });
 
     if (priceTierId !== undefined) {
-      await this.prisma.store_users.update({
+      await db.store_users.update({
         where: { store_id_user_id: { store_id: storeId, user_id: user.id } },
         data: { price_tier_id: priceTierId },
       });
     }
 
+    const previousPriceTierId =
+      (user as { price_tier_id?: number | null }).price_tier_id ??
+      (user as { store_users?: Array<{ price_tier_id: number | null }> })
+        .store_users?.[0]?.price_tier_id ??
+      null;
+
     return {
       ...updated,
       price_tier_id:
-        priceTierId !== undefined
-          ? priceTierId
-          : ((user as { price_tier_id?: number | null }).price_tier_id ?? null),
+        priceTierId !== undefined ? priceTierId : previousPriceTierId,
     };
   }
 

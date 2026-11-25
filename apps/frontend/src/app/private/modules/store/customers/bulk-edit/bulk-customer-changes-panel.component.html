@@ -1,0 +1,52 @@
+<div class="flex flex-col gap-3">
+  <!-- ═══ Resumen de lo activado ═════════════════════════════════════════ -->
+  <div
+    class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-gray-50 px-3 py-2"
+  >
+    <p class="text-[11px] font-semibold text-text-primary">
+      {{ activeCount() }}
+      {{ activeCount() === 1 ? 'campo activado' : 'campos activados' }}
+      <span class="font-normal text-text-secondary">
+        · se aplicarán a {{ selectionCount() }}
+        {{ selectionCount() === 1 ? 'cliente' : 'clientes' }}
+      </span>
+    </p>
+
+    @if (activeCount() > 0) {
+      <app-button variant="ghost" size="xsm" (clicked)="resetRequested.emit()">
+        <app-icon slot="icon" name="rotate-ccw" [size]="13" />
+        Limpiar cambios
+      </app-button>
+    }
+  </div>
+
+  <!-- ═══ Grupos de campos ═══════════════════════════════════════════════ -->
+  @for (group of groups; track group.group.key) {
+    <section class="rounded-xl border border-border bg-surface p-3">
+      <header class="mb-1 flex items-center gap-2">
+        <app-icon [name]="group.group.icon" [size]="15" class="text-primary" />
+        <h3 class="text-xs font-bold uppercase tracking-wide text-text-primary">
+          {{ group.group.label }}
+        </h3>
+      </header>
+
+      @if (group.group.hint) {
+        <p class="mb-2 text-[10px] leading-tight text-text-secondary">
+          {{ group.group.hint }}
+        </p>
+      }
+
+      <div class="flex flex-col gap-2">
+        @for (field of group.fields; track field.key) {
+          <app-bulk-customer-field-control
+            [field]="field"
+            [form]="form()"
+            [active]="isActive(field.key)"
+            [dynamicOptions]="dynamicOptionsFor(field)"
+            (activeChange)="onFieldActiveChange(field.key, $event)"
+          />
+        }
+      </div>
+    </section>
+  }
+</div>

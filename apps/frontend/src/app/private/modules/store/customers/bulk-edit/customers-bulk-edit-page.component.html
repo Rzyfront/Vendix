@@ -1,0 +1,119 @@
+<!--
+  Edición masiva de clientes.
+
+  `app-sticky-header` va en la RAÍZ del contenedor, sin padre con padding: si se
+  anida dentro de un contenedor acolchado, `sticky top-0` se pega respecto a ese
+  contenedor y el encabezado salta al hacer scroll. El padding vive en el bloque
+  de contenido de abajo.
+-->
+<div class="w-full">
+  <app-sticky-header
+    title="Edición masiva de clientes"
+    subtitle="Selecciona clientes, define los cambios y revísalos antes de aplicar"
+    icon="users"
+    [actions]="headerActions()"
+    [metadataContent]="headerMetadata()"
+    (actionClicked)="onHeaderAction($event)"
+  />
+
+  <div class="flex flex-col gap-3 p-2 md:gap-4 md:p-4">
+    @if (applyBlockedReason()) {
+      <p
+        class="flex items-start gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-[11px] leading-tight text-text-secondary"
+      >
+        <app-icon name="info" [size]="13" class="mt-px shrink-0 text-primary" />
+        {{ applyBlockedReason() }}. Los cambios solo se escriben desde el modal
+        de confirmación, después de ver el impacto cliente por cliente.
+      </p>
+    }
+
+    <!-- ═══ Dos paneles: resultados a la izquierda, stack a la derecha ═════ -->
+    <div class="grid grid-cols-1 items-start gap-3 lg:grid-cols-12 lg:gap-4">
+      <div class="lg:col-span-7 xl:col-span-8">
+        <app-bulk-customer-selection-panel
+          [rows]="rows()"
+          [fetching]="fetching()"
+          [pickingAll]="pickingAll()"
+          [total]="totalItems()"
+          [page]="page()"
+          [limit]="limit"
+          [totalPages]="totalPages()"
+          [capped]="capped()"
+          [cappedLimit]="cappedLimit"
+          [segments]="segmentCatalog()"
+          [tags]="tagCatalog()"
+          [priceTiers]="priceTierCatalog()"
+          [(selectedIds)]="selectedIds"
+          [filters]="filters()"
+          (filtersChange)="onFiltersChanged($event)"
+          (selectAllFiltered)="onSelectAllFiltered()"
+          (pageChanged)="onPageChanged($event)"
+          (refreshRequested)="onRefresh()"
+        />
+      </div>
+
+      <div class="lg:col-span-5 xl:col-span-4">
+        <app-bulk-customer-selected-stack
+          [entries]="selectedEntries()"
+          (removeRequested)="onRemoveFromStack($event)"
+          (clearRequested)="onClearStack()"
+        />
+      </div>
+    </div>
+
+    <!-- ═══ Panel de cambios ═══════════════════════════════════════════════ -->
+    <app-bulk-customer-changes-panel
+      [form]="changesForm"
+      [selectionCount]="selectedCount()"
+      [priceTiers]="priceTierOptions()"
+      [crmTags]="tagOptions()"
+      [(activeFields)]="activeFields"
+      (resetRequested)="onResetChanges()"
+    />
+  </div>
+
+  <!--
+    El modal se monta siempre y se gobierna con `modalOpen`. Su efecto interno
+    dispara el dry-run al abrirse y borra el preview al cerrarse, así que reabrir
+    nunca muestra el diff de una selección anterior.
+  -->
+  <app-bulk-customer-confirm-modal
+    [(modalOpen)]="modalOpen"
+    [ids]="selectedIdList()"
+    [changes]="changes()"
+    [resolveName]="nameResolver()"
+    [priceTiers]="priceTierOptions()"
+    [crmTags]="tagOptions()"
+    (applied)="onApplied($event)"
+  />
+
+  <!--
+    Barra fija inferior en móvil: a 375 px el header con «Aplicar cambios»
+    queda fuera de pantalla en cuanto se hace scroll, y el contador de
+    seleccionados tiene que estar SIEMPRE visible (es el dato que evita editar
+    medio catálogo sin querer). En escritorio no se pinta: el header sticky ya
+    cumple.
+  -->
+  <div
+    class="sticky bottom-0 z-20 flex items-center justify-between gap-2 border-t border-border bg-surface px-3 py-2 lg:hidden"
+  >
+    <p class="text-[11px] font-semibold text-text-primary" role="status">
+      {{ selectedCount() }}
+      {{ selectedCount() === 1 ? 'seleccionado' : 'seleccionados' }}
+      <span class="font-normal text-text-secondary">·
+        {{ changedFieldKeys().length }}
+        {{ changedFieldKeys().length === 1 ? 'campo' : 'campos' }}
+      </span>
+    </p>
+
+    <app-button
+      variant="primary"
+      size="sm"
+      [disabled]="!canApply() || !canEditCustomers()"
+      (clicked)="onHeaderAction('apply')"
+    >
+      <app-icon slot="icon" name="save" [size]="14" />
+      Aplicar
+    </app-button>
+  </div>
+</div>

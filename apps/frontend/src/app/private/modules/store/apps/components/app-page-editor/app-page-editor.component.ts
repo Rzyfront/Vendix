@@ -17,6 +17,7 @@ import { DialogService } from '../../../../../../shared/components/dialog/dialog
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { AppPageViewComponent } from '../../../../../../public/app-page/app-page-view.component';
+import { AppProductSelectorComponent } from '../app-product-selector/app-product-selector.component';
 import { contrastChecks } from '../../../../../../public/app-page/app-page-theme';
 import type { StoreAppDetail } from '../../interfaces/store-app.interface';
 import { StoreAppsService } from '../../services/store-apps.service';
@@ -82,7 +83,7 @@ const APP_LABEL: Record<PageAppKind, string> = {
 @Component({
   selector: 'app-app-page-editor',
   standalone: true,
-  imports: [NgTemplateOutlet, IconComponent, AppPageViewComponent],
+  imports: [NgTemplateOutlet, IconComponent, AppPageViewComponent, AppProductSelectorComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="space-y-4" data-testid="app-page-editor">
@@ -480,9 +481,29 @@ const APP_LABEL: Record<PageAppKind, string> = {
             <input type="number" [class]="inputClass" [attr.min]="def.min" [attr.max]="def.max"
                    [value]="read(target, def.key) ?? ''" (input)="onInt(target, def.key, $event)" />
           }
+          @case ('range') {
+            <input type="number" [class]="inputClass" [attr.min]="def.min" [attr.max]="def.max"
+                   [value]="read(target, def.key) ?? ''" (input)="onInt(target, def.key, $event)" />
+          }
           @case ('url') {
             <input type="url" [class]="inputClass" [attr.placeholder]="def.placeholder ?? 'https://'"
                    [value]="read(target, def.key) ?? ''" (input)="onText(target, def.key, $event)" />
+          }
+          @case ('media') {
+            <input type="url" [class]="inputClass" [attr.placeholder]="def.placeholder ?? 'https://'"
+                   [value]="read(target, def.key) ?? ''" (input)="onText(target, def.key, $event)" />
+          }
+          @case ('color') {
+            <input type="text" [class]="inputClass" maxlength="7" [attr.placeholder]="def.placeholder ?? '#RRGGBB'"
+                   [value]="read(target, def.key) ?? ''" (input)="onText(target, def.key, $event)" />
+          }
+          @case ('select') {
+            <select [class]="inputClass" [value]="read(target, def.key) ?? ''" (change)="onText(target, def.key, $event)">
+              <option value="">{{ def.emptyLabel ?? 'Por defecto' }}</option>
+              @for (opt of def.options; track opt.value) {
+                <option [value]="opt.value" [selected]="read(target, def.key) === opt.value">{{ opt.label }}</option>
+              }
+            </select>
           }
           @default {
             @if (def.multiline) {
@@ -535,6 +556,20 @@ const APP_LABEL: Record<PageAppKind, string> = {
         }
         @case ('url_list') {
           <ng-container *ngTemplateOutlet="stringList; context: { field: field, i: i, url: true }" />
+        }
+        @case ('media_list') {
+          <ng-container *ngTemplateOutlet="stringList; context: { field: field, i: i, url: true }" />
+        }
+        @case ('product_ids') {
+          @if (!field.visibleWhen || read(blockTarget(i), field.visibleWhen.key) === field.visibleWhen.value) {
+            <app-product-selector
+              [selectedIds]="productIdsOf(i, field.key)"
+              [max]="field.max"
+              [label]="field.label"
+              [excludeServices]="kind() === 'service_page'"
+              (selectedIdsChange)="onProductIds(i, field.key, $event)"
+            />
+          }
         }
         @default {
           <ng-container *ngTemplateOutlet="scalar; context: { def: field, target: blockTarget(i) }" />
@@ -968,5 +1003,16 @@ export class AppPageEditorComponent {
   onStringItem(i: number, key: string, idx: number, event: Event): void {
     const value = (event.target as HTMLInputElement).value;
     this.update((page) => ((page.blocks[i].props[key] as string[])[idx] = value));
+  }
+
+  productIdsOf(i: number, key: string): number[] {
+    const value = this.blocks()[i]?.props[key];
+    return Array.isArray(value)
+      ? value.filter((v): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 1)
+      : [];
+  }
+
+  onProductIds(i: number, key: string, ids: number[]): void {
+    this.write(this.blockTarget(i), key, ids.length > 0 ? ids : undefined);
   }
 }

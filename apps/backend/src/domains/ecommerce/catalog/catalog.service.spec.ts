@@ -1,5 +1,7 @@
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Test, TestingModule } from '@nestjs/testing';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { S3Service } from '@common/services/s3.service';
@@ -9,6 +11,8 @@ import { PromotionEngineService } from '../../store/promotions/promotion-engine/
 import { MenuAvailabilityCheckerService } from '../../store/menus/menu-availability-checker.service';
 import { PosSearchPathService } from '../../store/settings/pos-smart-search/pos-search-path.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { resolvePreviewProductCards } from '../../store/apps/shared/app-page-products.helper';
+import { CatalogQueryDto } from './dto/catalog-query.dto';
 import { CatalogService } from './catalog.service';
 
 describe('CatalogService reviews', () => {
@@ -1415,5 +1419,244 @@ describe('CatalogService public smart search (D.3)', () => {
         'variant_count',
       ].sort(),
     );
+  });
+
+  it('llave de caché de búsqueda distingue include_variants (iv)', async () => {
+    cache.get.mockResolvedValue(null);
+    prisma.products.findMany.mockResolvedValue([]);
+
+    await service.getProducts({ search: 'cafe', page: 1, limit: 10 } as any);
+    await service.getProducts({
+      search: 'cafe',
+      page: 1,
+      limit: 10,
+      include_variants: 'true',
+    } as any);
+    await service.getProducts({
+      search: 'cafe',
+      page: 1,
+      limit: 10,
+      include_variants: 'false',
+    } as any);
+
+    expect(cache.set).toHaveBeenCalledTimes(3);
+    const keys = cache.set.mock.calls.map((c: any[]) => c[0]);
+    expect(new Set(keys).size).toBe(3);
+  });
+
+  it('ids: respeta el orden solicitado, deduplica y aplica tope de 50', async () => {
+    prisma.products.findMany.mockResolvedValue([
+      listedProduct(10),
+      listedProduct(30),
+      listedProduct(20),
+    ]);
+    prisma.products.count.mockResolvedValue(3);
+
+    const ordered = await service.getProducts({
+      ids: '30,10,30,20',
+      limit: 10,
+    } as any);
+    expect(ordered.data.map((p: any) => p.id)).toEqual([30, 10, 20]);
+
+    const sixty = Array.from({ length: 60 }, (_, i) => i + 1).join(',');
+    prisma.products.findMany.mockResolvedValueOnce([]);
+    prisma.products.count.mockResolvedValueOnce(0);
+    await service.getProducts({ ids: sixty, limit: 50 } as any);
+    const lastWhere = prisma.products.findMany.mock.calls.at(-1)[0].where;
+    expect(lastWhere.id.in).toHaveLength(50);
+    expect(lastWhere.id.in[0]).toBe(1);
+    expect(lastWhere.id.in[49]).toBe(50);
+  });
+});
+
+describe('CatalogQueryDto y paridad precio vista previa == público', () => {
+  it('rechaza include_variants fuera de true/false y más de 50 ids; acepta valores válidos', async () => {
+    const valid = plainToInstance(CatalogQueryDto, {
+      include_variants: 'true',
+      ids: Array.from({ length: 50 }, (_, i) => i + 1).join(','),
+    });
+    expect(await validate(valid)).toEqual([]);
+
+    const validFalse = plainToInstance(CatalogQueryDto, {
+      include_variants: 'false',
+    });
+    expect(await validate(validFalse)).toEqual([]);
+
+    const badVariants = plainToInstance(CatalogQueryDto, {
+      include_variants: 'si',
+    });
+    const variantErrors = await validate(badVariants);
+    expect(variantErrors.some((e) => e.property === 'include_variants')).toBe(
+      true,
+    );
+
+    const badNumericBool = plainToInstance(CatalogQueryDto, {
+      include_variants: '1',
+    });
+    expect(
+      (await validate(badNumericBool)).some(
+        (e) => e.property === 'include_variants',
+      ),
+    ).toBe(true);
+
+    const tooManyIds = plainToInstance(CatalogQueryDto, {
+      ids: Array.from({ length: 51 }, (_, i) => i + 1).join(','),
+    });
+    const idsErrors = await validate(tooManyIds);
+    expect(idsErrors.some((e) => e.property === 'ids')).toBe(true);
+  });
+
+  it('el precio y las variantes en vista previa coinciden con CatalogService (impuestos, presentación por defecto y promoción)', async () => {
+    const storefrontPrice = new StorefrontPriceService(
+      new PriceResolverService(),
+    );
+    const defaultTier = {
+      id: 7,
+      name: 'Caja x6',
+      discount_percentage: 0,
+      adjustment_type: 'fixed_price',
+      adjustment_value: null,
+      amount_scope: 'package',
+      is_package_unit: true,
+      units_per_package: 6,
+    };
+    const productRow = {
+      id: 42,
+      name: 'Aceite esencial',
+      slug: 'aceite-esencial',
+      description: null,
+      base_price: '20000.00',
+      sale_price: null,
+      is_on_sale: false,
+      is_featured: false,
+      sku: 'AE-42',
+      stock_quantity: 12,
+      track_inventory: false,
+      product_images: [{ id: 1, image_url: 'img/ae.jpg', is_main: true }],
+      brands: null,
+      product_categories: [{ category_id: 5, categories: { id: 5, name: 'Spa', slug: 'spa' } }],
+      product_tax_assignments: [
+        {
+          is_inclusive: false,
+          tax_categories: {
+            is_inclusive: false,
+            tax_rates: [{ rate: '0.19', is_inclusive: false }],
+          },
+        },
+      ],
+      stock_levels: [],
+      product_variants: [
+        {
+          id: 420,
+          name: '30 ml',
+          sku: 'AE-30',
+          price_override: '22000.00',
+          is_on_sale: false,
+          sale_price: null,
+          product_images: null,
+          stock_levels: [],
+        },
+      ],
+      _count: { product_variants: 1 },
+      product_type: 'physical',
+      requires_booking: false,
+    };
+
+    const promoMap = new Map([
+      [
+        42,
+        {
+          id: 9,
+          name: 'Promo 10%',
+          type: 'percentage' as const,
+          scope: 'product' as const,
+          discount_percentage: 10,
+          promotional_price: 96390,
+          badge_label: '-10% OFF',
+          priority: 1,
+        },
+      ],
+    ]);
+
+    const prismaMock = {
+      store_settings: { findFirst: jest.fn().mockResolvedValue({ settings: {} }) },
+      products: {
+        findMany: jest.fn().mockResolvedValue([productRow]),
+        count: jest.fn().mockResolvedValue(1),
+      },
+      product_price_tier_assignments: {
+        findMany: jest
+          .fn()
+          .mockResolvedValue([{ product_id: 42, price_tier_id: 7, price_tier: defaultTier }]),
+      },
+      product_price_tier_overrides: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            product_id: 42,
+            price_tier_id: 7,
+            variant_id: null,
+            override_price: '90000.00',
+            override_units_per_package: 6,
+          },
+        ]),
+      },
+    };
+    const promotionEngine = {
+      findActiveAutoPromotionsForProducts: jest.fn().mockResolvedValue(promoMap),
+    };
+    const s3 = { signUrl: jest.fn(async (k?: string) => (k ? `signed:${k}` : null)) };
+
+    const storeSpy = jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(10);
+    try {
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          CatalogService,
+          { provide: EcommercePrismaService, useValue: prismaMock },
+          { provide: StorePrismaService, useValue: prismaMock },
+          { provide: S3Service, useValue: s3 },
+          PriceResolverService,
+          StorefrontPriceService,
+          { provide: PromotionEngineService, useValue: promotionEngine },
+          {
+            provide: MenuAvailabilityCheckerService,
+            useValue: { getAvailabilityMap: jest.fn().mockResolvedValue(new Map()) },
+          },
+          { provide: CACHE_MANAGER, useValue: { get: jest.fn(), set: jest.fn() } },
+          {
+            provide: PosSearchPathService,
+            useValue: { isKillSwitchOn: jest.fn().mockReturnValue(false) },
+          },
+        ],
+      }).compile();
+
+      const catalogService = moduleRef.get(CatalogService);
+      const publicRes = await catalogService.getProducts({
+        ids: '42',
+        include_variants: 'true',
+      } as any);
+      const publicCard = publicRes.data[0];
+
+      const { cardsById } = await resolvePreviewProductCards(
+        [productRow as any],
+        {
+          prisma: prismaMock,
+          s3: s3 as any,
+          storefrontPrice,
+          promotionEngine: promotionEngine as any,
+        },
+      );
+      const previewCard = cardsById.get(42)!;
+
+      // 90.000 * 1.19 = 107.100 antes de promo; con promo plana: 96.390.
+      expect(publicCard.final_price).toBe(107100);
+      expect(publicCard.active_promotion?.promotional_price).toBe(96390);
+      expect(previewCard.final_price).toBe(publicCard.active_promotion?.promotional_price);
+      expect(previewCard.regular_final_price).toBe(publicCard.final_price);
+      // Con presentación por defecto, ninguno expone variantes.
+      expect(publicCard.variants).toEqual([]);
+      expect(previewCard.variants).toEqual([]);
+    } finally {
+      storeSpy.mockRestore();
+    }
   });
 });

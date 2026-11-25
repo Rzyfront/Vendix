@@ -1,5 +1,9 @@
 import { CartItem } from '../models/cart.model';
-import { customerTierPrompt, followUpRestorePrompt } from './customer-tier-prompt.util';
+import {
+  customerTierPrompt,
+  customerTierShortcut,
+  followUpRestorePrompt,
+} from './customer-tier-prompt.util';
 
 /**
  * Aviso de la tarifa preferencial al elegir o quitar cliente en el POS.
@@ -197,5 +201,74 @@ describe('customerTierPrompt', () => {
         canApplyTier: true,
       })?.lines[0].label,
     ).toBe('Producto a1 · Rojo / M');
+  });
+});
+
+/**
+ * Acceso a la tarifa del cliente desde la orden: decide si el botón junto al
+ * cliente aparece, su contador y por qué queda deshabilitado.
+ */
+describe('customerTierShortcut', () => {
+  const line = (id: string, over: Partial<CartItem> = {}, enabled = [7]): CartItem =>
+    ({
+      id,
+      quantity: 1,
+      itemType: 'product',
+      applied_price_tier_id: null,
+      product: {
+        id: Number(id.replace(/\D/g, '')) || 1,
+        name: `Producto ${id}`,
+        enabled_price_tier_ids: enabled,
+        has_multiple_price_tiers: true,
+      },
+      ...over,
+    }) as unknown as CartItem;
+  const mayorista = { id: 7, name: 'Mayorista' };
+
+  it('no aparece sin tarifa del cliente o sin permiso para aplicarla', () => {
+    expect(customerTierShortcut({ items: [line('a1')], tier: null, canApplyTier: true })).toBeNull();
+    expect(customerTierShortcut({ items: [line('a1')], tier: mayorista, canApplyTier: false })).toBeNull();
+  });
+
+  it('cuenta las líneas elegibles que aún no llevan la tarifa del cliente', () => {
+    const state = customerTierShortcut({
+      items: [
+        line('a1'),
+        line('b2', { applied_price_tier_id: 7 } as Partial<CartItem>),
+        line('c3', { applied_price_tier_id: 8 } as Partial<CartItem>),
+        line('d4', {}, [9]),
+        line('e5', { itemType: 'custom' } as Partial<CartItem>),
+        line('f6', { captured_by_scale: true } as Partial<CartItem>),
+      ],
+      tier: mayorista,
+      canApplyTier: true,
+    });
+    expect(state).toEqual({
+      tier: mayorista,
+      eligible: 3,
+      pendingItemIds: ['a1', 'c3'],
+      disabledReason: null,
+    });
+  });
+
+  it('deshabilitado con motivo si ninguna línea admite la tarifa', () => {
+    const state = customerTierShortcut({
+      items: [line('d4', {}, [9])],
+      tier: mayorista,
+      canApplyTier: true,
+    });
+    expect(state?.pendingItemIds).toEqual([]);
+    expect(state?.disabledReason).toBe(
+      'Ningún producto de la orden admite la tarifa "Mayorista"',
+    );
+  });
+
+  it('deshabilitado si todas las líneas elegibles ya llevan la tarifa', () => {
+    const state = customerTierShortcut({
+      items: [line('a1', { applied_price_tier_id: 7 } as Partial<CartItem>)],
+      tier: mayorista,
+      canApplyTier: true,
+    });
+    expect(state?.disabledReason).toBe('Ya aplicada a toda la orden');
   });
 });

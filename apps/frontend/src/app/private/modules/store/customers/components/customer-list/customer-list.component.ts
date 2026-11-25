@@ -77,7 +77,7 @@ export interface CustomerLocationFilter {
         placeholder="Buscar clientes..."
         [filters]="filterConfigs()"
         [filterValues]="filterValues()"
-        [actions]="dropdownActions"
+        [actions]="dropdownActions()"
         [isLoading]="loading()"
         (searchChange)="onSearch($event)"
         (filterChange)="onFilterChange($event)"
@@ -164,6 +164,12 @@ export class CustomerListComponent {
   readonly viewDetail = output<Customer>();
   readonly bulkUpload = output<void>();
   readonly aiImport = output<void>();
+  /**
+   * Entrada a la vista dedicada de edición masiva. Es la ÚNICA puerta (no hay
+   * ítem de sidebar) y se gatea con `store:customers:update`, el mismo permiso
+   * que exige el backend para escribir el lote.
+   */
+  readonly bulkEdit = output<void>();
   readonly pageChange = output<number>();
   /** Department/city filter, as the names stored on `addresses`. */
   readonly locationFilter = output<CustomerLocationFilter>();
@@ -270,16 +276,28 @@ export class CustomerListComponent {
   }
 
   // Dropdown actions
-  dropdownActions: DropdownAction[] = [
-    { label: 'Carga Masiva', icon: 'upload', action: 'bulk-upload' },
-    { label: 'Cargar con IA', icon: 'sparkles', action: 'ai-import' },
-    {
-      label: 'Nuevo Cliente',
-      icon: 'plus',
-      action: 'create',
-      variant: 'primary',
-    },
-  ];
+  //
+  // «Edición masiva» se oculta sin `store:customers:update`: es afordancia de
+  // UI, el permiso real lo impone el backend. En este repo la lista comparte
+  // `app-list-search-bar`, así que no hay `disabled` por acción: se filtra el
+  // catálogo antes de pasarlo.
+  readonly dropdownActions = computed<DropdownAction[]>(() => {
+    const canBulkEdit = this.auth.isOwner() || this.auth.hasPermission('store:customers:update');
+    const actions: DropdownAction[] = [
+      { label: 'Carga Masiva', icon: 'upload', action: 'bulk-upload' },
+      { label: 'Cargar con IA', icon: 'sparkles', action: 'ai-import' },
+      { label: 'Edición masiva', icon: 'list-checks', action: 'bulk-edit' },
+      {
+        label: 'Nuevo Cliente',
+        icon: 'plus',
+        action: 'create',
+        variant: 'primary',
+      },
+    ];
+    return actions.filter((action) =>
+      action.action === 'bulk-edit' ? canBulkEdit : true,
+    );
+  });
 
   private readonly membershipCell = viewChild<TemplateRef<unknown>>('membershipCell');
 
@@ -462,6 +480,9 @@ export class CustomerListComponent {
         break;
       case 'ai-import':
         this.aiImport.emit();
+        break;
+      case 'bulk-edit':
+        this.bulkEdit.emit();
         break;
     }
   }

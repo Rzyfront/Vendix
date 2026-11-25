@@ -6,7 +6,9 @@ import {
   AppPageBlock,
   AppPageDocument,
   AppPageHero,
+  BLOCK_APPEARANCE_FIELDS,
   FieldDef,
+  HERO_CUSTOM_FIELDS,
   HERO_FIELDS,
   PageAppKind,
   ScalarFieldDef,
@@ -47,16 +49,56 @@ export interface PageBlockMeta {
 /** Item key of the lists of plain texts or links (`text_list`, `url_list`). */
 const SCALAR_ITEM_KEY = 'value';
 
+/** Apps con configurabilidad extendida (la tienda en línea `store_home` no se toca). */
+function supportsSectionCustomization(kind: PageAppKind): boolean {
+  return kind !== 'store_home';
+}
+
 function scalarField(def: ScalarFieldDef): BuilderScalarFieldDef {
   switch (def.kind) {
     case 'text':
-      return { key: def.key, label: def.label, kind: def.multiline ? 'textarea' : 'text', max: def.max, placeholder: def.placeholder };
+      return {
+        key: def.key,
+        label: def.label,
+        kind: def.multiline ? 'textarea' : 'text',
+        max: def.max,
+        placeholder: def.placeholder,
+        group: def.group,
+      };
     case 'url':
-      return { key: def.key, label: def.label, kind: 'url', placeholder: def.placeholder ?? 'https://…' };
+      return { key: def.key, label: def.label, kind: 'url', placeholder: def.placeholder ?? 'https://…', group: def.group };
+    case 'media':
+      return { key: def.key, label: def.label, kind: 'media', placeholder: def.placeholder, hint: def.hint, group: def.group };
+    case 'color':
+      return { key: def.key, label: def.label, kind: 'color', placeholder: def.placeholder, hint: def.hint, group: def.group };
+    case 'select':
+      return {
+        key: def.key,
+        label: def.label,
+        kind: def.display === 'chips' ? 'chips' : 'select',
+        options: def.options,
+        emptyLabel: def.emptyLabel,
+        hint: def.hint,
+        group: def.group,
+      };
+    case 'range':
+      return {
+        key: def.key,
+        label: def.label,
+        kind: 'range',
+        min: def.min,
+        max: def.max,
+        step: def.step,
+        unit: def.unit,
+        defaultValue: def.defaultValue,
+        defaultByProp: def.defaultByProp,
+        hint: def.hint,
+        group: def.group,
+      };
     case 'bool':
-      return { key: def.key, label: def.label, kind: 'toggle' };
+      return { key: def.key, label: def.label, kind: 'toggle', hint: def.hint, group: def.group };
     case 'int':
-      return { key: def.key, label: def.label, kind: 'number', min: def.min, max: def.max };
+      return { key: def.key, label: def.label, kind: 'number', min: def.min, max: def.max, group: def.group };
   }
 }
 
@@ -83,6 +125,24 @@ export function builderField(def: FieldDef): BuilderFieldDef {
         max: def.max,
         item: [{ key: SCALAR_ITEM_KEY, label: 'Enlace https', kind: 'url', placeholder: 'https://…/foto.jpg' }],
       };
+    case 'media_list':
+      return {
+        key: def.key,
+        label: def.label,
+        kind: 'list',
+        itemLabel: 'Imagen',
+        max: def.max,
+        item: [{ key: SCALAR_ITEM_KEY, label: 'Imagen', kind: 'media', placeholder: 'O pega una URL https://…' }],
+      };
+    case 'product_ids':
+      return {
+        key: def.key,
+        label: def.label,
+        kind: 'product_ids',
+        max: def.max,
+        hint: def.hint,
+        visibleWhen: def.visibleWhen,
+      };
     default:
       return scalarField(def);
   }
@@ -100,13 +160,15 @@ export function pageBuilderCatalog(
   heroCategory = categories[0]?.id ?? 'essentials',
 ): BuilderCatalog {
   const template = APP_PAGE_TEMPLATES[kind];
+  const customizable = supportsSectionCustomization(kind);
+  const heroDefs = customizable ? HERO_CUSTOM_FIELDS : HERO_FIELDS;
   const hero: BuilderBlockDef = {
     type: HERO_BLOCK_TYPE,
     label: 'Portada',
-    description: 'Lo primero que se ve: título, subtítulo, imagen y botón. Vacía, la página usa su portada de siempre.',
+    description: 'Lo primero que se ve: título, subtítulo, imagen, diseño y botón. Vacía, la página usa su portada de siempre.',
     icon: 'panel-top',
     category: heroCategory,
-    fields: HERO_FIELDS.map(scalarField),
+    fields: heroDefs.map(scalarField),
     single: true,
     virtual: true,
   };
@@ -114,13 +176,14 @@ export function pageBuilderCatalog(
   for (const def of template.blocks) {
     const m = meta[def.type];
     if (!m) continue;
+    const extraAppearance = customizable ? BLOCK_APPEARANCE_FIELDS : [];
     blocks.push({
       type: def.type,
       label: def.label,
       description: def.description,
       icon: def.icon,
       category: m.category,
-      fields: def.fields.map(builderField),
+      fields: [...def.fields, ...extraAppearance].map(builderField),
       // The sections the layout draws are read with `blocks.find(type)`: one per page.
       single: !!def.existing,
       pinned: m.pinned,
@@ -149,15 +212,18 @@ function cleanScalarItems(field: BuilderListFieldDef, raw: unknown): string[] {
   return cleanListItems(field, readListItems(field, raw)).map((item) => item[SCALAR_ITEM_KEY]);
 }
 
-/** List items as stored: blank ones dropped and number fields as numbers (empty or out of range dropped). */
+/** List items as stored: blank ones dropped, empty optional strings removed, and number fields as numbers. */
 function cleanTypedItems(field: BuilderListFieldDef, raw: unknown): Record<string, string | number>[] {
   return cleanListItems(field, readListItems(field, raw)).map((item) => {
     const out: Record<string, string | number> = { ...item };
     for (const sub of field.item) {
-      if (sub.kind !== 'number') continue;
-      const n = Number(out[sub.key]);
-      if (out[sub.key] === '' || !Number.isInteger(n) || n < sub.min || n > sub.max) delete out[sub.key];
-      else out[sub.key] = n;
+      if (sub.kind === 'number') {
+        const n = Number(out[sub.key]);
+        if (out[sub.key] === '' || !Number.isInteger(n) || n < sub.min || n > sub.max) delete out[sub.key];
+        else out[sub.key] = n;
+      } else if (out[sub.key] === '') {
+        delete out[sub.key];
+      }
     }
     return out;
   });
@@ -168,11 +234,35 @@ export function cleanBlockProps(fields: readonly FieldDef[], props: Record<strin
   const out: Record<string, unknown> = { ...props };
   for (const def of fields) {
     const value = out[def.key];
-    if (value === undefined || value === null) continue;
+    if (value === undefined) {
+      delete out[def.key];
+      continue;
+    }
+    if (value === null) continue;
     if (def.kind === 'list') {
       out[def.key] = cleanTypedItems(builderField(def) as BuilderListFieldDef, value);
-    } else if (def.kind === 'text_list' || def.kind === 'url_list') {
+    } else if (def.kind === 'text_list' || def.kind === 'url_list' || def.kind === 'media_list') {
       out[def.key] = cleanScalarItems(builderField(def) as BuilderListFieldDef, value);
+    } else if (def.kind === 'product_ids') {
+      const cleaned = cleanProductIds(value, def.max);
+      if (cleaned.length > 0) out[def.key] = cleaned;
+      else delete out[def.key];
+    }
+  }
+  return out;
+}
+
+/** Conserva enteros positivos únicos en orden, hasta el máximo permitido por el contrato. */
+function cleanProductIds(raw: unknown, max: number): number[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<number>();
+  const out: number[] = [];
+  for (const item of raw) {
+    if (out.length >= max) break;
+    if (typeof item !== 'number' || !Number.isInteger(item) || item < 1) continue;
+    if (!seen.has(item)) {
+      seen.add(item);
+      out.push(item);
     }
   }
   return out;
@@ -188,9 +278,11 @@ export function blocksToPage(
   base: AppPageDocument,
   blocks: readonly BuilderBlock[],
 ): AppPageDocument {
-  const fieldsOf = new Map(APP_PAGE_TEMPLATES[kind].blocks.map((b) => [b.type, b.fields]));
+  const customizable = supportsSectionCustomization(kind);
+  const extraAppearance = customizable ? BLOCK_APPEARANCE_FIELDS : [];
+  const fieldsOf = new Map(APP_PAGE_TEMPLATES[kind].blocks.map((b) => [b.type, [...b.fields, ...extraAppearance]]));
   const heroBlock = blocks.find((b) => blockDef(catalog, b.type)?.virtual);
-  const hero = cleanHero(heroBlock?.props ?? {});
+  const hero = cleanHero(heroBlock?.props ?? {}, customizable ? HERO_CUSTOM_FIELDS : HERO_FIELDS);
   const page: AppPageDocument = {
     ...base,
     schema_version: APP_PAGE_SCHEMA_VERSION,
@@ -210,11 +302,17 @@ export function blocksToPage(
   return page;
 }
 
-/** Only the hero texts that have content; `null` when none (the page keeps its usual cover). */
-function cleanHero(props: Record<string, unknown>): AppPageHero | null {
-  const hero: Record<string, string> = {};
-  for (const def of HERO_FIELDS) {
+/** Solo los campos de portada con valor; `null` si está vacía (mantiene la portada por defecto). */
+function cleanHero(props: Record<string, unknown>, defs: readonly ScalarFieldDef[]): AppPageHero | null {
+  const hero: Record<string, string | number> = {};
+  for (const def of defs) {
     const value = props[def.key];
+    if (def.kind === 'range' || def.kind === 'int') {
+      if (typeof value === 'number' && Number.isInteger(value) && value >= def.min && value <= def.max) {
+        hero[def.key] = value;
+      }
+      continue;
+    }
     if (typeof value === 'string' && value.trim()) hero[def.key] = value.trim();
   }
   return Object.keys(hero).length ? (hero as AppPageHero) : null;

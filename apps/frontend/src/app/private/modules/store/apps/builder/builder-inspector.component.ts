@@ -1,16 +1,26 @@
-import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
+import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
 
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import type { AppPageProductItem } from '../../../../../public/app-page/app-page-products.util';
+import { AppMediaFieldComponent } from '../components/app-media-field/app-media-field.component';
+import { AppMediaPickerComponent } from '../components/app-media-picker/app-media-picker.component';
+import { AppProductSelectorComponent } from '../components/app-product-selector/app-product-selector.component';
+import type { AppMediaItem } from '../services/app-media.service';
+import type { PageAppKind } from '../templates/app-page.types';
 import { BuilderListItem, blockDef, readListItems } from './builder-blocks';
 import type {
   BuilderBlock,
   BuilderCatalog,
   BuilderFieldDef,
   BuilderListFieldDef,
+  BuilderProductIdsFieldDef,
   BuilderScalarFieldDef,
 } from './builder.types';
 
-/** An edit of one prop of one block, applied by the editor with `setBlockProp`. */
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+
+/** Edición de una prop de un bloque, aplicada por el editor con `setBlockProp`. */
 export interface BuilderPropChange {
   blockId: string;
   key: string;
@@ -18,17 +28,19 @@ export interface BuilderPropChange {
 }
 
 /**
- * F6-A — field inspector of the builder (engine, app-agnostic). It renders the
- * fields the catalog declares for the selected block: text and long text with
- * a character counter, https links, whole numbers and yes/no switches (F6-B),
- * and repeatable lists edited item by item
- * (add, remove, reorder). Lists are read with the catalog aliases and written
- * back with the canonical keys; blank items are dropped on write.
+ * Inspector de campos del constructor de páginas (motor genérico por catálogo).
+ *
+ * Renderiza los campos declarados para el bloque seleccionado:
+ * texto/textarea con contador, enlaces https, medios conectados a la galería
+ * (`app-media-field`), selectores cerrados (desplegables o chips), sliders de
+ * rango, colores `#RRGGBB`, números enteros, interruptores y listas repetibles
+ * (agregar, quitar y reordenar). Los campos con `group: 'appearance'` se
+ * agrupan en un panel plegable «Apariencia de la sección».
  */
 @Component({
   selector: 'app-builder-inspector',
   standalone: true,
-  imports: [IconComponent],
+  imports: [NgTemplateOutlet, IconComponent, AppMediaFieldComponent, AppMediaPickerComponent, AppProductSelectorComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (block(); as b) {
@@ -55,110 +67,35 @@ export interface BuilderPropChange {
             </p>
           }
 
-          @for (field of d.fields; track field.key) {
-            @if (isList(field)) {
-              <fieldset class="space-y-2" [attr.data-field]="field.key">
-                <legend class="flex w-full items-center justify-between text-xs font-semibold text-[var(--color-text-primary)]">
-                  <span>{{ field.label }}</span>
-                  <span class="font-normal text-[var(--color-text-secondary)]">{{ items(b, field).length }} / {{ field.max }}</span>
-                </legend>
-                @for (item of items(b, field); track $index; let i = $index; let first = $first; let last = $last) {
-                  <div class="space-y-2 rounded-lg border border-[var(--color-border)] p-2.5" data-testid="builder-list-item">
-                    <div class="flex items-center justify-between">
-                      <span class="text-[11px] font-medium text-[var(--color-text-secondary)]">{{ field.itemLabel }} {{ i + 1 }}</span>
-                      <div class="flex items-center">
-                        <button type="button" class="rounded p-1 text-[var(--color-text-secondary)] hover:bg-[var(--color-background)] disabled:opacity-30"
-                                [disabled]="first" (click)="moveItem(b, field, i, i - 1)" [attr.aria-label]="'Subir ' + field.itemLabel">
-                          <app-icon name="chevron-up" [size]="13" />
-                        </button>
-                        <button type="button" class="rounded p-1 text-[var(--color-text-secondary)] hover:bg-[var(--color-background)] disabled:opacity-30"
-                                [disabled]="last" (click)="moveItem(b, field, i, i + 1)" [attr.aria-label]="'Bajar ' + field.itemLabel">
-                          <app-icon name="chevron-down" [size]="13" />
-                        </button>
-                        <button type="button" class="rounded p-1 text-[var(--color-text-secondary)] hover:bg-[var(--color-background)] hover:text-[var(--color-error,#dc2626)]"
-                                (click)="removeItem(b, field, i)" [attr.aria-label]="'Quitar ' + field.itemLabel" data-testid="builder-list-remove">
-                          <app-icon name="trash-2" [size]="13" />
-                        </button>
-                      </div>
-                    </div>
-                    @for (sub of field.item; track sub.key) {
-                      <label class="block">
-                        <span class="mb-1 flex justify-between text-[11px] text-[var(--color-text-secondary)]">
-                          <span>{{ sub.label }}</span>
-                          @if (counter(sub); as max) { <span>{{ (item[sub.key] ?? '').length }}/{{ max }}</span> }
-                        </span>
-                        @if (sub.kind === 'textarea') {
-                          <textarea rows="2" [attr.maxlength]="sub.max" [attr.placeholder]="sub.placeholder ?? null"
-                                    class="w-full resize-y rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm"
-                                    [value]="item[sub.key] ?? ''" (input)="setItem(b, field, i, sub.key, $any($event.target).value)"></textarea>
-                        } @else if (sub.kind === 'number') {
-                          <input type="number" step="1" [attr.min]="sub.min" [attr.max]="sub.max"
-                                 class="w-24 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm"
-                                 [value]="item[sub.key] ?? ''" (input)="setItem(b, field, i, sub.key, $any($event.target).value)" />
-                        } @else {
-                          <input [type]="sub.kind === 'url' ? 'url' : 'text'" [attr.maxlength]="counter(sub)"
-                                 [attr.placeholder]="placeholder(sub)"
-                                 class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm"
-                                 [class.border-[var(--color-error,#dc2626)]]="urlError(item[sub.key], sub)"
-                                 [value]="item[sub.key] ?? ''" (input)="setItem(b, field, i, sub.key, $any($event.target).value)" />
-                          @if (urlError(item[sub.key], sub)) {
-                            <span class="mt-1 block text-[11px] text-[var(--color-error,#dc2626)]">Usa un enlace que empiece por https://</span>
-                          }
-                        }
-                      </label>
-                    }
-                  </div>
-                } @empty {
-                  @if (field.emptyHint) {
-                    <p class="rounded-lg border border-dashed border-[var(--color-border)] px-3 py-2.5 text-xs text-[var(--color-text-secondary)]">{{ field.emptyHint }}</p>
-                  }
-                }
-                <button type="button" class="inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--color-primary)] disabled:opacity-40"
-                        [disabled]="items(b, field).length >= field.max" (click)="addItem(b, field)" data-testid="builder-list-add">
-                  <app-icon name="plus" [size]="13" /> Agregar {{ field.itemLabel.toLowerCase() }}
-                </button>
-              </fieldset>
-            } @else if (field.kind === 'toggle') {
-              <label class="flex items-start gap-2.5" [attr.data-field]="field.key">
-                <input type="checkbox" class="mt-0.5 h-4 w-4 accent-[var(--color-primary)]"
-                       [checked]="flag(b, field.key)" (change)="setValue(b, field.key, $any($event.target).checked)" />
-                <span>
-                  <span class="block text-xs font-semibold text-[var(--color-text-primary)]">{{ field.label }}</span>
-                  @if (field.hint) {
-                    <span class="block text-[11px] text-[var(--color-text-secondary)]">{{ field.hint }}</span>
-                  }
-                </span>
-              </label>
-            } @else {
-              <label class="block" [attr.data-field]="field.key">
-                <span class="mb-1 flex justify-between text-xs font-semibold text-[var(--color-text-primary)]">
-                  <span>{{ field.label }}</span>
-                  @if (counter(field); as max) {
-                    <span class="font-normal text-[var(--color-text-secondary)]">{{ text(b, field.key).length }}/{{ max }}</span>
-                  }
-                </span>
-                @if (field.kind === 'textarea') {
-                  <textarea rows="4" [attr.maxlength]="field.max" [attr.placeholder]="field.placeholder ?? null"
-                            class="w-full resize-y rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm"
-                            [value]="text(b, field.key)" (input)="setText(b, field.key, $any($event.target).value)"></textarea>
-                } @else if (field.kind === 'number') {
-                  <input type="number" step="1" [attr.min]="field.min" [attr.max]="field.max"
-                         class="w-28 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm"
-                         [value]="text(b, field.key)" (input)="setNumber(b, field.key, $any($event.target).value)" />
-                } @else {
-                  <input [type]="field.kind === 'url' ? 'url' : 'text'" [attr.maxlength]="counter(field)"
-                         [attr.placeholder]="placeholder(field)"
-                         class="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm"
-                         [class.border-[var(--color-error,#dc2626)]]="urlError(text(b, field.key), field)"
-                         [value]="text(b, field.key)" (input)="setText(b, field.key, $any($event.target).value)" />
-                }
-                @if (urlError(text(b, field.key), field)) {
-                  <span class="mt-1 block text-[11px] text-[var(--color-error,#dc2626)]">Usa un enlace que empiece por https://</span>
-                } @else if (field.hint) {
-                  <span class="mt-1 block text-[11px] text-[var(--color-text-secondary)]">{{ field.hint }}</span>
-                }
-              </label>
+          @for (field of mainFields(); track field.key) {
+            @if (isFieldVisible(b, field)) {
+              <ng-container *ngTemplateOutlet="fieldTpl; context: { b: b, field: field }" />
             }
+          }
+
+          @if (appearanceFields().length > 0) {
+            <details
+              class="rounded-xl border border-[var(--color-border)] bg-[var(--color-background)]/40 p-3"
+              [open]="hasCustomAppearance()"
+              data-testid="builder-appearance-group"
+            >
+              <summary class="flex cursor-pointer list-none items-center justify-between gap-2 text-xs font-semibold text-[var(--color-text-primary)]">
+                <span class="inline-flex items-center gap-1.5">
+                  <app-icon name="sliders-horizontal" [size]="14" class="text-[var(--color-primary)]" />
+                  Apariencia de la sección
+                </span>
+                @if (hasCustomAppearance()) {
+                  <span class="rounded-full bg-[var(--color-primary)]/10 px-2 py-0.5 text-[10px] font-semibold text-[var(--color-primary)]">
+                    Personalizada
+                  </span>
+                }
+              </summary>
+              <div class="mt-3 space-y-3.5 border-t border-[var(--color-border)] pt-3">
+                @for (field of appearanceFields(); track field.key) {
+                  <ng-container *ngTemplateOutlet="fieldTpl; context: { b: b, field: field }" />
+                }
+              </div>
+            </details>
           }
         </div>
       } @else {
@@ -171,26 +108,408 @@ export interface BuilderPropChange {
         <p class="mt-1 text-xs text-[var(--color-text-secondary)]">Haz clic en una sección de la lista o directamente en la vista previa.</p>
       </div>
     }
+
+    <!-- Plantilla de un campo del bloque -->
+    <ng-template #fieldTpl let-b="b" let-field="field">
+      @if (isProductIds(field)) {
+        <div class="block" [attr.data-field]="field.key">
+          <app-product-selector
+            [selectedIds]="productIds(b, field.key)"
+            [max]="field.max"
+            [label]="field.label"
+            [excludeServices]="appKind() === 'service_page'"
+            (selectedIdsChange)="setProductIds(b, field.key, $event)"
+            (productsResolved)="productsResolved.emit($event)"
+          />
+          @if (field.hint) {
+            <span class="mt-1 block text-[11px] text-[var(--color-text-secondary)]">{{ field.hint }}</span>
+          }
+        </div>
+      } @else if (isList(field)) {
+        <fieldset class="space-y-2" [attr.data-field]="field.key">
+          <legend class="flex w-full items-center justify-between text-xs font-semibold text-[var(--color-text-primary)]">
+            <span>{{ field.label }}</span>
+            <span class="font-normal text-[var(--color-text-secondary)]">{{ items(b, field).length }} / {{ field.max }}</span>
+          </legend>
+          @for (item of items(b, field); track $index; let i = $index; let first = $first; let last = $last) {
+            <div class="space-y-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-2.5" data-testid="builder-list-item">
+              <div class="flex items-center justify-between">
+                <span class="text-[11px] font-medium text-[var(--color-text-secondary)]">{{ field.itemLabel }} {{ i + 1 }}</span>
+                <div class="flex items-center">
+                  <button type="button" class="rounded p-1 text-[var(--color-text-secondary)] hover:bg-[var(--color-background)] disabled:opacity-30"
+                          [disabled]="first" (click)="moveItem(b, field, i, i - 1)" [attr.aria-label]="'Subir ' + field.itemLabel">
+                    <app-icon name="chevron-up" [size]="13" />
+                  </button>
+                  <button type="button" class="rounded p-1 text-[var(--color-text-secondary)] hover:bg-[var(--color-background)] disabled:opacity-30"
+                          [disabled]="last" (click)="moveItem(b, field, i, i + 1)" [attr.aria-label]="'Bajar ' + field.itemLabel">
+                    <app-icon name="chevron-down" [size]="13" />
+                  </button>
+                  <button type="button" class="rounded p-1 text-[var(--color-text-secondary)] hover:bg-[var(--color-background)] hover:text-[var(--color-error,#dc2626)]"
+                          (click)="removeItem(b, field, i)" [attr.aria-label]="'Quitar ' + field.itemLabel" data-testid="builder-list-remove">
+                    <app-icon name="trash-2" [size]="13" />
+                  </button>
+                </div>
+              </div>
+              @for (sub of field.item; track sub.key) {
+                @if (sub.kind === 'media') {
+                  <div class="block" [attr.data-subfield]="sub.key">
+                    <span class="mb-1 block text-[11px] text-[var(--color-text-secondary)]">{{ sub.label }}</span>
+                    <app-media-field
+                      [value]="item[sub.key] ?? ''"
+                      [appKind]="appKind()"
+                      [compact]="true"
+                      [ariaLabel]="sub.label"
+                      (valueChange)="setItem(b, field, i, sub.key, $event)"
+                    />
+                  </div>
+                } @else if (sub.kind === 'select') {
+                  <label class="block" [attr.data-subfield]="sub.key">
+                    <span class="mb-1 block text-[11px] text-[var(--color-text-secondary)]">{{ sub.label }}</span>
+                    <select class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm"
+                            (change)="setItem(b, field, i, sub.key, $any($event.target).value)">
+                      <option value="" [selected]="!(item[sub.key] ?? '')">{{ sub.emptyLabel ?? 'Por defecto' }}</option>
+                      @for (opt of sub.options; track opt.value) {
+                        <option [value]="opt.value" [selected]="(item[sub.key] ?? '') === opt.value">{{ opt.label }}</option>
+                      }
+                    </select>
+                  </label>
+                } @else {
+                  <label class="block" [attr.data-subfield]="sub.key">
+                    <span class="mb-1 flex justify-between text-[11px] text-[var(--color-text-secondary)]">
+                      <span>{{ sub.label }}</span>
+                      @if (counter(sub); as max) { <span>{{ (item[sub.key] ?? '').length }}/{{ max }}</span> }
+                    </span>
+                    @if (sub.kind === 'textarea') {
+                      <textarea rows="2" [attr.maxlength]="sub.max" [attr.placeholder]="sub.placeholder ?? null"
+                                class="w-full resize-y rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm"
+                                [value]="item[sub.key] ?? ''" (input)="setItem(b, field, i, sub.key, $any($event.target).value)"></textarea>
+                    } @else if (sub.kind === 'number') {
+                      <input type="number" step="1" [attr.min]="sub.min" [attr.max]="sub.max"
+                             class="w-24 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm"
+                             [value]="item[sub.key] ?? ''" (input)="setItem(b, field, i, sub.key, $any($event.target).value)" />
+                    } @else {
+                      <input [type]="sub.kind === 'url' ? 'url' : 'text'" [attr.maxlength]="counter(sub)"
+                             [attr.placeholder]="placeholder(sub)"
+                             class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm"
+                             [class.border-[var(--color-error,#dc2626)]]="urlError(item[sub.key], sub)"
+                             [value]="item[sub.key] ?? ''" (input)="setItem(b, field, i, sub.key, $any($event.target).value)" />
+                      @if (urlError(item[sub.key], sub)) {
+                        <span class="mt-1 block text-[11px] text-[var(--color-error,#dc2626)]">Usa un enlace que empiece por https://</span>
+                      }
+                    }
+                  </label>
+                }
+              }
+            </div>
+          } @empty {
+            @if (field.emptyHint) {
+              <p class="rounded-lg border border-dashed border-[var(--color-border)] px-3 py-2.5 text-xs text-[var(--color-text-secondary)]">{{ field.emptyHint }}</p>
+            }
+          }
+          <div class="flex flex-wrap items-center gap-3">
+            @if (isPureMediaList(field)) {
+              <button type="button" class="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-xs font-semibold text-[var(--color-primary)] hover:bg-[var(--color-background)] disabled:opacity-40"
+                      [disabled]="items(b, field).length >= field.max"
+                      (click)="openListMediaPicker(b, field)"
+                      data-testid="builder-list-add-media">
+                <app-icon name="images" [size]="13" /> Agregar desde galería
+              </button>
+            }
+            <button type="button" class="inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--color-primary)] disabled:opacity-40"
+                    [disabled]="items(b, field).length >= field.max" (click)="addItem(b, field)" data-testid="builder-list-add">
+              <app-icon name="plus" [size]="13" /> Agregar {{ field.itemLabel.toLowerCase() }}
+            </button>
+          </div>
+        </fieldset>
+      } @else if (field.kind === 'toggle') {
+        <label class="flex items-start gap-2.5" [attr.data-field]="field.key">
+          <input type="checkbox" class="mt-0.5 h-4 w-4 accent-[var(--color-primary)]"
+                 [checked]="flag(b, field.key)" (change)="setValue(b, field.key, $any($event.target).checked)" />
+          <span>
+            <span class="block text-xs font-semibold text-[var(--color-text-primary)]">{{ field.label }}</span>
+            @if (field.hint) {
+              <span class="block text-[11px] text-[var(--color-text-secondary)]">{{ field.hint }}</span>
+            }
+          </span>
+        </label>
+      } @else if (field.kind === 'media') {
+        <div class="block" [attr.data-field]="field.key">
+          <span class="mb-1 block text-xs font-semibold text-[var(--color-text-primary)]">{{ field.label }}</span>
+          <app-media-field
+            [value]="text(b, field.key)"
+            [appKind]="appKind()"
+            [ariaLabel]="field.label"
+            (valueChange)="setOptionalText(b, field.key, $event)"
+          />
+          @if (field.hint) {
+            <span class="mt-1 block text-[11px] text-[var(--color-text-secondary)]">{{ field.hint }}</span>
+          }
+        </div>
+      } @else if (field.kind === 'chips') {
+        <div class="block" [attr.data-field]="field.key">
+          <span class="mb-1.5 block text-xs font-semibold text-[var(--color-text-primary)]">{{ field.label }}</span>
+          <div class="flex flex-wrap gap-1.5" role="group" [attr.aria-label]="field.label">
+            <button
+              type="button"
+              class="rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors"
+              [class]="!text(b, field.key)
+                ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
+                : 'border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:bg-[var(--color-background)]'"
+              [attr.aria-pressed]="!text(b, field.key)"
+              data-testid="builder-chip-default"
+              (click)="setValue(b, field.key, undefined)"
+            >
+              {{ field.emptyLabel ?? 'Por defecto' }}
+            </button>
+            @for (opt of field.options; track opt.value) {
+              <button
+                type="button"
+                class="rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors"
+                [class]="text(b, field.key) === opt.value
+                  ? 'border-[var(--color-primary)] bg-[var(--color-primary)] text-white'
+                  : 'border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-background)]'"
+                [attr.aria-pressed]="text(b, field.key) === opt.value"
+                [attr.data-testid]="'builder-chip-' + opt.value"
+                (click)="setValue(b, field.key, opt.value)"
+              >
+                {{ opt.label }}
+              </button>
+            }
+          </div>
+          @if (field.hint) {
+            <span class="mt-1 block text-[11px] text-[var(--color-text-secondary)]">{{ field.hint }}</span>
+          }
+        </div>
+      } @else if (field.kind === 'select') {
+        <label class="block" [attr.data-field]="field.key">
+          <span class="mb-1 block text-xs font-semibold text-[var(--color-text-primary)]">{{ field.label }}</span>
+          <select class="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm"
+                  (change)="setOptionalText(b, field.key, $any($event.target).value)">
+            <option value="" [selected]="!text(b, field.key)">{{ field.emptyLabel ?? 'Por defecto' }}</option>
+            @for (opt of field.options; track opt.value) {
+              <option [value]="opt.value" [selected]="text(b, field.key) === opt.value">{{ opt.label }}</option>
+            }
+          </select>
+          @if (field.hint) {
+            <span class="mt-1 block text-[11px] text-[var(--color-text-secondary)]">{{ field.hint }}</span>
+          }
+        </label>
+      } @else if (field.kind === 'range') {
+        <div class="block" [attr.data-field]="field.key">
+          <div class="mb-1 flex items-center justify-between gap-2">
+            <span class="text-xs font-semibold text-[var(--color-text-primary)]">{{ field.label }}</span>
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-medium text-[var(--color-text-secondary)]" data-testid="builder-range-value">
+                {{ rangeValueText(b, field) }}
+              </span>
+              @if (hasNumber(b, field.key)) {
+                <button type="button" class="text-[11px] font-medium text-[var(--color-primary)] hover:underline"
+                        data-testid="builder-range-reset"
+                        (click)="setValue(b, field.key, undefined)">
+                  Restablecer
+                </button>
+              }
+            </div>
+          </div>
+          <input
+            type="range"
+            class="w-full cursor-pointer accent-[var(--color-primary)]"
+            [attr.min]="field.min"
+            [attr.max]="field.max"
+            [attr.step]="field.step ?? 1"
+            [value]="rangeValue(b, field)"
+            [attr.aria-label]="field.label"
+            [attr.aria-valuetext]="rangeValueText(b, field)"
+            (input)="setNumber(b, field.key, $any($event.target).value)"
+          />
+          @if (field.hint) {
+            <span class="mt-1 block text-[11px] text-[var(--color-text-secondary)]">{{ field.hint }}</span>
+          }
+        </div>
+      } @else if (field.kind === 'color') {
+        <div class="block" [attr.data-field]="field.key">
+          <span class="mb-1 block text-xs font-semibold text-[var(--color-text-primary)]">{{ field.label }}</span>
+          <div class="flex items-center gap-2">
+            <input
+              type="color"
+              class="h-9 w-11 shrink-0 cursor-pointer rounded border border-[var(--color-border)] bg-transparent p-0.5"
+              [value]="validHex(b, field.key) || '#ffffff'"
+              [attr.aria-label]="field.label"
+              (input)="setOptionalText(b, field.key, $any($event.target).value)"
+            />
+            <input
+              type="text"
+              maxlength="7"
+              [attr.placeholder]="field.placeholder ?? '#RRGGBB'"
+              class="w-full rounded-lg border bg-[var(--color-surface)] px-3 py-2 text-sm"
+              [class]="colorError(b, field.key) ? 'border-[var(--color-error,#dc2626)]' : 'border-[var(--color-border)]'"
+              [value]="text(b, field.key)"
+              (input)="setOptionalText(b, field.key, $any($event.target).value)"
+            />
+            @if (text(b, field.key)) {
+              <button type="button" class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-background)]"
+                      aria-label="Quitar color" title="Quitar color" data-testid="builder-color-clear"
+                      (click)="setValue(b, field.key, undefined)">
+                <app-icon name="x" [size]="14" />
+              </button>
+            }
+          </div>
+          @if (colorError(b, field.key)) {
+            <span class="mt-1 block text-[11px] text-[var(--color-error,#dc2626)]">Usa un color hexadecimal #RRGGBB</span>
+          } @else if (field.hint) {
+            <span class="mt-1 block text-[11px] text-[var(--color-text-secondary)]">{{ field.hint }}</span>
+          }
+        </div>
+      } @else {
+        <label class="block" [attr.data-field]="field.key">
+          <span class="mb-1 flex justify-between text-xs font-semibold text-[var(--color-text-primary)]">
+            <span>{{ field.label }}</span>
+            @if (counter(field); as max) {
+              <span class="font-normal text-[var(--color-text-secondary)]">{{ text(b, field.key).length }}/{{ max }}</span>
+            }
+          </span>
+          @if (field.kind === 'textarea') {
+            <textarea rows="4" [attr.maxlength]="field.max" [attr.placeholder]="field.placeholder ?? null"
+                      class="w-full resize-y rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm"
+                      [value]="text(b, field.key)" (input)="setText(b, field.key, $any($event.target).value)"></textarea>
+          } @else if (field.kind === 'number') {
+            <input type="number" step="1" [attr.min]="field.min" [attr.max]="field.max"
+                   class="w-28 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm"
+                   [value]="text(b, field.key)" (input)="setNumber(b, field.key, $any($event.target).value)" />
+          } @else {
+            <input [type]="field.kind === 'url' ? 'url' : 'text'" [attr.maxlength]="counter(field)"
+                   [attr.placeholder]="placeholder(field)"
+                   class="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm"
+                   [class.border-[var(--color-error,#dc2626)]]="urlError(text(b, field.key), field)"
+                   [value]="text(b, field.key)" (input)="setText(b, field.key, $any($event.target).value)" />
+          }
+          @if (urlError(text(b, field.key), field)) {
+            <span class="mt-1 block text-[11px] text-[var(--color-error,#dc2626)]">Usa un enlace que empiece por https://</span>
+          } @else if (field.hint) {
+            <span class="mt-1 block text-[11px] text-[var(--color-text-secondary)]">{{ field.hint }}</span>
+          }
+        </label>
+      }
+    </ng-template>
+
+    @if (pendingMediaList(); as target) {
+      <app-app-media-picker
+        [open]="true"
+        [appKind]="appKind()"
+        (close)="pendingMediaList.set(null)"
+        (picked)="onListMediaPicked(target, $event)"
+      />
+    }
   `,
 })
 export class BuilderInspectorComponent {
   readonly catalog = input.required<BuilderCatalog>();
   readonly block = input<BuilderBlock | null>(null);
+  readonly appKind = input<PageAppKind | null>(null);
 
   readonly propChange = output<BuilderPropChange>();
+  /** Propaga productos resueltos por `app-product-selector` hacia el constructor para vista previa en vivo. */
+  readonly productsResolved = output<AppPageProductItem[]>();
+
+  /** Lista de imágenes esperando una nueva foto elegida desde la galería. */
+  readonly pendingMediaList = signal<{ block: BuilderBlock; field: BuilderListFieldDef } | null>(null);
 
   readonly def = computed(() => {
     const b = this.block();
     return b ? blockDef(this.catalog(), b.type) ?? null : null;
   });
 
+  readonly mainFields = computed<BuilderFieldDef[]>(() =>
+    (this.def()?.fields ?? []).filter((f) => !('group' in f) || f.group !== 'appearance'),
+  );
+
+  readonly appearanceFields = computed<BuilderFieldDef[]>(() =>
+    (this.def()?.fields ?? []).filter((f) => 'group' in f && f.group === 'appearance'),
+  );
+
+  readonly hasCustomAppearance = computed(() => {
+    const b = this.block();
+    if (!b) return false;
+    return this.appearanceFields().some((f) => {
+      const v = b.props[f.key];
+      return v !== undefined && v !== null && v !== '';
+    });
+  });
+
   isList(field: BuilderFieldDef): field is BuilderListFieldDef {
     return field.kind === 'list';
+  }
+
+  isProductIds(field: BuilderFieldDef): field is BuilderProductIdsFieldDef {
+    return field.kind === 'product_ids';
+  }
+
+  isFieldVisible(block: BuilderBlock, field: BuilderFieldDef): boolean {
+    if (!('visibleWhen' in field) || !field.visibleWhen) return true;
+    return block.props[field.visibleWhen.key] === field.visibleWhen.value;
+  }
+
+  productIds(block: BuilderBlock, key: string): number[] {
+    const raw = block.props[key];
+    return Array.isArray(raw)
+      ? raw.filter((v): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 1)
+      : [];
+  }
+
+  setProductIds(block: BuilderBlock, key: string, ids: number[]): void {
+    this.propChange.emit({ blockId: block.id, key, value: ids.length > 0 ? ids : undefined });
+  }
+
+  isPureMediaList(field: BuilderListFieldDef): boolean {
+    return field.item.length === 1 && field.item[0].kind === 'media';
   }
 
   text(block: BuilderBlock, key: string): string {
     const value = block.props[key];
     return typeof value === 'string' || typeof value === 'number' ? String(value) : '';
+  }
+
+  hasNumber(block: BuilderBlock, key: string): boolean {
+    const value = block.props[key];
+    return typeof value === 'number' && Number.isFinite(value);
+  }
+
+  numeric(block: BuilderBlock, key: string): number {
+    const value = block.props[key];
+    return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  }
+
+  /** Valor por defecto real de un control deslizante cuando la prop no está definida. */
+  rangeDefault(block: BuilderBlock, field: Extract<BuilderScalarFieldDef, { kind: 'range' }>): number {
+    if (field.defaultByProp) {
+      const propVal = block.props[field.defaultByProp.key];
+      if (typeof propVal === 'string' && propVal in field.defaultByProp.values) {
+        return field.defaultByProp.values[propVal];
+      }
+    }
+    return field.defaultValue ?? field.min;
+  }
+
+  rangeValue(block: BuilderBlock, field: Extract<BuilderScalarFieldDef, { kind: 'range' }>): number {
+    return this.hasNumber(block, field.key) ? this.numeric(block, field.key) : this.rangeDefault(block, field);
+  }
+
+  /** Texto legible para etiqueta y `aria-valuetext` (p. ej. "Por defecto (40 %)" o "40 %"). */
+  rangeValueText(block: BuilderBlock, field: Extract<BuilderScalarFieldDef, { kind: 'range' }>): string {
+    const val = this.rangeValue(block, field);
+    const unit = field.unit ?? '';
+    const formatted = unit === '%' ? `${val} %` : `${val}${unit}`;
+    return this.hasNumber(block, field.key) ? formatted : `Por defecto (${formatted})`;
+  }
+
+  validHex(block: BuilderBlock, key: string): string | null {
+    const value = this.text(block, key).trim();
+    return HEX_COLOR_RE.test(value) ? value : null;
+  }
+
+  colorError(block: BuilderBlock, key: string): boolean {
+    const value = this.text(block, key).trim();
+    return value.length > 0 && !HEX_COLOR_RE.test(value);
   }
 
   items(block: BuilderBlock, field: BuilderListFieldDef): BuilderListItem[] {
@@ -220,6 +539,12 @@ export class BuilderInspectorComponent {
     this.propChange.emit({ blockId: block.id, key, value });
   }
 
+  /** Emite `undefined` cuando el campo opcional se vacía para conservar el comportamiento por defecto. */
+  setOptionalText(block: BuilderBlock, key: string, value: string): void {
+    const trimmed = value.trim();
+    this.propChange.emit({ blockId: block.id, key, value: trimmed ? value : undefined });
+  }
+
   setValue(block: BuilderBlock, key: string, value: unknown): void {
     this.propChange.emit({ blockId: block.id, key, value });
   }
@@ -241,6 +566,21 @@ export class BuilderInspectorComponent {
     if (items.length >= field.max) return;
     items.push(Object.fromEntries(field.item.map((f) => [f.key, ''])));
     this.writeItems(block, field, items);
+  }
+
+  openListMediaPicker(block: BuilderBlock, field: BuilderListFieldDef): void {
+    if (this.items(block, field).length >= field.max) return;
+    this.pendingMediaList.set({ block, field });
+  }
+
+  onListMediaPicked(target: { block: BuilderBlock; field: BuilderListFieldDef }, item: AppMediaItem): void {
+    this.pendingMediaList.set(null);
+    if (!item.url) return;
+    const items = this.items(target.block, target.field);
+    if (items.length >= target.field.max) return;
+    const key = target.field.item[0]?.key ?? 'value';
+    items.push({ [key]: item.url });
+    this.writeItems(target.block, target.field, items);
   }
 
   removeItem(block: BuilderBlock, field: BuilderListFieldDef, index: number): void {

@@ -5,7 +5,11 @@ import { Cache } from 'cache-manager';
 import { createHash } from 'crypto';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
-import { CatalogQueryDto, ProductSortBy } from './dto/catalog-query.dto';
+import {
+  CatalogQueryDto,
+  MAX_CATALOG_QUERY_IDS,
+  ProductSortBy,
+} from './dto/catalog-query.dto';
 import { RequestContextService } from '@common/context/request-context.service';
 import { isPlanProduct } from '../../store/reservations/service-plans/service-plan-pricing.util';
 import { S3Service } from '@common/services/s3.service';
@@ -221,14 +225,21 @@ export class CatalogService {
       where.brand_id = brandIds.length === 1 ? brandIds[0] : { in: brandIds };
     }
 
+    const requestedIds: number[] = [];
     if (ids) {
-      const idList = ids
-        .split(',')
-        .map((id) => Number(id.trim()))
-        .filter((id) => !isNaN(id));
+      const seen = new Set<number>();
+      for (const raw of ids.split(',')) {
+        if (requestedIds.length >= MAX_CATALOG_QUERY_IDS) break;
+        const parsed = Number(raw.trim());
+        if (!Number.isInteger(parsed) || parsed < 1 || seen.has(parsed)) {
+          continue;
+        }
+        seen.add(parsed);
+        requestedIds.push(parsed);
+      }
 
-      if (idList.length > 0) {
-        where.id = { in: idList };
+      if (requestedIds.length > 0) {
+        where.id = { in: requestedIds };
       }
     }
 
@@ -312,6 +323,8 @@ export class CatalogService {
       };
     }
 
+    const includeVariants = String(query.include_variants) === 'true';
+
     // D.3 — Rama rankeada: scan tokenizado + rank en memoria + hydrate de la
     // página con el include del listado. null (sobre scan-cap) o throw ⇒
     // legacy de abajo con warn (fail-open, nunca 5xx por el motor).
@@ -337,6 +350,7 @@ export class CatalogService {
           Number(limit),
           applied_tokens,
           store_id,
+          includeVariants,
         );
         if (ranked !== null) {
           const payload = {
@@ -592,6 +606,18 @@ export class CatalogService {
               quantity_available: true,
             },
           },
+          ...(includeVariants
+            ? {
+                product_variants: {
+                  orderBy: { id: 'asc' },
+                  take: 24,
+                  include: {
+                    product_images: { select: { image_url: true } },
+                    stock_levels: { select: { quantity_available: true } },
+                  },
+                },
+              }
+            : {}),
           _count: { select: { product_variants: true } },
         },
       }),
@@ -609,9 +635,25 @@ export class CatalogService {
           product,
           activePromotionsByProductId.get(product.id) ?? null,
           availabilityByProductId.get(product.id) ?? null,
+          includeVariants,
         ),
       ),
     );
+
+    // Si el cliente pidió IDs explícitos sin búsqueda ni orden distinto al default,
+    // conservamos el orden exacto de la lista solicitada.
+    if (
+      requestedIds.length > 0 &&
+      !searchActive &&
+      effectiveSort === ProductSortBy.NEWEST
+    ) {
+      const orderIndex = new Map(requestedIds.map((id, idx) => [id, idx]));
+      mappedData.sort(
+        (a, b) =>
+          (orderIndex.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
+          (orderIndex.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+      );
+    }
 
     // Las cartas (menús) NO filtran el catálogo general: cartas y productos
     // conviven sin interferir. Un producto enlazado a una carta con ventana
@@ -660,6 +702,7 @@ export class CatalogService {
     limit: number,
     tokens: readonly string[],
     store_id: number,
+    includeVariants = false,
   ): Promise<{
     data: any[];
     meta: { total: number; page: number; limit: number; total_pages: number };
@@ -705,7 +748,7 @@ export class CatalogService {
           // pageIds ya satisfacen el where completo (salieron del scan);
           // el scope de tienda lo aplica EcommercePrismaService.
           where: { id: { in: [...pageIds] } },
-          include: this.listingInclude(),
+          include: this.listingInclude(includeVariants),
         }),
       getId: (row: any) => row?.id,
     });
@@ -725,6 +768,7 @@ export class CatalogService {
           product,
           activePromotionsByProductId.get(product.id) ?? null,
           availabilityByProductId.get(product.id) ?? null,
+          includeVariants,
         ),
       ),
     );
@@ -765,6 +809,7 @@ export class CatalogService {
       d: String(query.has_discount ?? ''),
       f: String(query.is_featured ?? ''),
       fill: String(query.fill ?? ''),
+      iv: String(query.include_variants ?? ''),
     });
     const digest = createHash('sha256').update(norm).digest('hex');
     return `catalog:search:v1:${store_id}:${smartSearch ? 1 : 0}:${digest}`;
@@ -1149,7 +1194,7 @@ export class CatalogService {
    * cascada de destacados (`getFeaturedWithFill`) no diverja del shape que
    * consume `mapProductToResponse`. No se refactorizan los usos existentes.
    */
-  private listingInclude(): any {
+  private listingInclude(includeVariants = false): any {
     return {
       product_images: { where: { is_main: true }, take: 1 },
       brands: { select: { id: true, name: true } },
@@ -1173,6 +1218,18 @@ export class CatalogService {
           quantity_available: true,
         },
       },
+      ...(includeVariants
+        ? {
+            product_variants: {
+              orderBy: { id: 'asc' },
+              take: 24,
+              include: {
+                product_images: { select: { image_url: true } },
+                stock_levels: { select: { quantity_available: true } },
+              },
+            },
+          }
+        : {}),
       _count: { select: { product_variants: true } },
     };
   }
@@ -1306,6 +1363,7 @@ export class CatalogService {
     product: any,
     activePromotion: ActiveProductPromotion | null = null,
     availability: ProductAvailability | null = null,
+    includeVariants = false,
   ) {
     const raw_image_url = product.product_images?.[0]?.image_url || null;
     const signed_image_url = await this.s3Service.signUrl(raw_image_url);
@@ -1418,6 +1476,9 @@ export class CatalogService {
       categories:
         product.product_categories?.map((pc: any) => pc.categories) || [],
       variant_count: variantCount,
+      ...(includeVariants
+        ? { variants: await this.mapVariantsToResponse(product) }
+        : {}),
       product_type: product.product_type,
       requires_booking: product.requires_booking,
       // QUI-1060 F2: la tarjeta de un plan abre su ficha (no se reserva en línea).
@@ -1670,20 +1731,17 @@ export class CatalogService {
    * los listados y por producto en el detalle.
    */
   private calculateFinalPrice(product: any, variant?: any): number {
-    return this.storefrontPrice.resolveLine({
+    return this.storefrontPrice.resolveCatalogFinalPrice(
       product,
-      variant: variant ?? null,
-      saleUnit: product?.__default_sale_unit ?? null,
-      taxRate: this.storefrontPrice.getTotalTaxRate(product),
-      taxRates: this.storefrontPrice.getTypedTaxRates(product),
-    }).gross_unit_price;
+      variant ?? null,
+    );
   }
 
   /** The compare-at amount must use exactly the same tax resolver as `final_price`. */
   private calculateRegularFinalPrice(product: any, variant?: any): number {
-    return this.calculateFinalPrice(
-      { ...product, is_on_sale: false, sale_price: null },
-      variant ? { ...variant, is_on_sale: false, sale_price: null } : undefined,
+    return this.storefrontPrice.resolveCatalogRegularFinalPrice(
+      product,
+      variant ?? null,
     );
   }
 

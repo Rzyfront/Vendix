@@ -1,8 +1,11 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideZonelessChangeDetection } from '@angular/core';
+import { provideZonelessChangeDetection, signal } from '@angular/core';
+import { provideRouter } from '@angular/router';
+import { CurrencyFormatService } from '../../shared/pipes/currency';
 import type { AppPageDocument, PageAppKind } from '../../private/modules/store/apps/templates/app-page.types';
 import { APP_PAGE_VARIANTS } from '../../private/modules/store/apps/templates';
 import { AppPageViewComponent } from './app-page-view.component';
+import { cssBgUrl } from './app-page-view.util';
 
 const page = (over: Partial<AppPageDocument> = {}): AppPageDocument => ({
   schema_version: 1,
@@ -42,7 +45,14 @@ describe('AppPageViewComponent (apps-f2 T3)', () => {
   beforeEach(() =>
     TestBed.configureTestingModule({
       imports: [AppPageViewComponent],
-      providers: [provideZonelessChangeDetection()],
+      providers: [
+        provideZonelessChangeDetection(),
+        provideRouter([]),
+        {
+          provide: CurrencyFormatService,
+          useValue: { currencyCode: signal('COP'), format: (v: number) => `$${v}`, loadCurrency: () => {} },
+        },
+      ],
     }),
   );
 
@@ -243,6 +253,80 @@ describe('AppPageViewComponent (apps-f2 T3)', () => {
       expect(getComputedStyle(el.querySelector('.ap-card')!).borderTopLeftRadius).toBe('16px');
     });
 
+    describe('extended tokens (apps-f7)', () => {
+      const md = () => window.matchMedia('(min-width: 768px)').matches;
+      const withGallery = (theme: AppPageDocument['theme']) =>
+        page({
+          theme,
+          brand: { cover_url: 'https://cdn.test/cover.jpg' },
+          blocks: [
+            ...page().blocks,
+            { id: 'gallery', type: 'gallery', enabled: true, props: { image_urls: ['https://cdn.test/a.jpg'] } },
+          ],
+        });
+
+      it('an F3-only theme binds no F7 marker and keeps today\'s computed look', () => {
+        const el = render(withGallery({ density: 'spacious' }));
+        const host = fixture.nativeElement as HTMLElement;
+        for (const name of ['data-ap-type', 'data-ap-card', 'data-ap-shadow', 'data-ap-overlay', 'data-ap-hero']) {
+          expect(host.hasAttribute(name)).withContext(name).toBeFalse();
+        }
+        expect(getComputedStyle(el.querySelector('section[data-block="benefits"]')!).paddingTop).toBe('48px');
+        const card = el.querySelector<HTMLElement>('.ap-card')!;
+        expect(getComputedStyle(card).boxShadow).toBe('none');
+        expect(getComputedStyle(card.querySelector('p')!).fontSize).toBe('14px');
+        const img = el.querySelector<HTMLElement>('.ap-img')!;
+        expect(getComputedStyle(img).aspectRatio).toBe('1 / 1');
+        expect(getComputedStyle(img).filter).toBe('none');
+        const veil = el.querySelector<HTMLElement>('.ap-cover-veil')!;
+        expect(getComputedStyle(veil).backgroundColor).toBe('rgba(0, 0, 0, 0.4)');
+        const inner = el.querySelector<HTMLElement>('.ap-hero-inner')!;
+        expect(getComputedStyle(inner).paddingTop).toBe(md() ? '64px' : '48px');
+      });
+
+      it('applies border, type scale, section gap, cards, shadow, image ratio, veil and hero height', () => {
+        const el = render(
+          withGallery({
+            density: 'spacious',
+            border_color: '#123456',
+            base_font_size: 'lg',
+            heading_scale: 'display',
+            section_gap: 'airy',
+            card_style: 'flat',
+            shadow: 'strong',
+            image_ratio: '16:9',
+            image_overlay: 40,
+            hero_height: 'full',
+          }),
+        );
+        const host = fixture.nativeElement as HTMLElement;
+        expect(host.style.getPropertyValue('--color-border')).toBe('#123456');
+        // spacious 3rem (md 4.5rem) × airy 1.5
+        expect(getComputedStyle(el.querySelector('section[data-block="benefits"]')!).paddingTop).toBe(md() ? '108px' : '72px');
+        const card = el.querySelector<HTMLElement>('.ap-card')!;
+        expect(getComputedStyle(card).borderTopColor).toBe('rgba(0, 0, 0, 0)');
+        expect(getComputedStyle(card).boxShadow).not.toBe('none');
+        expect(getComputedStyle(card.querySelector('p')!).fontSize).toBe('14.875px');
+        const title = el.querySelector<HTMLElement>('[data-testid="hero-title"]')!;
+        // text-3xl (md:text-5xl) × lg 1.0625 × display 1.25
+        expect(parseFloat(getComputedStyle(title).fontSize)).toBeCloseTo(md() ? 63.75 : 39.84, 1);
+        const img = el.querySelector<HTMLElement>('.ap-img')!;
+        expect(getComputedStyle(img).aspectRatio).toBe('16 / 9');
+        expect(getComputedStyle(img).filter).toBe('brightness(0.6)');
+        expect(getComputedStyle(el.querySelector('.ap-cover-veil')!).backgroundColor).toBe('rgba(0, 0, 0, 0.4)');
+        const hero = el.querySelector<HTMLElement>('[data-testid="app-page-hero"]')!;
+        expect(getComputedStyle(hero).display).toBe('flex');
+        expect(parseFloat(getComputedStyle(hero).minHeight)).toBeGreaterThan(0);
+      });
+
+      it('card styles: outline drops the fill, soft drops the border', () => {
+        let el = render(page({ theme: { card_style: 'outline' } }));
+        expect(getComputedStyle(el.querySelector('.ap-card')!).backgroundColor).toBe('rgba(0, 0, 0, 0)');
+        el = render(page({ theme: { card_style: 'soft' } }));
+        expect(getComputedStyle(el.querySelector('.ap-card')!).borderTopColor).toBe('rgba(0, 0, 0, 0)');
+      });
+    });
+
     it('renders a template variant in its own block order', () => {
       const clinical = APP_PAGE_VARIANTS.product_page[2];
       const el = render(clinical.page);
@@ -252,6 +336,530 @@ describe('AppPageViewComponent (apps-f2 T3)', () => {
         .map((b) => b.type);
       expect(rendered).toEqual(expected);
       expect(rendered[0]).toBe('specifications');
+    });
+  });
+
+  describe('section variants and block appearance (apps-sections)', () => {
+    it('hero renders each layout variant, background image with overlay, height and alignment', () => {
+      const centered = render({
+        schema_version: 1,
+        hero: {
+          title: 'Centrado',
+          variant: 'centered',
+          height: 'compact',
+          align: 'center',
+          image_url: 'https://cdn.x.co/hero.jpg',
+        },
+        blocks: [],
+      });
+      const centeredHero = centered.querySelector('[data-testid="app-page-hero"]') as HTMLElement;
+      expect(centeredHero.classList.contains('ap-hero--centered')).toBeTrue();
+      expect(centeredHero.classList.contains('ap-hero--compact')).toBeTrue();
+      expect(centeredHero.getAttribute('data-hero-align')).toBe('center');
+      expect(centered.querySelector('[data-testid="hero-image"]')).not.toBeNull();
+
+      const imageRight = render({
+        schema_version: 1,
+        hero: {
+          title: 'Derecha',
+          variant: 'image_right',
+          image_url: 'https://cdn.x.co/side.jpg',
+        },
+        blocks: [],
+      });
+      const rightHero = imageRight.querySelector('[data-testid="app-page-hero"]') as HTMLElement;
+      expect(rightHero.classList.contains('ap-hero--image-right')).toBeTrue();
+      expect(imageRight.querySelector('[data-testid="hero-image"]')).not.toBeNull();
+
+      const background = render({
+        schema_version: 1,
+        hero: {
+          title: 'Fondo con velo',
+          variant: 'background',
+          background_image_url: 'https://cdn.x.co/bg.jpg',
+          overlay_opacity: 60,
+          height: 'full',
+          align: 'right',
+        },
+        blocks: [],
+      });
+      const bgHero = background.querySelector('[data-testid="app-page-hero"]') as HTMLElement;
+      expect(bgHero.classList.contains('ap-hero--background')).toBeTrue();
+      expect(bgHero.classList.contains('ap-hero--full')).toBeTrue();
+      expect(bgHero.style.backgroundImage).toContain('https://cdn.x.co/bg.jpg');
+      expect(background.querySelector('[data-testid="hero-image"]')).toBeNull();
+      const overlay = background.querySelector('[data-testid="hero-overlay"]') as HTMLElement;
+      expect(overlay).not.toBeNull();
+      expect(overlay.style.backgroundColor).toBe('rgba(0, 0, 0, 0.6)');
+    });
+
+    it('gallery renders grid (columns + aspect), carousel (multiple images + controls) and mosaic', () => {
+      const photos = ['https://cdn.x.co/1.jpg', 'https://cdn.x.co/2.jpg', 'https://cdn.x.co/3.jpg'];
+
+      const grid = render({
+        schema_version: 1,
+        blocks: [
+          {
+            id: 'g1',
+            type: 'gallery',
+            enabled: true,
+            props: { title: 'Grid', variant: 'grid', columns: 4, aspect_ratio: '16:9', image_urls: photos },
+          },
+        ],
+      });
+      const gridWrap = grid.querySelector('[data-testid="gallery-grid"]') as HTMLElement;
+      expect(gridWrap.classList.contains('ap-gallery--grid')).toBeTrue();
+      expect(gridWrap.classList.contains('md:grid-cols-4')).toBeTrue();
+      const gridImgs = Array.from(gridWrap.querySelectorAll('img'));
+      expect(gridImgs.length).toBe(3);
+      expect(gridImgs[0].classList.contains('aspect-video')).toBeTrue();
+
+      const carousel = render({
+        schema_version: 1,
+        blocks: [
+          {
+            id: 'g2',
+            type: 'gallery',
+            enabled: true,
+            props: { title: 'Carrusel', variant: 'carousel', columns: 2, aspect_ratio: '4:3', image_urls: photos },
+          },
+        ],
+      });
+      const carouselWrap = carousel.querySelector('[data-testid="gallery-carousel"]') as HTMLElement;
+      expect(carouselWrap.classList.contains('ap-gallery--carousel')).toBeTrue();
+      expect(carousel.querySelectorAll('[data-testid="gallery-carousel-track"] img').length).toBe(3);
+      expect(carousel.querySelector('[data-testid="gallery-carousel-prev"]')).not.toBeNull();
+      expect(carousel.querySelector('[data-testid="gallery-carousel-next"]')).not.toBeNull();
+
+      const mosaic = render({
+        schema_version: 1,
+        blocks: [
+          {
+            id: 'g3',
+            type: 'gallery',
+            enabled: true,
+            props: { title: 'Mosaico', variant: 'mosaic', image_urls: photos },
+          },
+        ],
+      });
+      const mosaicWrap = mosaic.querySelector('[data-testid="gallery-mosaic"]') as HTMLElement;
+      expect(mosaicWrap.classList.contains('ap-gallery--mosaic')).toBeTrue();
+      const mosaicImgs = Array.from(mosaicWrap.querySelectorAll('img'));
+      expect(mosaicImgs[0].classList.contains('md:row-span-2')).toBeTrue();
+    });
+
+    it('highlights renders cards, list and band variants with item image, icon and accent color', () => {
+      const items = [
+        { title: 'Envío', text: 'Rápido', image_url: 'https://cdn.x.co/h1.jpg', icon: 'truck' },
+        { title: 'Garantía', text: '1 año', icon: 'shield-check' },
+      ];
+
+      for (const variant of ['cards', 'list', 'band'] as const) {
+        const el = render(
+          {
+            schema_version: 1,
+            blocks: [
+              {
+                id: `hl_${variant}`,
+                type: 'highlights',
+                enabled: true,
+                props: { title: 'Destacados', variant, accent_color: '#10B981', items },
+              },
+            ],
+          },
+          { kind: 'service_page' },
+        );
+        const container = el.querySelector(`[data-highlights-variant="${variant}"]`) as HTMLElement;
+        expect(container).withContext(variant).not.toBeNull();
+        expect(container.classList.contains(`ap-highlights--${variant}`)).toBeTrue();
+        expect(el.querySelector('[data-testid="highlight-image"]')).not.toBeNull();
+        expect(el.querySelector('[data-testid="highlight-icon"]')).not.toBeNull();
+      }
+    });
+
+    it('applies common block appearance (background color/image+overlay, spacing, align) and cta image', () => {
+      const el = render({
+        schema_version: 1,
+        blocks: [
+          {
+            id: 'faq1',
+            type: 'faq',
+            enabled: true,
+            props: {
+              title: 'Dudas',
+              background_color: '#F1F5F9',
+              background_image_url: 'https://cdn.x.co/section-bg.jpg',
+              overlay_opacity: 50,
+              spacing: 'spacious',
+              align: 'center',
+              items: [{ question: '¿Cómo funciona?', answer: 'Muy fácil.' }],
+            },
+          },
+          {
+            id: 'cta1',
+            type: 'cta',
+            enabled: true,
+            props: { title: 'Actúa', button_label: 'Ir', image_url: 'https://cdn.x.co/cta.jpg' },
+          },
+        ],
+      });
+
+      const section = el.querySelector('section[data-block="faq"]') as HTMLElement;
+      expect(section.classList.contains('ap-section--bg')).toBeTrue();
+      expect(section.classList.contains('ap-spacing--spacious')).toBeTrue();
+      expect(section.classList.contains('text-center')).toBeTrue();
+      expect(section.style.backgroundColor).toBe('rgb(241, 245, 249)');
+      expect(section.style.backgroundImage).toContain('https://cdn.x.co/section-bg.jpg');
+      const overlay = section.querySelector('[data-testid="block-overlay"]') as HTMLElement;
+      expect(overlay.style.backgroundColor).toBe('rgba(0, 0, 0, 0.5)');
+
+      const ctaImg = el.querySelector('[data-testid="cta-image"]') as HTMLImageElement;
+      expect(ctaImg).not.toBeNull();
+      expect(ctaImg.src).toBe('https://cdn.x.co/cta.jpg');
+    });
+
+    it('leaves legacy documents without new tokens unchanged in structure and attributes', () => {
+      const el = render(page());
+      const hero = el.querySelector('[data-testid="app-page-hero"]') as HTMLElement;
+      expect(hero.hasAttribute('data-hero-variant')).toBeFalse();
+      expect(hero.hasAttribute('data-hero-height')).toBeFalse();
+      expect(hero.hasAttribute('data-hero-align')).toBeFalse();
+      expect(el.querySelector('[data-testid="hero-overlay"]')).toBeNull();
+      expect(el.querySelector('[data-testid="block-overlay"]')).toBeNull();
+      const firstSection = el.querySelector('section[data-block]') as HTMLElement;
+      expect(firstSection.classList.contains('ap-section--bg')).toBeFalse();
+      expect(firstSection.hasAttribute('data-spacing')).toBeFalse();
+      expect(firstSection.hasAttribute('data-align')).toBeFalse();
+    });
+
+    it('inherits F7 image_overlay on legacy cover (.ap-cover-veil), background hero and blocks, with block overriding theme', () => {
+      // Legacy cover without image_url: .ap-cover-veil reads color from --ap-image-overlay token (not hardcoded 0.4)
+      const legacy = render(
+        page({
+          brand: { cover_url: 'https://cdn.test/cover.jpg' },
+          theme: { image_overlay: 65 },
+        }),
+      );
+      const coverVeil = legacy.querySelector<HTMLElement>('.ap-cover-veil')!;
+      expect(coverVeil).not.toBeNull();
+      expect(legacy.querySelector('[data-testid="hero-overlay"]')).toBeNull();
+      expect(getComputedStyle(coverVeil).backgroundColor).toBe('rgba(0, 0, 0, 0.65)');
+
+      // Background variant hero inherits theme.image_overlay when hero.overlay_opacity is absent
+      const bgInherited = render({
+        schema_version: 1,
+        theme: { image_overlay: 65 },
+        hero: {
+          title: 'Hereda velo',
+          variant: 'background',
+          background_image_url: 'https://cdn.x.co/bg.jpg',
+        },
+        blocks: [
+          {
+            id: 'f1',
+            type: 'faq',
+            enabled: true,
+            props: {
+              title: 'FAQ',
+              background_image_url: 'https://cdn.x.co/sec.jpg',
+              items: [{ question: 'Q', answer: 'A' }],
+            },
+          },
+        ],
+      });
+      expect(bgInherited.querySelector('.ap-cover-veil')).toBeNull();
+      const heroOverlay = bgInherited.querySelector<HTMLElement>('[data-testid="hero-overlay"]')!;
+      expect(heroOverlay.style.backgroundColor).toBe('rgba(0, 0, 0, 0.65)');
+      const blockOverlay = bgInherited.querySelector<HTMLElement>('[data-testid="block-overlay"]')!;
+      expect(blockOverlay.style.backgroundColor).toBe('rgba(0, 0, 0, 0.65)');
+
+      // Explicit block overlay_opacity wins over theme.image_overlay
+      const overridden = render({
+        schema_version: 1,
+        theme: { image_overlay: 65 },
+        hero: {
+          title: 'Gana bloque',
+          variant: 'background',
+          background_image_url: 'https://cdn.x.co/bg.jpg',
+          overlay_opacity: 20,
+        },
+        blocks: [
+          {
+            id: 'f1',
+            type: 'faq',
+            enabled: true,
+            props: {
+              title: 'FAQ',
+              background_image_url: 'https://cdn.x.co/sec.jpg',
+              overlay_opacity: 25,
+              items: [{ question: 'Q', answer: 'A' }],
+            },
+          },
+        ],
+      });
+      expect(overridden.querySelector<HTMLElement>('[data-testid="hero-overlay"]')!.style.backgroundColor).toBe(
+        'rgba(0, 0, 0, 0.2)',
+      );
+      expect(overridden.querySelector<HTMLElement>('[data-testid="block-overlay"]')!.style.backgroundColor).toBe(
+        'rgba(0, 0, 0, 0.25)',
+      );
+    });
+
+    it('unifies full hero height on var(--ap-hero-min-h, 100svh) with block height winning over theme.hero_height', () => {
+      const md = () => window.matchMedia('(min-width: 768px)').matches;
+
+      // .ap-hero--full reads --ap-hero-min-h (unified with theme.hero_height='full')
+      const blockFull = render({
+        schema_version: 1,
+        hero: { title: 'Full bloque', height: 'full' },
+        blocks: [],
+      });
+      blockFull.style.setProperty('--ap-hero-min-h', '620px');
+      const blockFullHero = blockFull.querySelector<HTMLElement>('[data-testid="app-page-hero"]')!;
+      expect(getComputedStyle(blockFullHero).display).toBe('flex');
+      expect(getComputedStyle(blockFullHero).minHeight).toBe('620px');
+
+      // theme.hero_height='full' inherited when hero.height is absent
+      const themeFull = render({
+        schema_version: 1,
+        theme: { hero_height: 'full' },
+        hero: { title: 'Full tema' },
+        blocks: [],
+      });
+      themeFull.style.setProperty('--ap-hero-min-h', '620px');
+      const themeFullHero = themeFull.querySelector<HTMLElement>('[data-testid="app-page-hero"]')!;
+      expect(getComputedStyle(themeFullHero).display).toBe('flex');
+      expect(getComputedStyle(themeFullHero).minHeight).toBe('620px');
+
+      // theme.hero_height='compact' inherited when hero.height is absent
+      const themeCompact = render({
+        schema_version: 1,
+        theme: { hero_height: 'compact' },
+        hero: { title: 'Compact tema' },
+        blocks: [],
+      });
+      const themeCompactInner = themeCompact.querySelector<HTMLElement>('.ap-hero-inner')!;
+      expect(getComputedStyle(themeCompactInner).paddingTop).toBe(md() ? '40px' : '32px');
+
+      // Precedence: block hero.height='compact' overrides theme.hero_height='full'
+      const blockCompactWins = render({
+        schema_version: 1,
+        theme: { hero_height: 'full' },
+        hero: { title: 'Compact gana', height: 'compact' },
+        blocks: [],
+      });
+      blockCompactWins.style.setProperty('--ap-hero-min-h', '620px');
+      const compactWinsHero = blockCompactWins.querySelector<HTMLElement>('[data-testid="app-page-hero"]')!;
+      expect(getComputedStyle(compactWinsHero).minHeight).toBe('0px');
+      expect(getComputedStyle(blockCompactWins.querySelector<HTMLElement>('.ap-hero-inner')!).paddingTop).toBe(
+        md() ? '40px' : '32px',
+      );
+
+      // Precedence: block hero.height='full' overrides theme.hero_height='compact'
+      const blockFullWins = render({
+        schema_version: 1,
+        theme: { hero_height: 'compact' },
+        hero: { title: 'Full gana', height: 'full' },
+        blocks: [],
+      });
+      blockFullWins.style.setProperty('--ap-hero-min-h', '620px');
+      const fullWinsHero = blockFullWins.querySelector<HTMLElement>('[data-testid="app-page-hero"]')!;
+      expect(getComputedStyle(fullWinsHero).display).toBe('flex');
+      expect(getComputedStyle(fullWinsHero).minHeight).toBe('620px');
+    });
+
+    it('applies readable light text on dark/image section backgrounds and dark text on light section backgrounds', () => {
+      // Dark background_color & background_image_url -> ap-section--on-dark + white text across p, dl, faq, testimonials
+      const darkDoc = render({
+        schema_version: 1,
+        blocks: [
+          {
+            id: 'specs_dark',
+            type: 'specifications',
+            enabled: true,
+            props: {
+              title: 'Ficha',
+              background_color: '#0F172A',
+              items: [{ label: 'Peso', value: '200 g' }],
+            },
+          },
+          {
+            id: 'faq_img',
+            type: 'faq',
+            enabled: true,
+            props: {
+              title: 'Preguntas',
+              background_image_url: 'https://cdn.x.co/bg.jpg',
+              items: [{ question: '¿Envían?', answer: 'Sí, a todo el país.' }],
+            },
+          },
+          {
+            id: 'test_dark',
+            type: 'testimonials',
+            enabled: true,
+            props: {
+              title: 'Opiniones',
+              background_color: '#1E293B',
+              items: [{ name: 'Ana', city: 'Cali', quote: 'Excelente', rating: 5 }],
+            },
+          },
+        ],
+      });
+
+      const specsDark = darkDoc.querySelector<HTMLElement>('section[data-block="specifications"]')!;
+      expect(specsDark.classList.contains('ap-section--on-dark')).toBeTrue();
+      expect(specsDark.classList.contains('ap-section--on-light')).toBeFalse();
+      expect(getComputedStyle(specsDark.querySelector('h2')!).color).toBe('rgb(255, 255, 255)');
+      expect(getComputedStyle(specsDark.querySelector('dt')!).color).toBe('rgb(255, 255, 255)');
+      expect(getComputedStyle(specsDark.querySelector('dd')!).color).toBe('rgb(255, 255, 255)');
+
+      const faqImg = darkDoc.querySelector<HTMLElement>('section[data-block="faq"]')!;
+      expect(faqImg.classList.contains('ap-section--on-dark')).toBeTrue();
+      expect(getComputedStyle(faqImg.querySelector('summary')!).color).toBe('rgb(255, 255, 255)');
+      expect(getComputedStyle(faqImg.querySelector('p')!).color).toBe('rgb(255, 255, 255)');
+
+      const testDark = darkDoc.querySelector<HTMLElement>('section[data-block="testimonials"]')!;
+      expect(testDark.classList.contains('ap-section--on-dark')).toBeTrue();
+      expect(getComputedStyle(testDark.querySelector('blockquote')!).color).toBe('rgb(255, 255, 255)');
+      expect(getComputedStyle(testDark.querySelector('figcaption')!).color).toBe('rgb(255, 255, 255)');
+
+      // Light background_color (even inside a dark theme) -> ap-section--on-light + dark text
+      const lightOnDarkTheme = render({
+        schema_version: 1,
+        theme: { surface_color: '#0F172A', text_color: '#F1F5F9' },
+        blocks: [
+          {
+            id: 'specs_light',
+            type: 'specifications',
+            enabled: true,
+            props: {
+              title: 'Ficha clara',
+              background_color: '#F8FAFC',
+              items: [{ label: 'Material', value: 'Algodón' }],
+            },
+          },
+          {
+            id: 'faq_light',
+            type: 'faq',
+            enabled: true,
+            props: {
+              title: 'FAQ claro',
+              background_color: '#FFFFFF',
+              items: [{ question: '¿Garantía?', answer: '1 año.' }],
+            },
+          },
+          {
+            id: 'test_light',
+            type: 'testimonials',
+            enabled: true,
+            props: {
+              title: 'Testimonios claros',
+              background_color: '#FEF9C3',
+              items: [{ name: 'Luis', city: 'Bogotá', quote: 'Muy bueno', rating: 5 }],
+            },
+          },
+        ],
+      });
+
+      const specsLight = lightOnDarkTheme.querySelector<HTMLElement>('section[data-block="specifications"]')!;
+      expect(specsLight.classList.contains('ap-section--on-light')).toBeTrue();
+      expect(specsLight.classList.contains('ap-section--on-dark')).toBeFalse();
+      expect(getComputedStyle(specsLight.querySelector('h2')!).color).toBe('rgb(17, 24, 39)');
+      expect(getComputedStyle(specsLight.querySelector('dt')!).color).toBe('rgb(17, 24, 39)');
+      expect(getComputedStyle(specsLight.querySelector('dd')!).color).toBe('rgb(17, 24, 39)');
+
+      const faqLight = lightOnDarkTheme.querySelector<HTMLElement>('section[data-block="faq"]')!;
+      expect(faqLight.classList.contains('ap-section--on-light')).toBeTrue();
+      expect(getComputedStyle(faqLight.querySelector('summary')!).color).toBe('rgb(17, 24, 39)');
+      expect(getComputedStyle(faqLight.querySelector('p')!).color).toBe('rgb(17, 24, 39)');
+
+      const testLight = lightOnDarkTheme.querySelector<HTMLElement>('section[data-block="testimonials"]')!;
+      expect(testLight.classList.contains('ap-section--on-light')).toBeTrue();
+      expect(getComputedStyle(testLight.querySelector('blockquote')!).color).toBe('rgb(17, 24, 39)');
+      expect(getComputedStyle(testLight.querySelector('figcaption')!).color).toBe('rgb(17, 24, 39)');
+    });
+
+    it('escapes quotes, parentheses and newlines in cssBgUrl and rejects javascript:/data: in background_image_url', () => {
+      const escaped = cssBgUrl('https://cdn.x.co/a"b\'c(d)\ne\rf.jpg');
+      expect(escaped).toBe('url("https://cdn.x.co/a%22b%27c%28d%29%0ae%0df.jpg")');
+      expect(cssBgUrl('javascript:alert(1)')).toBeNull();
+      expect(cssBgUrl('data:image/svg+xml,<svg onload=alert(1)>')).toBeNull();
+
+      for (const badUrl of ['javascript:alert(1)', 'data:image/png;base64,AAAA']) {
+        const el = render({
+          schema_version: 1,
+          hero: { title: 'Seguro', variant: 'background', background_image_url: badUrl },
+          blocks: [
+            {
+              id: 'faq_bad',
+              type: 'faq',
+              enabled: true,
+              props: { title: 'FAQ', background_image_url: badUrl, items: [{ question: 'Q', answer: 'A' }] },
+            },
+          ],
+        });
+        const hero = el.querySelector<HTMLElement>('[data-testid="app-page-hero"]')!;
+        expect(hero.style.backgroundImage).toBe('');
+        expect(el.querySelector('[data-testid="hero-overlay"]')).toBeNull();
+        const section = el.querySelector<HTMLElement>('section[data-block="faq"]')!;
+        expect(section.style.backgroundImage).toBe('');
+        expect(section.querySelector('[data-testid="block-overlay"]')).toBeNull();
+      }
+    });
+
+    it('renderiza el bloque products en product_page respetando orden manual, variantes con precio y diseño', () => {
+      fixture = TestBed.createComponent(AppPageViewComponent);
+      fixture.componentRef.setInput('kind', 'product_page');
+      fixture.componentRef.setInput('preview', true);
+      fixture.componentRef.setInput('previewProducts', [
+        {
+          id: 1,
+          slug: 'crema',
+          name: 'Crema',
+          image_url: null,
+          final_price: 40000,
+          variants: [
+            { id: 11, name: '50 ml', final_price: 40000 },
+            { id: 12, name: '100 ml', final_price: 72000 },
+          ],
+        },
+        {
+          id: 2,
+          slug: 'jabon',
+          name: 'Jabón',
+          image_url: null,
+          final_price: 18000,
+          variants: [],
+        },
+      ]);
+      fixture.componentRef.setInput('page', {
+        schema_version: 1,
+        blocks: [
+          {
+            id: 'productos_destacados',
+            type: 'products',
+            enabled: true,
+            props: {
+              title: 'Nuestros favoritos',
+              selection: 'manual',
+              product_ids: [2, 1],
+              show_variants: true,
+              layout: 'list',
+            },
+          },
+        ],
+      });
+      fixture.detectChanges();
+
+      const el = fixture.nativeElement as HTMLElement;
+      expect(el.querySelector('[data-testid="products-layout-list"]')).not.toBeNull();
+      const cards = Array.from(el.querySelectorAll('[data-testid="product-block-card"]'));
+      expect(cards.map((c) => c.getAttribute('data-product-id'))).toEqual(['2', '1']);
+      expect(cards[1].querySelector('[data-testid="product-card-price"]')?.textContent?.trim()).toBe('$40000');
+
+      (cards[1].querySelector('[data-testid="variant-option-12"]') as HTMLButtonElement).click();
+      fixture.detectChanges();
+      expect(cards[1].querySelector('[data-testid="product-card-price"]')?.textContent?.trim()).toBe('$72000');
     });
   });
 });

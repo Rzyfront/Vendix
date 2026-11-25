@@ -103,6 +103,16 @@ export type AppThemeDensity = 'compact' | 'comfortable' | 'spacious';
 export type AppThemeButtonStyle = 'solid' | 'outline';
 export type AppThemeImageStyle = 'square' | 'rounded';
 export type AppThemeContentWidth = 'narrow' | 'normal' | 'wide';
+// Apps F7 — extended tokens.
+export type AppThemeFontSize = 'sm' | 'md' | 'lg';
+export type AppThemeHeadingScale = 'compact' | 'normal' | 'display';
+export type AppThemeSectionGap = 'tight' | 'normal' | 'airy';
+export type AppThemeCardStyle = 'flat' | 'outline' | 'soft';
+export type AppThemeShadow = 'none' | 'soft' | 'strong';
+export type AppThemeImageRatio = 'square' | '4:3' | '16:9' | 'auto';
+export type AppThemeHeroHeight = 'auto' | 'compact' | 'full';
+/** Max opacity (%) of the veil over hero and gallery images (mirrors the backend). */
+export const APP_THEME_MAX_IMAGE_OVERLAY = 80;
 
 /** Style tokens of a page. Every token is optional: a missing one keeps today's look. */
 export interface AppPageTheme {
@@ -118,6 +128,16 @@ export interface AppPageTheme {
   button_style?: AppThemeButtonStyle;
   image_style?: AppThemeImageStyle;
   content_width?: AppThemeContentWidth;
+  border_color?: string;
+  base_font_size?: AppThemeFontSize;
+  heading_scale?: AppThemeHeadingScale;
+  section_gap?: AppThemeSectionGap;
+  card_style?: AppThemeCardStyle;
+  shadow?: AppThemeShadow;
+  image_ratio?: AppThemeImageRatio;
+  /** Opacity (0..80 %) of the veil over hero and gallery images. */
+  image_overlay?: number;
+  hero_height?: AppThemeHeroHeight;
 }
 
 export type AppThemeColorKey =
@@ -125,7 +145,8 @@ export type AppThemeColorKey =
   | 'secondary_color'
   | 'surface_color'
   | 'text_color'
-  | 'accent_color';
+  | 'accent_color'
+  | 'border_color';
 
 export const APP_THEME_COLORS: readonly { key: AppThemeColorKey; label: string; hint: string }[] = [
   { key: 'primary_color', label: 'Principal', hint: 'Botones y llamados a la acción.' },
@@ -135,7 +156,94 @@ export const APP_THEME_COLORS: readonly { key: AppThemeColorKey; label: string; 
   { key: 'accent_color', label: 'Acento', hint: 'Estrellas, enlaces y detalles.' },
 ];
 
+/** Apps F7 — border color, edited apart from the five palette colors. */
+export const APP_THEME_BORDER_COLOR: { key: AppThemeColorKey; label: string; hint: string } = {
+  key: 'border_color',
+  label: 'Bordes',
+  hint: 'Líneas de tarjetas y separadores.',
+};
+
+/** The five palette colors a quick palette sets at once. */
+export type AppThemePaletteKey = Exclude<AppThemeColorKey, 'border_color'>;
+
+/**
+ * Quick palettes of the style panel: each sets the five palette colors at
+ * once. Every pair checked by `contrastChecks` stays at 4.5:1 or more.
+ */
+export const APP_THEME_PALETTES: readonly {
+  id: string;
+  name: string;
+  colors: Record<AppThemePaletteKey, string>;
+}[] = [
+  {
+    id: 'ocean',
+    name: 'Océano',
+    colors: {
+      primary_color: '#1D4ED8',
+      secondary_color: '#1E3A8A',
+      surface_color: '#F8FAFC',
+      text_color: '#0F172A',
+      accent_color: '#0369A1',
+    },
+  },
+  {
+    id: 'forest',
+    name: 'Bosque',
+    colors: {
+      primary_color: '#166534',
+      secondary_color: '#14532D',
+      surface_color: '#F7FAF5',
+      text_color: '#1C2A1E',
+      accent_color: '#3F6212',
+    },
+  },
+  {
+    id: 'terracotta',
+    name: 'Terracota',
+    colors: {
+      primary_color: '#9A3412',
+      secondary_color: '#7C2D12',
+      surface_color: '#FFF8F1',
+      text_color: '#2A1A12',
+      accent_color: '#9A3412',
+    },
+  },
+  {
+    id: 'night',
+    name: 'Noche',
+    colors: {
+      primary_color: '#FBBF24',
+      secondary_color: '#F59E0B',
+      surface_color: '#0F172A',
+      text_color: '#F1F5F9',
+      accent_color: '#FCD34D',
+    },
+  },
+];
+
 export type AppThemeOptionKey = 'radius' | 'density' | 'button_style' | 'image_style' | 'content_width';
+
+/** Apps F7 — the extended closed tokens (style panel of product, service and booking pages). */
+export type AppThemeExtendedOptionKey =
+  | 'base_font_size'
+  | 'heading_scale'
+  | 'section_gap'
+  | 'card_style'
+  | 'shadow'
+  | 'image_ratio'
+  | 'hero_height';
+
+/** Group of the style panel an option belongs to. */
+export type AppThemeOptionGroup = 'typography' | 'spacing' | 'images';
+
+/** Group of each original (F3) option in the regrouped style panel. */
+export const APP_THEME_OPTION_GROUPS: Record<AppThemeOptionKey, AppThemeOptionGroup> = {
+  radius: 'spacing',
+  density: 'spacing',
+  button_style: 'spacing',
+  image_style: 'images',
+  content_width: 'spacing',
+};
 
 /** The closed choices of each non-color token, with their editor labels. */
 export const APP_THEME_OPTIONS: readonly {
@@ -189,11 +297,196 @@ export const APP_THEME_OPTIONS: readonly {
   },
 ];
 
+/** Apps F7 — closed choices of the extended tokens, with their group and labels. */
+export const APP_THEME_EXTENDED_OPTIONS: readonly {
+  key: AppThemeExtendedOptionKey;
+  group: AppThemeOptionGroup;
+  label: string;
+  values: readonly { value: string; label: string }[];
+}[] = [
+  {
+    key: 'base_font_size',
+    group: 'typography',
+    label: 'Tamaño del texto',
+    values: [
+      { value: 'sm', label: 'Pequeño' },
+      { value: 'md', label: 'Normal' },
+      { value: 'lg', label: 'Grande' },
+    ],
+  },
+  {
+    key: 'heading_scale',
+    group: 'typography',
+    label: 'Tamaño de los títulos',
+    values: [
+      { value: 'compact', label: 'Compactos' },
+      { value: 'normal', label: 'Normales' },
+      { value: 'display', label: 'Destacados' },
+    ],
+  },
+  {
+    key: 'section_gap',
+    group: 'spacing',
+    label: 'Espacio entre secciones',
+    values: [
+      { value: 'tight', label: 'Junto' },
+      { value: 'normal', label: 'Normal' },
+      { value: 'airy', label: 'Aireado' },
+    ],
+  },
+  {
+    key: 'card_style',
+    group: 'spacing',
+    label: 'Tarjetas',
+    values: [
+      { value: 'flat', label: 'Planas' },
+      { value: 'outline', label: 'Con borde' },
+      { value: 'soft', label: 'Suaves' },
+    ],
+  },
+  {
+    key: 'shadow',
+    group: 'spacing',
+    label: 'Sombra de tarjetas',
+    values: [
+      { value: 'none', label: 'Sin sombra' },
+      { value: 'soft', label: 'Suave' },
+      { value: 'strong', label: 'Marcada' },
+    ],
+  },
+  {
+    key: 'image_ratio',
+    group: 'images',
+    label: 'Proporción de imágenes',
+    values: [
+      { value: 'square', label: 'Cuadrada' },
+      { value: '4:3', label: '4:3' },
+      { value: '16:9', label: '16:9' },
+      { value: 'auto', label: 'Original' },
+    ],
+  },
+  {
+    key: 'hero_height',
+    group: 'images',
+    label: 'Alto de la portada',
+    values: [
+      { value: 'auto', label: 'Automático' },
+      { value: 'compact', label: 'Compacta' },
+      { value: 'full', label: 'Pantalla completa' },
+    ],
+  },
+];
+
 export interface AppPageSeo {
   title?: string;
   description?: string;
   image_url?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Apps sections — variantes por sección y apariencia opcional de bloque
+// ---------------------------------------------------------------------------
+
+export type AppHeroVariant = 'centered' | 'image_right' | 'background';
+export type AppHeroHeight = 'auto' | 'compact' | 'full';
+export type AppGalleryVariant = 'grid' | 'carousel' | 'mosaic';
+export type AppGalleryAspectRatio = '1:1' | '4:3' | '16:9';
+export type AppHighlightsVariant = 'cards' | 'list' | 'band';
+export type AppBlockSpacing = 'compact' | 'normal' | 'spacious';
+export type AppTextAlign = 'left' | 'center' | 'right';
+export type AppProductsSelection = 'auto' | 'manual';
+export type AppProductsLayout = 'grid' | 'list' | 'carousel';
+export const MAX_BLOCK_PRODUCT_IDS = 50;
+export type AppHighlightsIcon =
+  | 'sparkles'
+  | 'star'
+  | 'check'
+  | 'shield-check'
+  | 'truck'
+  | 'clock'
+  | 'heart'
+  | 'award'
+  | 'zap'
+  | 'flame'
+  | 'gift'
+  | 'map-pin'
+  | 'crown'
+  | 'thumbs-up';
+
+export interface FieldOption {
+  value: string;
+  label: string;
+}
+
+export const APP_HERO_VARIANT_OPTIONS: readonly FieldOption[] = [
+  { value: 'centered', label: 'Centrado' },
+  { value: 'image_right', label: 'Imagen a la derecha' },
+  { value: 'background', label: 'Imagen de fondo' },
+];
+
+export const APP_HERO_HEIGHT_OPTIONS: readonly FieldOption[] = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'compact', label: 'Compacto' },
+  { value: 'full', label: 'Completo' },
+];
+
+export const APP_GALLERY_VARIANT_OPTIONS: readonly FieldOption[] = [
+  { value: 'grid', label: 'Cuadrícula' },
+  { value: 'carousel', label: 'Carrusel' },
+  { value: 'mosaic', label: 'Mosaico' },
+];
+
+export const APP_GALLERY_ASPECT_OPTIONS: readonly FieldOption[] = [
+  { value: '1:1', label: '1:1' },
+  { value: '4:3', label: '4:3' },
+  { value: '16:9', label: '16:9' },
+];
+
+export const APP_HIGHLIGHTS_VARIANT_OPTIONS: readonly FieldOption[] = [
+  { value: 'cards', label: 'Tarjetas' },
+  { value: 'list', label: 'Lista' },
+  { value: 'band', label: 'Banda' },
+];
+
+export const APP_HIGHLIGHTS_ICON_OPTIONS: readonly FieldOption[] = [
+  { value: 'sparkles', label: 'Destello' },
+  { value: 'star', label: 'Estrella' },
+  { value: 'check', label: 'Verificado' },
+  { value: 'shield-check', label: 'Garantía' },
+  { value: 'truck', label: 'Envío' },
+  { value: 'clock', label: 'Rapidez' },
+  { value: 'heart', label: 'Favorito' },
+  { value: 'award', label: 'Calidad' },
+  { value: 'zap', label: 'Energía' },
+  { value: 'flame', label: 'Destacado' },
+  { value: 'gift', label: 'Beneficio' },
+  { value: 'map-pin', label: 'Ubicación' },
+  { value: 'crown', label: 'Premium' },
+  { value: 'thumbs-up', label: 'Recomendado' },
+];
+
+export const APP_BLOCK_SPACING_OPTIONS: readonly FieldOption[] = [
+  { value: 'compact', label: 'Compacto' },
+  { value: 'normal', label: 'Normal' },
+  { value: 'spacious', label: 'Amplio' },
+];
+
+export const APP_TEXT_ALIGN_OPTIONS: readonly FieldOption[] = [
+  { value: 'left', label: 'Izquierda' },
+  { value: 'center', label: 'Centrado' },
+  { value: 'right', label: 'Derecha' },
+];
+
+export const APP_PRODUCTS_SELECTION_OPTIONS: readonly FieldOption[] = [
+  { value: 'auto', label: 'Automática' },
+  { value: 'manual', label: 'Manual' },
+];
+
+export const APP_PRODUCTS_LAYOUT_OPTIONS: readonly FieldOption[] = [
+  { value: 'grid', label: 'Cuadrícula' },
+  { value: 'list', label: 'Lista' },
+  { value: 'carousel', label: 'Carrusel' },
+];
 
 export interface AppPageHero {
   eyebrow?: string;
@@ -201,6 +494,11 @@ export interface AppPageHero {
   subtitle?: string;
   image_url?: string;
   button_label?: string;
+  variant?: AppHeroVariant;
+  background_image_url?: string;
+  overlay_opacity?: number;
+  height?: AppHeroHeight;
+  align?: AppTextAlign;
 }
 
 /** `store_apps.config.page`. Every field but the version and blocks is optional. */
@@ -227,16 +525,50 @@ export function effectiveMode(kind: PageAppKind, page: AppPageDocument | null | 
 // ---------------------------------------------------------------------------
 
 export type ScalarFieldDef =
-  | { key: string; label: string; kind: 'text'; max: number; multiline?: boolean; placeholder?: string }
-  | { key: string; label: string; kind: 'url'; placeholder?: string }
-  | { key: string; label: string; kind: 'bool' }
-  | { key: string; label: string; kind: 'int'; min: number; max: number };
+  | { key: string; label: string; kind: 'text'; max: number; multiline?: boolean; placeholder?: string; group?: 'appearance' }
+  | { key: string; label: string; kind: 'url'; placeholder?: string; group?: 'appearance' }
+  | { key: string; label: string; kind: 'media'; placeholder?: string; hint?: string; group?: 'appearance' }
+  | { key: string; label: string; kind: 'color'; placeholder?: string; hint?: string; group?: 'appearance' }
+  | {
+      key: string;
+      label: string;
+      kind: 'select';
+      options: readonly FieldOption[];
+      display?: 'select' | 'chips';
+      emptyLabel?: string;
+      hint?: string;
+      group?: 'appearance';
+    }
+  | {
+      key: string;
+      label: string;
+      kind: 'range';
+      min: number;
+      max: number;
+      step?: number;
+      unit?: string;
+      defaultValue?: number;
+      defaultByProp?: { key: string; values: Readonly<Record<string, number>> };
+      hint?: string;
+      group?: 'appearance';
+    }
+  | { key: string; label: string; kind: 'bool'; hint?: string; group?: 'appearance' }
+  | { key: string; label: string; kind: 'int'; min: number; max: number; group?: 'appearance' };
 
 export type FieldDef =
   | ScalarFieldDef
   | { key: string; label: string; kind: 'list'; max: number; itemLabel: string; item: ScalarFieldDef[] }
   | { key: string; label: string; kind: 'text_list'; max: number; itemMax: number }
-  | { key: string; label: string; kind: 'url_list'; max: number };
+  | { key: string; label: string; kind: 'url_list'; max: number }
+  | { key: string; label: string; kind: 'media_list'; max: number }
+  | {
+      key: string;
+      label: string;
+      kind: 'product_ids';
+      max: number;
+      hint?: string;
+      visibleWhen?: { key: string; value: unknown };
+    };
 
 export interface BlockDef {
   type: string;
@@ -346,15 +678,164 @@ export const faqFields = (): FieldDef[] => [
   },
 ];
 
+/** Campos comunes de apariencia opcional para cualquier bloque (excepto store_home). */
+export const BLOCK_APPEARANCE_FIELDS: readonly ScalarFieldDef[] = [
+  {
+    key: 'background_color',
+    label: 'Color de fondo',
+    kind: 'color',
+    placeholder: 'Sin color propio',
+    group: 'appearance',
+  },
+  {
+    key: 'background_image_url',
+    label: 'Imagen de fondo',
+    kind: 'media',
+    hint: 'Se muestra detrás del contenido de la sección.',
+    group: 'appearance',
+  },
+  {
+    key: 'overlay_opacity',
+    label: 'Intensidad del velo',
+    kind: 'range',
+    min: 0,
+    max: 80,
+    step: 5,
+    unit: '%',
+    defaultValue: 40,
+    hint: 'Oscurece la imagen de fondo para mejorar la lectura.',
+    group: 'appearance',
+  },
+  {
+    key: 'spacing',
+    label: 'Espaciado',
+    kind: 'select',
+    display: 'chips',
+    options: APP_BLOCK_SPACING_OPTIONS,
+    emptyLabel: 'Por defecto',
+    group: 'appearance',
+  },
+  {
+    key: 'align',
+    label: 'Alineación',
+    kind: 'select',
+    display: 'chips',
+    options: APP_TEXT_ALIGN_OPTIONS,
+    emptyLabel: 'Por defecto',
+    group: 'appearance',
+  },
+];
+
+/** Campos configurables de bloques de destacados/beneficios (variantes, imagen, icono y acento). */
+export const highlightsFields = (itemLabel = 'Destacado'): FieldDef[] => [
+  titleField(),
+  {
+    key: 'variant',
+    label: 'Diseño',
+    kind: 'select',
+    display: 'chips',
+    options: APP_HIGHLIGHTS_VARIANT_OPTIONS,
+    emptyLabel: 'Por defecto',
+  },
+  {
+    key: 'accent_color',
+    label: 'Color de acento',
+    kind: 'color',
+    placeholder: 'Color de la página',
+  },
+  {
+    key: 'items',
+    label: itemLabel === 'Beneficio' ? 'Beneficios' : 'Destacados',
+    kind: 'list',
+    max: 6,
+    itemLabel,
+    item: [
+      { key: 'title', label: 'Título', kind: 'text', max: 60 },
+      { key: 'text', label: 'Texto', kind: 'text', max: 240, multiline: true },
+      { key: 'image_url', label: 'Imagen', kind: 'media' },
+      {
+        key: 'icon',
+        label: 'Icono',
+        kind: 'select',
+        display: 'select',
+        options: APP_HIGHLIGHTS_ICON_OPTIONS,
+        emptyLabel: 'Sin icono',
+      },
+    ],
+  },
+];
+
 export const galleryFields = (): FieldDef[] => [
   titleField(),
-  { key: 'image_urls', label: 'Imágenes (URL https)', kind: 'url_list', max: 12 },
+  {
+    key: 'variant',
+    label: 'Diseño',
+    kind: 'select',
+    display: 'chips',
+    options: APP_GALLERY_VARIANT_OPTIONS,
+    emptyLabel: 'Por defecto',
+  },
+  {
+    key: 'columns',
+    label: 'Columnas',
+    kind: 'range',
+    min: 2,
+    max: 4,
+    step: 1,
+    unit: ' col.',
+    defaultValue: 3,
+  },
+  {
+    key: 'aspect_ratio',
+    label: 'Proporción',
+    kind: 'select',
+    display: 'chips',
+    options: APP_GALLERY_ASPECT_OPTIONS,
+    emptyLabel: 'Por defecto',
+  },
+  { key: 'image_urls', label: 'Imágenes', kind: 'media_list', max: 12 },
 ];
 
 export const ctaFields = (): FieldDef[] => [
   titleField(),
   { key: 'text', label: 'Texto', kind: 'text', max: 300, multiline: true },
   { key: 'button_label', label: 'Texto del botón', kind: 'text', max: 40 },
+  { key: 'image_url', label: 'Imagen', kind: 'media' },
+];
+
+/** Campos configurables del bloque de productos (selección automática/manual, variantes y diseño). */
+export const productsFields = (): FieldDef[] => [
+  titleField(),
+  {
+    key: 'selection',
+    label: 'Selección de productos',
+    kind: 'select',
+    display: 'chips',
+    options: APP_PRODUCTS_SELECTION_OPTIONS,
+    emptyLabel: 'Por defecto',
+  },
+  {
+    key: 'product_ids',
+    label: 'Productos elegidos',
+    kind: 'product_ids',
+    max: MAX_BLOCK_PRODUCT_IDS,
+    hint: 'El orden de la lista se respeta en la página pública y en la vista previa.',
+    visibleWhen: { key: 'selection', value: 'manual' },
+  },
+  {
+    key: 'show_variants',
+    label: 'Mostrar selector de variantes',
+    kind: 'bool',
+    hint: 'Las tarjetas permiten elegir variante y ver su precio al instante.',
+  },
+  {
+    key: 'layout',
+    label: 'Diseño',
+    kind: 'select',
+    display: 'chips',
+    options: APP_PRODUCTS_LAYOUT_OPTIONS,
+    emptyLabel: 'Por defecto',
+  },
 ];
 
 /** Hero fields, common to every app page. */
@@ -362,8 +843,62 @@ export const HERO_FIELDS: ScalarFieldDef[] = [
   { key: 'eyebrow', label: 'Antetítulo', kind: 'text', max: 60 },
   { key: 'title', label: 'Título', kind: 'text', max: 120 },
   { key: 'subtitle', label: 'Subtítulo', kind: 'text', max: 300, multiline: true },
-  { key: 'image_url', label: 'Imagen (URL https)', kind: 'url' },
+  { key: 'image_url', label: 'Imagen', kind: 'url' },
   { key: 'button_label', label: 'Texto del botón', kind: 'text', max: 40 },
+];
+
+/** Portada editable con galería y variantes (Product Page, Service Page y Booking). */
+export const HERO_CUSTOM_FIELDS: ScalarFieldDef[] = [
+  {
+    key: 'variant',
+    label: 'Diseño de la portada',
+    kind: 'select',
+    display: 'chips',
+    options: APP_HERO_VARIANT_OPTIONS,
+    emptyLabel: 'Por defecto',
+  },
+  { key: 'eyebrow', label: 'Antetítulo', kind: 'text', max: 60 },
+  { key: 'title', label: 'Título', kind: 'text', max: 120 },
+  { key: 'subtitle', label: 'Subtítulo', kind: 'text', max: 300, multiline: true },
+  { key: 'image_url', label: 'Imagen principal', kind: 'media' },
+  { key: 'button_label', label: 'Texto del botón', kind: 'text', max: 40 },
+  {
+    key: 'background_image_url',
+    label: 'Imagen de fondo',
+    kind: 'media',
+    hint: 'Se muestra detrás de la portada con el velo configurado.',
+    group: 'appearance',
+  },
+  {
+    key: 'overlay_opacity',
+    label: 'Intensidad del velo',
+    kind: 'range',
+    min: 0,
+    max: 80,
+    step: 5,
+    unit: '%',
+    defaultValue: 40,
+    defaultByProp: { key: 'variant', values: { background: 45 } },
+    group: 'appearance',
+  },
+  {
+    key: 'height',
+    label: 'Alto',
+    kind: 'select',
+    display: 'chips',
+    options: APP_HERO_HEIGHT_OPTIONS,
+    emptyLabel: 'Por defecto',
+    group: 'appearance',
+  },
+  {
+    key: 'align',
+    label: 'Alineación del texto',
+    kind: 'select',
+    display: 'chips',
+    options: APP_TEXT_ALIGN_OPTIONS,
+    emptyLabel: 'Por defecto',
+    group: 'appearance',
+  },
 ];
 
 export const SEO_FIELDS: ScalarFieldDef[] = [

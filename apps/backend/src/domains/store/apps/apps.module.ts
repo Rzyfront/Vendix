@@ -19,6 +19,8 @@ import { AppDomainService } from './shared/app-domain.service';
 import { AppPageService } from './shared/app-page.service';
 import { LodgingReservationsModule } from '../hospitality/reservations/reservations.module';
 import { PaymentLinksModule } from '../payment-links/payment-links.module';
+import { PromotionsModule } from '../promotions/promotions.module';
+import { StorefrontSharedModule } from '../../ecommerce/shared/storefront-shared.module';
 import { BookingAppController } from './booking/booking-app.controller';
 import { BookingAppService } from './booking/booking-app.service';
 import { BookingCheckinService } from './booking/booking-checkin.service';
@@ -48,6 +50,9 @@ import { LandingLeadService } from './landing/landing-lead.service';
     S3Module,
     CrmModule,
     PaymentLinksModule,
+    // Fuente única de precio del catálogo y promociones activas para la vista previa.
+    StorefrontSharedModule,
+    PromotionsModule,
   ],
   controllers: [
     // Antes que AppsController: `store/apps/media` no debe caer en `:kind`.

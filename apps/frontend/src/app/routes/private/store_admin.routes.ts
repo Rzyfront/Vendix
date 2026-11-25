@@ -704,6 +704,16 @@ export const storeAdminRoutes: Routes = [
                 (c) => c.SegmentsComponent,
               ),
           },
+          // Edición masiva de clientes. MUST stay BEFORE ':id': el segmento
+          // literal 'bulk-edit' lo capturaría la ruta de detalle y mostraría
+          // "Cliente no encontrado".
+          {
+            path: 'bulk-edit',
+            loadComponent: () =>
+              import('../../private/modules/store/customers/bulk-edit/customers-bulk-edit-page.component').then(
+                (c) => c.CustomersBulkEditPageComponent,
+              ),
+          },
           // Landing de captación (QUI-719): vive en Apps desde apps-vistas-f1
           // (S4). La ruta vieja queda como redirect para enlaces guardados.
           { path: 'crm', pathMatch: 'full', redirectTo: '/admin/apps/landing' },
@@ -831,6 +841,15 @@ export const storeAdminRoutes: Routes = [
             loadComponent: () =>
               import('../../private/modules/store/apps/apps-catalog.component').then(
                 (c) => c.AppsCatalogComponent,
+              ),
+          },
+          {
+            // Galería de medios de las apps (apps-customization F1.2). Va antes
+            // de `:kind` para que no la capture el guard de tipos de app.
+            path: 'gallery',
+            loadComponent: () =>
+              import('../../private/modules/store/apps/pages/app-media-gallery/app-media-gallery.component').then(
+                (c) => c.AppMediaGalleryComponent,
               ),
           },
           {

@@ -19,7 +19,9 @@
  *   they can never contradict it.
  * - `brand`: logo, colors, font, cover. `seo`: title, description, image.
  * - `theme` (Apps F3): style tokens (palette, heading/body fonts, corner
- *   radius, density, button and image treatment, content width). Every token
+ *   radius, density, button and image treatment, content width) and, since
+ *   F7, border color, type size and heading scale, section gap, card style
+ *   and shadow, image ratio and overlay, and hero height. Every token
  *   is optional and closed; a missing one keeps the look the page has today.
  *   The hostname is the app's domain (settings panel), not part of the page.
  *
@@ -64,6 +66,16 @@ export const APP_THEME_DENSITIES = ['compact', 'comfortable', 'spacious'] as con
 export const APP_THEME_BUTTON_STYLES = ['solid', 'outline'] as const;
 export const APP_THEME_IMAGE_STYLES = ['square', 'rounded'] as const;
 export const APP_THEME_CONTENT_WIDTHS = ['narrow', 'normal', 'wide'] as const;
+/** Apps F7 — extended tokens; all optional, a missing one keeps today's look. */
+export const APP_THEME_FONT_SIZES = ['sm', 'md', 'lg'] as const;
+export const APP_THEME_HEADING_SCALES = ['compact', 'normal', 'display'] as const;
+export const APP_THEME_SECTION_GAPS = ['tight', 'normal', 'airy'] as const;
+export const APP_THEME_CARD_STYLES = ['flat', 'outline', 'soft'] as const;
+export const APP_THEME_SHADOWS = ['none', 'soft', 'strong'] as const;
+export const APP_THEME_IMAGE_RATIOS = ['square', '4:3', '16:9', 'auto'] as const;
+export const APP_THEME_HERO_HEIGHTS = ['auto', 'compact', 'full'] as const;
+/** Max opacity (%) of the veil over hero and gallery images. */
+export const APP_THEME_MAX_IMAGE_OVERLAY = 80;
 
 /** Color tokens of `page.theme`, all `#RRGGBB`. */
 export const APP_THEME_COLOR_KEYS = [
@@ -72,7 +84,38 @@ export const APP_THEME_COLOR_KEYS = [
   'surface_color',
   'text_color',
   'accent_color',
+  'border_color',
 ] as const;
+
+/** Apps sections — catálogos cerrados de variantes y apariencia por sección. */
+export const APP_HERO_VARIANTS = ['centered', 'image_right', 'background'] as const;
+export const APP_HERO_HEIGHTS = ['auto', 'compact', 'full'] as const;
+export const APP_GALLERY_VARIANTS = ['grid', 'carousel', 'mosaic'] as const;
+export const APP_GALLERY_ASPECT_RATIOS = ['1:1', '4:3', '16:9'] as const;
+export const APP_HIGHLIGHTS_VARIANTS = ['cards', 'list', 'band'] as const;
+export const APP_HIGHLIGHTS_ICONS = [
+  'sparkles',
+  'star',
+  'check',
+  'shield-check',
+  'truck',
+  'clock',
+  'heart',
+  'award',
+  'zap',
+  'flame',
+  'gift',
+  'map-pin',
+  'crown',
+  'thumbs-up',
+] as const;
+export const APP_BLOCK_SPACINGS = ['compact', 'normal', 'spacious'] as const;
+export const APP_TEXT_ALIGNS = ['left', 'center', 'right'] as const;
+
+/** Apps selectors — catálogos cerrados del bloque de productos (Product Page y Service Page). */
+export const APP_PRODUCTS_SELECTIONS = ['auto', 'manual'] as const;
+export const APP_PRODUCTS_LAYOUTS = ['grid', 'list', 'carousel'] as const;
+export const MAX_BLOCK_PRODUCT_IDS = 50;
 
 /**
  * Mode each app has today, before F2, when it has no saved page: the product
@@ -93,6 +136,7 @@ export const DEFAULT_APP_MODE: Record<PageAppKind, AppPageMode> = {
 type ScalarField =
   | { kind: 'text'; max: number }
   | { kind: 'url' }
+  | { kind: 'color' }
   | { kind: 'bool' }
   | { kind: 'int'; min: number; max: number }
   | { kind: 'enum'; values: readonly string[] };
@@ -101,15 +145,31 @@ type FieldSpec =
   | ScalarField
   | { kind: 'list'; max: number; item: Record<string, ScalarField> }
   | { kind: 'text_list'; max: number; itemMax: number }
-  | { kind: 'url_list'; max: number };
+  | { kind: 'url_list'; max: number }
+  | { kind: 'id_list'; max: number };
 
 type FieldsSpec = Record<string, FieldSpec>;
 
 const text = (max: number): ScalarField => ({ kind: 'text', max });
 const url: ScalarField = { kind: 'url' };
+const color: ScalarField = { kind: 'color' };
 const bool: ScalarField = { kind: 'bool' };
 const int = (min: number, max: number): ScalarField => ({ kind: 'int', min, max });
 const oneOf = (values: readonly string[]): ScalarField => ({ kind: 'enum', values });
+
+/** Apariencia opcional común a cualquier bloque de Product Page, Service Page y Booking. */
+const BLOCK_APPEARANCE: FieldsSpec = {
+  background_color: color,
+  background_image_url: url,
+  overlay_opacity: int(0, 80),
+  spacing: oneOf(APP_BLOCK_SPACINGS),
+  align: oneOf(APP_TEXT_ALIGNS),
+};
+
+const withBlockStyle = (spec: FieldsSpec): FieldsSpec => ({
+  ...spec,
+  ...BLOCK_APPEARANCE,
+});
 
 const TITLE = text(80);
 const SUBTITLE = text(200);
@@ -126,15 +186,35 @@ const FAQ: FieldsSpec = {
 const GALLERY: FieldsSpec = {
   title: TITLE,
   image_urls: { kind: 'url_list', max: 12 },
+  variant: oneOf(APP_GALLERY_VARIANTS),
+  columns: int(2, 4),
+  aspect_ratio: oneOf(APP_GALLERY_ASPECT_RATIOS),
 };
 
-/** Title + text cards (benefits, highlights). */
+/** Tarjetas simples (usadas por store_home sin tocar su contrato actual). */
 const CARDS: FieldsSpec = {
   title: TITLE,
   items: {
     kind: 'list',
     max: 6,
     item: { title: text(60), text: text(240) },
+  },
+};
+
+/** Destacados / beneficios configurables con variantes, imagen, icono y color de acento. */
+const HIGHLIGHTS: FieldsSpec = {
+  title: TITLE,
+  variant: oneOf(APP_HIGHLIGHTS_VARIANTS),
+  accent_color: color,
+  items: {
+    kind: 'list',
+    max: 6,
+    item: {
+      title: text(60),
+      text: text(240),
+      image_url: url,
+      icon: oneOf(APP_HIGHLIGHTS_ICONS),
+    },
   },
 };
 
@@ -169,6 +249,16 @@ const CTA: FieldsSpec = {
   title: TITLE,
   text: text(300),
   button_label: text(40),
+  image_url: url,
+};
+
+/** Bloque de productos con selección automática/manual, variantes y diseño (Product Page y Service Page). */
+const PRODUCTS_BLOCK: FieldsSpec = {
+  title: TITLE,
+  selection: oneOf(APP_PRODUCTS_SELECTIONS),
+  product_ids: { kind: 'id_list', max: MAX_BLOCK_PRODUCT_IDS },
+  show_variants: bool,
+  layout: oneOf(APP_PRODUCTS_LAYOUTS),
 };
 
 /**
@@ -180,40 +270,45 @@ const CTA: FieldsSpec = {
 export const APP_PAGE_BLOCKS: Record<PageAppKind, Record<string, FieldsSpec>> =
   {
     product_page: {
-      /** "Por qué elegirlo": short benefit cards under the product. */
-      benefits: CARDS,
-      how_it_works: STEPS,
-      specifications: {
+      /** "Por qué elegirlo": tarjetas configurables (tarjetas, lista o banda). */
+      benefits: withBlockStyle(HIGHLIGHTS),
+      /** Destacados con imagen, icono y color de acento. */
+      highlights: withBlockStyle(HIGHLIGHTS),
+      how_it_works: withBlockStyle(STEPS),
+      specifications: withBlockStyle({
         title: TITLE,
         items: {
           kind: 'list',
           max: 24,
           item: { label: text(60), value: text(200) },
         },
-      },
-      gallery: GALLERY,
-      testimonials: TESTIMONIALS,
+      }),
+      gallery: withBlockStyle(GALLERY),
+      testimonials: withBlockStyle(TESTIMONIALS),
       /** Existing: "Complementa tu compra". */
-      complements: { title: TITLE },
-      shipping_warranty: {
+      complements: withBlockStyle({ title: TITLE }),
+      /** Bloque configurable de productos con selección manual/automática, variantes y diseño. */
+      products: withBlockStyle(PRODUCTS_BLOCK),
+      shipping_warranty: withBlockStyle({
         title: TITLE,
         shipping: text(500),
         warranty: text(500),
         returns: text(500),
-      },
-      faq: FAQ,
-      cta: CTA,
+      }),
+      faq: withBlockStyle(FAQ),
+      cta: withBlockStyle(CTA),
     },
     service_page: {
       /** Existing: the service list (cards with duration and price). */
-      services: {
+      services: withBlockStyle({
         title: TITLE,
         subtitle: SUBTITLE,
         show_duration: bool,
         show_price: bool,
-      },
-      how_it_works: STEPS,
-      team: {
+      }),
+      highlights: withBlockStyle(HIGHLIGHTS),
+      how_it_works: withBlockStyle(STEPS),
+      team: withBlockStyle({
         title: TITLE,
         items: {
           kind: 'list',
@@ -225,47 +320,48 @@ export const APP_PAGE_BLOCKS: Record<PageAppKind, Record<string, FieldsSpec>> =
             photo_url: url,
           },
         },
-      },
-      policies: {
+      }),
+      policies: withBlockStyle({
         title: TITLE,
         deposit: text(500),
         cancellation: text(800),
         reminders: text(500),
-      },
-      gallery: GALLERY,
-      testimonials: TESTIMONIALS,
-      faq: FAQ,
+      }),
+      gallery: withBlockStyle(GALLERY),
+      testimonials: withBlockStyle(TESTIMONIALS),
+      faq: withBlockStyle(FAQ),
       /** Existing: the secondary "también puedes comprar" products. */
-      products: { title: TITLE },
-      cta: CTA,
+      products: withBlockStyle(PRODUCTS_BLOCK),
+      cta: withBlockStyle(CTA),
     },
     booking: {
       /** Existing: the PMS search (dates, guests) and the room types with rate. */
-      search: { title: TITLE, subtitle: SUBTITLE },
-      amenities: {
+      search: withBlockStyle({ title: TITLE, subtitle: SUBTITLE }),
+      highlights: withBlockStyle(HIGHLIGHTS),
+      amenities: withBlockStyle({
         title: TITLE,
         items: { kind: 'text_list', max: 24, itemMax: 60 },
-      },
-      policies: {
+      }),
+      policies: withBlockStyle({
         title: TITLE,
         check_in: text(40),
         check_out: text(40),
         cancellation: text(800),
         house_rules: text(800),
-      },
-      gallery: GALLERY,
-      testimonials: TESTIMONIALS,
-      location: {
+      }),
+      gallery: withBlockStyle(GALLERY),
+      testimonials: withBlockStyle(TESTIMONIALS),
+      location: withBlockStyle({
         title: TITLE,
         address: text(200),
         text: text(500),
         map_url: url,
-      },
-      faq: FAQ,
+      }),
+      faq: withBlockStyle(FAQ),
       /** Existing: the online check-in note. */
-      checkin_info: { text: text(300) },
+      checkin_info: withBlockStyle({ text: text(300) }),
       /** Existing: the "para tu estadía" products. */
-      products: { title: TITLE },
+      products: withBlockStyle({ title: TITLE }),
     },
     store_home: {
       /**
@@ -289,12 +385,23 @@ export const APP_PAGE_BLOCKS: Record<PageAppKind, Record<string, FieldsSpec>> =
     },
   };
 
-const HERO: FieldsSpec = {
+/** Portada base (usada por `store_home` para mantener la Tienda en línea aislada). */
+const HERO_BASE: FieldsSpec = {
   eyebrow: text(60),
   title: text(120),
   subtitle: text(300),
   image_url: url,
   button_label: text(40),
+};
+
+/** Portada extendida con variantes y apariencia (Product Page, Service Page y Booking). */
+const HERO: FieldsSpec = {
+  ...HERO_BASE,
+  variant: oneOf(APP_HERO_VARIANTS),
+  background_image_url: url,
+  overlay_opacity: int(0, 80),
+  height: oneOf(APP_HERO_HEIGHTS),
+  align: oneOf(APP_TEXT_ALIGNS),
 };
 
 const BRAND: FieldsSpec = {
@@ -337,6 +444,15 @@ const THEME: FieldsSpec = {
   button_style: oneOf(APP_THEME_BUTTON_STYLES),
   image_style: oneOf(APP_THEME_IMAGE_STYLES),
   content_width: oneOf(APP_THEME_CONTENT_WIDTHS),
+  border_color: text(7),
+  base_font_size: oneOf(APP_THEME_FONT_SIZES),
+  heading_scale: oneOf(APP_THEME_HEADING_SCALES),
+  section_gap: oneOf(APP_THEME_SECTION_GAPS),
+  card_style: oneOf(APP_THEME_CARD_STYLES),
+  shadow: oneOf(APP_THEME_SHADOWS),
+  image_ratio: oneOf(APP_THEME_IMAGE_RATIOS),
+  image_overlay: int(0, APP_THEME_MAX_IMAGE_OVERLAY),
+  hero_height: oneOf(APP_THEME_HERO_HEIGHTS),
 };
 
 const SEO: FieldsSpec = {
@@ -404,6 +520,16 @@ export interface AppPageTheme {
   button_style?: (typeof APP_THEME_BUTTON_STYLES)[number];
   image_style?: (typeof APP_THEME_IMAGE_STYLES)[number];
   content_width?: (typeof APP_THEME_CONTENT_WIDTHS)[number];
+  border_color?: string;
+  base_font_size?: (typeof APP_THEME_FONT_SIZES)[number];
+  heading_scale?: (typeof APP_THEME_HEADING_SCALES)[number];
+  section_gap?: (typeof APP_THEME_SECTION_GAPS)[number];
+  card_style?: (typeof APP_THEME_CARD_STYLES)[number];
+  shadow?: (typeof APP_THEME_SHADOWS)[number];
+  image_ratio?: (typeof APP_THEME_IMAGE_RATIOS)[number];
+  /** Opacity (0..80 %) of the veil over hero and gallery images. */
+  image_overlay?: number;
+  hero_height?: (typeof APP_THEME_HERO_HEIGHTS)[number];
 }
 
 export interface AppPageDocument {
@@ -429,6 +555,11 @@ export interface AppPageDocument {
     subtitle?: string;
     image_url?: string;
     button_label?: string;
+    variant?: (typeof APP_HERO_VARIANTS)[number];
+    background_image_url?: string;
+    overlay_opacity?: number;
+    height?: (typeof APP_HERO_HEIGHTS)[number];
+    align?: (typeof APP_TEXT_ALIGNS)[number];
   };
   blocks: AppPageBlock[];
 }
@@ -513,6 +644,10 @@ function cleanScalar(
     if (!isHttpsUrl(trimmed)) errors.push(`${path} debe ser una URL https.`);
     return trimmed;
   }
+  if (spec.kind === 'color') {
+    if (!HEX_COLOR_RE.test(trimmed)) errors.push(`${path} debe ser un color #RRGGBB.`);
+    return trimmed;
+  }
   if (trimmed.length > spec.max) {
     errors.push(`${path} supera ${spec.max} caracteres.`);
   }
@@ -567,6 +702,27 @@ function cleanFields(
           cleanScalar(scalar, item, `${fieldPath}[${i}]`, errors),
         )
         .filter((item) => item !== undefined);
+      if (items.length) out[key] = items;
+    } else if (field.kind === 'id_list') {
+      if (!Array.isArray(raw)) {
+        errors.push(`${fieldPath} debe ser una lista.`);
+        continue;
+      }
+      if (raw.length > field.max) {
+        errors.push(`${fieldPath} admite máximo ${field.max} elementos.`);
+      }
+      const seen = new Set<number>();
+      const items: number[] = [];
+      raw.forEach((item, i) => {
+        if (typeof item !== 'number' || !Number.isInteger(item) || item < 1) {
+          errors.push(`${fieldPath}[${i}] debe ser un identificador entero positivo.`);
+          return;
+        }
+        if (!seen.has(item)) {
+          seen.add(item);
+          items.push(item);
+        }
+      });
       if (items.length) out[key] = items;
     } else {
       const cleaned = cleanScalar(field, raw, fieldPath, errors);
@@ -644,7 +800,8 @@ export function validateAppPage(
   const seo = cleanFields(SEO, value['seo'], 'seo', errors);
   const theme = cleanFields(THEME, value['theme'], 'theme', errors);
   for (const key of APP_THEME_COLOR_KEYS) checkColor(theme, key, 'theme', errors);
-  const hero = cleanFields(HERO, value['hero'], 'hero', errors);
+  const heroSpec = kind === 'store_home' ? HERO_BASE : HERO;
+  const hero = cleanFields(heroSpec, value['hero'], 'hero', errors);
 
   const catalog = APP_PAGE_BLOCKS[kind];
   const blocks: AppPageBlock[] = [];

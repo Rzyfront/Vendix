@@ -12,6 +12,8 @@ import {
   mixColors,
 } from '../../../../../public/app-page/app-page-theme';
 import { APP_PAGE_TEMPLATES, APP_PAGE_VARIANTS, PAGE_APP_KINDS, applyVariant } from './index';
+import { blocksToPage, pageToBlocks } from '../page-builder/page-builder-document';
+import { PRODUCT_PAGE_BUILDER_CATALOG } from '../page-builder/product-page/product-page-builder';
 
 describe('Apps F2 · app page templates', () => {
   for (const kind of PAGE_APP_KINDS) {
@@ -133,6 +135,73 @@ describe('Apps F2 · app page templates', () => {
       const base = applyVariant(next, APP_PAGE_VARIANTS.product_page[0]);
       expect(base.theme).toBeUndefined();
       expect(base.mode).toBe('info');
+    });
+
+    it('un documento sin los tokens nuevos conserva exactamente su contenido tras validar y pasar por el builder', () => {
+      const legacy = {
+        schema_version: 1 as const,
+        mode: 'sales' as const,
+        hero: { title: 'Producto clásico', subtitle: 'Sin variantes nuevas' },
+        blocks: [
+          {
+            id: 'benefits',
+            type: 'benefits',
+            enabled: true,
+            props: { title: 'Ventajas', items: [{ title: 'Rápido', text: 'En el día' }] },
+          },
+          {
+            id: 'gallery',
+            type: 'gallery',
+            enabled: true,
+            props: { title: 'Fotos', image_urls: ['https://cdn.x.co/1.jpg'] },
+          },
+        ],
+      };
+
+      const validated = validateAppPage('product_page', legacy);
+      expect(validated.valid).toBeTrue();
+      expect(validated.value?.hero).toEqual(legacy.hero);
+      expect(validated.value?.blocks).toEqual(legacy.blocks);
+
+      const roundTripped = blocksToPage(
+        'product_page',
+        PRODUCT_PAGE_BUILDER_CATALOG,
+        { schema_version: 1, mode: 'sales', blocks: [] },
+        pageToBlocks(legacy),
+      );
+      expect(roundTripped).toEqual(legacy);
+    });
+
+    it('un bloque products con selección manual, show_variants y layout pasa contrato y round-trip en el builder', () => {
+      const doc = {
+        schema_version: 1 as const,
+        mode: 'sales' as const,
+        blocks: [
+          {
+            id: 'products',
+            type: 'products',
+            enabled: true,
+            props: {
+              title: 'Recomendados',
+              selection: 'manual',
+              product_ids: [9, 3, 5],
+              show_variants: true,
+              layout: 'carousel',
+            },
+          },
+        ],
+      };
+      const validated = validateAppPage('product_page', doc);
+      expect(validated.valid).toBeTrue();
+      expect(validated.errors).toEqual([]);
+
+      const roundTripped = blocksToPage(
+        'product_page',
+        PRODUCT_PAGE_BUILDER_CATALOG,
+        { schema_version: 1, mode: 'sales', blocks: [] },
+        pageToBlocks(doc),
+      );
+      expect(roundTripped).toEqual(doc);
     });
   });
 });

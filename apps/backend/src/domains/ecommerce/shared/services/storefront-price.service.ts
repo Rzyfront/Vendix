@@ -257,6 +257,44 @@ export class StorefrontPriceService {
   }
 
   /**
+   * Resuelve el precio final publicado del catálogo (con impuestos y
+   * presentación por defecto cuando aplica). Fuente única para la vitrina
+   * pública (`CatalogService`) y la vista previa de apps (`app-page-products.helper`).
+   */
+  resolveCatalogFinalPrice(
+    product: StorefrontLineProduct & { __default_sale_unit?: DefaultSaleUnit | null },
+    variant?: StorefrontLineVariant | null,
+    saleUnit?: DefaultSaleUnit | null,
+  ): number {
+    return this.resolveLine({
+      product,
+      variant: variant ?? null,
+      saleUnit:
+        saleUnit !== undefined
+          ? saleUnit
+          : (product?.__default_sale_unit ?? null),
+      taxRate: this.getTotalTaxRate(product),
+      taxRates: this.getTypedTaxRates(product),
+    }).gross_unit_price;
+  }
+
+  /**
+   * Resuelve el precio regular final (sin oferta `is_on_sale`) usando el
+   * mismo motor de impuestos y presentación que `resolveCatalogFinalPrice`.
+   */
+  resolveCatalogRegularFinalPrice(
+    product: StorefrontLineProduct & { __default_sale_unit?: DefaultSaleUnit | null },
+    variant?: StorefrontLineVariant | null,
+    saleUnit?: DefaultSaleUnit | null,
+  ): number {
+    return this.resolveCatalogFinalPrice(
+      { ...product, is_on_sale: false, sale_price: null },
+      variant ? { ...variant, is_on_sale: false, sale_price: null } : null,
+      saleUnit,
+    );
+  }
+
+  /**
    * Suma de tasas de impuesto del producto. Las tasas se guardan en decimal
    * (0.19 = 19%).
    *

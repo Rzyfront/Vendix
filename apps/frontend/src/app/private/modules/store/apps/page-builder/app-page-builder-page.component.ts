@@ -21,6 +21,7 @@ import {
   setBlockProp,
   toggleBlockHidden,
 } from '../builder/builder-blocks';
+import type { AppPageProductItem } from '../../../../../public/app-page/app-page-products.util';
 import { BuilderInspectorComponent, BuilderPropChange } from '../builder/builder-inspector.component';
 import { BuilderOutlineComponent } from '../builder/builder-outline.component';
 import { BuilderPreviewPaneComponent } from '../builder/builder-preview-pane.component';
@@ -159,7 +160,13 @@ function snapshot(value: unknown): string {
                 />
               </aside>
               <section class="min-h-0 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] lg:h-full" aria-label="Campos de la sección">
-                <app-builder-inspector [catalog]="adapter().catalog" [block]="selectedBlock()" (propChange)="setProp($event)" />
+                <app-builder-inspector
+                  [catalog]="adapter().catalog"
+                  [block]="selectedBlock()"
+                  [appKind]="adapter().kind"
+                  (propChange)="setProp($event)"
+                  (productsResolved)="onProductsResolved($event)"
+                />
               </section>
             }
             <section class="min-h-[32rem] overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-background)] lg:h-full"
@@ -255,6 +262,8 @@ export class AppPageBuilderPageComponent<S = unknown, C = unknown> implements On
 
   readonly selectedId = signal<string | null>(null);
   readonly device = signal<BuilderDevice>('mobile');
+  /** Caché local de productos resueltos por `app-product-selector` para refrescar la vista previa en vivo. */
+  readonly resolvedCatalogProducts = signal<ReadonlyMap<number, AppPageProductItem>>(new Map());
 
   // ── Derived state ──────────────────────────────────────────────────────
   readonly frameSrc = computed(() => appPagePreviewFrameSrc(this.adapter().kind));
@@ -339,6 +348,7 @@ export class AppPageBuilderPageComponent<S = unknown, C = unknown> implements On
 
   readonly previewPayload = computed<AppPagePreviewPayload<S | null, C | null>>(() => {
     const logo = this.auth.userStore()?.logo_url;
+    const catalogProducts = Array.from(this.resolvedCatalogProducts().values());
     return {
       kind: this.adapter().kind,
       page: this.page(),
@@ -346,6 +356,7 @@ export class AppPageBuilderPageComponent<S = unknown, C = unknown> implements On
       context: this.context(),
       storeName: this.storeName(),
       storeLogoUrl: typeof logo === 'string' && HTTPS.test(logo) ? logo : null,
+      ...(catalogProducts.length > 0 ? { catalogProducts } : {}),
     };
   });
 
@@ -419,6 +430,13 @@ export class AppPageBuilderPageComponent<S = unknown, C = unknown> implements On
 
   setProp(change: BuilderPropChange): void {
     this.setBlocks(setBlockProp(this.blocks(), change.blockId, change.key, change.value));
+  }
+
+  onProductsResolved(items: AppPageProductItem[]): void {
+    if (items.length === 0) return;
+    const next = new Map(this.resolvedCatalogProducts());
+    for (const item of items) next.set(item.id, item);
+    this.resolvedCatalogProducts.set(next);
   }
 
   setTheme(theme: AppPageTheme): void {
