@@ -13,7 +13,9 @@ import { BusinessHoursService } from '../../reservations/business-hours/business
  * Disponibilidad del prestador en la Agenda (agenda-unificada F1, requisito
  * de prestadores). Mismas reglas que Reservas (`availability.service.ts`,
  * `provider-availability.service.ts`): los bloques semanales activos de
- * `provider_schedules` (0 = domingo) definen el horario; una excepción del
+ * `provider_schedules` (0 = domingo) definen el horario —o el horario de la
+ * tienda si el prestador trabaja en él (`uses_store_hours`, mismo lector
+ * `loadProviderBlocks` que la reserva)—; una excepción del
  * día con `is_unavailable` lo bloquea entero, y si no, sus horas propias
  * reemplazan las del bloque. Igual que al generar franjas de reserva
  * (`availability.service.ts:291,317`), el resultado se recorta con el horario
@@ -119,7 +121,7 @@ export function providerDayAvailability(
  */
 export async function loadProviderAvailability(
   prisma: StorePrismaService,
-  businessHours: Pick<BusinessHoursService, 'loadStoreHours'>,
+  businessHours: Pick<BusinessHoursService, 'loadStoreHours' | 'loadProviderBlocks'>,
   store_id: number,
   staffIds: readonly number[],
   from: string,
@@ -134,16 +136,9 @@ export async function loadProviderAvailability(
   const ownedIds = owned.map((p) => p.id);
   if (!ownedIds.length) return [];
   const [schedules, exceptions, storeHours] = await Promise.all([
-    prisma.provider_schedules.findMany({
-      where: { provider_id: { in: ownedIds }, is_active: true },
-      select: {
-        provider_id: true,
-        day_of_week: true,
-        block_order: true,
-        start_time: true,
-        end_time: true,
-      },
-    }),
+    // Horario semanal efectivo (Parte 1): el de la tienda para quien trabaja
+    // en él (`uses_store_hours`), o sus bloques propios.
+    businessHours.loadProviderBlocks(ownedIds, prisma),
     prisma.provider_exceptions.findMany({
       where: {
         provider_id: { in: ownedIds },

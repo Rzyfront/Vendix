@@ -30,3 +30,16 @@ describe('UpdateProviderDto.display_name', () => {
     expect(nameErrors).toHaveLength(0);
   });
 });
+
+describe('UpdateProviderDto.uses_store_hours (Parte 1)', () => {
+  const errorsOf = async (payload: Record<string, unknown>) =>
+    (await validate(plainToInstance(UpdateProviderDto, payload))).filter((e) => e.property === 'uses_store_hours');
+
+  it.each([true, false])('accepts %p', async (value) => {
+    await expect(errorsOf({ uses_store_hours: value })).resolves.toHaveLength(0);
+  });
+
+  it('rejects a non-boolean value', async () => {
+    await expect(errorsOf({ uses_store_hours: 'yes' })).resolves.toHaveLength(1);
+  });
+});

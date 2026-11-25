@@ -1,4 +1,10 @@
 import {
+  FULL_DAY_RANGE,
+  continuationsByDay,
+  calendarFocusKey,
+  focusScrollTop,
+  nowLinePercent,
+  storeClock,
   availabilityByDay,
   offHourBands,
   filterValuesToQuery,
@@ -160,5 +166,72 @@ describe('Agenda unificada F1 — cálculo del calendario', () => {
     // Día bloqueado: todo sombreado. Sin datos de disponibilidad: nada.
     expect(offHourBands(days.get('2026-11-24'), range)).toEqual([{ top: 0, height: 100 }]);
     expect(offHourBands(undefined, range)).toEqual([]);
+  });
+});
+
+describe('Agenda 24 h — línea de ahora, foco y reservas nocturnas', () => {
+  it('Semana y Día cubren las 24 horas', () => {
+    expect(FULL_DAY_RANGE).toEqual({ start: 0, end: 1440 });
+  });
+
+  it('la línea de ahora se ubica en la franja y desaparece fuera de ella', () => {
+    expect(nowLinePercent(720, FULL_DAY_RANGE)).toBe(50);
+    expect(nowLinePercent(0, FULL_DAY_RANGE)).toBe(0);
+    expect(nowLinePercent(300, { start: 420, end: 1260 })).toBe(-1);
+  });
+
+  it('«ahora» se lee en la zona de la tienda, no en la del navegador', () => {
+    // 2026-11-24 03:30 UTC = 2026-11-23 22:30 en Bogotá (UTC-5).
+    expect(storeClock(new Date('2026-11-24T03:30:00Z'), 'America/Bogota')).toEqual({
+      date: '2026-11-23',
+      minutes: 22 * 60 + 30,
+    });
+  });
+
+  it('el foco deja la hora a un tercio del alto visible sin pasarse de los bordes', () => {
+    // 1440 px de rejilla, 600 px visibles: 12:00 → 720 - 200 = 520.
+    expect(focusScrollTop(720, FULL_DAY_RANGE, 1440, 600)).toBe(520);
+    expect(focusScrollTop(30, FULL_DAY_RANGE, 1440, 600)).toBe(0);
+    expect(focusScrollTop(1435, FULL_DAY_RANGE, 1440, 600)).toBe(840);
+  });
+
+  it('sin hoy a la vista, vuelve a enfocar cuando llegan los eventos', () => {
+    const days = ['2026-11-30', '2026-12-01'];
+    const empty = calendarFocusKey('week', days, 0, false, false);
+    const loaded = calendarFocusKey('week', days, 0, false, true);
+    expect(loaded).not.toBe(empty);
+    // Con hoy a la vista el foco es «ahora»: la llegada de eventos no lo mueve.
+    expect(calendarFocusKey('week', days, 0, true, false)).toBe(calendarFocusKey('week', days, 0, true, true));
+    // Otra semana o el botón «Hoy» siguen pidiendo foco nuevo.
+    expect(calendarFocusKey('week', ['2026-12-07'], 0, false, true)).not.toBe(loaded);
+    expect(calendarFocusKey('week', days, 1, false, true)).not.toBe(loaded);
+  });
+
+  it('una reserva 23:00–01:00 también se pinta el día siguiente desde las 00:00', () => {
+    const night = ev('n', '23:00', '01:00', { date: '2026-11-23', end_date: '2026-11-24' });
+    const plan = ev('p', '09:00', '09:00', { date: '2026-11-23', end_date: '2026-11-27' });
+    const exactMidnight = ev('m', '22:00', '00:00', { date: '2026-11-23', end_date: '2026-11-24' });
+    const map = continuationsByDay([night, plan, exactMidnight, ev('d', '09:00', '10:00')]);
+    expect(map.get('2026-11-24')?.map((e) => e.id)).toEqual(['n']);
+    expect(map.size).toBe(1);
+
+    const first = layoutDay([night], FULL_DAY_RANGE, 30, '2026-11-23')[0];
+    expect(first.continues).toBeTrue();
+    expect(first.continued).toBeFalse();
+    expect(first.top).toBeCloseTo((1380 / 1440) * 100, 5);
+    expect(first.height).toBeCloseTo((60 / 1440) * 100, 5);
+
+    const second = layoutDay([night], FULL_DAY_RANGE, 30, '2026-11-24')[0];
+    expect(second.continued).toBeTrue();
+    expect(second.continues).toBeFalse();
+    expect(second.top).toBe(0);
+    expect(second.height).toBeCloseTo((60 / 1440) * 100, 5);
+  });
+
+  it('sin día de columna el cálculo de siempre no cambia', () => {
+    const placed = layoutDay([ev('a', '09:00', '10:00')], { start: 480, end: 1080 })[0];
+    expect(placed.continued).toBeFalse();
+    expect(placed.continues).toBeFalse();
+    expect(placed.top).toBeCloseTo(10, 5);
   });
 });

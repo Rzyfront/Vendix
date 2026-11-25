@@ -5,13 +5,20 @@ import { ScheduleValidationService } from './schedule-validation.service';
  * (A5), so "open at 01:00 Saturday" must also look at Friday's overnight block.
  */
 describe('ScheduleValidationService.validateBusinessHours (S21)', () => {
-  const build = (business_hours: Record<string, unknown>) => {
+  const build = (
+    business_hours: Record<string, unknown>,
+    schedule_mode?: 'continuous' | 'custom',
+  ) => {
     const prisma: any = {
       store_settings: {
         findUnique: jest.fn().mockResolvedValue({
           settings: {
             general: { timezone: 'UTC' },
-            pos: { enable_schedule_validation: true, business_hours },
+            pos: {
+              enable_schedule_validation: true,
+              ...(schedule_mode ? { schedule_mode } : {}),
+              business_hours,
+            },
           },
         }),
       },
@@ -89,5 +96,37 @@ describe('ScheduleValidationService.validateBusinessHours (S21)', () => {
     at('2026-11-13T23:30:00Z');
     const result = await build({ friday: { open: '09:00', close: '00:00' } }).validateBusinessHours(1);
     expect(result.isWithinBusinessHours).toBe(true);
+  });
+
+  describe('custom mode closed days with empty blocks[]', () => {
+    const hours = {
+      friday: { open: '08:00', close: '18:00', blocks: [] },
+      saturday: { open: '08:00', close: '18:00', blocks: [] },
+      sunday: { open: '09:00', close: '13:00', blocks: [{ open: '09:00', close: '13:00' }] },
+    };
+
+    it('treats today with blocks: [] as closed in custom mode and skips closed days for nextOpenTime', async () => {
+      at('2026-11-13T10:00:00Z'); // Friday 10:00
+      const result = await build(hours, 'custom').validateBusinessHours(1);
+      expect(result.isWithinBusinessHours).toBe(false);
+      expect(result.nextOpenTime).toBe('Domingo 09:00 - 13:00');
+    });
+
+    it('ignores overnight spill from yesterday when yesterday has blocks: [] in custom mode', async () => {
+      at('2026-11-14T01:00:00Z'); // Saturday 01:00
+      const spillHours = {
+        friday: { open: '18:00', close: '03:00', blocks: [] },
+        saturday: { open: '09:00', close: '18:00', blocks: [{ open: '09:00', close: '18:00' }] },
+      };
+      const result = await build(spillHours, 'custom').validateBusinessHours(1);
+      expect(result.isWithinBusinessHours).toBe(false);
+      expect(result.nextOpenTime).toBe('Hoy 09:00 - 18:00');
+    });
+
+    it('keeps continuous mode fallback to open/close when schedule_mode is continuous', async () => {
+      at('2026-11-13T10:00:00Z'); // Friday 10:00
+      const result = await build(hours, 'continuous').validateBusinessHours(1);
+      expect(result.isWithinBusinessHours).toBe(true);
+    });
   });
 });

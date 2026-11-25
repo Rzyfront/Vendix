@@ -10,7 +10,7 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { finalize, forkJoin } from 'rxjs';
 import { ReservationsService } from '../../services/reservations.service';
 import { AvailableProviderUser, ServiceProvider } from '../../interfaces/reservation.interface';
@@ -76,6 +76,7 @@ interface BookableService {
     ResponsiveDataViewComponent,
     ScrollableTabsComponent,
     EmptyStateComponent,
+    RouterLink,
     WeeklyScheduleEditorComponent,
     ExceptionsManagerComponent,
     DecimalPipe,
@@ -180,6 +181,21 @@ export class ScheduleManagementComponent {
       .map((station) => ({ value: station.id, label: station.name })),
   ]);
 
+  /** Parte 1: the provider works the store hours unless it chose its own schedule. */
+  readonly usesStoreHours = computed(() => this.selectedProvider()?.uses_store_hours !== false);
+  /**
+   * "Own schedule" picked for a provider with no own rows saved yet: it is
+   * only a draft (prefilled with the store hours) until the first save, so the
+   * provider keeps the store hours and never ends up without availability.
+   */
+  readonly ownScheduleDraft = signal(false);
+  /** The own-schedule option is the one shown (saved, or as an unsaved draft). */
+  readonly showsOwnSchedule = computed(() => !this.usesStoreHours() || this.ownScheduleDraft());
+  readonly savingScheduleSource = signal(false);
+  /** Agenda → Configuración → Horario: where the store hours are edited. */
+  readonly storeHoursRoute = '/admin/orders/agenda';
+  readonly storeHoursQuery = { tab: 'configuracion', seccion: 'horario' };
+
   // Live schedule stats (updated in real-time from editor)
   liveWeeklyHours = signal<number | null>(null);
   liveActiveDays = signal<number | null>(null);
@@ -198,8 +214,7 @@ export class ScheduleManagementComponent {
   readonly detailTabs = computed(() => [
     { id: 'services', label: 'Servicios', icon: 'layers' },
     ...(this.hasStations() ? [{ id: 'stations', label: 'Estaciones', icon: 'warehouse' }] : []),
-    { id: 'schedule', label: 'Horario', icon: 'clock' },
-    { id: 'exceptions', label: 'Excepciones', icon: 'calendar-x' },
+    { id: 'schedule', label: 'Horario y ausencias', icon: 'clock' },
   ]);
 
   // Provider table columns
@@ -309,6 +324,7 @@ export class ScheduleManagementComponent {
   closeDetailModal(): void {
     this.isDetailModalOpen.set(false);
     this.selectedProvider.set(null);
+    this.ownScheduleDraft.set(false);
     this.activeTab.set('services');
     this.liveWeeklyHours.set(null);
     this.liveActiveDays.set(null);
@@ -337,6 +353,7 @@ export class ScheduleManagementComponent {
   }
 
   selectProvider(provider: ServiceProvider): void {
+    this.ownScheduleDraft.set(false);
     this.managingServices.set(false);
     this.editingBio.set(false);
     this.activeTab.set('services');
@@ -418,11 +435,12 @@ export class ScheduleManagementComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (updated) => {
-          if (this.selectedProvider()?.id === updated.id) {
-            this.selectedProvider.set(updated);
+          const currentSelected = this.selectedProvider();
+          if (currentSelected?.id === updated.id) {
+            this.selectedProvider.set({ ...currentSelected, ...updated });
           }
           const list = this.providers().map((p) =>
-            p.id === updated.id ? updated : p,
+            p.id === updated.id ? { ...p, ...updated } : p,
           );
           this.providers.set(list);
           this.toastService.success(
@@ -490,9 +508,11 @@ export class ScheduleManagementComponent {
       )
       .subscribe({
         next: (updated) => {
-          this.selectedProvider.set(updated);
+          this.selectedProvider.set({ ...provider, ...updated });
           this.providers.set(
-            this.providers().map((p) => (p.id === updated.id ? updated : p)),
+            this.providers().map((p) =>
+              p.id === updated.id ? { ...p, ...updated } : p,
+            ),
           );
           this.editingName.set(false);
           this.toastService.success('Nombre actualizado');
@@ -523,9 +543,9 @@ export class ScheduleManagementComponent {
       )
       .subscribe({
         next: (updated) => {
-          this.selectedProvider.set(updated);
+          this.selectedProvider.set({ ...provider, ...updated });
           const list = this.providers().map((p) =>
-            p.id === updated.id ? updated : p,
+            p.id === updated.id ? { ...p, ...updated } : p,
           );
           this.providers.set(list);
           this.editingBio.set(false);
@@ -568,6 +588,56 @@ export class ScheduleManagementComponent {
   getLiveWeeklyHours(provider: ServiceProvider): number {
     if (this.liveWeeklyHours() !== null) return this.liveWeeklyHours()!;
     return this.getWeeklyHours(provider);
+  }
+
+  /**
+   * Switches between the store hours and the provider's own schedule. Going
+   * back to the store hours keeps the saved own schedule (the API never deletes it).
+   */
+  setUsesStoreHours(value: boolean): void {
+    const provider = this.selectedProvider();
+    if (!provider) return;
+    if (value && this.ownScheduleDraft()) {
+      // Nothing was saved: drop the draft, the provider never left the store hours.
+      this.ownScheduleDraft.set(false);
+      return;
+    }
+    if (this.usesStoreHours() === value) return;
+    if (!value && provider.has_own_schedule !== true) {
+      // Without saved own rows, "own schedule" waits for the first save.
+      this.ownScheduleDraft.set(true);
+      return;
+    }
+    this.savingScheduleSource.set(true);
+    this.reservationsService
+      .updateProvider(provider.id, { uses_store_hours: value })
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.savingScheduleSource.set(false)),
+      )
+      .subscribe({
+        next: (updated) => {
+          const merged = { ...provider, ...updated, uses_store_hours: value };
+          this.selectedProvider.set(merged);
+          this.providers.set(this.providers().map((p) => (p.id === merged.id ? merged : p)));
+          this.liveActiveDays.set(null);
+          this.liveWeeklyHours.set(null);
+          this.toastService.success(
+            value ? 'Ahora usa el horario de la tienda' : 'Ahora usa su horario propio',
+          );
+        },
+        error: () => this.toastService.error('No se pudo cambiar el horario del proveedor'),
+      });
+  }
+
+  /** The first save of a draft own schedule is what switches the provider (the API sets it). */
+  onOwnScheduleSaved(): void {
+    const provider = this.selectedProvider();
+    if (!provider || !this.ownScheduleDraft()) return;
+    const merged = { ...provider, uses_store_hours: false, has_own_schedule: true };
+    this.selectedProvider.set(merged);
+    this.providers.set(this.providers().map((p) => (p.id === merged.id ? merged : p)));
+    this.ownScheduleDraft.set(false);
   }
 
   onScheduleChanged(stats: { activeDays: number; weeklyHours: number }): void {

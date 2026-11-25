@@ -1,4 +1,17 @@
-import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  ElementRef,
+  afterRenderEffect,
+  computed,
+  inject,
+  input,
+  output,
+  signal,
+  untracked,
+  viewChild,
+} from '@angular/core';
 import { IconComponent } from '../../../../../../shared/components';
 import { dayMonth, fullDate, weekdayShort } from '../../../scheduled-orders/utils/ymd.util';
 import {
@@ -8,12 +21,19 @@ import {
 } from '../../interfaces/scheduling.interface';
 import {
   AgendaView,
+  FULL_DAY_RANGE,
   availabilityByDay,
+  calendarFocusKey,
+  continuationsByDay,
   eventsByDay,
+  focusScrollTop,
+  minutesOf,
+  nowLinePercent,
   offHourBands,
   hourRangeFor,
   layoutDay,
   monthGrid,
+  storeClock,
   weekDays,
 } from '../../utils/scheduling-calendar.util';
 
@@ -78,6 +98,30 @@ const MONTH_CELL_LIMIT = 3;
       .ev-block {
         position: absolute;
         overflow: hidden;
+      }
+      /* Semana y Día: 24 h con scroll propio; la fila de días queda fija. */
+      .agenda-scroll {
+        max-height: max(22rem, calc(100dvh - 16rem));
+        overflow-y: auto;
+        overscroll-behavior: contain;
+      }
+      .now-line {
+        position: absolute;
+        left: 0;
+        right: 0;
+        z-index: 15;
+        height: 2px;
+        background: var(--color-error);
+        pointer-events: none;
+      }
+      .now-dot {
+        position: absolute;
+        left: -4px;
+        top: -4px;
+        width: 10px;
+        height: 10px;
+        border-radius: 9999px;
+        background: var(--color-error);
       }
     `,
   ],
@@ -153,8 +197,9 @@ const MONTH_CELL_LIMIT = 3;
       }
 
       @default {
-        <!-- Semana y día: rejilla horaria en la zona de la tienda. -->
-        <div class="flex border-b border-border">
+        <!-- Semana y día: las 24 h en la zona de la tienda, con foco en «ahora». -->
+        <div #scroller class="agenda-scroll" data-testid="agenda-scroll">
+        <div class="sticky top-0 z-20 flex border-b border-border bg-surface">
           <div class="w-12 shrink-0"></div>
           <div class="grid flex-1" [style.grid-template-columns]="'repeat(' + days().length + ', minmax(0, 1fr))'">
             @for (day of days(); track day) {
@@ -165,6 +210,9 @@ const MONTH_CELL_LIMIT = 3;
                 (click)="dayClick.emit(day)"
               >
                 {{ weekday(day) }} {{ shortDate(day) }}
+                @if (day === now().date) {
+                  <span class="ml-1 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-bold text-white">Hoy</span>
+                }
               </button>
             }
           </div>
@@ -209,6 +257,9 @@ const MONTH_CELL_LIMIT = 3;
                     type="button"
                     class="ev-block rounded-md border px-1.5 py-1 text-left text-xs"
                     [class]="tone(p.event)"
+                    [class.border-dashed]="p.continued || p.continues"
+                    [attr.data-continued]="p.continued ? 'true' : null"
+                    [attr.title]="p.continued ? 'Viene del día anterior' : p.continues ? 'Sigue al día siguiente' : null"
                     [style.top.%]="p.top"
                     [style.height.%]="p.height"
                     [style.left.%]="(p.lane / p.lanes) * 100"
@@ -218,7 +269,9 @@ const MONTH_CELL_LIMIT = 3;
                   >
                     <span class="flex items-center gap-1 font-semibold">
                       <app-icon [name]="icon(p.event)" [size]="12" />
-                      <span class="truncate">{{ p.event.local_start }}–{{ p.event.local_end }}</span>
+                      <span class="truncate">
+                        {{ p.continued ? '↳ ' : '' }}{{ p.event.local_start }}–{{ p.event.local_end }}{{ p.continues ? ' →' : '' }}
+                      </span>
                     </span>
                     <span class="block truncate font-semibold">{{ p.event.title }}</span>
                     @if (p.event.customer || p.event.staff) {
@@ -228,9 +281,15 @@ const MONTH_CELL_LIMIT = 3;
                     }
                   </button>
                 }
+                @if (day === now().date && nowPercent() >= 0) {
+                  <div class="now-line" data-testid="now-line" [style.top.%]="nowPercent()" aria-hidden="true">
+                    <span class="now-dot"></span>
+                  </div>
+                }
               </div>
             }
           </div>
+        </div>
         </div>
       }
     }
@@ -247,6 +306,12 @@ export class EventCalendarComponent {
 
   /** Permite tocar un hueco de Semana/Día para reservar ahí. */
   readonly slotClickable = input(false);
+  /** Zona horaria de la tienda: «ahora» se calcula en ella, nunca en la del navegador. */
+  readonly timezone = input<string>('');
+  /** Semana/Día muestran las 24 h; `false` vuelve a la franja ajustada a los eventos. */
+  readonly fullDay = input(true);
+  /** Al cambiar, vuelve a enfocar la hora actual (botón «Hoy»). */
+  readonly focusToken = input(0);
   readonly eventClick = output<SchedulingEvent>();
   /** Hueco tocado: día y hora local (múltiplo de 30 min). */
   readonly slotClick = output<{ date: string; time: string }>();
@@ -265,7 +330,52 @@ export class EventCalendarComponent {
     return this.events().filter((ev) => days.has(ev.date));
   });
   readonly availabilityDays = computed(() => availabilityByDay(this.availability()));
+  private readonly continuations = computed(() => continuationsByDay(this.events()));
+
+  /** Reloj de «ahora» en la zona de la tienda; avanza solo cada 30 s. */
+  private readonly tick = signal(Date.now());
+  readonly now = computed(() => storeClock(new Date(this.tick()), this.timezone()));
+  readonly nowPercent = computed(() => nowLinePercent(this.now().minutes, this.range()));
+
+  private readonly scroller = viewChild<ElementRef<HTMLElement>>('scroller');
+  private focusedKey: string | null = null;
+
+  constructor() {
+    const timer = setInterval(() => this.tick.set(Date.now()), 30_000);
+    inject(DestroyRef).onDestroy(() => clearInterval(timer));
+    // Al abrir (y al cambiar de vista o de semana) lleva el scroll a la hora
+    // actual si hoy está visible; si no, al primer evento o a las 08:00.
+    afterRenderEffect(() => {
+      const el = this.scroller()?.nativeElement;
+      const key = calendarFocusKey(
+        this.view(),
+        this.days(),
+        this.focusToken(),
+        this.days().includes(this.now().date),
+        this.visibleEvents().length > 0,
+      );
+      if (!el || !el.scrollHeight || key === this.focusedKey) return;
+      this.focusedKey = key;
+      el.scrollTop = untracked(() =>
+        focusScrollTop(this.focusMinutes(), this.range(), el.scrollHeight - this.headerHeight(el), el.clientHeight),
+      );
+    });
+  }
+
+  /** Minuto en que se centra la vista: ahora (si hoy se ve), el primer evento o las 08:00. */
+  focusMinutes(): number {
+    const now = this.now();
+    if (this.days().includes(now.date)) return now.minutes;
+    const starts = this.visibleEvents().map((ev) => minutesOf(ev.local_start));
+    return starts.length ? Math.min(...starts) : 8 * 60;
+  }
+
+  private headerHeight(el: HTMLElement): number {
+    return (el.firstElementChild as HTMLElement | null)?.offsetHeight ?? 0;
+  }
+
   readonly range = computed(() => {
+    if (this.fullDay()) return FULL_DAY_RANGE;
     const days = this.availabilityDays();
     const windows = this.days().flatMap((day) =>
       (days.get(day)?.windows ?? []).map((w) => ({
@@ -292,7 +402,10 @@ export class EventCalendarComponent {
     const range = this.range();
     const byDay = this.byDay();
     const map = new Map<string, ReturnType<typeof layoutDay>>();
-    for (const day of this.days()) map.set(day, layoutDay(byDay.get(day) ?? [], range));
+    const continued = this.continuations();
+    for (const day of this.days()) {
+      map.set(day, layoutDay([...(byDay.get(day) ?? []), ...(continued.get(day) ?? [])], range, 30, day));
+    }
     return map;
   });
 

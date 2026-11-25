@@ -1,94 +1,64 @@
-<div class="business-hours">
-  <header class="business-hours__header">
-    <h2>
-      <app-icon name="clock"></app-icon>
-      Horario de la tienda
-    </h2>
-    <p class="business-hours__subtitle">
-      Ventana maestra que la reserva consulta al generar slots. Los proveedores no podrán ser agendados fuera de este horario.
-    </p>
+<section class="flex flex-col gap-3 rounded-2xl border border-border bg-surface p-3 md:p-4" aria-labelledby="store-hours-title">
+  <header class="flex items-start gap-3">
+    <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+      <app-icon name="store" [size]="18" />
+    </span>
+    <div class="min-w-0">
+      <h2 id="store-hours-title" class="text-base font-bold text-text-primary">Horario de la tienda</h2>
+      <p class="text-sm text-text-secondary">
+        Los días y horas en que la tienda atiende. Las reservas solo se ofrecen dentro de este horario.
+      </p>
+    </div>
   </header>
 
-  <section class="business-hours__stats">
-    <app-stats
-      title="Días activos"
-      [value]="activeDays().toString()"
-      iconName="calendar-check"
-    ></app-stats>
-    <app-stats
-      title="Días cerrados"
-      [value]="(7 - activeDays()).toString()"
-      iconName="calendar-x"
-    ></app-stats>
-  </section>
-
-  @if (loading()) {
-    <div class="business-hours__loading">Cargando horario...</div>
-  } @else {
-    <app-card>
-      <ul class="days">
-        @for (day of dayLabels; track day.dow) {
-          @if (row(day.dow); as r) {
-            <li class="days__row" [class.days__row--closed]="!r.is_active">
-              <div class="days__name">
-                <label class="toggle">
-                  <input
-                    type="checkbox"
-                    [checked]="r.is_active"
-                    (change)="toggleDay(day.dow)"
-                  />
-                  <span class="toggle__label">{{ day.label }}</span>
-                </label>
-              </div>
-              <div class="days__inputs">
-                <input
-                  type="time"
-                  [disabled]="!r.is_active"
-                  [value]="r.start_time"
-                  (input)="updateField(day.dow, 'start_time', $any($event.target).value)"
-                />
-                <span class="days__sep">a</span>
-                <input
-                  type="time"
-                  [disabled]="!r.is_active"
-                  [value]="r.end_time"
-                  (input)="updateField(day.dow, 'end_time', $any($event.target).value)"
-                />
-                @if (closesNextDay(r)) {
-                  <span class="days__sep">(+1 día)</span>
-                }
-              </div>
-              <div class="days__status">
-                @if (r.is_active) {
-                  <app-icon name="check" variant="success"></app-icon>
-                  <span>Abierto</span>
-                } @else {
-                  <app-icon name="x" variant="muted"></app-icon>
-                  <span>Cerrado</span>
-                }
-              </div>
-            </li>
+  <!-- Same schedule as Ajustes → Venta -->
+  <div
+    class="flex flex-col gap-3 rounded-2xl border border-info/25 bg-info/10 p-3 sm:flex-row sm:items-center"
+    data-testid="shared-schedule-notice"
+  >
+    <app-icon name="link" [size]="18" class="hidden shrink-0 text-info sm:block" />
+    <div class="min-w-0 flex-1 text-sm text-text-primary">
+      <p class="font-bold">Es el mismo horario de Ajustes → Venta</p>
+      <p class="text-text-secondary">
+        Lo que cambies aquí cambia allá, y al revés.
+        @if (inheritingProviders() !== null) {
+          @if (inheritingProviders() === 0) {
+            Ningún prestador usa todavía el horario de la tienda.
+          } @else if (inheritingProviders() === 1) {
+            También es el horario de <strong class="text-text-primary">1 prestador</strong> que usa el horario de la tienda.
+          } @else {
+            También es el horario de <strong class="text-text-primary">{{ inheritingProviders() }} prestadores</strong> que usan el horario de la tienda.
           }
         }
-      </ul>
-    </app-card>
-  }
-
-  <footer class="business-hours__footer">
-    @if (errorMsg()) {
-      <div class="business-hours__error">{{ errorMsg() }}</div>
-    }
-    @if (successMsg()) {
-      <div class="business-hours__success">{{ successMsg() }}</div>
-    }
-    <app-button
-      variant="primary"
-      [loading]="saving()"
-      [disabled]="loading() || saving()"
-      (clicked)="save()"
+      </p>
+    </div>
+    <a
+      [routerLink]="salesSettingsRoute"
+      class="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-info/25 bg-surface px-3 text-xs font-semibold text-info no-underline transition hover:bg-info/10"
+      data-testid="sales-settings-link"
     >
-      <app-icon name="save"></app-icon>
-      Guardar horario
-    </app-button>
-  </footer>
-</div>
+      Ver en Ajustes → Venta
+      <app-icon name="arrow-right" [size]="14" />
+    </a>
+  </div>
+
+  @if (loading()) {
+    <div class="flex justify-center py-8"><app-spinner /></div>
+  } @else {
+    @if (loadError()) {
+      <p class="rounded-xl border border-warning/25 bg-warning/10 p-3 text-sm text-text-primary" role="alert">
+        No se pudo cargar el horario guardado. Revisa tu conexión y vuelve a abrir esta pantalla antes de guardar.
+      </p>
+    }
+    <app-weekly-hours-editor
+      [days]="days()"
+      (daysChange)="onDaysChange($event)"
+      [requireOpenDay]="true"
+      [showSave]="true"
+      [saving]="saving()"
+      [dirty]="dirty()"
+      [saved]="justSaved()"
+      (save)="save($event)"
+    />
+  }
+</section>

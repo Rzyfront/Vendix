@@ -1032,6 +1032,31 @@ describe('reservations.tools · contrato T4', () => {
       expect(deps.providersService.update).not.toHaveBeenCalled();
     });
 
+    it('Parte 1: update cambia a horario de la tienda (preview y ejecución)', async () => {
+      const { deps, tools } = buildTools();
+      deps.providersService.findOne.mockResolvedValue({ ...PROVIDER_ROW, uses_store_hours: false });
+      deps.providersService.update.mockResolvedValue({ ...PROVIDER_ROW, uses_store_hours: true });
+
+      const result = await preview(tools, 'manage_booking_providers', {
+        action: 'update',
+        provider_id: 3,
+        uses_store_hours: true,
+      });
+      expect(result.changes).toEqual([
+        { field: 'uses_store_hours', label: 'Usa el horario de la tienda', from: false, to: true },
+      ]);
+
+      await run(tools, 'manage_booking_providers', {
+        action: 'update',
+        provider_id: 3,
+        uses_store_hours: true,
+      });
+      expect(deps.providersService.update).toHaveBeenCalledWith(
+        3,
+        expect.objectContaining({ uses_store_hours: true }),
+      );
+    });
+
     it('(b) happy: assign_service vincula proveedor↔servicio', async () => {
       const { deps, tools } = buildTools();
       deps.providersService.findOne.mockResolvedValue(PROVIDER_ROW);

@@ -1,90 +1,48 @@
-// Exceptions Manager — Layout-only styles
-// Buttons, inputs, toggles, badges, empty states handled by shared components
-// Mobile-first: base styles → @media (min-width: ...) for larger screens
-
-// Header
+// Ausencias del prestador — same Soft UI language as the weekly hours editor.
 .section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 1rem;
+  @apply mb-3 flex items-start justify-between gap-3;
 }
 
 .section-title {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
+  @apply flex min-w-0 items-start gap-3;
 
   h3 {
-    margin: 0;
-    font-size: 0.875rem;
-    font-weight: 700;
-    color: var(--color-text-primary);
+    @apply m-0 text-sm font-bold text-text-primary;
+  }
+
+  p {
+    @apply m-0 text-xs text-text-secondary;
   }
 }
 
-// Form layout
-.exception-form {
-  padding: 1rem;
-  background: var(--color-background);
-  border-radius: 0.5rem;
-  border: 1px solid var(--color-border);
-  margin-bottom: 1rem;
+.section-title__icon {
+  @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary;
 }
 
-// Exception list
+.exception-form {
+  @apply mb-3 rounded-2xl border border-primary/25 bg-primary/5 p-3;
+}
+
 .exceptions-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
+  @apply flex flex-col gap-2;
 }
 
 .exception-card {
-  display: flex;
-  align-items: center;
-  gap: 0.625rem;
-  padding: 0.625rem 0.75rem;
-  background: var(--color-background);
-  border: 1px solid var(--color-border);
-  border-radius: 0.5rem;
-  transition: border-color 0.15s ease;
-  min-height: 44px;
+  @apply flex min-h-11 flex-wrap items-center gap-2 rounded-2xl border border-border bg-surface px-3 py-2 transition-colors;
 
   &:hover {
-    border-color: var(--color-text-muted);
+    @apply border-primary/25;
   }
 }
 
 .exception-date {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--color-text-primary);
-  white-space: nowrap;
+  @apply flex items-center gap-1.5 whitespace-nowrap text-sm font-semibold text-text-primary;
 }
 
 .exception-reason {
-  flex: 1;
-  min-width: 0;
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  font-style: italic;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+  @apply min-w-0 flex-1 basis-full truncate text-xs text-text-secondary;
 
-// Mobile
-@media (max-width: 639px) {
-  .exception-card {
-    flex-wrap: wrap;
-    gap: 0.375rem;
-  }
-
-  .exception-reason {
-    flex-basis: 100%;
-    order: 10;
+  @media (min-width: 640px) {
+    @apply basis-auto;
   }
 }

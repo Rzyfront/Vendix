@@ -62,6 +62,12 @@ export interface FilterConfig {
   helpText?: string;
   /** Default value to restore when filters are cleared (instead of null) */
   defaultValue?: string | string[];
+  /**
+   * `false`: no suma al contador de filtros activos. Para controles que cambian
+   * cómo se ve el resultado y no lo acotan (p. ej. la vista Mes/Día de la
+   * Agenda en celular). Default: cuenta.
+   */
+  countsAsActive?: boolean;
 
   /**
    * Checkbox opcional debajo del control principal, dentro del mismo bloque

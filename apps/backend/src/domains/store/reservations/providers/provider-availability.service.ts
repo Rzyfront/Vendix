@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { BusinessHoursService } from '../business-hours/business-hours.service';
+import { windowSpan } from '../../../../common/utils/schedule-window.util';
 import { booking_status_enum, Prisma } from '@prisma/client';
 
 export interface ProviderAvailabilityDay {
@@ -58,7 +60,10 @@ export interface ProviderAvailabilityOverview {
  */
 @Injectable()
 export class ProviderAvailabilityService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly businessHours: BusinessHoursService,
+  ) {}
 
   async getOverview(params: {
     date_from: string;
@@ -123,10 +128,8 @@ export class ProviderAvailabilityService {
 
     const providerIds = providers.map((p) => p.id);
 
-    // Load schedules for all providers in one query
-    const schedules = await this.prisma.provider_schedules.findMany({
-      where: { provider_id: { in: providerIds }, is_active: true },
-    });
+    // Effective weekly blocks of every provider (Parte 1: store hours or own)
+    const schedules = await this.businessHours.loadProviderBlocks(providerIds);
     const schedulesByProvider = new Map<
       number,
       typeof schedules
@@ -321,10 +324,11 @@ export class ProviderAvailabilityService {
     duration: number,
     buffer: number,
   ): number {
+    if (duration <= 0) return 0;
     let count = 0;
-    let cur = this.timeToMinutes(start);
-    const endMin = this.timeToMinutes(end);
-    while (cur + duration <= endMin) {
+    const span = windowSpan({ start_time: start, end_time: end });
+    let cur = span.startMin;
+    while (cur + duration <= span.endMin) {
       count += 1;
       cur += duration + buffer;
     }
@@ -351,10 +355,5 @@ export class ProviderAvailabilityService {
     const m = (d.getUTCMonth() + 1).toString().padStart(2, '0');
     const day = d.getUTCDate().toString().padStart(2, '0');
     return `${y}-${m}-${day}`;
-  }
-
-  private timeToMinutes(t: string): number {
-    const [h, m] = t.split(':').map(Number);
-    return h * 60 + m;
   }
 }

@@ -2,6 +2,7 @@ import { ConflictException, NotFoundException, BadRequestException } from '@nest
 import { ProvidersService } from './providers.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { BusinessHoursService } from '../business-hours/business-hours.service';
 
 /**
  * Proveedores de servicio como usuarios de tienda: el proveedor puede ser
@@ -35,7 +36,10 @@ describe('ProvidersService — proveedores como usuarios de tienda', () => {
       },
     };
     prisma.$transaction = jest.fn((fn: any) => fn(prisma));
-    service = new ProvidersService(prisma as unknown as StorePrismaService);
+    service = new ProvidersService(
+      prisma as unknown as StorePrismaService,
+      { loadProviderBlocks: jest.fn().mockResolvedValue([]) } as unknown as BusinessHoursService,
+    );
   });
 
   afterEach(() => jest.restoreAllMocks());
@@ -50,6 +54,40 @@ describe('ProvidersService — proveedores como usuarios de tienda', () => {
       },
     },
   };
+
+  describe('Parte 1 — horario de la tienda', () => {
+    const inherited = [
+      { provider_id: 1, day_of_week: 5, block_order: 0, start_time: '17:00', end_time: '04:00', is_active: true, inherited: true },
+    ];
+    const own = [{ id: 9, provider_id: 1, day_of_week: 1, start_time: '08:00', end_time: '12:00', is_active: true }];
+
+    it('findOne muestra el horario de la tienda (heredado) a quien trabaja en él', async () => {
+      prisma.service_providers.findFirst.mockResolvedValue({ id: 1, uses_store_hours: true, schedules: own });
+      (service as any).businessHours.loadProviderBlocks.mockResolvedValue(inherited);
+      await expect(service.findOne(1)).resolves.toMatchObject({ uses_store_hours: true, schedules: inherited, has_own_schedule: true });
+    });
+
+    it('findOne deja el horario propio igual que antes', async () => {
+      prisma.service_providers.findFirst.mockResolvedValue({ id: 1, uses_store_hours: false, schedules: own });
+      await expect(service.findOne(1)).resolves.toMatchObject({ schedules: own, has_own_schedule: true });
+      expect((service as any).businessHours.loadProviderBlocks).not.toHaveBeenCalled();
+    });
+
+    it('findOne avisa que no hay horario propio guardado', async () => {
+      prisma.service_providers.findFirst.mockResolvedValue({ id: 1, uses_store_hours: true, schedules: [] });
+      (service as any).businessHours.loadProviderBlocks.mockResolvedValue(inherited);
+      await expect(service.findOne(1)).resolves.toMatchObject({ has_own_schedule: false });
+    });
+
+    it('update guarda la elección sin tocar los horarios propios', async () => {
+      prisma.service_providers.findFirst.mockResolvedValue({ id: 1, uses_store_hours: false, schedules: own });
+      await service.update(1, { uses_store_hours: true });
+      expect(prisma.service_providers.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 1 }, data: expect.objectContaining({ uses_store_hours: true }) }),
+      );
+      expect(prisma.provider_schedules).toBeUndefined();
+    });
+  });
 
   it('crea el proveedor por user_id con el nombre del usuario por defecto', async () => {
     prisma.users.findFirst.mockResolvedValue({ id: 31, first_name: 'Ana', last_name: 'Ruiz' });

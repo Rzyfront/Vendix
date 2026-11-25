@@ -100,6 +100,83 @@ export interface HourRange {
 
 export const DEFAULT_HOUR_RANGE: HourRange = { start: 7 * 60, end: 21 * 60 };
 
+/** Semana y Día de la Agenda: las 24 horas (00:00–24:00). */
+export const FULL_DAY_RANGE: HourRange = { start: 0, end: 24 * 60 };
+
+/**
+ * Reservas que empezaron el día anterior y terminan en este (cruzan UNA
+ * medianoche, p. ej. 23:00–01:00): se pintan también de 00:00 a su fin. Los
+ * planes de varios días siguen solo en su primer día.
+ */
+export function continuationsByDay(events: readonly SchedulingEvent[]): Map<string, SchedulingEvent[]> {
+  const map = new Map<string, SchedulingEvent[]>();
+  for (const event of events) {
+    if (event.end_date !== addDays(event.date, 1) || minutesOf(event.local_end) <= 0) continue;
+    const list = map.get(event.end_date) ?? [];
+    list.push(event);
+    map.set(event.end_date, list);
+  }
+  return map;
+}
+
+/** Minutos desde medianoche y fecha (`YYYY-MM-DD`) de un instante en la zona de la tienda. */
+export function storeClock(instant: Date, timeZone: string): { date: string; minutes: number } {
+  const parts: Record<string, string> = {};
+  try {
+    for (const p of new Intl.DateTimeFormat('en-US', {
+      timeZone: timeZone || undefined,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).formatToParts(instant)) {
+      parts[p.type] = p.value;
+    }
+  } catch {
+    return storeClock(instant, '');
+  }
+  const hour = Number(parts['hour']) % 24;
+  return { date: `${parts['year']}-${parts['month']}-${parts['day']}`, minutes: hour * 60 + Number(parts['minute']) };
+}
+
+/** Posición (%) de la línea de «ahora» en la franja; -1 cuando queda fuera. */
+export function nowLinePercent(minutes: number, range: HourRange): number {
+  if (minutes < range.start || minutes > range.end) return -1;
+  return ((minutes - range.start) / (range.end - range.start)) * 100;
+}
+
+/**
+ * `scrollTop` que deja `minutes` a un tercio del alto visible (foco en la
+ * hora actual al abrir), sin pasarse de los bordes.
+ */
+export function focusScrollTop(
+  minutes: number,
+  range: HourRange,
+  scrollHeight: number,
+  clientHeight: number,
+): number {
+  const y = ((minutes - range.start) / (range.end - range.start)) * scrollHeight;
+  return Math.round(Math.min(Math.max(y - clientHeight / 3, 0), Math.max(scrollHeight - clientHeight, 0)));
+}
+
+/**
+ * Clave del auto-foco de Semana/Día: se vuelve a enfocar solo cuando cambia.
+ * Si hoy no se ve, el foco depende del primer evento, así que la clave cambia
+ * también cuando llegan los eventos (antes se quedaba en las 08:00).
+ */
+export function calendarFocusKey(
+  view: AgendaView,
+  days: readonly string[],
+  focusToken: number,
+  todayVisible: boolean,
+  hasVisibleEvents: boolean,
+): string {
+  const target = todayVisible ? 'now' : hasVisibleEvents ? 'events' : 'empty';
+  return `${view}|${days.join(',')}|${focusToken}|${target}`;
+}
+
 /** Franja horaria visible: la de por defecto, ampliada para que quepa todo. */
 export function hourRangeFor(
   events: readonly SchedulingEvent[],
@@ -130,6 +207,10 @@ export interface PlacedEvent {
   /** Columna dentro de un grupo de eventos que se solapan. */
   lane: number;
   lanes: number;
+  /** Empezó el día anterior (se pinta desde las 00:00). */
+  continued: boolean;
+  /** Sigue al día siguiente (se corta a las 24:00). */
+  continues: boolean;
 }
 
 /**
@@ -141,14 +222,19 @@ export function layoutDay(
   events: readonly SchedulingEvent[],
   range: HourRange,
   minHeightMinutes = 30,
+  /** Día de la columna: un evento de un día anterior empieza a las 00:00. */
+  day?: string,
 ): PlacedEvent[] {
   const span = range.end - range.start;
   const items = events
     .map((event) => {
-      const start = minutesOf(event.local_start);
-      const rawEnd = event.end_date > event.date ? 24 * 60 : minutesOf(event.local_end);
+      const column = day ?? event.date;
+      const continued = event.date < column;
+      const continues = event.end_date > column;
+      const start = continued ? 0 : minutesOf(event.local_start);
+      const rawEnd = continues ? 24 * 60 : minutesOf(event.local_end);
       const end = Math.max(rawEnd, start + minHeightMinutes);
-      return { event, start, end };
+      return { event, start, end, continued, continues };
     })
     .sort((a, b) => a.start - b.start || b.end - a.end);
 
@@ -164,6 +250,8 @@ export function layoutDay(
         height: ((g.item.end - g.item.start) / span) * 100,
         lane: g.lane,
         lanes,
+        continued: g.item.continued,
+        continues: g.item.continues,
       });
     }
     group = [];

@@ -80,6 +80,7 @@ export class ScheduleValidationService {
     const enableScheduleValidation =
       posSettings.enable_schedule_validation || false;
     const businessHours = posSettings.business_hours || {};
+    const customMode = posSettings.schedule_mode === 'custom';
     const timezone = settings?.general?.timezone || 'America/Bogota';
 
     // Si no está habilitado, permitir acceso
@@ -125,7 +126,11 @@ export class ScheduleValidationService {
     const yesterdayHours = businessHours[dayNames[(day + 6) % 7]] as
       | BusinessHours
       | undefined;
-    const spill = this.findOvernightSpill(yesterdayHours, curMinutes);
+    const spill = this.findOvernightSpill(
+      yesterdayHours,
+      curMinutes,
+      customMode,
+    );
     if (spill) {
       return {
         isWithinBusinessHours: true,
@@ -137,13 +142,37 @@ export class ScheduleValidationService {
       };
     }
 
+    // In custom mode, a day with an empty `blocks: []` array is closed even if
+    // legacy `open`/`close` strings remain on the object (aligned with BusinessHoursService).
+    if (this.isClosedCustomDay(todayHours, customMode)) {
+      const nextOpen = this.getNextOpenDay(
+        businessHours,
+        day,
+        curMinutes,
+        customMode,
+      );
+      return {
+        isWithinBusinessHours: false,
+        currentDay: this.getCurrentDayNameSpanish(currentDayName),
+        currentTime,
+        nextOpenTime: nextOpen,
+        activeBlocks: [],
+        message: `El establecimiento está cerrado hoy (${this.getCurrentDayNameSpanish(currentDayName)}). Horario próximo: ${nextOpen}`,
+      };
+    }
+
     // Custom mode: multiple blocks per day
     if (todayHours.blocks && todayHours.blocks.length > 0) {
       const allClosed = todayHours.blocks.every(
         (b) => b.open === 'closed' || b.close === 'closed',
       );
       if (allClosed) {
-        const nextOpen = this.getNextOpenDay(businessHours, day, curMinutes);
+        const nextOpen = this.getNextOpenDay(
+          businessHours,
+          day,
+          curMinutes,
+          customMode,
+        );
         return {
           isWithinBusinessHours: false,
           currentDay: this.getCurrentDayNameSpanish(currentDayName),
@@ -180,7 +209,12 @@ export class ScheduleValidationService {
         };
       }
 
-      const nextOpen = this.getNextOpenDay(businessHours, day, curMinutes);
+      const nextOpen = this.getNextOpenDay(
+        businessHours,
+        day,
+        curMinutes,
+        customMode,
+      );
       return {
         isWithinBusinessHours: false,
         currentDay: this.getCurrentDayNameSpanish(currentDayName),
@@ -193,7 +227,12 @@ export class ScheduleValidationService {
 
     // Continuous mode: single open/close block (original logic)
     if (todayHours.open === 'closed' || todayHours.close === 'closed') {
-      const nextOpen = this.getNextOpenDay(businessHours, day, curMinutes);
+      const nextOpen = this.getNextOpenDay(
+        businessHours,
+        day,
+        curMinutes,
+        customMode,
+      );
       return {
         isWithinBusinessHours: false,
         currentDay: this.getCurrentDayNameSpanish(currentDayName),
@@ -223,7 +262,12 @@ export class ScheduleValidationService {
     }
 
     // Está fuera de horario
-    const nextOpen = this.getNextOpenDay(businessHours, day, curMinutes);
+    const nextOpen = this.getNextOpenDay(
+      businessHours,
+      day,
+      curMinutes,
+      customMode,
+    );
     return {
       isWithinBusinessHours: false,
       currentDay: this.getCurrentDayNameSpanish(currentDayName),
@@ -382,6 +426,18 @@ export class ScheduleValidationService {
     return curMinutes >= openMinutes && curMinutes <= closeMinutes;
   }
 
+  private isClosedCustomDay(
+    dayHours: BusinessHours | undefined,
+    customMode: boolean,
+  ): boolean {
+    return Boolean(
+      customMode &&
+        dayHours &&
+        Array.isArray(dayHours.blocks) &&
+        dayHours.blocks.length === 0,
+    );
+  }
+
   /**
    * Block of `yesterday` that crosses midnight and still covers `curMinutes`
    * (minutes since 00:00 today, inclusive of the close minute like same-day blocks).
@@ -389,8 +445,11 @@ export class ScheduleValidationService {
   private findOvernightSpill(
     yesterday: BusinessHours | undefined,
     curMinutes: number,
+    customMode = false,
   ): { open: string; close: string } | null {
-    if (!yesterday) return null;
+    if (!yesterday || this.isClosedCustomDay(yesterday, customMode)) {
+      return null;
+    }
     const candidates: Array<{ open: string; close: string }> =
       yesterday.blocks && yesterday.blocks.length > 0
         ? yesterday.blocks
@@ -413,6 +472,7 @@ export class ScheduleValidationService {
     businessHours: Record<string, BusinessHours>,
     currentDay: number,
     currentMinutes: number,
+    customMode = false,
   ): string {
     const dayNames = [
       'sunday',
@@ -437,7 +497,7 @@ export class ScheduleValidationService {
     const todayName = dayNames[currentDay];
     const todayHours = businessHours[todayName];
 
-    if (todayHours) {
+    if (todayHours && !this.isClosedCustomDay(todayHours, customMode)) {
       if (todayHours.blocks && todayHours.blocks.length > 0) {
         for (const block of todayHours.blocks) {
           if (block.open !== 'closed' && block.close !== 'closed') {
@@ -466,7 +526,7 @@ export class ScheduleValidationService {
       const dayName = dayNames[dayIndex];
       const hours = businessHours[dayName];
 
-      if (!hours) continue;
+      if (!hours || this.isClosedCustomDay(hours, customMode)) continue;
 
       if (hours.blocks && hours.blocks.length > 0) {
         const hasOpen = hours.blocks.some(
