@@ -287,7 +287,17 @@ export class BankAccountsService {
       }
       owner_store_id = null;
       available_in_all_stores = create_dto.available_in_all_stores ?? true;
-      if (!available_in_all_stores) {
+      if (available_in_all_stores) {
+        if (
+          Array.isArray(create_dto.store_ids) &&
+          create_dto.store_ids.length > 0
+        ) {
+          throw new VendixHttpException(
+            ErrorCodes.BANK_ACCOUNT_INVALID_ASSIGNMENT,
+            'Para asignar tiendas específicas debes indicar available_in_all_stores en false.',
+          );
+        }
+      } else {
         assigned_store_ids = await this.validateOrganizationStoreIds(
           policy.organization_id,
           create_dto.store_ids,
@@ -417,7 +427,17 @@ export class BankAccountsService {
         existingAccount.available_in_all_stores ??
         true;
 
-      if (!nextAvailableInAll) {
+      if (nextAvailableInAll) {
+        if (
+          Array.isArray(update_dto.store_ids) &&
+          update_dto.store_ids.length > 0
+        ) {
+          throw new VendixHttpException(
+            ErrorCodes.BANK_ACCOUNT_INVALID_ASSIGNMENT,
+            'Para asignar tiendas específicas debes indicar available_in_all_stores en false.',
+          );
+        }
+      } else {
         const candidateStoreIds =
           update_dto.store_ids !== undefined
             ? update_dto.store_ids
@@ -429,59 +449,68 @@ export class BankAccountsService {
       }
     }
 
-    const updated = await this.prisma.bank_accounts.update({
-      where: { id },
-      data: {
-        ...(update_dto.name !== undefined && { name: update_dto.name }),
-        ...(update_dto.account_number !== undefined && {
-          account_number: update_dto.account_number,
-        }),
-        ...(update_dto.bank_name !== undefined && {
-          bank_name: update_dto.bank_name,
-        }),
-        ...(update_dto.bank_code !== undefined && {
-          bank_code: update_dto.bank_code,
-        }),
-        ...(update_dto.currency !== undefined && {
-          currency: update_dto.currency,
-        }),
-        ...(update_dto.opening_balance !== undefined && {
-          opening_balance: update_dto.opening_balance,
-        }),
-        ...(update_dto.chart_account_id !== undefined && {
-          chart_account_id: update_dto.chart_account_id,
-        }),
-        ...(update_dto.column_mapping !== undefined && {
-          column_mapping: update_dto.column_mapping as any,
-        }),
-        ...(nextAvailableInAll !== undefined && {
-          available_in_all_stores: nextAvailableInAll,
-        }),
-      },
-      include: BANK_ACCOUNT_RELATIONS_INCLUDE,
-    });
+    const updateData = {
+      ...(update_dto.name !== undefined && { name: update_dto.name }),
+      ...(update_dto.account_number !== undefined && {
+        account_number: update_dto.account_number,
+      }),
+      ...(update_dto.bank_name !== undefined && {
+        bank_name: update_dto.bank_name,
+      }),
+      ...(update_dto.bank_code !== undefined && {
+        bank_code: update_dto.bank_code,
+      }),
+      ...(update_dto.currency !== undefined && {
+        currency: update_dto.currency,
+      }),
+      ...(update_dto.opening_balance !== undefined && {
+        opening_balance: update_dto.opening_balance,
+      }),
+      ...(update_dto.chart_account_id !== undefined && {
+        chart_account_id: update_dto.chart_account_id,
+      }),
+      ...(update_dto.column_mapping !== undefined && {
+        column_mapping: update_dto.column_mapping as any,
+      }),
+      ...(nextAvailableInAll !== undefined && {
+        available_in_all_stores: nextAvailableInAll,
+      }),
+    };
 
     if (shouldUpdateAssignment) {
-      if (nextAvailableInAll) {
-        await this.prisma.bank_account_stores.deleteMany({
-          where: { bank_account_id: id },
+      await this.prisma.$transaction(async (tx: any) => {
+        await tx.bank_accounts.update({
+          where: { id },
+          data: updateData,
         });
-      } else if (update_dto.store_ids !== undefined && validatedStoreIds) {
-        await this.prisma.bank_account_stores.deleteMany({
-          where: { bank_account_id: id },
-        });
-        await this.prisma.bank_account_stores.createMany({
-          data: validatedStoreIds.map((store_id) => ({
-            bank_account_id: id,
-            store_id,
-            organization_id: policy.organization_id,
-          })),
-          skipDuplicates: true,
-        });
-      }
+
+        if (nextAvailableInAll) {
+          await tx.bank_account_stores.deleteMany({
+            where: { bank_account_id: id },
+          });
+        } else if (update_dto.store_ids !== undefined && validatedStoreIds) {
+          await tx.bank_account_stores.deleteMany({
+            where: { bank_account_id: id },
+          });
+          await tx.bank_account_stores.createMany({
+            data: validatedStoreIds.map((store_id) => ({
+              bank_account_id: id,
+              store_id,
+              organization_id: policy.organization_id,
+            })),
+            skipDuplicates: true,
+          });
+        }
+      });
 
       return this.findOne(id);
     }
+
+    const updated = await this.prisma.bank_accounts.update({
+      where: { id },
+      data: updateData,
+      include: BANK_ACCOUNT_RELATIONS_INCLUDE,
+    });
 
     return this.formatAccount(updated, policy);
   }

@@ -28,6 +28,7 @@ describe('Accounting BankAccountsService (QUI-1061)', () => {
       bank_transactions: {
         aggregate: jest.fn(),
       },
+      $transaction: jest.fn((cb: any) => cb(prisma)),
     };
     fiscalScopeService = {
       getFiscalScope: jest.fn().mockResolvedValue('STORE'),
@@ -338,11 +339,66 @@ describe('Accounting BankAccountsService (QUI-1061)', () => {
         available_in_all_stores: true,
       });
 
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
       expect(prisma.bank_account_stores.deleteMany).toHaveBeenCalledWith({
         where: { bank_account_id: 50 },
       });
       expect(updated.available_in_all_stores).toBe(true);
       expect(updated.assigned_store_ids).toEqual([]);
+    });
+
+    it('rejects store_ids when available_in_all_stores is true or omitted on update and create', async () => {
+      setContext({ store_id: 10, organization_id: 1, is_owner: true });
+
+      await expect(
+        service.create({
+          name: 'Ambigua',
+          account_number: '555-999',
+          bank_name: 'Bancolombia',
+          store_ids: [10],
+        }),
+      ).rejects.toMatchObject({
+        errorCode: ErrorCodes.BANK_ACCOUNT_INVALID_ASSIGNMENT.code,
+      });
+
+      const existing = {
+        id: 50,
+        name: 'Cuenta Org',
+        account_number: '555-111',
+        bank_name: 'Davivienda',
+        store_id: null,
+        available_in_all_stores: true,
+        store_assignments: [],
+      };
+      prisma.bank_accounts.findFirst.mockResolvedValueOnce(existing);
+
+      await expect(
+        service.update(50, { store_ids: [10, 20] }),
+      ).rejects.toMatchObject({
+        errorCode: ErrorCodes.BANK_ACCOUNT_INVALID_ASSIGNMENT.code,
+      });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('allows org admin to close an inherited store account from another branch after STORE->ORGANIZATION transition', async () => {
+      setContext({ store_id: 10, organization_id: 1, is_owner: true });
+      prisma.bank_accounts.findFirst.mockResolvedValue({
+        id: 77,
+        name: 'Cuenta Heredada Sucursal B',
+        account_number: '12345',
+        bank_name: 'Bancolombia',
+        store_id: 20,
+        available_in_all_stores: true,
+        store_assignments: [],
+      });
+      prisma.bank_accounts.update.mockResolvedValue({ id: 77, status: 'closed' });
+
+      await service.remove(77);
+
+      expect(prisma.bank_accounts.update).toHaveBeenCalledWith({
+        where: { id: 77 },
+        data: { status: 'closed' },
+      });
     });
   });
 });

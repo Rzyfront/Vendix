@@ -4,6 +4,9 @@ import {
   canManageOrganizationBankAccounts,
   canModifyBankAccount,
   canViewAllOrganizationBankAccounts,
+  collectBankTransferAccountIds,
+  extractBankTransferAccountEntryId,
+  filterBankTransferConfigAccounts,
   isBankAccountAvailableInStore,
   resolveBankAccountPolicy,
 } from './bank-account-availability.helper';
@@ -137,7 +140,72 @@ describe('bank-account-availability.helper (QUI-1061)', () => {
       expect(canModifyBankAccount({ store_id: 10 }, storeAdminPolicy)).toBe(
         true,
       );
-      expect(canModifyBankAccount({ store_id: 20 }, orgPolicy)).toBe(false);
+      expect(canModifyBankAccount({ store_id: 20 }, storeAdminPolicy)).toBe(
+        false,
+      );
+      // En scope ORGANIZATION, el admin de organización puede editar/cerrar
+      // cuentas heredadas de cualquier sucursal de su organización (STORE -> ORG).
+      expect(canModifyBankAccount({ store_id: 20 }, orgPolicy)).toBe(true);
+      expect(
+        canModifyBankAccount(
+          { store_id: 20 },
+          { ...orgPolicy, store_id: 0 },
+        ),
+      ).toBe(true);
+
+      // En scope STORE, incluso un owner no modifica cuentas de otra tienda.
+      const storeScopeOwnerPolicy = {
+        ...orgPolicy,
+        fiscal_scope: 'STORE' as const,
+      };
+      expect(
+        canModifyBankAccount({ store_id: 20 }, storeScopeOwnerPolicy),
+      ).toBe(false);
+    });
+  });
+
+  describe('bank_transfer custom_config.accounts helpers', () => {
+    it('extracts ids across { id }, { bank_account_id } and ignores legacy entries', () => {
+      expect(extractBankTransferAccountEntryId({ id: 12 })).toBe(12);
+      expect(extractBankTransferAccountEntryId({ bank_account_id: 34 })).toBe(
+        34,
+      );
+      expect(
+        extractBankTransferAccountEntryId({
+          bank_name: 'Nequi',
+          account_number: '300111',
+          legacy: true,
+        }),
+      ).toBeNull();
+      expect(
+        collectBankTransferAccountIds({
+          accounts: [
+            { id: 10, bank_name: 'A' },
+            { bank_account_id: 20, bank_name: 'B' },
+            { bank_name: 'Legacy', account_number: '999' },
+          ],
+        }),
+      ).toEqual([10, 20]);
+    });
+
+    it('filters out accounts not in allowed set while preserving legacy entries without id', () => {
+      const cfg = {
+        instructions: 'Pagar por PSE',
+        accounts: [
+          { id: 10, bank_name: 'Bancolombia', account_number: '111' },
+          { bank_account_id: 20, bank_name: 'Davivienda', account_number: '222' },
+          { bank_name: 'Legacy', account_number: '333', legacy: true },
+        ],
+      };
+
+      const filtered = filterBankTransferConfigAccounts(cfg, new Set([10]));
+      expect(filtered).toEqual({
+        instructions: 'Pagar por PSE',
+        accounts: [
+          { id: 10, bank_name: 'Bancolombia', account_number: '111' },
+          { bank_name: 'Legacy', account_number: '333', legacy: true },
+        ],
+      });
     });
   });
 

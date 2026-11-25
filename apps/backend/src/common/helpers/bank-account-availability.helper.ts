@@ -117,20 +117,105 @@ export async function resolveBankAccountPolicy(
 
 /**
  * ¿Puede el contexto modificar (editar, cerrar, reactivar, asignar) esta
- * cuenta? Las cuentas de tienda las modifica la tienda dueña. Las de
- * organización: en scope ORGANIZATION solo un usuario de organización; en
- * scope STORE (cuentas de organización heredadas) se conserva el
- * comportamiento previo: cualquier tienda en la que esté disponible.
+ * cuenta?
+ * - Scope ORGANIZATION: un usuario con permisos de organización puede
+ *   modificar tanto las cuentas de organización (`store_id = null`) como las
+ *   cuentas heredadas de cualquier sucursal de la organización (necesario para
+ *   consolidar o cerrar duplicados tras migrar de STORE → ORGANIZATION). Un
+ *   admin de tienda solo puede modificar cuentas heredadas de su propia tienda.
+ * - Scope STORE: cada tienda modifica sus propias cuentas; para cuentas de
+ *   organización heredadas (`store_id = null`) se conserva el comportamiento
+ *   previo (cualquier tienda en la que esté disponible).
  */
 export function canModifyBankAccount(
   account: { store_id: number | null },
   policy: BankAccountPolicy,
 ): boolean {
-  if (account.store_id !== null) return account.store_id === policy.store_id;
   if (policy.fiscal_scope === 'ORGANIZATION') {
-    return policy.can_manage_organization_accounts;
+    if (policy.can_manage_organization_accounts) {
+      return true;
+    }
+    return account.store_id !== null && account.store_id === policy.store_id;
   }
+  if (account.store_id !== null) return account.store_id === policy.store_id;
   return true;
+}
+
+/**
+ * Extrae el id numérico de `bank_accounts` de una entrada de
+ * `custom_config.accounts`, tolerando las tres formas que conviven en
+ * producción (`{ id }`, `{ bank_account_id }`, `{ legacy: { ... } }`).
+ * Devuelve `null` para entradas legacy sin FK.
+ */
+export function extractBankTransferAccountEntryId(entry: unknown): number | null {
+  if (!entry || typeof entry !== 'object') return null;
+  const e = entry as Record<string, unknown>;
+  const nested =
+    e['legacy'] != null && typeof e['legacy'] === 'object'
+      ? (e['legacy'] as Record<string, unknown>)
+      : {};
+  const candidate =
+    e['bank_account_id'] ?? e['id'] ?? nested['bank_account_id'] ?? nested['id'];
+  if (candidate === undefined || candidate === null || candidate === '') {
+    return null;
+  }
+  const id = Number(candidate);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+/**
+ * Recolecta todos los `bank_accounts.id` únicos presentes en
+ * `custom_config.accounts` de un método `bank_transfer`.
+ */
+export function collectBankTransferAccountIds(customConfig: unknown): number[] {
+  if (
+    !customConfig ||
+    typeof customConfig !== 'object' ||
+    Array.isArray(customConfig)
+  ) {
+    return [];
+  }
+  const accounts = (customConfig as Record<string, unknown>)['accounts'];
+  if (!Array.isArray(accounts)) return [];
+  const ids: number[] = [];
+  for (const entry of accounts) {
+    const id = extractBankTransferAccountEntryId(entry);
+    if (id !== null && !ids.includes(id)) {
+      ids.push(id);
+    }
+  }
+  return ids;
+}
+
+/**
+ * Filtra las entradas de `custom_config.accounts` con FK numérica contra el
+ * conjunto de `bank_accounts.id` activos y disponibles para la tienda.
+ * Las entradas legacy sin id se conservan para mantener compatibilidad con
+ * cobros previos.
+ */
+export function filterBankTransferConfigAccounts<
+  T extends Record<string, any> | null | undefined,
+>(customConfig: T, allowedAccountIds: ReadonlySet<number>): T {
+  if (
+    !customConfig ||
+    typeof customConfig !== 'object' ||
+    Array.isArray(customConfig)
+  ) {
+    return customConfig;
+  }
+  const accounts = customConfig['accounts'];
+  if (!Array.isArray(accounts)) return customConfig;
+
+  const filtered = accounts.filter((entry) => {
+    const id = extractBankTransferAccountEntryId(entry);
+    if (id === null) return true;
+    return allowedAccountIds.has(id);
+  });
+
+  return {
+    ...customConfig,
+    accounts: filtered,
+  } as T;
 }
 
 /**
