@@ -80,7 +80,14 @@ describe('AppMediaService — biblioteca de medios (apps-customization F1.1)', (
   it('guarda un PDF como documento y respeta la app destino', async () => {
     const { service, s3 } = build();
     const [row] = await service.upload(
-      [file({ originalname: 'politicas.pdf', mimetype: 'application/pdf' })],
+      [
+        file({
+          originalname: 'politicas.pdf',
+          mimetype: 'application/pdf',
+          // La firma real importa: el servicio valida que empiece por %PDF-.
+          buffer: Buffer.from('%PDF-1.7 contenido'),
+        }),
+      ],
       'booking' as never,
     );
     expect(s3.uploadFile).toHaveBeenCalledWith(
