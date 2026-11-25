@@ -505,6 +505,7 @@ export const WRITE_BATCH_ROUTING_RULE = [
   'Pregunta solo por un dato que no puedas leer ni inferir, y entonces haz UNA sola pregunta que agrupe todo lo que falta.',
   'propose_write_batch está en el índice: llámala por su nombre exacto con {goal, steps:[{tool, arguments, label}]}, un paso por cada cambio, con el nombre exacto de la herramienta de escritura y sus argumentos exactos.',
   'Envía todos los cambios en una sola llamada (máximo 100 pasos; el sistema arma tarjetas de hasta 25). Si son más de 100, propón lotes de 100, nunca cambios sueltos.',
+  'Tarifa a muchos productos («aplícale la tarifa X a todos mis productos»): llama UNA vez a preview_product_price_tiers (all_active_products: true si son todos) y propón sus batch_steps tal cual en UNA llamada a propose_write_batch; no listes productos uno por uno. Si no falta ninguno, dilo y no propongas lote.',
   'Lo irreversible (anular, eliminar, pagos, DIAN, envíos) no entra al lote: va solo, con su propia confirmación.',
   'Nada se aplica hasta que la persona aprueba la tarjeta con su botón; un mensaje dictado o escrito no aprueba cambios, y nunca digas que algo se aplicó antes de esa aprobación.',
 ].join(' ');

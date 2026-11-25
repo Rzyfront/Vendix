@@ -1008,6 +1008,24 @@ describe('pricing.tools · contrato canónico T4', () => {
       expect(deps.productsBulkEditService.apply).not.toHaveBeenCalled();
     });
 
+    it('(c) si no se aplica ninguno, el handler devuelve {error} (no un éxito vacío)', async () => {
+      const deps = depsWithStore();
+      deps.productsBulkEditService.apply.mockResolvedValue({
+        total: 1,
+        successful: 0,
+        failed: 1,
+        results: [{ id: 20, name: 'Producto 20', status: 'error', message: 'Archivado' }],
+      });
+      const { tools } = buildTools(deps);
+      const out = await run(tools, 'manage_product_price_tiers', {
+        price_tier_id: 21,
+        product_ids: [20],
+      });
+      expect(out).toEqual({
+        error: 'Tarifa "Manaure": 0 aplicados, 1 fallidos. Producto 20: Archivado',
+      });
+    });
+
     it('(c) el bulk-edit lanza → {error} con mensaje, nunca throw', async () => {
       const deps = depsWithStore();
       deps.productsBulkEditService.apply.mockRejectedValue(new Error('db caída'));

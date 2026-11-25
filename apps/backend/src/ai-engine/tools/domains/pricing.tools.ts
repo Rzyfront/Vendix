@@ -1120,6 +1120,16 @@ export function createPricingTools(deps: PricingToolDeps): RegisteredTool[] {
               reason: item.message ?? item.code ?? 'Error',
             }));
           const verb = diff.action === 'assign' ? 'aplicados' : 'quitados';
+          // Ninguno aplicado: es un fallo, no un éxito con cero cambios (el
+          // lote lo marca fallido en vez de «aplicado»).
+          if (result.successful === 0) {
+            return writeToolError(
+              `Tarifa "${diff.tierName}": 0 ${verb}, ${result.failed} fallidos. ${failedItems
+                .slice(0, 5)
+                .map((p) => `${p.name}: ${p.reason}`)
+                .join('; ')}`,
+            );
+          }
           return JSON.stringify({
             summary: `Tarifa "${diff.tierName}": ${result.successful} ${verb}, ${result.failed} fallidos${diff.unchanged.length ? `, ${diff.unchanged.length} ya estaban así` : ''}.`,
             data: {
