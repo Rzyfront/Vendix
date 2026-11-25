@@ -7,6 +7,7 @@ import { BookingPublicController } from './booking-public.controller';
  * page keeps exactly its previous response.
  */
 describe('BookingPublicController.get (stay_facts)', () => {
+  const defaults = { check_in: 'Desde las 3:00 p. m.', check_out: 'Hasta las 12:00 m.', cancellation: null };
   const stayFacts = { check_in: 'Desde las 3:00 p. m.', max_guests: 4, has_photos: true };
 
   const build = (page: unknown) => {
@@ -17,7 +18,7 @@ describe('BookingPublicController.get (stay_facts)', () => {
     };
     const policies = {
       fill: jest.fn(async (_storeId: number, p: unknown) => p),
-      stayFacts: jest.fn().mockResolvedValue(stayFacts),
+      readWithStayFacts: jest.fn().mockResolvedValue({ defaults, stayFacts }),
     };
     const response = { success: jest.fn((data: unknown) => data) };
     const controller = new BookingPublicController(
@@ -32,14 +33,24 @@ describe('BookingPublicController.get (stay_facts)', () => {
   beforeEach(() => jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(7));
   afterEach(() => jest.restoreAllMocks());
 
-  it('incluye stay_facts de la tienda de la petición cuando la página tiene stay_detail', async () => {
+  it('incluye stay_facts y rellena policies en una sola lectura cuando la página tiene stay_detail', async () => {
     const { controller, policies } = build({
       schema_version: 1,
-      blocks: [{ id: 'stay', type: 'stay_detail', props: { show_deposit: true } }],
+      blocks: [
+        { id: 'stay', type: 'stay_detail', props: { show_deposit: true } },
+        { id: 'policies', type: 'policies', props: { title: 'Políticas' } },
+      ],
     });
     const data = (await controller.get()) as unknown as Record<string, unknown>;
     expect(data['stay_facts']).toEqual(stayFacts);
-    expect(policies.stayFacts).toHaveBeenCalledWith(7);
+    expect((data['page'] as any).blocks[1].props).toMatchObject({
+      title: 'Políticas',
+      check_in: 'Desde las 3:00 p. m.',
+      check_out: 'Hasta las 12:00 m.',
+    });
+    expect(policies.readWithStayFacts).toHaveBeenCalledTimes(1);
+    expect(policies.readWithStayFacts).toHaveBeenCalledWith(7);
+    expect(policies.fill).not.toHaveBeenCalled();
   });
 
   it('una página sin stay_detail ni condiciones responde como antes', async () => {
@@ -49,7 +60,8 @@ describe('BookingPublicController.get (stay_facts)', () => {
     });
     const data = (await controller.get()) as unknown as Record<string, unknown>;
     expect(data).not.toHaveProperty('stay_facts');
-    expect(policies.stayFacts).not.toHaveBeenCalled();
+    expect(policies.readWithStayFacts).not.toHaveBeenCalled();
+    expect(policies.fill).toHaveBeenCalledTimes(1);
 
     const legacy = build(null);
     expect(await legacy.controller.get()).toEqual({ product_ids: [] });

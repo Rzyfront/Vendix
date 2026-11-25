@@ -46,6 +46,8 @@ export interface ServicePageContext {
     service_duration_unit?: 'minute' | 'hour' | 'day' | null;
     service_modality: string | null;
     requires_booking: boolean;
+    /** Plan de varios días (QUI-1060): excluye `has_availability` y muestra «Ver plan». */
+    is_plan?: boolean;
     categories: { id: number; name: string; slug: string }[];
   }[];
   featured_service_ids: number[];
@@ -134,11 +136,16 @@ export function selectPreviewServices(
   const props = page?.blocks.find((b) => b.type === 'services')?.props;
   if (props?.['selection'] === 'manual') {
     const raw = Array.isArray(props['service_ids']) ? (props['service_ids'] as unknown[]) : [];
-    const picked = raw
-      .filter((id): id is number => typeof id === 'number' && Number.isInteger(id) && id > 0)
-      .slice(0, MAX_BLOCK_SERVICE_IDS)
-      .map((id) => byId.get(id))
-      .filter((s): s is ServicePageContext['services'][number] => !!s);
+    const seen = new Set<number>();
+    const picked: ServicePageContext['services'] = [];
+    for (const id of raw) {
+      if (picked.length >= MAX_BLOCK_SERVICE_IDS) break;
+      if (typeof id !== 'number' || !Number.isInteger(id) || id < 1 || seen.has(id)) continue;
+      const match = byId.get(id);
+      if (!match) continue;
+      seen.add(id);
+      picked.push(match);
+    }
     const pickedIds = new Set(picked.map((s) => s.id));
     return { services: picked, featuredIds: featuredIds.filter((id) => pickedIds.has(id)) };
   }
@@ -175,6 +182,7 @@ export function servicePagePreview(
     service_duration_unit: s.service_duration_unit ?? null,
     service_modality: (s.service_modality ?? null) as ServiceCardData['service_modality'],
     requires_booking: s.requires_booking,
+    is_plan: Boolean(s.is_plan),
     categories: s.categories,
   }));
   const products = (settings?.products ?? []).map((p) => ({

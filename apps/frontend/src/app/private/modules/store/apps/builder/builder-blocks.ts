@@ -81,13 +81,18 @@ export function newBlockId(type: string, blocks: readonly BuilderBlock[]): strin
   return `${type}_${n}`;
 }
 
-/** Inserts a new empty block of `type` at `index` (default: the end). */
+/** Inserta un bloque nuevo de `type` en `index` (por defecto al final), con sus props iniciales si las hay. */
 export function insertBlock(
   blocks: readonly BuilderBlock[],
   type: string,
   index = blocks.length,
+  initialProps?: Readonly<Record<string, unknown>>,
 ): { blocks: BuilderBlock[]; block: BuilderBlock } {
-  const block: BuilderBlock = { id: newBlockId(type, blocks), type, props: {} };
+  const block: BuilderBlock = {
+    id: newBlockId(type, blocks),
+    type,
+    props: initialProps ? (structuredClone(initialProps) as Record<string, unknown>) : {},
+  };
   const at = Math.max(0, Math.min(index, blocks.length));
   return { blocks: [...blocks.slice(0, at), block, ...blocks.slice(at)], block };
 }

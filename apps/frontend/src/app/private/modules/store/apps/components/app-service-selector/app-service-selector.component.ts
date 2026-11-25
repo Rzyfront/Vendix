@@ -28,7 +28,7 @@ export type SelectableService = ServicePageContext['services'][number];
 function normalize(value: string): string {
   return value
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .trim();
 }

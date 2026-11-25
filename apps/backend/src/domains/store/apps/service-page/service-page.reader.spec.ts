@@ -78,9 +78,10 @@ describe('service page reader', () => {
       expect(result.services.map((s) => s.id)).toEqual([2, 1, 3, 4]);
     });
 
-    it('caps the list', () => {
+    it('caps the list by default and returns all when limit is null', () => {
       const many = Array.from({ length: MAX_LISTED_SERVICES + 5 }, (_, i) => ({ id: i + 1 }));
       expect(orderServices(many, []).services).toHaveLength(MAX_LISTED_SERVICES);
+      expect(orderServices(many, [], null).services).toHaveLength(MAX_LISTED_SERVICES + 5);
     });
   });
   describe('selector de servicios (apps-booking-detail A)', () => {
@@ -97,10 +98,11 @@ describe('service page reader', () => {
       expect(manualServiceIds(page({ selection: 'manual' }))).toEqual([]);
     });
 
-    it('selectPageServices en manual respeta el orden elegido y descarta ids que no son servicios en línea de la tienda', () => {
-      const store = [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }];
-      const result = selectPageServices(store, [4, 2], [3, 99, 4]);
-      expect(result.services.map((s) => s.id)).toEqual([3, 4]);
+    it('selectPageServices en manual respeta el orden elegido, descarta ids ajenos e incluye elegidos por encima del tope de 60', () => {
+      const store = Array.from({ length: MAX_LISTED_SERVICES + 5 }, (_, i) => ({ id: i + 1 }));
+      const beyondCap = MAX_LISTED_SERVICES + 5;
+      const result = selectPageServices(store, [4, 2], [beyondCap, 999, 4]);
+      expect(result.services.map((s) => s.id)).toEqual([beyondCap, 4]);
       expect(result.featuredIds).toEqual([4]);
     });
 

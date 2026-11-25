@@ -474,7 +474,7 @@ const APP_LABEL: Record<PageAppKind, string> = {
         @switch (def.kind) {
           @case ('bool') {
             <span class="inline-flex items-center gap-2">
-              <input type="checkbox" [checked]="read(target, def.key) === true" (change)="onBool(target, def.key, $event)" />
+              <input type="checkbox" [checked]="readBool(target, def)" (change)="onBool(target, def.key, $event)" />
               {{ def.label }}
             </span>
           }
@@ -907,7 +907,13 @@ export class AppPageEditorComponent {
     const taken = new Set(this.blocks().map((b) => b.id));
     let id = type.replace(/_/g, '-');
     for (let n = 2; taken.has(id); n++) id = `${type.replace(/_/g, '-')}-${n}`;
-    const block: AppPageBlock = { id, type, enabled: true, props: {} };
+    const defaults = this.defOf(type)?.defaultProps;
+    const block: AppPageBlock = {
+      id,
+      type,
+      enabled: true,
+      props: defaults ? ({ ...defaults } as Record<string, unknown>) : {},
+    };
     this.update((page) => page.blocks.push(block));
   }
 
@@ -967,6 +973,11 @@ export class AppPageEditorComponent {
     const group = target.g === 'hero' || target.g === 'seo' || target.g === 'brand';
     // Group fields drop empty strings (an empty URL or color would not validate).
     this.write(target, key, group && value.trim() === '' ? undefined : value);
+  }
+
+  readBool(target: FieldTarget, def: Extract<ScalarFieldDef, { kind: 'bool' }>): boolean {
+    const value = this.read(target, def.key);
+    return typeof value === 'boolean' ? value : Boolean(def.defaultValue);
   }
 
   onBool(target: FieldTarget, key: string, event: Event): void {

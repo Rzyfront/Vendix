@@ -246,5 +246,34 @@ describe('BuilderInspectorComponent (F6-A)', () => {
       await renderWith({ id: 'faq', type: 'faq', props: {} }, PRODUCT_PAGE_BUILDER_CATALOG);
       expect(el().querySelector('[data-testid="builder-conditions"]')).toBeNull();
     });
+
+    it('stay_detail y services pintan los switches según su defaultValue cuando faltan en props', async () => {
+      const checkedOf = (key: string) =>
+        (el().querySelector(`[data-field="${key}"] input[type="checkbox"]`) as HTMLInputElement).checked;
+
+      await renderWith({ id: 'stay', type: 'stay_detail', props: {} }, BOOKING_BUILDER_CATALOG);
+      expect(checkedOf('show_duration')).toBeTrue();
+      expect(checkedOf('show_capacity')).toBeTrue();
+      expect(checkedOf('show_inclusions')).toBeTrue();
+      expect(checkedOf('show_cancellation')).toBeTrue();
+      expect(checkedOf('show_deposit')).toBeFalse();
+      expect(checkedOf('show_note')).toBeFalse();
+
+      // Un `false` explícito apaga el switch aunque su `defaultValue` sea `true`.
+      fixture.componentRef.setInput('block', { id: 'stay', type: 'stay_detail', props: { show_duration: false, show_deposit: true } });
+      fixture.detectChanges();
+      expect(checkedOf('show_duration')).toBeFalse();
+      expect(checkedOf('show_deposit')).toBeTrue();
+
+      TestBed.resetTestingModule();
+      await renderWith({ id: 'services', type: 'services', props: {} }, SERVICE_PAGE_BUILDER_CATALOG);
+      expect(checkedOf('show_duration')).toBeTrue();
+      expect(checkedOf('show_price')).toBeTrue();
+
+      fixture.componentRef.setInput('block', { id: 'services', type: 'services', props: { show_duration: false } });
+      fixture.detectChanges();
+      expect(checkedOf('show_duration')).toBeFalse();
+      expect(checkedOf('show_price')).toBeTrue();
+    });
   });
 });

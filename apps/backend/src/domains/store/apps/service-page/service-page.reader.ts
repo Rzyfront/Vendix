@@ -111,13 +111,16 @@ export interface PublishedServicePage {
 }
 
 /**
- * Orders the store's online services for the page: the featured ones in the
- * owner's order (skipping any that stopped being sold online), then the rest
- * in the order given, capped at `MAX_LISTED_SERVICES`.
+ * Ordena los servicios en línea de la tienda: primero los destacados en el orden
+ * del dueño (omitiendo los que ya no se venden en línea) y luego el resto en el
+ * orden recibido. Cuando `limit` es `null` devuelve todos (usado en el contexto
+ * de vista previa y el selector); en el modo automático público recorta a
+ * `MAX_LISTED_SERVICES`.
  */
 export function orderServices<T extends { id: number }>(
   services: T[],
   featuredIds: number[],
+  limit: number | null = MAX_LISTED_SERVICES,
 ): { services: T[]; featuredIds: number[] } {
   const byId = new Map(services.map((s) => [s.id, s]));
   const featured = featuredIds
@@ -125,8 +128,9 @@ export function orderServices<T extends { id: number }>(
     .filter((s): s is T => !!s);
   const featuredSet = new Set(featured.map((s) => s.id));
   const rest = services.filter((s) => !featuredSet.has(s.id));
+  const ordered = [...featured, ...rest];
   return {
-    services: [...featured, ...rest].slice(0, MAX_LISTED_SERVICES),
+    services: limit === null ? ordered : ordered.slice(0, limit),
     featuredIds: featured.map((s) => s.id),
   };
 }

@@ -577,7 +577,7 @@ export type ScalarFieldDef =
       hint?: string;
       group?: 'appearance';
     }
-  | { key: string; label: string; kind: 'bool'; hint?: string; group?: 'appearance' }
+  | { key: string; label: string; kind: 'bool'; defaultValue?: boolean; hint?: string; group?: 'appearance' }
   | { key: string; label: string; kind: 'int'; min: number; max: number; group?: 'appearance' };
 
 export type FieldDef =
@@ -616,6 +616,8 @@ export interface BlockDef {
    * retitle it and turning it off hides it.
    */
   existing?: boolean;
+  /** Props iniciales que se escriben explícitamente al insertar el bloque en el editor. */
+  defaultProps?: Readonly<Record<string, unknown>>;
   fields: FieldDef[];
 }
 
@@ -894,8 +896,8 @@ export const servicesFields = (): FieldDef[] => [
     hint: 'El orden de la lista se respeta en la página pública y en la vista previa.',
     visibleWhen: { key: 'selection', value: 'manual' },
   },
-  { key: 'show_duration', label: 'Mostrar duración', kind: 'bool' },
-  { key: 'show_price', label: 'Mostrar precio', kind: 'bool' },
+  { key: 'show_duration', label: 'Mostrar duración', kind: 'bool', defaultValue: true },
+  { key: 'show_price', label: 'Mostrar precio', kind: 'bool', defaultValue: true },
 ];
 
 /**
@@ -905,13 +907,13 @@ export const servicesFields = (): FieldDef[] => [
  */
 export const stayDetailFields = (): FieldDef[] => [
   titleField(),
-  { key: 'show_duration', label: 'Mostrar horarios de la estadía', kind: 'bool' },
-  { key: 'show_capacity', label: 'Mostrar capacidad (huéspedes)', kind: 'bool' },
-  { key: 'show_cancellation', label: 'Mostrar política de cancelación', kind: 'bool' },
-  { key: 'show_deposit', label: 'Mostrar anticipo', kind: 'bool' },
-  { key: 'show_inclusions', label: 'Mostrar «Qué incluye»', kind: 'bool' },
+  { key: 'show_duration', label: 'Mostrar horarios de la estadía', kind: 'bool', defaultValue: true },
+  { key: 'show_capacity', label: 'Mostrar capacidad (huéspedes)', kind: 'bool', defaultValue: true },
+  { key: 'show_cancellation', label: 'Mostrar política de cancelación', kind: 'bool', defaultValue: true },
+  { key: 'show_deposit', label: 'Mostrar anticipo', kind: 'bool', defaultValue: false },
+  { key: 'show_inclusions', label: 'Mostrar «Qué incluye»', kind: 'bool', defaultValue: true },
   { key: 'inclusions', label: 'Qué incluye', kind: 'text_list', max: MAX_STAY_INCLUSIONS, itemMax: MAX_STAY_INCLUSION_LENGTH },
-  { key: 'show_note', label: 'Mostrar nota', kind: 'bool' },
+  { key: 'show_note', label: 'Mostrar nota', kind: 'bool', defaultValue: false },
   { key: 'note', label: 'Nota', kind: 'text', max: MAX_STAY_NOTE_LENGTH, multiline: true },
   {
     key: 'layout',

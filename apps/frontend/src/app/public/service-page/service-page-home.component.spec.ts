@@ -191,6 +191,66 @@ describe('ServicePageHomeComponent (apps-module Fase 3)', () => {
     expect(text()).toContain('Agenda ya');
   });
 
+  it('pinta el precio promocional plano en público igual que el preview y omite promos escalonadas o con variantes', async () => {
+    catalog.getProducts.and.returnValue(
+      of({
+        data: [
+          service(10, 'Masaje con promo', {
+            final_price: 80000,
+            variant_count: 0,
+            active_promotion: {
+              id: 1,
+              name: 'Promo',
+              promotional_price: 60000,
+              is_quantity_tiered: false,
+            } as EcommerceProduct['active_promotion'],
+          }),
+          service(11, 'Masaje por cantidad', {
+            final_price: 80000,
+            active_promotion: {
+              id: 2,
+              name: 'Escalonada',
+              promotional_price: 55000,
+              is_quantity_tiered: true,
+            } as EcommerceProduct['active_promotion'],
+          }),
+          service(12, 'Servicio con variantes', {
+            final_price: 90000,
+            variant_count: 3,
+            active_promotion: {
+              id: 3,
+              name: 'Promo',
+              promotional_price: 70000,
+            } as EcommerceProduct['active_promotion'],
+          }),
+        ],
+      } as any),
+    );
+    await render({ service_ids: [10, 11, 12], featured_service_ids: [], product_ids: [] });
+
+    const cards = Array.from(fixture.nativeElement.querySelectorAll('[data-service]')) as HTMLElement[];
+    expect(cards[0].textContent).toContain('$60000');
+    expect(cards[0].textContent).not.toContain('$80000');
+    expect(cards[1].textContent).toContain('$80000');
+    expect(cards[2].textContent).toContain('$90000');
+  });
+
+  it('plan de varios días: pinta «Ver plan» y no cuenta como disponible para visible_when.has_availability', async () => {
+    const withConditions = ownPage({
+      blocks: [
+        { id: 'services', type: 'services', enabled: true, props: {} },
+        { id: 'cta', type: 'cta', enabled: true, props: { title: 'Agenda ya', visible_when: { has_availability: true } } },
+      ],
+    });
+    catalog.getProducts.and.returnValue(
+      of({ data: [service(10, 'Retiro 3 días', { requires_booking: true, is_plan: true })] } as any),
+    );
+    await render({ service_ids: [10], featured_service_ids: [], product_ids: [], page: withConditions });
+
+    expect(fixture.nativeElement.querySelector('[data-book="10"]')?.textContent).toContain('Ver plan');
+    expect(text()).not.toContain('Agenda ya');
+  });
+
   it('sin página publicada dice que no está disponible', async () => {
     await render(null);
 

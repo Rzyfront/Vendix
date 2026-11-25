@@ -103,7 +103,7 @@ describe('ServicePageViewService (F6-B)', () => {
   });
 
   it('returns price (sale price when on sale), signed image, categories and the products in the owner order', async () => {
-    const { view } = build(
+    const { view, s3 } = build(
       [
         service(1, 'Facial', {
           is_on_sale: true,
@@ -122,11 +122,14 @@ describe('ServicePageViewService (F6-B)', () => {
       image_url: 'signed:k/1.jpg',
       categories: [{ id: 9, name: 'Rostro', slug: 'rostro' }],
       requires_booking: true,
+      is_plan: false,
       service_duration_minutes: 60,
       service_duration_unit: 'hour',
     });
     expect(data.products.map((p) => p.id)).toEqual([2, 3]);
     expect(data.products[1].image_url).toBe('signed:k/3.jpg');
+    // Reutiliza la imagen ya firmada por `resolvePreviewProductCards` (no firma dos veces `k/1.jpg`).
+    expect(s3.signUrl.mock.calls.filter(([k]) => k === 'k/1.jpg')).toHaveLength(1);
   });
 
   it('does not query secondary products when none is chosen and tolerates a missing config', async () => {
@@ -201,7 +204,7 @@ describe('ServicePageViewService (F6-B)', () => {
 describe('ServicePageViewService — precio igual al público (apps-booking-detail A)', () => {
   const storefrontPrice = new StorefrontPriceService(new PriceResolverService());
 
-  it('cada servicio trae final_price resuelto como el catálogo público (impuestos y promoción automática)', async () => {
+  it('cada servicio trae final_price resuelto como el catálogo público (IVA 19 % y promoción automática) y proyecta is_plan', async () => {
     const findMany = jest.fn().mockResolvedValueOnce([
       service(1, 'Facial', {
         base_price: '50000.00',
@@ -213,6 +216,22 @@ describe('ServicePageViewService — precio igual al público (apps-booking-deta
         base_price: '80000.00',
         track_inventory: false,
         product_tax_assignments: [],
+        product_variants: [],
+      }),
+      service(3, 'Plan bienestar 3 días', {
+        base_price: '100000.00',
+        track_inventory: false,
+        service_pricing_type: 'package',
+        plan_duration_days: 3,
+        product_tax_assignments: [
+          {
+            is_inclusive: false,
+            tax_categories: {
+              is_inclusive: false,
+              tax_rates: [{ rate: '0.19', is_inclusive: false }],
+            },
+          },
+        ],
         product_variants: [],
       }),
     ]);
@@ -231,16 +250,52 @@ describe('ServicePageViewService — precio igual al público (apps-booking-deta
 
     const data = await view.read(7, { featured_service_ids: [], product_ids: [] });
 
-    expect(data.services.map((s) => [s.id, s.price, s.final_price])).toEqual([
-      [1, 50000, 50000],
-      [2, 80000, 60000],
+    expect(data.services.map((s) => [s.id, s.price, s.final_price, s.is_plan])).toEqual([
+      [1, 50000, 50000, false],
+      [2, 80000, 60000, false],
+      [3, 100000, 119000, true],
     ]);
-    // Los servicios se leen con los campos de precio que usa el catálogo público.
+    // Los servicios se leen con los campos de precio e is_plan que usa el catálogo público.
     expect(findMany.mock.calls[0][0].select).toMatchObject({
       product_tax_assignments: expect.any(Object),
       service_duration_minutes: true,
       requires_booking: true,
+      service_pricing_type: true,
+      plan_duration_days: true,
     });
+  });
+
+  it('devuelve todos los servicios en línea sin recortar a 60 para el selector y la selección manual', async () => {
+    const many = Array.from({ length: 65 }, (_, i) =>
+      service(i + 1, `Servicio ${String(i + 1).padStart(2, '0')}`, {
+        track_inventory: false,
+        product_tax_assignments: [],
+        product_variants: [],
+      }),
+    );
+    const findMany = jest.fn().mockResolvedValueOnce(many);
+    const prisma = {
+      products: { findMany },
+      product_price_tier_assignments: { findMany: jest.fn().mockResolvedValue([]) },
+      product_price_tier_overrides: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    const promotionEngine = {
+      findActiveAutoPromotionsForProducts: jest.fn().mockResolvedValue(new Map()),
+    };
+    const s3 = { signUrl: jest.fn(async () => undefined) };
+    const view = new ServicePageViewService(prisma as any, s3 as any, storefrontPrice, promotionEngine as any);
+
+    const data = await view.read(7, {
+      featured_service_ids: [],
+      product_ids: [],
+      page: {
+        schema_version: 1,
+        blocks: [{ id: 'services', type: 'services', enabled: true, props: { selection: 'manual', service_ids: [65] } }],
+      },
+    });
+
+    expect(data.services).toHaveLength(65);
+    expect(data.services.some((s) => s.id === 65)).toBe(true);
   });
 });
 

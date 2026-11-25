@@ -32,6 +32,10 @@ export const SERVICE_PAGE_TEMPLATE: AppPageTemplate = {
       description: 'Tus servicios reales con precio, duración y reserva (los de "Servicios y dominio").',
       icon: 'briefcase',
       existing: true,
+      defaultProps: {
+        show_duration: true,
+        show_price: true,
+      },
       fields: servicesFields(),
     },
     {

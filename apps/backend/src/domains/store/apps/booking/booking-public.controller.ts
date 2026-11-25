@@ -15,7 +15,7 @@ import { ErrorCodes } from '@common/errors/error-codes';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { readPublishedBookingPage } from './booking-page.reader';
 import { BookingCheckinService } from './booking-checkin.service';
-import { BookingPoliciesService, needsStayFacts } from './booking-policies';
+import { BookingPoliciesService, fillPolicies, needsStayFacts } from './booking-policies';
 
 /**
  * Public side of the store's booking page, for the STORE_BOOKING app.
@@ -47,15 +47,24 @@ export class BookingPublicController {
     if (!page) {
       throw new VendixHttpException(ErrorCodes.STORE_APPS_001);
     }
+    if (!page.page) {
+      return this.responseService.success({
+        product_ids: page.products.map((p) => p.id),
+      });
+    }
+    if (needsStayFacts(page.page)) {
+      // Una sola lectura de políticas + habitaciones para rellenar `policies` y entregar `stay_facts`.
+      const { defaults, stayFacts } = await this.policies.readWithStayFacts(storeId);
+      return this.responseService.success({
+        product_ids: page.products.map((p) => p.id),
+        page: fillPolicies(page.page, defaults),
+        stay_facts: stayFacts,
+      });
+    }
     return this.responseService.success({
       product_ids: page.products.map((p) => p.id),
-      // Apps F2: only when the owner saved a page (pre-F2 response otherwise).
-      ...(page.page ? { page: await this.policies.fill(storeId, page.page) } : {}),
-      // Apps booking-detail: the hotel's real stay data, only for a page with
-      // a `stay_detail` block or block conditions (same data as the preview).
-      ...(page.page && needsStayFacts(page.page)
-        ? { stay_facts: await this.policies.stayFacts(storeId) }
-        : {}),
+      // Apps F2: solo cuando el dueño guardó una página (sin `stay_facts` si no hay bloque que lo requiera).
+      page: await this.policies.fill(storeId, page.page),
     });
   }
 

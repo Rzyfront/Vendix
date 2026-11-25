@@ -157,15 +157,50 @@ describe('stay_detail — hechos reales de la estadía (apps-booking-detail B)',
     });
   });
 
-  it('needsStayFacts solo cuando la página tiene un stay_detail visible o algún visible_when', () => {
+  it('needsStayFacts solo cuando la página tiene un stay_detail o visible_when activo', () => {
     const doc = (blocks: AppPageDocument['blocks']): AppPageDocument => ({ schema_version: 1 as never, blocks });
     expect(needsStayFacts(doc([]))).toBe(false);
     expect(needsStayFacts(doc([{ id: 'f', type: 'faq', enabled: true, props: {} }]))).toBe(false);
     expect(needsStayFacts(doc([{ id: 's', type: 'stay_detail', enabled: false, props: {} }]))).toBe(false);
+    expect(
+      needsStayFacts(doc([{ id: 'f', type: 'faq', enabled: false, props: { visible_when: { has_photos: true } } }])),
+    ).toBe(false);
     expect(needsStayFacts(doc([{ id: 's', type: 'stay_detail', enabled: true, props: {} }]))).toBe(true);
     expect(
       needsStayFacts(doc([{ id: 'f', type: 'faq', enabled: true, props: { visible_when: { has_photos: true } } }])),
     ).toBe(true);
+  });
+
+  it('readWithStayFacts consulta cada tabla una sola vez y devuelve defaults + stayFacts consistentes', async () => {
+    const prisma = {
+      store_settings: { findFirst: jest.fn().mockResolvedValue({ settings: { hospitality: { check_in_time: '14:00' } } }) },
+      lodging_rate_plans: {
+        findFirst: jest.fn().mockResolvedValue({ deposit_percent: '25.00', cancellation_policy: null }),
+      },
+      lodging_unit_types: {
+        findMany: jest.fn().mockResolvedValue([{ max_occupancy: 3, images: [] }]),
+      },
+    };
+    const service = new BookingPoliciesService(prisma as never);
+
+    const out = await service.readWithStayFacts(7);
+    expect(out.defaults).toEqual({
+      check_in: 'Desde las 2:00 p. m.',
+      check_out: 'Hasta las 12:00 m.',
+      cancellation: null,
+    });
+    expect(out.stayFacts).toEqual({
+      check_in: 'Desde las 2:00 p. m.',
+      check_out: 'Hasta las 12:00 m.',
+      cancellation: null,
+      max_guests: 3,
+      deposit_percent: 25,
+      has_photos: false,
+      has_availability: true,
+    });
+    expect(prisma.store_settings.findFirst).toHaveBeenCalledTimes(1);
+    expect(prisma.lodging_rate_plans.findFirst).toHaveBeenCalledTimes(1);
+    expect(prisma.lodging_unit_types.findMany).toHaveBeenCalledTimes(1);
   });
 
   it('stayFacts lee todo con el store_id de la petición', async () => {

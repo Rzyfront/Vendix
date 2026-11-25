@@ -14,6 +14,7 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
 import { withPageSeo } from '../app-page/app-page-seo';
 import { ServicePageHomeViewComponent } from './service-page-home-view.component';
 import { ServicePageService } from './service-page.service';
+import { ServiceCardData, mapEcommerceServiceToCard } from './service-page.util';
 
 /**
  * `/` of a service page domain (Apps · STORE_SERVICE_PAGE): the store's
@@ -58,7 +59,7 @@ export class ServicePageHomeComponent {
   protected readonly storeSeo = inject(StoreSeoService);
   private readonly destroyRef = inject(DestroyRef);
 
-  readonly services = signal<EcommerceProduct[]>([]);
+  readonly services = signal<ServiceCardData[]>([]);
   readonly state = signal<'loading' | 'ready' | 'unavailable'>('loading');
 
   readonly featuredIds = computed(() => this.servicePage.config()?.featured_service_ids ?? []);
@@ -79,16 +80,17 @@ export class ServicePageHomeComponent {
         switchMap((config) => {
           if (!config) return of(null);
           const ids = config.service_ids;
-          if (ids.length === 0) return of([] as EcommerceProduct[]);
+          if (ids.length === 0) return of([] as ServiceCardData[]);
           return this.catalog.getProducts({ ids: ids.join(','), limit: ids.length }).pipe(
-            // Keep the page order (featured first); drop what the catalog no longer sells.
+            // Conserva el orden de la página y aplica la misma regla de promoción plana que el preview.
             map((res) => {
               const byId = new Map(res.data.map((p) => [p.id, p]));
               return ids
                 .map((id) => byId.get(id))
-                .filter((p): p is EcommerceProduct => !!p);
+                .filter((p): p is EcommerceProduct => !!p)
+                .map(mapEcommerceServiceToCard);
             }),
-            catchError(() => of([] as EcommerceProduct[])),
+            catchError(() => of([] as ServiceCardData[])),
           );
         }),
         takeUntilDestroyed(this.destroyRef),

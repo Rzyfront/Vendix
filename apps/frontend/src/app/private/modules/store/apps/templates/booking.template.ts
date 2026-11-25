@@ -37,6 +37,15 @@ export const BOOKING_TEMPLATE: AppPageTemplate = {
       label: 'Detalle de la estadía',
       description: 'Horarios, capacidad, qué incluye, cancelación y anticipo, con los datos reales de tu hotel.',
       icon: 'clipboard-list',
+      defaultProps: {
+        show_duration: true,
+        show_capacity: true,
+        show_inclusions: true,
+        show_cancellation: true,
+        show_deposit: false,
+        show_note: false,
+        layout: 'card',
+      },
       fields: stayDetailFields(),
     },
     {

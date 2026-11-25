@@ -65,6 +65,15 @@ describe('stay_detail en el constructor de Booking (apps-booking-detail)', () =>
       jasmine.arrayContaining(['show_duration', 'show_capacity', 'inclusions', 'show_deposit', 'note', 'layout', 'visible_when']),
     );
     expect(def?.fields.some((f) => f.key === 'max_guests' || f.key === 'deposit_percent')).toBeFalse();
+    expect(def?.defaultProps).toEqual({
+      show_duration: true,
+      show_capacity: true,
+      show_inclusions: true,
+      show_cancellation: true,
+      show_deposit: false,
+      show_note: false,
+      layout: 'card',
+    });
   });
 
   it('la vista previa usa los mismos datos reales de la estadía que la página pública', () => {

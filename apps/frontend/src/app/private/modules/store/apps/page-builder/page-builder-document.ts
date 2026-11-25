@@ -105,7 +105,14 @@ function scalarField(def: ScalarFieldDef): BuilderScalarFieldDef {
         group: def.group,
       };
     case 'bool':
-      return { key: def.key, label: def.label, kind: 'toggle', hint: def.hint, group: def.group };
+      return {
+        key: def.key,
+        label: def.label,
+        kind: 'toggle',
+        defaultValue: def.defaultValue,
+        hint: def.hint,
+        group: def.group,
+      };
     case 'int':
       return { key: def.key, label: def.label, kind: 'number', min: def.min, max: def.max, group: def.group };
   }
@@ -209,6 +216,7 @@ export function pageBuilderCatalog(
       single: !!def.existing,
       pinned: m.pinned,
       removable: m.removable,
+      defaultProps: def.defaultProps,
       modes: m.modes,
       liveData: m.liveData,
     });

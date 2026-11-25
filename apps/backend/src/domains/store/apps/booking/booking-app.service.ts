@@ -70,13 +70,17 @@ export class BookingAppService {
   async previewContext(): Promise<BookingPreviewContext> {
     const storeId = this.requireStoreId();
     const row = await this.findRow(storeId);
-    const [view, online_payment_ready, policy_defaults, stay_facts] = await Promise.all([
+    const [view, online_payment_ready, policyContext] = await Promise.all([
       this.view.read(storeId, row?.config ?? null),
       this.paymentLinks.isConfigured(),
-      this.policies.defaults(storeId),
-      this.policies.stayFacts(storeId),
+      this.policies.readWithStayFacts(storeId),
     ]);
-    return { ...view, online_payment_ready, policy_defaults, stay_facts };
+    return {
+      ...view,
+      online_payment_ready,
+      policy_defaults: policyContext.defaults,
+      stay_facts: policyContext.stayFacts,
+    };
   }
 
   async updateConfig(dto: UpdateBookingPageConfigDto): Promise<void> {

@@ -14,6 +14,7 @@ import {
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import {
   arrangeBlocks,
+  blockDef,
   duplicateBlock,
   insertBlock,
   moveBlock,
@@ -401,7 +402,8 @@ export class AppPageBuilderPageComponent<S = unknown, C = unknown> implements On
 
   addBlock(type: string): void {
     const selected = this.blocks().findIndex((b) => b.id === this.selectedId());
-    const { blocks, block } = insertBlock(this.blocks(), type, selected < 0 ? undefined : selected + 1);
+    const defaults = blockDef(this.adapter().catalog, type)?.defaultProps;
+    const { blocks, block } = insertBlock(this.blocks(), type, selected < 0 ? undefined : selected + 1, defaults);
     this.setBlocks(blocks);
     this.selectedId.set(block.id);
   }

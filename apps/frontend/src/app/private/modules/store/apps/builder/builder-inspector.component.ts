@@ -268,7 +268,7 @@ export interface BuilderPropChange {
       } @else if (field.kind === 'toggle') {
         <label class="flex items-start gap-2.5" [attr.data-field]="field.key">
           <input type="checkbox" class="mt-0.5 h-4 w-4 accent-[var(--color-primary)]"
-                 [checked]="flag(b, field.key)" (change)="setValue(b, field.key, $any($event.target).checked)" />
+                 [checked]="flag(b, field)" (change)="setValue(b, field.key, $any($event.target).checked)" />
           <span>
             <span class="block text-xs font-semibold text-[var(--color-text-primary)]">{{ field.label }}</span>
             @if (field.hint) {
@@ -594,8 +594,10 @@ export class BuilderInspectorComponent {
     return 'placeholder' in field ? (field.placeholder ?? null) : null;
   }
 
-  flag(block: BuilderBlock, key: string): boolean {
-    return block.props[key] === true;
+  /** Valor efectivo de un interruptor: respeta `defaultValue` del catálogo cuando la prop aún no está guardada. */
+  flag(block: BuilderBlock, field: Extract<BuilderScalarFieldDef, { kind: 'toggle' }>): boolean {
+    const value = block.props[field.key];
+    return typeof value === 'boolean' ? value : Boolean(field.defaultValue);
   }
 
   urlError(value: string | undefined, field: BuilderScalarFieldDef): boolean {

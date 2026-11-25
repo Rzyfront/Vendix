@@ -86,15 +86,16 @@ export function buildStayFacts(
 }
 
 /**
- * Whether the public page needs the stay facts: an enabled `stay_detail`
- * block, or any block shown under conditions. A page without them keeps its
- * response (and its queries) as before.
+ * Indica si la página pública necesita los hechos reales de la estadía:
+ * un bloque `stay_detail` activo o cualquier bloque activo con `visible_when`.
+ * Las páginas sin ellos mantienen su respuesta y consultas anteriores.
  */
 export function needsStayFacts(page: AppPageDocument): boolean {
   return page.blocks.some(
     (b) =>
-      (b.type === 'stay_detail' && b.enabled) ||
-      (!!b.props?.['visible_when'] && typeof b.props['visible_when'] === 'object'),
+      b.enabled !== false &&
+      (b.type === 'stay_detail' ||
+        (!!b.props?.['visible_when'] && typeof b.props['visible_when'] === 'object')),
   );
 }
 
@@ -134,8 +135,18 @@ export class BookingPoliciesService {
     return (await this.read(storeId)).defaults;
   }
 
-  /** Real data of the stay (`stay_detail` and `visible_when`), scoped by `storeId`. */
+  /** Datos reales de la estadía (`stay_detail` y `visible_when`), acotados por `storeId`. */
   async stayFacts(storeId: number): Promise<BookingStayFacts> {
+    return (await this.readWithStayFacts(storeId)).stayFacts;
+  }
+
+  /**
+   * Lee en una sola pasada las políticas del hotel y las habitaciones activas
+   * para entregar `defaults` y `stayFacts` sin duplicar consultas a Prisma.
+   */
+  async readWithStayFacts(
+    storeId: number,
+  ): Promise<{ defaults: PolicyDefaults; stayFacts: BookingStayFacts }> {
     const [{ defaults, depositPercent }, rooms] = await Promise.all([
       this.read(storeId),
       this.prisma.lodging_unit_types.findMany({
@@ -143,27 +154,32 @@ export class BookingPoliciesService {
         select: { max_occupancy: true, images: true },
       }),
     ]);
-    return buildStayFacts(defaults, depositPercent, rooms);
+    return {
+      defaults,
+      stayFacts: buildStayFacts(defaults, depositPercent, rooms),
+    };
   }
 
   private async read(storeId: number): Promise<{ defaults: PolicyDefaults; depositPercent: unknown }> {
-    const row = await this.prisma.store_settings.findFirst({
-      where: { store_id: storeId },
-      select: { settings: true },
-    });
+    const [row, plan] = await Promise.all([
+      this.prisma.store_settings.findFirst({
+        where: { store_id: storeId },
+        select: { settings: true },
+      }),
+      this.prisma.lodging_rate_plans.findFirst({
+        where: { store_id: storeId, is_default: true, is_active: true },
+        select: {
+          deposit_percent: true,
+          cancellation_policy: {
+            select: { id: true, name: true, rules: true, no_show_penalty: true, is_active: true },
+          },
+        },
+      }),
+    ]);
     const hospitality = (mergeStoreSettingsWithDefaults(row?.settings)?.hospitality ?? {}) as {
       check_in_time?: string;
       check_out_time?: string;
     };
-    const plan = await this.prisma.lodging_rate_plans.findFirst({
-      where: { store_id: storeId, is_default: true, is_active: true },
-      select: {
-        deposit_percent: true,
-        cancellation_policy: {
-          select: { id: true, name: true, rules: true, no_show_penalty: true, is_active: true },
-        },
-      },
-    });
     const policy = plan?.cancellation_policy?.is_active ? toPolicySnapshot(plan.cancellation_policy) : null;
     return {
       defaults: {

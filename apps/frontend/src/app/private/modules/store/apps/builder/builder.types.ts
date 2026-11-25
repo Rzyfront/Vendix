@@ -70,8 +70,8 @@ export type BuilderScalarFieldDef =
     }
   /** F6-B: a whole number within `min`..`max` (e.g. a 1-5 rating). Stored as a number. */
   | { key: string; label: string; kind: 'number'; min: number; max: number; hint?: string; group?: 'appearance' }
-  /** F6-B: a yes/no switch (e.g. show the price). Stored as a boolean; block fields only, not list items. */
-  | { key: string; label: string; kind: 'toggle'; hint?: string; group?: 'appearance' };
+  /** F6-B: interruptor sí/no (p. ej. mostrar precio). `defaultValue` sincroniza el check cuando la prop falta. */
+  | { key: string; label: string; kind: 'toggle'; defaultValue?: boolean; hint?: string; group?: 'appearance' };
 
 /**
  * A repeatable list of items (benefits, testimonials, questions, photos).
@@ -169,6 +169,8 @@ export interface BuilderBlockDef {
   pinned?: 'start' | 'end';
   /** F6-B: `false` when removing the block would not take it off the page (only hiding does). */
   removable?: boolean;
+  /** Props iniciales que se escriben explícitamente al insertar el bloque. */
+  defaultProps?: Readonly<Record<string, unknown>>;
 }
 
 /** The blocks one app type offers. */
