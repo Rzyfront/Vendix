@@ -77,7 +77,7 @@ export interface CustomerLocationFilter {
         placeholder="Buscar clientes..."
         [filters]="filterConfigs()"
         [filterValues]="filterValues()"
-        [actions]="dropdownActions"
+        [actions]="dropdownActions()"
         [isLoading]="loading()"
         (searchChange)="onSearch($event)"
         (filterChange)="onFilterChange($event)"

@@ -263,15 +263,32 @@ export class CustomersBulkEditService {
         const payload = this.buildUpdatePayload(row, changes, tier);
         await this.customersService.update(storeId, id, payload);
 
-        // Etiquetas: se escriben DESPUÉS del update escalar y dentro del mismo
-        // try. `tag_action` es idempotente por fila, así que un cliente que ya
-        // tenía la etiqueta no genera escritura.
+        // Etiquetas: se escriben DESPUÉS del update escalar. `tag_action` es
+        // idempotente por fila, así que un cliente que ya tenía la etiqueta no
+        // genera escritura. Si las etiquetas fallan, la fila NO se reporta como
+        // fallo total: los datos del cliente YA se guardaron, y decir lo
+        // contrario mandaría al operador a repetir una escritura que ya ocurrió.
         if (tagContext) {
           const nextTags = this.applyTagAction(
             currentTags.get(id) ?? [],
             tagContext.action,
           );
-          await this.replaceCustomerTags(storeId, id, nextTags);
+          try {
+            await this.replaceCustomerTags(storeId, id, nextTags);
+          } catch (tagError) {
+            const info = this.extractErrorInfo(tagError);
+            this.logger.warn(
+              `Bulk customer edit: las etiquetas del cliente ${id} fallaron: ${info.message}`,
+            );
+            results.push({
+              id,
+              name: this.displayName(row),
+              status: 'error',
+              ...(info.code && { code: info.code }),
+              message: `Los datos del cliente se guardaron, pero las etiquetas no: ${info.message}`,
+            });
+            continue;
+          }
         }
 
         results.push({ id, name: this.displayName(row), status: 'ok' });

@@ -220,6 +220,19 @@
       {{ selectedCount() }} seleccionados · {{ total() }} clientes en el filtro
       actual
     </p>
+
+    <!--
+      La selección NO se limpia al cambiar de filtro ni de página (el `Set` vive
+      en la página, no aquí). Se dice en pantalla porque lo contrario es una
+      suposición habitual y cara: el operador creería que filtrar reencuadra la
+      selección y editaría clientes que ya no ve.
+    -->
+    @if (selectedCount() > 0) {
+      <p class="flex items-start gap-1 text-[10px] leading-tight text-text-secondary">
+        <app-icon name="info" [size]="11" class="mt-px shrink-0 text-primary" />
+        Tu selección se mantiene al cambiar de filtro o de página.
+      </p>
+    }
   </div>
 
   <!-- ═══ Aviso de recorte del endpoint de ids ═══════════════════════════ -->

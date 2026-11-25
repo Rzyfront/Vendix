@@ -86,4 +86,34 @@
     [crmTags]="tagOptions()"
     (applied)="onApplied($event)"
   />
+
+  <!--
+    Barra fija inferior en móvil: a 375 px el header con «Aplicar cambios»
+    queda fuera de pantalla en cuanto se hace scroll, y el contador de
+    seleccionados tiene que estar SIEMPRE visible (es el dato que evita editar
+    medio catálogo sin querer). En escritorio no se pinta: el header sticky ya
+    cumple.
+  -->
+  <div
+    class="sticky bottom-0 z-20 flex items-center justify-between gap-2 border-t border-border bg-surface px-3 py-2 lg:hidden"
+  >
+    <p class="text-[11px] font-semibold text-text-primary" role="status">
+      {{ selectedCount() }}
+      {{ selectedCount() === 1 ? 'seleccionado' : 'seleccionados' }}
+      <span class="font-normal text-text-secondary">·
+        {{ changedFieldKeys().length }}
+        {{ changedFieldKeys().length === 1 ? 'campo' : 'campos' }}
+      </span>
+    </p>
+
+    <app-button
+      variant="primary"
+      size="sm"
+      [disabled]="!canApply() || !canEditCustomers()"
+      (clicked)="onHeaderAction('apply')"
+    >
+      <app-icon slot="icon" name="save" [size]="14" />
+      Aplicar
+    </app-button>
+  </div>
 </div>
