@@ -793,6 +793,7 @@ model organizations {
 
   // Bank Reconciliation & Advanced Accounting
   bank_accounts             bank_accounts[]
+  bank_account_stores       bank_account_stores[]
   fixed_asset_categories    fixed_asset_categories[]
   fixed_assets              fixed_assets[]
   budgets                   budgets[]
@@ -1139,6 +1140,8 @@ model stores {
 
   // Bank Reconciliation & Advanced Accounting
   bank_accounts             bank_accounts[]
+  bank_account_stores       bank_account_stores[]
+  bank_transactions         bank_transactions[]
   fixed_assets              fixed_assets[]
   budgets                   budgets[]
   consolidation_adjustments consolidation_adjustments[]
@@ -10757,11 +10760,17 @@ model bank_accounts {
   status           bank_account_status_enum @default(active)
   chart_account_id Int?
   column_mapping   Json?
+  // QUI-1061 — solo aplica a cuentas de ORGANIZACIÓN (`store_id` NULL):
+  // `true` = disponible en todas las tiendas (default, y lo que ya eran las
+  // cuentas existentes); `false` = solo en las tiendas de `store_assignments`.
+  // Las cuentas de tienda (`store_id` = tienda) lo ignoran.
+  available_in_all_stores Boolean         @default(true)
   created_at       DateTime?                @default(now()) @db.Timestamp(6)
   updated_at       DateTime?                @default(now()) @db.Timestamp(6)
 
   organization         organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   store                stores?                @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  store_assignments    bank_account_stores[]
   chart_account        chart_of_accounts?     @relation(fields: [chart_account_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   bank_transactions    bank_transactions[]
   bank_reconciliations bank_reconciliations[]
@@ -10769,13 +10778,42 @@ model bank_accounts {
   // CP-POLLO-ARABE-727 A.3 — pagos asociados a esta cuenta (FK Restrict)
   payments             payments[]
 
-  @@unique([organization_id, account_number])
+  // QUI-1061 — unicidad según el scope fiscal de la organización:
+  // - cuentas de tienda: única por (organización, tienda, número);
+  // - cuentas de organización (`store_id` NULL): única por (organización,
+  //   número) vía el índice parcial `bank_accounts_org_account_number_org_level_key`
+  //   (`WHERE store_id IS NULL`), que vive solo en la migración
+  //   `20261231180000_bank_accounts_fiscal_scope` porque Prisma no modela
+  //   índices parciales y Postgres no compara NULL en el único compuesto.
+  @@unique([organization_id, store_id, account_number])
+  @@index([organization_id, store_id])
+}
+
+/// QUI-1061 — tiendas en las que está disponible una cuenta bancaria de
+/// ORGANIZACIÓN (`bank_accounts.store_id` NULL) cuando
+/// `available_in_all_stores = false`. Org-scoped en `StorePrismaService`.
+model bank_account_stores {
+  id              Int       @id @default(autoincrement())
+  bank_account_id Int
+  store_id        Int
+  organization_id Int
+  created_at      DateTime? @default(now()) @db.Timestamp(6)
+
+  bank_account bank_accounts @relation(fields: [bank_account_id], references: [id], onDelete: Cascade)
+  store        stores        @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+
+  @@unique([bank_account_id, store_id])
   @@index([organization_id, store_id])
 }
 
 model bank_transactions {
   id               Int                        @id @default(autoincrement())
   bank_account_id  Int
+  // QUI-1061 — tienda de origen del movimiento (nullable para históricos y
+  // extractos importados a nivel organización). Permite filtrar por sucursal
+  // en cuentas consolidadas de organización sin dividir saldo ni conciliación.
+  store_id         Int?
   transaction_date DateTime                   @db.Date
   value_date       DateTime?                  @db.Date
   description      String                     @db.VarChar(500)
@@ -10790,11 +10828,13 @@ model bank_transactions {
   updated_at       DateTime?                  @default(now()) @db.Timestamp(6)
 
   bank_account                bank_accounts                 @relation(fields: [bank_account_id], references: [id], onDelete: Cascade)
+  store                       stores?                       @relation(fields: [store_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   bank_reconciliation_matches bank_reconciliation_matches[]
 
   @@unique([bank_account_id, external_id])
   @@index([bank_account_id, transaction_date])
   @@index([bank_account_id, is_reconciled])
+  @@index([bank_account_id, store_id])
 }
 
 model bank_reconciliations {
