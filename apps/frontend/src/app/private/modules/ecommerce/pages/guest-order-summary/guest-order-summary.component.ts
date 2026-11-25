@@ -2255,7 +2255,11 @@ export class GuestOrderSummaryComponent implements OnInit {
         ?.orders;
     this.voucherPrint.printVoucher(summary, {
       hidePrepEta: !this.physicalProgressAllowed() || orders?.hide_prep_eta === true,
-      hideTracking: orders?.hide_tracking_progress === true,
+      // QUI-1062: un pedido de solo servicios o reservas nunca imprime la
+      // barra de seguimiento.
+      hideTracking:
+        !this.showsPhysicalProgress() ||
+        orders?.hide_tracking_progress === true,
     });
   }
 
@@ -2571,6 +2575,7 @@ export class GuestOrderSummaryComponent implements OnInit {
 
   etaVisible(): boolean {
     if (!this.physicalProgressAllowed()) return false;
+    if (!this.showsPhysicalProgress()) return false;
     const config = this.tenantFacade.getCurrentDomainConfig();
     if (config?.customConfig?.ecommerce?.orders?.hide_prep_eta === true) {
       return false;
@@ -2581,11 +2586,29 @@ export class GuestOrderSummaryComponent implements OnInit {
   }
 
   /**
+   * QUI-1062 — un pedido de solo servicios o reservas no se prepara ni se
+   * entrega: no debe mostrar barra de seguimiento ni tiempo estimado.
+   *
+   * Reglas: cuentan solo las líneas vivas (no canceladas); un ítem sin
+   * `product_type` se trata como físico (compatibilidad con pedidos
+   * heredados) y un pedido sin desglose de ítems no se puede afirmar que sea
+   * de solo servicios, así que conserva la barra.
+   */
+  private showsPhysicalProgress(): boolean {
+    const items = this.summary()?.order?.items;
+    if (!items?.length) return true;
+    return items.some(
+      (item) => item.cancelled_at == null && item.product_type !== 'service',
+    );
+  }
+
+  /**
    * Paso 10 — opt-out `ecommerce.orders.hide_tracking_progress` (paso 7):
    * ausente ⇒ la barra se muestra, se lee con `!== true`.
    */
   trackingShown(): boolean {
     if (!this.physicalProgressAllowed()) return false;
+    if (!this.showsPhysicalProgress()) return false;
     const config = this.tenantFacade.getCurrentDomainConfig();
     if (
       config?.customConfig?.ecommerce?.orders?.hide_tracking_progress === true
