@@ -187,6 +187,8 @@ describe('ProductsService', () => {
       updateMany: jest.fn(),
     },
     $transaction: jest.fn(),
+    // `addImage` locks the product row to serialize concurrent additions.
+    $queryRaw: jest.fn().mockResolvedValue([]),
   };
 
   const mockVariantService = {
