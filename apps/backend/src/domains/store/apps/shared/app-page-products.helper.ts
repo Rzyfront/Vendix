@@ -23,6 +23,8 @@ export interface PreviewProductVariant {
   regular_final_price: number;
   is_on_sale: boolean;
   image_url: string | null;
+  /** Stock real desde `stock_levels`, igual que `mapVariantsToResponse`. */
+  is_available: boolean;
 }
 
 export interface PreviewProductCard {
@@ -65,6 +67,7 @@ export interface PreviewProductRow {
     is_on_sale?: boolean | null;
     track_inventory_override?: boolean | null;
     product_images?: { image_url?: string | null } | null;
+    stock_levels?: Array<{ quantity_available?: unknown }> | null;
   }>;
 }
 
@@ -134,6 +137,7 @@ export function buildPreviewProductSelect(includeDescription = false) {
         is_on_sale: true,
         track_inventory_override: true,
         product_images: { select: { image_url: true } },
+        stock_levels: { select: { quantity_available: true } },
       },
       orderBy: { id: 'asc' as const },
       take: MAX_PREVIEW_PRODUCT_VARIANTS,
@@ -371,16 +375,24 @@ export async function resolvePreviewProductCards(
             null,
           );
           const variantImage = signedVariantImages[index] ?? null;
+          // Misma regla que `mapVariantsToResponse`: `is_on_sale` es el flag tal
+          // cual (no se exige `sale_price`) y la disponibilidad sale del stock
+          // real, con el override de inventario de la variante.
+          const effectiveTracking =
+            v.track_inventory_override ?? Boolean(row.track_inventory);
+          const availableStock = (v.stock_levels ?? []).reduce(
+            (sum, sl) => sum + Number(sl?.quantity_available ?? 0),
+            0,
+          );
           variants.push({
             id: v.id,
             name: v.name?.trim() || v.sku || `Variante ${v.id}`,
             sku: v.sku ?? null,
             final_price: variantFinal,
             regular_final_price: variantRegular,
-            is_on_sale:
-              Boolean(v.is_on_sale && Number(v.sale_price ?? 0) > 0) ||
-              variantRegular > variantFinal,
+            is_on_sale: Boolean(v.is_on_sale),
             image_url: variantImage,
+            is_available: !effectiveTracking || availableStock > 0,
           });
         }
       }
@@ -393,7 +405,9 @@ export async function resolvePreviewProductCards(
         final_price: finalPrice,
         regular_final_price: regularFinalPrice,
         is_on_sale: isOnSale,
-        active_promotion: promo,
+        // Solo se publica cuando de verdad se aplicó: si la promo se omite por
+        // variantes, la tarjeta no debe mostrar etiqueta de descuento.
+        active_promotion: hasFlatPromo ? promo : null,
         variants,
       });
     }),

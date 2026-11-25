@@ -119,9 +119,15 @@ export function mapEcommerceProductToItem(product: EcommerceProduct): AppPagePro
   const promoPrice = promo ? Number(promo.promotional_price) : NaN;
   // La promoción plana es un precio de PRODUCTO: si el producto expone
   // variantes, aplicarla dejaría la tarjeta más barata que cualquier variante y
-  // el precio subiría al elegir una. Misma regla que `resolvePreviewProductCards`.
+  // el precio subiría al elegir una. Misma regla que `resolvePreviewProductCards`,
+  // decidida con `variant_count` (no con `variants`, que solo llega cuando el
+  // bloque muestra selectores) para que preview y público coincidan siempre.
+  const exposedVariantCount =
+    product.variant_count ?? variants.length;
+  const hasExposedVariants =
+    !product.sale_unit && exposedVariantCount > 0;
   const hasFlatPromo =
-    variants.length === 0 &&
+    !hasExposedVariants &&
     promo !== null &&
     promo.is_quantity_tiered !== true &&
     Number.isFinite(promoPrice) &&

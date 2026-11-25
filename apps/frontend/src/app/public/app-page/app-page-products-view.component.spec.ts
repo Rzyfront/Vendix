@@ -99,6 +99,31 @@ describe('AppPageProductsViewComponent', () => {
     expect(el().querySelector('[data-testid="product-card-compare-at"]')?.textContent?.trim()).toBe('$92000');
   });
 
+  it('la variante agotada se muestra deshabilitada y con aria-disabled', () => {
+    const withVariants = item(1, 'Crema hidratante', {
+      final_price: 50000,
+      variants: [
+        { id: 101, name: '250 ml', final_price: 50000, is_on_sale: false, is_available: true },
+        { id: 102, name: '500 ml', final_price: 78000, is_on_sale: false, is_available: false },
+      ],
+    });
+
+    fixture = TestBed.createComponent(AppPageProductsViewComponent);
+    fixture.componentRef.setInput('selection', 'manual');
+    fixture.componentRef.setInput('productIds', [1]);
+    fixture.componentRef.setInput('showVariants', true);
+    fixture.componentRef.setInput('preview', true);
+    fixture.componentRef.setInput('previewItems', [withVariants]);
+    fixture.detectChanges();
+
+    const soldOut = el().querySelector('[data-testid="variant-option-102"]') as HTMLButtonElement;
+    expect(soldOut.disabled).toBe(true);
+    expect(soldOut.getAttribute('aria-disabled')).toBe('true');
+
+    const available = el().querySelector('[data-testid="variant-option-101"]') as HTMLButtonElement;
+    expect(available.disabled).toBe(false);
+  });
+
   it('en página pública carga productos con include_variants y actualiza el precio igual que en vista previa', async () => {
     catalogSpy.getProducts.and.returnValue(
       of({
