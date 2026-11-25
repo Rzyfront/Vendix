@@ -56,6 +56,9 @@ const PUBLIC_TOOLS = [
   // F5/T34: proposes a batch and never writes; every step is re-checked by
   // this same role gate at approval, so it grants no business permission.
   'propose_write_batch',
+  // Vex T5: same reach as POST /support/tickets (no permission there); writes
+  // only after the person approves the card and only for a missing capability.
+  'request_capability',
   // agent scaffolding
   'search_tools',
   'suggest_followup',
