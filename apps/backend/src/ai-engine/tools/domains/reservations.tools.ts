@@ -94,6 +94,117 @@ const HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
 /** Máximo de slots que se serializan antes de truncar. */
 const MAX_SLOTS = 30;
 
+/**
+ * Horario 24 h y turnos nocturnos con el mismo criterio del HTTP
+ * (`BusinessHoursDayDto`, `ProviderScheduleService`, S21): fin <= inicio =
+ * el bloque termina al día siguiente; `00:00`–`00:00` = abierto 24 horas.
+ * La tool acepta además dos atajos para el modelo, `all_day: true` y un fin
+ * `24:00`, que se traducen a ese par antes de validar con el DTO.
+ */
+function normalizeClockRow(
+  raw: unknown,
+  startKey = 'start_time',
+  endKey = 'end_time',
+): Record<string, any> {
+  if (!raw || typeof raw !== 'object') return {};
+  const { all_day, ...rest } = raw as Record<string, any>;
+  const out: Record<string, any> = { ...rest };
+  if (all_day === true) {
+    out[startKey] = '00:00';
+    out[endKey] = '00:00';
+  } else if (out[endKey] === '24:00') {
+    out[endKey] = '00:00';
+  }
+  return out;
+}
+
+/** Fin == inicio solo vale como 24 h (`00:00`–`00:00`), igual que el servicio. */
+function isZeroLengthBlock(start?: string | null, end?: string | null): boolean {
+  return !!start && start === end && start !== '00:00';
+}
+
+/** "22:00–06:00 (termina al día siguiente)" / "24 horas" para el preview. */
+function clockRangeLabel(start?: string | null, end?: string | null): string {
+  if (start === '00:00' && end === '00:00') return '24 horas';
+  const overnight = !!start && !!end && end !== '00:00' && end <= start;
+  return `${start}–${end === '00:00' ? '24:00' : end}${overnight ? ' (termina al día siguiente)' : ''}`;
+}
+
+const ZERO_LENGTH_HINT =
+  'la apertura y el cierre son la misma hora; usa all_day: true (o 00:00 a 00:00) para atender las 24 horas';
+
+/** Fila del calendario maestro → payload de `BusinessHoursDayDto` (con turnos partidos). */
+function businessHoursRow(raw: unknown): Record<string, unknown> {
+  const row = normalizeClockRow(raw);
+  const blocks = Array.isArray(row.blocks)
+    ? row.blocks.map((block: unknown) => {
+        const b = normalizeClockRow(block);
+        return {
+          ...(b.start_time ? { start_time: String(b.start_time) } : {}),
+          ...(b.end_time ? { end_time: String(b.end_time) } : {}),
+        };
+      })
+    : undefined;
+  // Con turnos partidos el inicio/fin del día salen del primer y último bloque.
+  const start = row.start_time ?? blocks?.[0]?.start_time;
+  const end = row.end_time ?? blocks?.[blocks.length - 1]?.end_time;
+  return {
+    ...(row.day_of_week !== undefined && {
+      day_of_week: Number(row.day_of_week),
+    }),
+    ...(start ? { start_time: String(start) } : {}),
+    ...(end ? { end_time: String(end) } : {}),
+    ...(row.is_active !== undefined ? { is_active: row.is_active === true } : {}),
+    ...(blocks ? { blocks } : {}),
+  };
+}
+
+/** Bloques efectivos de un día del calendario maestro (los `blocks` ganan). */
+function businessDayBlocks(item: {
+  start_time: string;
+  end_time: string;
+  blocks?: Array<{ start_time: string; end_time: string }>;
+}): Array<{ start_time: string; end_time: string }> {
+  return item.blocks?.length
+    ? item.blocks
+    : [{ start_time: item.start_time, end_time: item.end_time }];
+}
+
+/** Excepción de un prestador → payload de `CreateProviderExceptionDto`. */
+function exceptionPayload(raw: unknown): Record<string, unknown> {
+  const row = normalizeClockRow(raw, 'custom_start_time', 'custom_end_time');
+  const customHours = !!(row.custom_start_time || row.custom_end_time);
+  return {
+    ...(row.date ? { date: String(row.date) } : {}),
+    // Horario especial sin is_unavailable explícito = el día SÍ se atiende con ese horario.
+    ...(row.is_unavailable !== undefined
+      ? { is_unavailable: row.is_unavailable === true }
+      : customHours
+        ? { is_unavailable: false }
+        : {}),
+    ...(row.custom_start_time ? { custom_start_time: String(row.custom_start_time) } : {}),
+    ...(row.custom_end_time ? { custom_end_time: String(row.custom_end_time) } : {}),
+    ...(row.reason ? { reason: String(row.reason) } : {}),
+  };
+}
+
+/** Rechazo legible de un horario especial inválido; null si está bien. */
+function exceptionHoursError(dto: {
+  custom_start_time?: string;
+  custom_end_time?: string;
+}): string | null {
+  const { custom_start_time: start, custom_end_time: end } = dto;
+  if (!start && !end) return null;
+  if (!start || !end) {
+    return 'El horario especial necesita custom_start_time y custom_end_time (o all_day: true).';
+  }
+  if (!HH_MM.test(start) || !HH_MM.test(end)) {
+    return `El horario especial debe venir en HH:mm de 24 h. Recibido: ${start}–${end}.`;
+  }
+  if (isZeroLengthBlock(start, end)) return `Horario especial: ${ZERO_LENGTH_HINT}.`;
+  return null;
+}
+
 function clamp(value: any, fallback: number, max: number): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 1) return fallback;
@@ -1543,7 +1654,7 @@ export function createReservationsTools(
             type: 'string',
             enum: PROVIDER_ACTIONS,
             description:
-              'create/update: alta y edición de proveedor. assign_service/remove_service: vínculo proveedor↔servicio. set_schedule: reemplaza el horario semanal propio (el proveedor deja de usar el horario de la tienda). add_exception/remove_exception: días no disponibles. set_business_hours: reemplaza el calendario maestro de la tienda.',
+              'create/update: alta y edición de proveedor. assign_service/remove_service: vínculo proveedor↔servicio. set_schedule: reemplaza el horario semanal propio (el proveedor deja de usar el horario de la tienda). add_exception/remove_exception: días no disponibles. set_business_hours: cambia el horario de la tienda (fuente única; lo heredan los prestadores con uses_store_hours). Horarios: admiten 24 h (all_day) y turnos que cruzan medianoche.',
           },
           provider_id: {
             type: 'number',
@@ -1585,13 +1696,13 @@ export function createReservationsTools(
           schedule: {
             type: 'array',
             description:
-              'Horario semanal COMPLETO que reemplaza al actual: [{day_of_week 0-6 (0=domingo), start_time HH:mm, end_time HH:mm, block_order?, is_active?}].',
+              'Horario semanal COMPLETO que reemplaza al actual: [{day_of_week 0-6 (0=domingo), start_time HH:mm, end_time HH:mm, all_day?, block_order?, is_active?}]. Fin menor o igual que el inicio = turno que termina al día siguiente (22:00–06:00). 24 horas: all_day: true (equivale a 00:00–00:00; también se acepta end_time 24:00).',
             items: { type: 'object' },
           },
           exception: {
             type: 'object',
             description:
-              'Excepción a crear: {date YYYY-MM-DD, is_unavailable? (default true), custom_start_time?, custom_end_time?, reason?}.',
+              'Excepción a crear: {date YYYY-MM-DD, is_unavailable?, custom_start_time? HH:mm, custom_end_time? HH:mm, all_day?, reason?}. Sin horario = día no disponible. Con horario especial (o all_day: true) el día se atiende en ese horario; admite turno nocturno (fin <= inicio).',
           },
           exception_id: {
             type: 'number',
@@ -1600,7 +1711,7 @@ export function createReservationsTools(
           business_hours: {
             type: 'array',
             description:
-              'Calendario maestro COMPLETO: [{day_of_week 0-6, start_time HH:mm, end_time HH:mm, is_active?}]. Los días omitidos se DESACTIVAN.',
+              'Horario de la tienda por día: [{day_of_week 0-6, start_time HH:mm, end_time HH:mm, all_day?, is_active?, blocks? [{start_time, end_time}] (turno partido, máx 5)}]. Solo se reescriben los días enviados; is_active false = cerrado. Fin menor o igual que el inicio = cierra al día siguiente (18:00–02:00). 24 horas: all_day: true (= 00:00–00:00; también end_time 24:00).',
             items: { type: 'object' },
           },
         },
@@ -1823,7 +1934,9 @@ export function createReservationsTools(
           if (isPreview(provider)) return provider;
           const rawItems = Array.isArray(args.schedule) ? args.schedule : [];
           const validated = toValidatedDto(UpsertProviderScheduleDto, {
-            items: rawItems.map((row: any) => ({
+            items: rawItems
+                .map((raw: any) => normalizeClockRow(raw))
+                .map((row: any) => ({
               ...(row?.day_of_week !== undefined && {
                 day_of_week: Number(row.day_of_week),
               }),
@@ -1845,10 +1958,21 @@ export function createReservationsTools(
               message: validated.message,
             };
           }
+          const zero = validated.dto.items.find((item) =>
+            isZeroLengthBlock(item.start_time, item.end_time),
+          );
+          if (zero) {
+            return {
+              status: 'error',
+              target: `Horario de ${providerName(provider)}`,
+              changes: [],
+              message: `${DAY_NAMES[zero.day_of_week]}: ${ZERO_LENGTH_HINT}.`,
+            };
+          }
           const summary = validated.dto.items
             .map(
               (item) =>
-                `${DAY_NAMES[item.day_of_week]} ${item.start_time}–${item.end_time}${item.is_active === false ? ' (inactivo)' : ''}`,
+                `${DAY_NAMES[item.day_of_week]} ${clockRangeLabel(item.start_time, item.end_time)}${item.is_active === false ? ' (inactivo)' : ''}`,
             )
             .join(', ');
           return {
@@ -1869,19 +1993,10 @@ export function createReservationsTools(
           const provider = await needProvider();
           if (isPreview(provider)) return provider;
           const raw = (args.exception ?? {}) as Record<string, any>;
-          const validated = toValidatedDto(CreateProviderExceptionDto, {
-            ...(raw.date ? { date: String(raw.date) } : {}),
-            ...(raw.is_unavailable !== undefined
-              ? { is_unavailable: raw.is_unavailable === true }
-              : {}),
-            ...(raw.custom_start_time
-              ? { custom_start_time: String(raw.custom_start_time) }
-              : {}),
-            ...(raw.custom_end_time
-              ? { custom_end_time: String(raw.custom_end_time) }
-              : {}),
-            ...(raw.reason ? { reason: String(raw.reason) } : {}),
-          });
+          const validated = toValidatedDto(
+            CreateProviderExceptionDto,
+            exceptionPayload(raw),
+          );
           if (!validated.ok) {
             return {
               status: 'error',
@@ -1890,15 +2005,29 @@ export function createReservationsTools(
               message: validated.message,
             };
           }
+          const hoursError = exceptionHoursError(validated.dto);
+          if (hoursError) {
+            return {
+              status: 'error',
+              target: `Excepción de ${providerName(provider)}`,
+              changes: [],
+              message: hoursError,
+            };
+          }
+          const specialHours =
+            validated.dto.is_unavailable === false &&
+            !!validated.dto.custom_start_time;
           return {
             status: 'ok',
-            target: `No disponible ${validated.dto.date} — ${providerName(provider)}`,
+            target: specialHours
+              ? `Horario especial ${validated.dto.date} — ${providerName(provider)}`
+              : `No disponible ${validated.dto.date} — ${providerName(provider)}`,
             changes: [
               {
                 field: 'excepcion',
-                label: 'Día no disponible',
+                label: specialHours ? 'Horario especial' : 'Día no disponible',
                 from: null,
-                to: `${validated.dto.date}${validated.dto.reason ? ` (${validated.dto.reason})` : ''}`,
+                to: `${validated.dto.date}${specialHours ? ` ${clockRangeLabel(validated.dto.custom_start_time, validated.dto.custom_end_time)}` : ''}${validated.dto.reason ? ` (${validated.dto.reason})` : ''}`,
               },
             ],
             domain: 'reservations',
@@ -1934,16 +2063,7 @@ export function createReservationsTools(
           ? args.business_hours
           : [];
         const validated = toValidatedDto(UpsertBusinessHoursDto, {
-          items: rawItems.map((row: any) => ({
-            ...(row?.day_of_week !== undefined && {
-              day_of_week: Number(row.day_of_week),
-            }),
-            ...(row?.start_time ? { start_time: String(row.start_time) } : {}),
-            ...(row?.end_time ? { end_time: String(row.end_time) } : {}),
-            ...(row?.is_active !== undefined
-              ? { is_active: row.is_active === true }
-              : {}),
-          })),
+          items: rawItems.map(businessHoursRow),
         });
         if (!validated.ok) {
           return {
@@ -1953,13 +2073,16 @@ export function createReservationsTools(
             message: validated.message,
           };
         }
+        // S21: fin <= inicio es un turno nocturno válido; solo se rechaza el
+        // bloque de duración cero que no es el 24 h explícito (00:00–00:00).
         for (const item of validated.dto.items) {
-          if (item.start_time >= item.end_time) {
+          if (item.is_active === false) continue;
+          if (businessDayBlocks(item).some((b) => isZeroLengthBlock(b.start_time, b.end_time))) {
             return {
               status: 'error',
               target: 'Calendario maestro de la tienda',
               changes: [],
-              message: `Día ${item.day_of_week} (${DAY_NAMES[item.day_of_week]}): end_time (${item.end_time}) debe ser mayor que start_time (${item.start_time}).`,
+              message: `Día ${item.day_of_week} (${DAY_NAMES[item.day_of_week]}): ${ZERO_LENGTH_HINT}.`,
             };
           }
         }
@@ -1977,11 +2100,14 @@ export function createReservationsTools(
             to:
               item.is_active === false
                 ? 'cerrado'
-                : `${item.start_time}–${item.end_time}`,
+                : businessDayBlocks(item)
+                    .map((b) => clockRangeLabel(b.start_time, b.end_time))
+                    .join(' y '),
           })),
+          // El servicio solo reescribe los días enviados (`settings.pos.business_hours`).
           message:
-            `Reemplaza TODO el calendario: ${omitted.length ? `los días omitidos (${omitted.join(', ')}) se DESACTIVAN` : 'los 7 días quedan definidos'}. ` +
-            'Ningún proveedor podrá reservarse fuera de estas ventanas.',
+            `Reemplaza el horario de los días enviados${omitted.length ? `; los omitidos (${omitted.join(', ')}) conservan su horario actual` : ''}. ` +
+            'Los prestadores que usan el horario de la tienda lo heredan, y nadie podrá reservarse fuera de estas ventanas.',
           domain: 'reservations',
         };
       },
@@ -2038,18 +2164,7 @@ export function createReservationsTools(
               ? args.business_hours
               : [];
             const validated = toValidatedDto(UpsertBusinessHoursDto, {
-              items: rawItems.map((row: any) => ({
-                ...(row?.day_of_week !== undefined && {
-                  day_of_week: Number(row.day_of_week),
-                }),
-                ...(row?.start_time
-                  ? { start_time: String(row.start_time) }
-                  : {}),
-                ...(row?.end_time ? { end_time: String(row.end_time) } : {}),
-                ...(row?.is_active !== undefined
-                  ? { is_active: row.is_active === true }
-                  : {}),
-              })),
+              items: rawItems.map(businessHoursRow),
             });
             if (!validated.ok) {
               return JSON.stringify({
@@ -2058,9 +2173,10 @@ export function createReservationsTools(
               });
             }
             for (const item of validated.dto.items) {
-              if (item.start_time >= item.end_time) {
+              if (item.is_active === false) continue;
+              if (businessDayBlocks(item).some((b) => isZeroLengthBlock(b.start_time, b.end_time))) {
                 return JSON.stringify({
-                  error: `Día ${item.day_of_week} (${DAY_NAMES[item.day_of_week]}): end_time debe ser mayor que start_time.`,
+                  error: `Día ${item.day_of_week} (${DAY_NAMES[item.day_of_week]}): ${ZERO_LENGTH_HINT}.`,
                   next_step: 'Corrige el día indicado y reintenta.',
                 });
               }
@@ -2073,7 +2189,7 @@ export function createReservationsTools(
               calendario_maestro: {
                 dias_definidos: validated.dto.items.length,
               },
-              nota: 'El calendario maestro quedó reemplazado: los días omitidos se desactivaron.',
+              nota: 'El horario de la tienda quedó actualizado en los días enviados; los omitidos conservan su horario.',
             });
           }
           // Resto de acciones: re-verifican que el proveedor siga existiendo.
@@ -2173,7 +2289,9 @@ export function createReservationsTools(
           if (action === 'set_schedule') {
             const rawItems = Array.isArray(args.schedule) ? args.schedule : [];
             const validated = toValidatedDto(UpsertProviderScheduleDto, {
-              items: rawItems.map((row: any) => ({
+              items: rawItems
+                .map((raw: any) => normalizeClockRow(raw))
+                .map((row: any) => ({
                 ...(row?.day_of_week !== undefined && {
                   day_of_week: Number(row.day_of_week),
                 }),
@@ -2210,23 +2328,21 @@ export function createReservationsTools(
           }
           if (action === 'add_exception') {
             const raw = (args.exception ?? {}) as Record<string, any>;
-            const validated = toValidatedDto(CreateProviderExceptionDto, {
-              ...(raw.date ? { date: String(raw.date) } : {}),
-              ...(raw.is_unavailable !== undefined
-                ? { is_unavailable: raw.is_unavailable === true }
-                : {}),
-              ...(raw.custom_start_time
-                ? { custom_start_time: String(raw.custom_start_time) }
-                : {}),
-              ...(raw.custom_end_time
-                ? { custom_end_time: String(raw.custom_end_time) }
-                : {}),
-              ...(raw.reason ? { reason: String(raw.reason) } : {}),
-            });
+            const validated = toValidatedDto(
+              CreateProviderExceptionDto,
+              exceptionPayload(raw),
+            );
             if (!validated.ok) {
               return JSON.stringify({
                 error: validated.message,
                 next_step: 'Corrige la excepción indicada y vuelve a proponer.',
+              });
+            }
+            const hoursError = exceptionHoursError(validated.dto);
+            if (hoursError) {
+              return JSON.stringify({
+                error: hoursError,
+                next_step: 'Corrige el horario especial y vuelve a proponer.',
               });
             }
             const created: any =

@@ -1146,7 +1146,7 @@ describe('reservations.tools · contrato T4', () => {
       ).not.toHaveBeenCalled();
     });
 
-    it('(e) preview set_business_hours: warning que lista días desactivados', async () => {
+    it('(e) preview set_business_hours: warning que lista los días que conservan su horario', async () => {
       const { deps, tools } = buildTools();
 
       const result = await preview(tools, 'manage_booking_providers', {
@@ -1157,7 +1157,7 @@ describe('reservations.tools · contrato T4', () => {
       });
 
       expect(result.status).toBe('warning');
-      expect(result.message).toContain('DESACTIVAN');
+      expect(result.message).toContain('conservan su horario actual');
       expect(result.message).toContain('domingo');
       expect(result.changes).toEqual([
         { field: 'dia_1', label: 'lunes', from: 'actual', to: '08:00–18:00' },
@@ -1183,19 +1183,215 @@ describe('reservations.tools · contrato T4', () => {
       );
     });
 
-    it('(a) sad: business_hours con fin<=inicio → error con día legible', async () => {
+    it('(a) sad: business_hours con fin==inicio (no 24 h) → error con día legible', async () => {
       const { deps, tools } = buildTools();
 
       const result = await preview(tools, 'manage_booking_providers', {
         action: 'set_business_hours',
         business_hours: [
-          { day_of_week: 1, start_time: '18:00', end_time: '08:00' },
+          { day_of_week: 1, start_time: '08:00', end_time: '08:00' },
         ],
       });
 
       expect(result.status).toBe('error');
       expect(result.message).toContain('lunes');
+      expect(result.message).toContain('all_day');
       expect(deps.businessHoursService.upsertAll).not.toHaveBeenCalled();
+    });
+
+    // ─── Turnos nocturnos y 24 h (criterio S21 del HTTP) ────────────────
+    describe('horario 24 h y turnos nocturnos', () => {
+      it('set_business_hours acepta fin<inicio como turno que cruza medianoche', async () => {
+        const { deps, tools } = buildTools();
+        deps.businessHoursService.upsertAll.mockResolvedValue([]);
+        const args = {
+          action: 'set_business_hours',
+          business_hours: [
+            { day_of_week: 5, start_time: '18:00', end_time: '02:00' },
+          ],
+        };
+
+        const result = await preview(tools, 'manage_booking_providers', args);
+        expect(result.status).toBe('warning');
+        expect(result.changes).toEqual([
+          {
+            field: 'dia_5',
+            label: 'viernes',
+            from: 'actual',
+            to: '18:00–02:00 (termina al día siguiente)',
+          },
+        ]);
+
+        const answer = await run(tools, 'manage_booking_providers', args);
+        expect(answer.error).toBeUndefined();
+        expect(deps.businessHoursService.upsertAll).toHaveBeenCalledWith(
+          STORE_ID,
+          expect.objectContaining({
+            items: [
+              expect.objectContaining({
+                day_of_week: 5,
+                start_time: '18:00',
+                end_time: '02:00',
+              }),
+            ],
+          }),
+        );
+      });
+
+      it('set_business_hours: all_day y end_time 24:00 se guardan como 00:00–00:00', async () => {
+        const { deps, tools } = buildTools();
+        deps.businessHoursService.upsertAll.mockResolvedValue([]);
+
+        const result = await preview(tools, 'manage_booking_providers', {
+          action: 'set_business_hours',
+          business_hours: [
+            { day_of_week: 0, all_day: true },
+            { day_of_week: 6, start_time: '00:00', end_time: '24:00' },
+          ],
+        });
+        expect(result.status).toBe('warning');
+        expect(result.changes.map((change: any) => change.to)).toEqual([
+          '24 horas',
+          '24 horas',
+        ]);
+
+        await run(tools, 'manage_booking_providers', {
+          action: 'set_business_hours',
+          business_hours: [
+            { day_of_week: 0, all_day: true },
+            { day_of_week: 6, start_time: '00:00', end_time: '24:00' },
+          ],
+        });
+        const dto = deps.businessHoursService.upsertAll.mock.calls[0][1];
+        expect(
+          dto.items.map((item: any) => [item.start_time, item.end_time]),
+        ).toEqual([
+          ['00:00', '00:00'],
+          ['00:00', '00:00'],
+        ]);
+      });
+
+      it('set_business_hours pasa turnos partidos (blocks) al servicio', async () => {
+        const { deps, tools } = buildTools();
+        deps.businessHoursService.upsertAll.mockResolvedValue([]);
+
+        await run(tools, 'manage_booking_providers', {
+          action: 'set_business_hours',
+          business_hours: [
+            {
+              day_of_week: 2,
+              blocks: [
+                { start_time: '08:00', end_time: '12:00' },
+                { start_time: '20:00', end_time: '03:00' },
+              ],
+            },
+          ],
+        });
+        const item = deps.businessHoursService.upsertAll.mock.calls[0][1].items[0];
+        expect(item.start_time).toBe('08:00');
+        expect(item.end_time).toBe('03:00');
+        expect(item.blocks).toHaveLength(2);
+      });
+
+      it('set_schedule acepta turno nocturno y all_day del prestador', async () => {
+        const { deps, tools } = buildTools();
+        deps.providersService.findOne.mockResolvedValue(PROVIDER_ROW);
+        deps.providerScheduleService.upsertSchedule.mockResolvedValue([]);
+        const args = {
+          action: 'set_schedule',
+          provider_id: 3,
+          schedule: [
+            { day_of_week: 1, start_time: '22:00', end_time: '06:00' },
+            { day_of_week: 3, all_day: true },
+          ],
+        };
+
+        const result = await preview(tools, 'manage_booking_providers', args);
+        expect(result.status).toBe('ok');
+        expect(result.changes[0].to).toBe(
+          'lunes 22:00–06:00 (termina al día siguiente), miércoles 24 horas',
+        );
+
+        await run(tools, 'manage_booking_providers', args);
+        const items = deps.providerScheduleService.upsertSchedule.mock.calls[0][1];
+        expect(items.map((i: any) => [i.start_time, i.end_time])).toEqual([
+          ['22:00', '06:00'],
+          ['00:00', '00:00'],
+        ]);
+      });
+
+      it('set_schedule rechaza un bloque de duración cero que no es 24 h', async () => {
+        const { deps, tools } = buildTools();
+        deps.providersService.findOne.mockResolvedValue(PROVIDER_ROW);
+
+        const result = await preview(tools, 'manage_booking_providers', {
+          action: 'set_schedule',
+          provider_id: 3,
+          schedule: [{ day_of_week: 1, start_time: '09:00', end_time: '09:00' }],
+        });
+        expect(result.status).toBe('error');
+        expect(result.message).toContain('lunes');
+        expect(deps.providerScheduleService.upsertSchedule).not.toHaveBeenCalled();
+      });
+
+      it('add_exception con horario nocturno especial: día atendido, no bloqueado', async () => {
+        const { deps, tools } = buildTools();
+        deps.providersService.findOne.mockResolvedValue(PROVIDER_ROW);
+        deps.providerScheduleService.createException.mockResolvedValue({ id: 44 });
+        const args = {
+          action: 'add_exception',
+          provider_id: 3,
+          exception: {
+            date: '2026-12-31',
+            custom_start_time: '20:00',
+            custom_end_time: '04:00',
+          },
+        };
+
+        const result = await preview(tools, 'manage_booking_providers', args);
+        expect(result.status).toBe('ok');
+        expect(result.changes[0].to).toBe(
+          '2026-12-31 20:00–04:00 (termina al día siguiente)',
+        );
+
+        await run(tools, 'manage_booking_providers', args);
+        expect(deps.providerScheduleService.createException).toHaveBeenCalledWith(
+          3,
+          expect.objectContaining({
+            is_unavailable: false,
+            custom_start_time: '20:00',
+            custom_end_time: '04:00',
+          }),
+        );
+      });
+
+      it('add_exception sin horario sigue bloqueando el día (compatibilidad)', async () => {
+        const { deps, tools } = buildTools();
+        deps.providersService.findOne.mockResolvedValue(PROVIDER_ROW);
+        deps.providerScheduleService.createException.mockResolvedValue({ id: 45 });
+
+        await run(tools, 'manage_booking_providers', {
+          action: 'add_exception',
+          provider_id: 3,
+          exception: { date: '2026-12-24', reason: 'vacaciones' },
+        });
+        const dto = deps.providerScheduleService.createException.mock.calls[0][1];
+        expect(dto.is_unavailable).toBe(true);
+        expect(dto.custom_start_time).toBeUndefined();
+      });
+
+      it('add_exception rechaza horario especial incompleto', async () => {
+        const { deps, tools } = buildTools();
+        deps.providersService.findOne.mockResolvedValue(PROVIDER_ROW);
+
+        const answer = await run(tools, 'manage_booking_providers', {
+          action: 'add_exception',
+          provider_id: 3,
+          exception: { date: '2026-12-24', custom_start_time: '20:00' },
+        });
+        expect(answer.error).toContain('custom_end_time');
+        expect(deps.providerScheduleService.createException).not.toHaveBeenCalled();
+      });
     });
 
     it('(c) proveedor inexistente → {error, next_step}', async () => {
