@@ -291,9 +291,15 @@ export class PlatformAlertService implements OnModuleInit, OnModuleDestroy {
     input: AlertRequestIdentity,
     context: ReturnType<typeof RequestContextService.asyncLocalStorage.getStore>,
   ): { organizationId: number | null; storeId: number | null; userId: number | null; params: Record<string, string> | null } {
+    // Una sola fuente: si el request trae identidad de tenant se usa completa;
+    // mezclarla con el contexto podría atribuir la alerta a una pareja
+    // organización/tienda que no existe.
+    const hasExplicitTenant = input.organizationId != null || input.storeId != null;
     return {
-      organizationId: input.organizationId ?? context?.organization_id ?? null,
-      storeId: input.storeId ?? context?.store_id ?? null,
+      organizationId: hasExplicitTenant
+        ? (input.organizationId ?? null)
+        : (context?.organization_id ?? null),
+      storeId: hasExplicitTenant ? (input.storeId ?? null) : (context?.store_id ?? null),
       userId: input.userId ?? currentRequestUserId() ?? null,
       params: input.params ?? null,
     };

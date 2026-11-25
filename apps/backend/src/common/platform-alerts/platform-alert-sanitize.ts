@@ -37,13 +37,19 @@ const RULES: ReadonlyArray<[RegExp, Replacement]> = [
 ];
 
 /**
- * Parámetros de ruta legibles para la trazabilidad (`orderId=123`). Se
- * descartan los que suenan a credencial y cualquier valor que no sea un id,
- * slug o fecha: al bot nunca le llegan tokens ni datos de clientes.
+ * Parámetros de ruta legibles para la trazabilidad (`orderId=123`).
+ *
+ * Lista de PERMITIDOS: solo ids, slugs y paginación con valor numérico o UUID.
+ * Cualquier otra clave (`file` de un iCal, `code` de un canje, `handle` de un
+ * adjunto…) se descarta: al bot nunca le llegan tokens ni datos de clientes.
  */
-const SECRET_PARAM =
-  /(token|secret|api[_-]?key|password|passwd|pwd|authorization|cookie|codigo|cvv|pin)/i;
-const SAFE_PARAM_VALUE = /^[\w.:-]{1,60}$/;
+const ALLOWED_PARAM_KEY =
+  /^(id|[a-z0-9]+_id|[a-z0-9]+Id|slug|year|month|day|date|page|limit)$/i;
+const NUMERIC_PARAM = /^\d{1,20}$/;
+const UUID_PARAM =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SLUG_PARAM = /^[a-z0-9-]{1,60}$/i;
+const DATE_PARAM = /^\d{4}-\d{2}-\d{2}$/;
 
 export function safeRouteParams(
   params: Record<string, unknown> | undefined | null,
@@ -51,12 +57,50 @@ export function safeRouteParams(
   if (!params) return null;
   const safe: Record<string, string> = {};
   for (const [key, value] of Object.entries(params)) {
-    if (SECRET_PARAM.test(key) || value === null || value === undefined) continue;
+    if (!ALLOWED_PARAM_KEY.test(key)) continue;
+    // Credenciales con forma de id: sesión, acceso público, token, share.
+    if (/(public|session|share|token)/i.test(key)) continue;
+    if (value === null || value === undefined) continue;
     const text = String(value);
-    if (!SAFE_PARAM_VALUE.test(text)) continue;
+    const looksLikeSlug = key.toLowerCase() === 'slug' && SLUG_PARAM.test(text);
+    const looksLikeDate = key.toLowerCase() === 'date' && DATE_PARAM.test(text);
+    if (!NUMERIC_PARAM.test(text) && !UUID_PARAM.test(text) && !looksLikeSlug && !looksLikeDate) {
+      continue;
+    }
     safe[key] = text;
   }
   return Object.keys(safe).length > 0 ? safe : null;
+}
+
+/** Identidad del request para una alerta (tienda, organización, usuario). */
+export function alertIdentityFromRequest(req: unknown): {
+  organizationId: number | null;
+  storeId: number | null;
+  userId: number | null;
+} {
+  const record = (req ?? {}) as Record<string, any>;
+  const user = record.user ?? {};
+  // En rutas públicas (checkout, catálogo) no hay usuario: el middleware de
+  // dominio ya resolvió la tienda por hostname o `x-store-id`.
+  const domain = record.domain_context ?? {};
+  const num = (value: unknown): number | null => {
+    if (typeof value === 'number') {
+      return Number.isInteger(value) && value > 0 ? value : null;
+    }
+    if (typeof value !== 'string' || !/^\d{1,12}$/.test(value)) return null;
+    const parsed = Number(value);
+    return parsed > 0 ? parsed : null;
+  };
+  // Una sola fuente: mezclar usuario y dominio podría atribuir la alerta a una
+  // pareja organización/tienda que no existe.
+  const userOrg = num(user.organization_id);
+  const userStore = num(user.store_id);
+  const useUser = userOrg !== null || userStore !== null;
+  return {
+    organizationId: useUser ? userOrg : num(domain.organization_id),
+    storeId: useUser ? userStore : num(domain.store_id),
+    userId: num(user.id ?? user.user_id),
+  };
 }
 
 /** Texto saneado y truncado; `''` si no hay texto. */

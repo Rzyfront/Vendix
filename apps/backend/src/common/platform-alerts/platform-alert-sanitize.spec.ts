@@ -2,6 +2,7 @@ import {
   fingerprintOf,
   normalizeUrlPath,
   routeKeyOf,
+  alertIdentityFromRequest,
   safeRouteParams,
   sanitizeAlertDetails,
   sanitizeAlertText,
@@ -66,12 +67,63 @@ describe('platform-alert-sanitize (S7: sin contraseñas, tokens ni datos de clie
     expect(out.Otro).toBe('tel [número]');
   });
 
-  it('safeRouteParams deja los ids legibles y descarta credenciales y valores raros', () => {
+  it('safeRouteParams solo deja ids, slugs y paginación con valor numérico o UUID', () => {
     expect(
-      safeRouteParams({ orderId: '987', invoiceId: 45, token: 'abc', email: 'a@b.co' }),
+      safeRouteParams({ orderId: '987', invoiceId: 45, file: 'abc123.ics', code: 'PROMO1', handle: 'h_x' }),
     ).toEqual({ orderId: '987', invoiceId: '45' });
+    expect(safeRouteParams({ page: '2', limit: 20, slug: 'mi-tienda' })).toEqual({
+      page: '2',
+      limit: '20',
+      slug: 'mi-tienda',
+    });
+    // Claves que suenan a secreto o llevan token con forma de slug: fuera.
+    expect(safeRouteParams({ file: 'abc123.ics', code: 'PROMO1', handle: 'h_x' })).toBeNull();
     expect(safeRouteParams({})).toBeNull();
     expect(safeRouteParams(null)).toBeNull();
+  });
+
+  it('acepta claves en camelCase terminadas en Id', () => {
+    expect(safeRouteParams({ shippingMethodId: 12, mappingId: '9' })).toEqual({
+      shippingMethodId: '12',
+      mappingId: '9',
+    });
+  });
+
+  it('safeRouteParams descarta ids que son credenciales de sesión o acceso', () => {
+    expect(safeRouteParams({ sessionId: '3f1e1a9e-7f0c-4a1d-9f7e-1b2c3d4e5f60' })).toBeNull();
+    expect(safeRouteParams({ publicId: '3f1e1a9e-7f0c-4a1d-9f7e-1b2c3d4e5f60' })).toBeNull();
+  });
+
+  it('alertIdentityFromRequest usa req.user y cae al dominio público sin usuario', () => {
+    expect(
+      alertIdentityFromRequest({
+        user: { id: 7, organization_id: 82, store_id: 105 },
+        domain_context: { store_id: 999, organization_id: 111 },
+      }),
+    ).toEqual({ organizationId: 82, storeId: 105, userId: 7 });
+
+    expect(
+      alertIdentityFromRequest({ domain_context: { store_id: 105, organization_id: 82 } }),
+    ).toEqual({ organizationId: 82, storeId: 105, userId: null });
+  });
+
+  it('alertIdentityFromRequest no mezcla usuario y dominio de tenants distintos', () => {
+    // Un admin de organización sin tienda no debe heredar la tienda del dominio.
+    expect(
+      alertIdentityFromRequest({
+        user: { id: 7, organization_id: 82 },
+        domain_context: { store_id: 105, organization_id: 111 },
+      }),
+    ).toEqual({ organizationId: 82, storeId: null, userId: 7 });
+  });
+
+  it('alertIdentityFromRequest descarta ids raros', () => {
+    expect(
+      alertIdentityFromRequest({
+        user: { id: '7abc', store_id: -1, organization_id: 1.5 },
+        domain_context: { store_id: '82abc' },
+      }),
+    ).toEqual({ organizationId: null, storeId: null, userId: null });
   });
 
   it('tenantIdsOf solo toma ids numéricos positivos del data del job', () => {
