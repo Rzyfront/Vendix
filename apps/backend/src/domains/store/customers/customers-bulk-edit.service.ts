@@ -291,7 +291,12 @@ export class CustomersBulkEditService {
         // lote NO es una sola transacción: un cliente que falla no revierte a
         // los demás, y el resultado se reporta por fila.
         await this.prisma.$transaction(async (tx) => {
-          await this.customersService.update(storeId, id, payload, tx);
+          await this.customersService.update(storeId, id, payload, tx, {
+            // Lectura mínima: el masivo ya cargó la fila y validó la tarifa
+            // una sola vez para todo el lote.
+            lean: true,
+            ...(tier ? { resolvedPriceTierId: tier.id } : {}),
+          });
 
           // `tag_action` es idempotente por fila: un cliente que ya tenía la
           // etiqueta no genera escritura.
