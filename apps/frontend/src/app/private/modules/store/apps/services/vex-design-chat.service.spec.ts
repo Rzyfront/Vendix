@@ -132,15 +132,15 @@ describe('VexDesignChatService · ciclo de vida de EventSource (F4)', () => {
         return fakeSource as unknown as EventSource;
       })
       .subscribe({
-        error: (err: Error) => (receivedError = err),
+        error: (err: Error) => errors.push(err),
       });
 
     fakeSource.triggerError();
     // Un segundo onerror tras cerrar no debe volver a cerrar ni fallar.
     fakeSource.triggerError();
 
-    expect(receivedError).toBeTruthy();
-    expect(receivedError!.message).toContain('interrumpió la conexión');
+    expect(errors.length).toBe(1);
+    expect(errors[0].message).toContain('interrumpió la conexión');
     expect(fakeSource.closed).toBe(true);
     expect(fakeSource.closeCalls).toBe(1);
   });
