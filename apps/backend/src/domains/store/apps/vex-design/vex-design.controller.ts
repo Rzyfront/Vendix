@@ -68,16 +68,20 @@ export class VexDesignController {
     const kind = this.requireDesignKind(rawKind);
     const { storeId, userId } = this.requireActor();
 
-    let conversationId = dto.conversation_id;
-    if (!conversationId) {
+    // `conversation_id` es opcional en el DTO: o llega una conversación de la
+    // tienda (se verifica propiedad) o se crea una nueva. El resultado es
+    // siempre un número para el resto del turno.
+    let conversationId: number;
+    if (dto.conversation_id) {
+      // Verifica propiedad y existencia de la conversación en esta tienda.
+      await this.chatService.getConversation(dto.conversation_id);
+      conversationId = dto.conversation_id;
+    } else {
       const conversation = await this.chatService.createConversation({
         agent_key: 'vex',
         title: `Diseño de ${kind}`,
       });
       conversationId = conversation.id;
-    } else {
-      // Verifica propiedad y existencia de la conversación en esta tienda.
-      await this.chatService.getConversation(conversationId);
     }
 
     let session;
