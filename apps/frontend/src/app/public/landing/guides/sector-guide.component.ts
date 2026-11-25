@@ -25,6 +25,9 @@ const RELATED_GUIDES: ReadonlyArray<{ key: string; label: string }> = [
   { key: 'ventas-mayoristas-al-detal', label: 'Ventas mayoristas y al detal' },
   { key: 'pasar-productos-excel-a-pos', label: 'Pasar tus productos de Excel a un POS' },
   { key: 'preparar-demostracion', label: 'Preparar una demostración' },
+  { key: 'cierre-de-caja', label: 'Cierre de caja diario' },
+  { key: 'control-de-inventario', label: 'Control de inventario' },
+  { key: 'elegir-software-pos', label: 'Cómo elegir un software POS' },
 ];
 
 @Component({
