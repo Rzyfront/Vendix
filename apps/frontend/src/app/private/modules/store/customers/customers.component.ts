@@ -97,6 +97,7 @@ import { customerDisplayName } from '../../../../shared/utils/customer-display-n
         (viewDetail)="onViewDetail($event)"
         (bulkUpload)="openBulkUploadModal()"
         (aiImport)="isAiImportModalOpen.set(true)"
+        (bulkEdit)="openBulkEdit()"
       ></app-customer-list>
 
       <!-- Modal -->
@@ -497,6 +498,15 @@ export class CustomersComponent {
 
   openCreateModal() {
     this.openModal();
+  }
+
+  /**
+   * Vista dedicada de edición masiva (QUI: clientes en lote). Vive fuera de esta
+   * página porque tiene su propio estado (selección, filtros, preview) y no
+   * comparte ni el modal ni la paginación del listado.
+   */
+  openBulkEdit(): void {
+    void this.router.navigate(['/admin/customers/bulk-edit']);
   }
 
   openEditModal(customer: Customer) {

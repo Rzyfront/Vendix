@@ -1164,6 +1164,15 @@ export class BreadcrumbService {
       parent: 'Clientes',
       icon: 'users',
     },
+    // Antes de '/admin/customers/:id' por consistencia con el árbol de rutas de
+    // Angular: `findRouteMatch` prueba coincidencia EXACTA primero, pero
+    // mantenerlo evita que un cambio del matcher rompa la ruta.
+    {
+      path: '/admin/customers/bulk-edit',
+      title: 'Edición masiva de clientes',
+      parent: 'Clientes',
+      icon: 'list-checks',
+    },
     {
       path: '/admin/data-collection',
       title: 'Recolección de datos',
