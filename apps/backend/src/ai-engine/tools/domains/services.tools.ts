@@ -832,7 +832,7 @@ export function createServiceTools(deps: ServiceToolDeps): RegisteredTool[] {
       } else {
         const validated = toValidatedDto(CreatePlanActivityDto, fields);
         if (!validated.ok) return fail(`Actividad ${index + 1}: ${validated.message}`);
-        if (validated.dto.day_number > product.plan_duration_days) {
+        if (validated.dto.day_number > Number(product.plan_duration_days)) {
           return fail(
             `Actividad ${index + 1}: el plan dura ${product.plan_duration_days} días; el día ${validated.dto.day_number} no existe.`,
           );
