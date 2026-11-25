@@ -716,4 +716,222 @@ describe('app page contract', () => {
       expect(bookingReject.errors).toEqual(['blocks[0].props.layout no es un campo permitido.']);
     });
   });
+  describe('selector de servicios (apps-booking-detail A)', () => {
+    it('acepta selection, service_ids (en orden y sin duplicados), show_duration y show_price', () => {
+      const result = validateAppPage('service_page', {
+        schema_version: 1,
+        blocks: [
+          {
+            id: 'services',
+            type: 'services',
+            props: {
+              title: 'Nuestros servicios',
+              selection: 'manual',
+              service_ids: [8, 2, 8, 5],
+              show_duration: true,
+              show_price: false,
+            },
+          },
+        ],
+      });
+      expect(result.errors).toEqual([]);
+      expect(result.value?.blocks[0].props).toEqual({
+        title: 'Nuestros servicios',
+        selection: 'manual',
+        service_ids: [8, 2, 5],
+        show_duration: true,
+        show_price: false,
+      });
+    });
+
+    it('acepta hasta 50 service_ids y rechaza más de 50', () => {
+      const fifty = Array.from({ length: 50 }, (_, i) => i + 1);
+      const ok = validateAppPage('service_page', {
+        schema_version: 1,
+        blocks: [{ id: 's', type: 'services', props: { selection: 'manual', service_ids: fifty } }],
+      });
+      expect(ok.valid).toBe(true);
+      const bad = validateAppPage('service_page', {
+        schema_version: 1,
+        blocks: [{ id: 's', type: 'services', props: { service_ids: [...fifty, 51] } }],
+      });
+      expect(bad.errors).toEqual(['blocks[0].props.service_ids admite máximo 50 elementos.']);
+    });
+
+    it('rechaza ids no enteros positivos y una selección desconocida', () => {
+      const result = validateAppPage('service_page', {
+        schema_version: 1,
+        blocks: [
+          { id: 's', type: 'services', props: { selection: 'todos', service_ids: [0, '3', 1.5] } },
+        ],
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors).toEqual([
+        'blocks[0].props.selection debe ser uno de: auto, manual.',
+        'blocks[0].props.service_ids[0] debe ser un identificador entero positivo.',
+        'blocks[0].props.service_ids[1] debe ser un identificador entero positivo.',
+        'blocks[0].props.service_ids[2] debe ser un identificador entero positivo.',
+      ]);
+    });
+
+    it('un bloque services sin props nuevas queda igual y service_ids no existe fuera de service_page', () => {
+      const legacy = validateAppPage('service_page', {
+        schema_version: 1,
+        blocks: [{ id: 's', type: 'services', props: { title: 'Servicios', show_price: true } }],
+      });
+      expect(legacy.value?.blocks[0]).toEqual({
+        id: 's',
+        type: 'services',
+        enabled: true,
+        props: { title: 'Servicios', show_price: true },
+      });
+      const other = validateAppPage('product_page', {
+        schema_version: 1,
+        blocks: [{ id: 'p', type: 'products', props: { service_ids: [1] } }],
+      });
+      expect(other.errors).toEqual(['blocks[0].props.service_ids no es un campo permitido.']);
+    });
+  });
+
+  describe('bloque stay_detail de Booking (apps-booking-detail B)', () => {
+    it('acepta todas sus props y limpia textos e incluye vacíos', () => {
+      const result = validateAppPage('booking', {
+        schema_version: 1,
+        blocks: [
+          {
+            id: 'stay',
+            type: 'stay_detail',
+            props: {
+              title: ' Tu estadía ',
+              show_duration: true,
+              show_capacity: false,
+              show_inclusions: true,
+              inclusions: ['Desayuno', '  ', 'Wifi'],
+              show_cancellation: true,
+              show_deposit: true,
+              show_note: true,
+              note: 'Mascotas bienvenidas',
+              layout: 'list',
+            },
+          },
+        ],
+      });
+      expect(result.errors).toEqual([]);
+      expect(result.value?.blocks[0].props).toEqual({
+        title: 'Tu estadía',
+        show_duration: true,
+        show_capacity: false,
+        show_inclusions: true,
+        inclusions: ['Desayuno', 'Wifi'],
+        show_cancellation: true,
+        show_deposit: true,
+        show_note: true,
+        note: 'Mascotas bienvenidas',
+        layout: 'list',
+      });
+    });
+
+    it('acepta el bloque sin props (valores por defecto)', () => {
+      const result = validateAppPage('booking', {
+        schema_version: 1,
+        blocks: [{ id: 'stay', type: 'stay_detail' }],
+      });
+      expect(result.valid).toBe(true);
+      expect(result.value?.blocks[0].props).toEqual({});
+    });
+
+    it('rechaza nota de más de 400, layout desconocido, datos escritos a mano y más de 12 incluye', () => {
+      const result = validateAppPage('booking', {
+        schema_version: 1,
+        blocks: [
+          {
+            id: 'stay',
+            type: 'stay_detail',
+            props: {
+              note: 'x'.repeat(401),
+              layout: 'grid',
+              max_guests: 4,
+              inclusions: Array.from({ length: 13 }, (_, i) => `Item ${i}`),
+            },
+          },
+        ],
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors).toEqual([
+        'blocks[0].props.max_guests no es un campo permitido.',
+        'blocks[0].props.inclusions admite máximo 12 elementos.',
+        'blocks[0].props.note supera 400 caracteres.',
+        'blocks[0].props.layout debe ser uno de: card, list.',
+      ]);
+    });
+
+    it('stay_detail solo existe en Booking', () => {
+      const result = validateAppPage('service_page', {
+        schema_version: 1,
+        blocks: [{ id: 'stay', type: 'stay_detail', props: {} }],
+      });
+      expect(result.errors).toEqual(['blocks[0].type "stay_detail" no es una sección de esta app.']);
+    });
+  });
+
+  describe('condiciones por bloque visible_when (apps-booking-detail C)', () => {
+    it('acepta condiciones combinables en service_page y booking', () => {
+      const service = validateAppPage('service_page', {
+        schema_version: 1,
+        blocks: [
+          { id: 'g', type: 'gallery', props: { visible_when: { has_photos: true } } },
+          { id: 's', type: 'services', props: { visible_when: { has_availability: true, sells: false } } },
+        ],
+      });
+      expect(service.errors).toEqual([]);
+      expect(service.value?.blocks.map((b) => b.props['visible_when'])).toEqual([
+        { has_photos: true },
+        { has_availability: true, sells: false },
+      ]);
+
+      const booking = validateAppPage('booking', {
+        schema_version: 1,
+        blocks: [{ id: 'stay', type: 'stay_detail', props: { visible_when: { has_availability: true } } }],
+      });
+      expect(booking.valid).toBe(true);
+    });
+
+    it('un visible_when vacío se descarta (siempre visible)', () => {
+      const result = validateAppPage('booking', {
+        schema_version: 1,
+        blocks: [{ id: 'f', type: 'faq', props: { visible_when: {} } }],
+      });
+      expect(result.valid).toBe(true);
+      expect(result.value?.blocks[0].props).toEqual({});
+    });
+
+    it('rechaza condiciones desconocidas, valores no booleanos y un valor que no es objeto', () => {
+      const result = validateAppPage('service_page', {
+        schema_version: 1,
+        blocks: [
+          { id: 'a', type: 'faq', props: { visible_when: { has_photos: 'sí', weekday: true } } },
+          { id: 'b', type: 'cta', props: { visible_when: 'has_photos' } },
+        ],
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors).toEqual([
+        'blocks[0].props.visible_when.weekday no es una condición permitida.',
+        'blocks[0].props.visible_when.has_photos debe ser verdadero o falso.',
+        'blocks[1].props.visible_when debe ser un objeto.',
+      ]);
+    });
+
+    it('no existe en Product Page ni en la Tienda en línea', () => {
+      const product = validateAppPage('product_page', {
+        schema_version: 1,
+        blocks: [{ id: 'f', type: 'faq', props: { visible_when: { sells: true } } }],
+      });
+      expect(product.errors).toEqual(['blocks[0].props.visible_when no es un campo permitido.']);
+      const home = validateAppPage('store_home', {
+        schema_version: 1,
+        blocks: [{ id: 'c', type: 'contact', props: { visible_when: { sells: true } } }],
+      });
+      expect(home.errors).toEqual(['blocks[0].props.visible_when no es un campo permitido.']);
+    });
+  });
 });

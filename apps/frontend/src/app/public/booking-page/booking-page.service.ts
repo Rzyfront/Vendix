@@ -5,6 +5,7 @@ import { catchError, map, shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 import { TenantFacade } from '../../core/store';
 import type { AppPageDocument } from '../../private/modules/store/apps/templates/app-page.types';
+import type { AppStayFacts } from '../app-page/app-page-stay';
 
 /** Public config of the store's booking page (`GET /ecommerce/booking-page`). */
 export interface BookingPagePublicConfig {
@@ -12,6 +13,8 @@ export interface BookingPagePublicConfig {
   product_ids: number[];
   /** The owner's own page (apps-f2); absent when never saved. */
   page?: AppPageDocument;
+  /** The hotel's real stay data; only when the page has `stay_detail` or block conditions. */
+  stay_facts?: AppStayFacts;
 }
 
 /** Backend `booking-checkin.ts`: what the page offers for the online check-in. */

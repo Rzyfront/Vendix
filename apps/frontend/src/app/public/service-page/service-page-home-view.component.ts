@@ -10,6 +10,7 @@ import {
   modeSells,
 } from '../../private/modules/store/apps/templates/app-page.types';
 import { AppPageViewComponent } from '../app-page/app-page-view.component';
+import { AppPageFacts, blockConditionsMet, servicePageFacts } from '../app-page/app-page-conditions';
 import { AppPageProductsViewComponent } from '../app-page/app-page-products-view.component';
 import {
   AppPageProductItem,
@@ -50,7 +51,7 @@ import {
   host: { class: 'block' },
   template: `
   @if (page()) {
-    <app-app-page-view kind="service_page" [page]="page()" part="hero" [blockIds]="blockIds()" />
+    <app-app-page-view kind="service_page" [page]="page()" part="hero" [blockIds]="blockIds()" [facts]="facts()" />
   }
   @if (showServices()) {
   <section class="mx-auto w-full max-w-6xl px-4 pb-4 pt-8" [attr.id]="page() ? 'app-page-main' : null" [attr.data-block-id]="servicesBlockId()">
@@ -146,7 +147,7 @@ import {
   }
 
   @if (page()) {
-    <app-app-page-view kind="service_page" [page]="page()" part="blocks" [blockIds]="blockIds()" />
+    <app-app-page-view kind="service_page" [page]="page()" part="blocks" [blockIds]="blockIds()" [facts]="facts()" />
   }
 
   @if (showProducts()) {
@@ -247,7 +248,19 @@ export class ServicePageHomeViewComponent {
   }
   readonly servicesBlockId = computed(() => (this.blockIds() ? (this.blockProps('services')?.id ?? null) : null));
   readonly productsBlockId = computed(() => (this.blockIds() ? (this.blockProps('products')?.id ?? null) : null));
-  readonly showServices = computed(() => this.blockProps('services')?.enabled !== false);
+  /**
+   * Datos reales para `visible_when`: los servicios que lista la página (los
+   * mismos en la vista previa y en la publicada) y si el modo vende.
+   */
+  readonly facts = computed<AppPageFacts>(() =>
+    servicePageFacts(this.services(), !this.page() || modeSells(this.mode())),
+  );
+  readonly showServices = computed(() => {
+    const block = this.blockProps('services');
+    if (block?.enabled === false || !blockConditionsMet(block?.props, this.facts())) return false;
+    // Selección manual sin servicios en línea elegidos: la sección no deja un hueco.
+    return !(block?.props['selection'] === 'manual' && this.services().length === 0);
+  });
   readonly showDuration = computed(() => this.blockProps('services')?.props['show_duration'] !== false);
   readonly showPrice = computed(() => this.blockProps('services')?.props['show_price'] !== false);
   readonly subheading = computed(
@@ -286,7 +299,10 @@ export class ServicePageHomeViewComponent {
     return Array.from(byId.values());
   });
   readonly showProducts = computed(() => {
-    const enabled = !this.page() || (modeSells(this.mode()) && this.blockProps('products')?.enabled !== false);
+    const block = this.blockProps('products');
+    const enabled =
+      !this.page() ||
+      (modeSells(this.mode()) && block?.enabled !== false && blockConditionsMet(block?.props, this.facts()));
     if (!enabled) return false;
     if (this.previewProducts() !== null && this.productsSelection() === 'manual') return true;
     return this.effectiveProductIds().length > 0;

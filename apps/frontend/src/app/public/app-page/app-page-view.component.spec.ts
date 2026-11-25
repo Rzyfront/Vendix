@@ -862,4 +862,94 @@ describe('AppPageViewComponent (apps-f2 T3)', () => {
       expect(cards[1].querySelector('[data-testid="product-card-price"]')?.textContent?.trim()).toBe('$72000');
     });
   });
+  describe('stay_detail y visible_when (apps-booking-detail)', () => {
+    const stayFacts = {
+      check_in: 'Desde las 3:00 p. m.',
+      check_out: 'Hasta las 12:00 m.',
+      cancellation: 'Flexible: gratis hasta 48 h antes de la llegada',
+      max_guests: 4,
+      deposit_percent: 30,
+      has_photos: true,
+      has_availability: true,
+    };
+    const facts = { has_photos: true, has_availability: true, sells: false };
+
+    const renderBooking = (doc: AppPageDocument, stay: typeof stayFacts | null = stayFacts, f = facts) => {
+      fixture = TestBed.createComponent(AppPageViewComponent);
+      fixture.componentRef.setInput('kind', 'booking');
+      fixture.componentRef.setInput('page', doc);
+      fixture.componentRef.setInput('stayFacts', stay);
+      fixture.componentRef.setInput('facts', f);
+      fixture.detectChanges();
+      return fixture.nativeElement as HTMLElement;
+    };
+    const stayBlock = (props: Record<string, unknown>): AppPageDocument => ({
+      schema_version: 1,
+      blocks: [{ id: 'stay', type: 'stay_detail', enabled: true, props }],
+    });
+
+    it('con sus valores por defecto muestra horarios, capacidad y cancelación reales; anticipo y nota no', () => {
+      const el = renderBooking(stayBlock({ title: 'Tu estadía' }));
+      const parts = Array.from(el.querySelectorAll('[data-stay]')).map((n) => n.getAttribute('data-stay'));
+      expect(parts).toEqual(['duration', 'capacity', 'cancellation']);
+      expect(el.textContent).toContain('Tu estadía');
+      expect(el.textContent).toContain('Por noches: entrada desde las 3:00 p. m. · salida hasta las 12:00 m.');
+      expect(el.textContent).toContain('Hasta 4 huéspedes por habitación.');
+      expect(el.textContent).toContain('Flexible: gratis hasta 48 h antes de la llegada');
+      expect(el.querySelector('[data-testid="stay-detail-cards"]')).not.toBeNull();
+    });
+
+    it('muestra qué incluye, anticipo y nota cuando el dueño los activa, en diseño de lista', () => {
+      const el = renderBooking(
+        stayBlock({
+          show_duration: false,
+          show_capacity: false,
+          show_cancellation: false,
+          inclusions: ['Desayuno', 'Wifi'],
+          show_deposit: true,
+          show_note: true,
+          note: 'Mascotas bienvenidas',
+          layout: 'list',
+        }),
+      );
+      expect(el.querySelector('[data-testid="stay-detail-list"]')).not.toBeNull();
+      const parts = Array.from(el.querySelectorAll('[data-stay]')).map((n) => n.getAttribute('data-stay'));
+      expect(parts).toEqual(['inclusions', 'deposit', 'note']);
+      expect(el.textContent).toContain('Desayuno, Wifi');
+      expect(el.textContent).toContain('anticipo del 30 % del valor de la estadía');
+      expect(el.textContent).toContain('Mascotas bienvenidas');
+    });
+
+    it('sin nada que mostrar el bloque no se pinta (sin hueco)', () => {
+      const el = renderBooking(stayBlock({ show_note: true }), null);
+      expect(el.querySelector('[data-block="stay_detail"]')).toBeNull();
+    });
+
+    it('visible_when oculta los bloques cuyas condiciones no coinciden con los datos de la página', () => {
+      const el = renderBooking(
+        {
+          schema_version: 1,
+          blocks: [
+            { id: 'a', type: 'amenities', enabled: true, props: { items: ['Wifi'], visible_when: { has_photos: true } } },
+            { id: 'b', type: 'faq', enabled: true, props: { items: [{ question: 'Q', answer: 'A' }], visible_when: { sells: true } } },
+            {
+              id: 'c',
+              type: 'location',
+              enabled: true,
+              props: { address: 'Calle 1', visible_when: { has_photos: true, has_availability: false } },
+            },
+          ],
+        },
+        stayFacts,
+      );
+      const order = Array.from(el.querySelectorAll('[data-block]')).map((n) => n.getAttribute('data-block'));
+      expect(order).toEqual(['amenities']);
+    });
+
+    it('sin datos (facts null) un documento viejo se ve igual', () => {
+      const el = render(page());
+      const order = Array.from(el.querySelectorAll('[data-block]')).map((n) => n.getAttribute('data-block'));
+      expect(order).toEqual(['benefits', 'testimonials', 'cta']);
+    });
+  });
 });

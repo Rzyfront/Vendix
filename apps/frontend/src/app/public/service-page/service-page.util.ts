@@ -1,5 +1,6 @@
 import { formatDurationUnitShort } from '../../shared/utils/duration-unit.util';
 import type { EcommerceProduct } from '../../private/modules/ecommerce/services/catalog.service';
+import { resolveEcommerceFinalPrice } from '../app-page/app-page-products.util';
 
 /** A category filter chip of the service list. */
 export interface ServiceCategoryChip {
@@ -75,6 +76,28 @@ export function formatDuration(
  */
 export function bookingTarget(service: ServiceLike): (string | number)[] {
   return service.requires_booking && !service.is_plan ? ['/book', service.id] : ['/products', service.slug];
+}
+
+/**
+ * Proyecta un servicio del catálogo público a tarjeta de Service Page aplicando
+ * la misma regla de promoción plana que `mapEcommerceProductToItem` y el preview.
+ */
+export function mapEcommerceServiceToCard(service: EcommerceProduct): ServiceCardData {
+  const { final_price } = resolveEcommerceFinalPrice(service);
+  return {
+    id: service.id,
+    name: service.name,
+    slug: service.slug,
+    description: service.description,
+    final_price,
+    image_url: service.image_url,
+    service_duration_minutes: service.service_duration_minutes,
+    service_duration_unit: service.service_duration_unit,
+    service_modality: service.service_modality,
+    requires_booking: service.requires_booking,
+    is_plan: service.is_plan,
+    categories: service.categories,
+  };
 }
 
 /** Label of the card button: «Ver plan» for a plan, «Reservar» when it books, else «Ver servicio». */

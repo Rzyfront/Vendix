@@ -6,8 +6,8 @@ import {
   galleryFields,
   highlightsFields,
   productsFields,
+  servicesFields,
   stepsFields,
-  subtitleField,
   testimonialsFields,
   titleField,
 } from './app-page.types';
@@ -32,12 +32,11 @@ export const SERVICE_PAGE_TEMPLATE: AppPageTemplate = {
       description: 'Tus servicios reales con precio, duración y reserva (los de "Servicios y dominio").',
       icon: 'briefcase',
       existing: true,
-      fields: [
-        titleField(),
-        subtitleField(),
-        { key: 'show_duration', label: 'Mostrar duración', kind: 'bool' },
-        { key: 'show_price', label: 'Mostrar precio', kind: 'bool' },
-      ],
+      defaultProps: {
+        show_duration: true,
+        show_price: true,
+      },
+      fields: servicesFields(),
     },
     {
       type: 'highlights',

@@ -41,6 +41,8 @@ import {
   whatsappHref,
 } from './app-page-view.util';
 import { hasTheme, onColor, themeMarkers, themeStyle } from './app-page-theme';
+import { AppPageFacts, blockConditionsMet } from './app-page-conditions';
+import { AppStayFacts, StayDetailPart, stayDetailParts } from './app-page-stay';
 
 interface PlaceholderView {
   id: string;
@@ -54,6 +56,7 @@ const GALLERY_ASPECTS: readonly AppGalleryAspectRatio[] = ['1:1', '4:3', '16:9']
 const HIGHLIGHTS_VARIANTS: readonly AppHighlightsVariant[] = ['cards', 'list', 'band'];
 const BLOCK_SPACINGS: readonly AppBlockSpacing[] = ['compact', 'normal', 'spacious'];
 const TEXT_ALIGNS: readonly AppTextAlign[] = ['left', 'center', 'right'];
+const STAY_LAYOUTS: readonly ('card' | 'list')[] = ['card', 'list'];
 const HIGHLIGHTS_ICON_SET = new Set<string>(APP_HIGHLIGHTS_ICON_OPTIONS.map((o) => o.value));
 
 /**
@@ -772,6 +775,43 @@ const HIGHLIGHTS_ICON_SET = new Set<string>(APP_HIGHLIGHTS_ICON_OPTIONS.map((o) 
                     }
                   </dl>
                 }
+                @case ('stay_detail') {
+                  <ng-container *ngTemplateOutlet="head; context: { b: item.block }" />
+                  @if (stayLayout(item.block) === 'list') {
+                    <dl class="ap-card divide-y divide-border overflow-hidden rounded-2xl border border-border bg-surface text-left" data-testid="stay-detail-list">
+                      @for (part of stayParts(item.block); track part.key) {
+                        <div class="flex gap-3 p-4" [attr.data-stay]="part.key">
+                          <app-icon [name]="part.icon" [size]="18" class="ap-accent-text mt-0.5 shrink-0" />
+                          <div class="min-w-0">
+                            <dt class="text-sm font-semibold text-text-primary">{{ part.label }}</dt>
+                            <dd class="mt-0.5 text-sm text-text-secondary">{{ part.text }}</dd>
+                          </div>
+                        </div>
+                      }
+                    </dl>
+                  } @else {
+                    <dl class="ap-grid grid gap-4 text-left sm:grid-cols-2 lg:grid-cols-3" data-testid="stay-detail-cards">
+                      @for (part of stayParts(item.block); track part.key) {
+                        <div class="ap-card rounded-2xl border border-border bg-surface p-5" [attr.data-stay]="part.key">
+                          <dt class="flex items-center gap-2 text-sm font-semibold text-text-primary">
+                            <app-icon [name]="part.icon" [size]="16" class="ap-accent-text shrink-0" /> {{ part.label }}
+                          </dt>
+                          @if (part.items) {
+                            <dd class="mt-2">
+                              <ul class="space-y-1 text-sm text-text-secondary">
+                                @for (entry of part.items; track $index) {
+                                  <li class="flex items-start gap-1.5"><app-icon name="check" [size]="14" class="ap-accent-text mt-0.5 shrink-0" /> {{ entry }}</li>
+                                }
+                              </ul>
+                            </dd>
+                          } @else {
+                            <dd class="mt-1 text-sm text-text-secondary">{{ part.text }}</dd>
+                          }
+                        </div>
+                      }
+                    </dl>
+                  }
+                }
                 @case ('amenities') {
                   <ng-container *ngTemplateOutlet="head; context: { b: item.block }" />
                   <ul class="flex flex-wrap gap-2" [class.justify-center]="blockAlign(item.block) === 'center'" [class.justify-end]="blockAlign(item.block) === 'right'">
@@ -949,6 +989,13 @@ export class AppPageViewComponent {
   readonly autoProductIds = input<readonly number[]>([]);
   /** Catálogo pre-resuelto para la vista previa del editor (sin peticiones HTTP). */
   readonly previewProducts = input<readonly AppPageProductItem[] | null>(null);
+  /**
+   * Datos reales de la página para `visible_when` (fotos, disponibilidad,
+   * venta). `null` (apps sin condiciones) muestra todos los bloques.
+   */
+  readonly facts = input<AppPageFacts | null>(null);
+  /** Booking: datos reales de la estadía para `stay_detail` (`stay_facts` del servidor). */
+  readonly stayFacts = input<AppStayFacts | null>(null);
 
   readonly starSlots = STAR_SLOTS;
 
@@ -1104,9 +1151,13 @@ export class AppPageViewComponent {
     const catalog = this.catalog();
     const preview = this.preview();
     const out: { block: AppPageBlock; placeholder: PlaceholderView | null }[] = [];
+    const facts = this.facts();
     for (const block of this.page()?.blocks ?? []) {
       const def = catalog.get(block.type);
       if (!block.enabled || !def) continue;
+      if (!blockConditionsMet(block.props, facts)) continue;
+      // Sin nada que mostrar, el detalle de la estadía no deja un hueco.
+      if (block.type === 'stay_detail' && this.stayParts(block).length === 0) continue;
       if (def.existing) {
         if (preview) out.push({ block, placeholder: { id: block.id, label: def.label } });
         continue;
@@ -1258,6 +1309,15 @@ export class AppPageViewComponent {
       ['warranty', 'Garantía'],
       ['returns', 'Devoluciones'],
     ]);
+  }
+
+  /** Partes del detalle de la estadía con los datos reales (vacío = el bloque no se pinta). */
+  stayParts(block: AppPageBlock): StayDetailPart[] {
+    return stayDetailParts(block.props, this.stayFacts());
+  }
+
+  stayLayout(block: AppPageBlock): 'card' | 'list' {
+    return blockEnum(block.props, 'layout', STAY_LAYOUTS) ?? 'card';
   }
 
   policyParts(block: AppPageBlock): { label: string; text: string }[] {

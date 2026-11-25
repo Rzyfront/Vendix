@@ -43,11 +43,16 @@ describe('Motor de bloques (F6-A)', () => {
   });
 
   describe('operaciones sobre la página (no mutan la entrada)', () => {
-    it('agrega en la posición pedida con un id nuevo', () => {
+    it('agrega en la posición pedida con un id nuevo y clona props iniciales si existen', () => {
       const { blocks, block } = insertBlock(page, 'about', 1);
       expect(blocks.map((b) => b.id)).toEqual(['hero_1', 'about_1', 'faq_1', 'contact_1']);
       expect(block.props).toEqual({});
       expect(page.length).toBe(3);
+
+      const defaults = { show_duration: true, layout: 'card' };
+      const withDefaults = insertBlock(page, 'stay_detail', 1, defaults);
+      expect(withDefaults.block.props).toEqual(defaults);
+      expect(withDefaults.block.props).not.toBe(defaults);
     });
 
     it('duplica debajo con id propio y props independientes', () => {

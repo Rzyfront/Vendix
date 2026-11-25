@@ -8,6 +8,7 @@ import type { ProductsService } from '../../../products/services/products.servic
 import type { BuilderCategory } from '../../builder/builder.types';
 import type { ServicePageConfig, StoreAppDetail } from '../../interfaces/store-app.interface';
 import type { StoreAppsService } from '../../services/store-apps.service';
+import { MAX_BLOCK_SERVICE_IDS } from '../../templates/app-page.types';
 import type { AppPageDocument } from '../../templates';
 import { PageBlockMeta, emptyPage, pageBuilderCatalog, storedPage } from '../page-builder-document';
 import type { AppPageBuilderAdapter, AppPagePreviewPayload } from '../page-builder.types';
@@ -38,10 +39,15 @@ export interface ServicePageContext {
     name: string;
     description: string | null;
     price: number;
+    /** Precio que muestra la página pública (impuestos y promoción), resuelto por el servidor. */
+    final_price?: number;
     image_url: string | null;
     service_duration_minutes: number | null;
+    service_duration_unit?: 'minute' | 'hour' | 'day' | null;
     service_modality: string | null;
     requires_booking: boolean;
+    /** Plan de varios días (QUI-1060): excluye `has_availability` y muestra «Ver plan». */
+    is_plan?: boolean;
     categories: { id: number; name: string; slug: string }[];
   }[];
   featured_service_ids: number[];
@@ -116,30 +122,67 @@ export interface ServicePagePreview {
 }
 
 /**
- * The service page the public layout would draw with this draft: every
- * online service the server read, the featured ones of General first in the
- * owner's order and the rest by name (the public rule), and the secondary
- * products of General with the photos the server knows.
+ * Servicios que lista la página con este borrador, con la misma regla que el
+ * servidor (`selectPageServices`): en `selection: 'manual'` solo los elegidos,
+ * en su orden y entre los servicios en línea de la tienda (los del contexto);
+ * en automático, los destacados primero y el resto por nombre.
+ */
+export function selectPreviewServices(
+  services: ServicePageContext['services'],
+  featuredIds: number[],
+  page: AppPageDocument | null,
+): { services: ServicePageContext['services']; featuredIds: number[] } {
+  const byId = new Map(services.map((s) => [s.id, s]));
+  const props = page?.blocks.find((b) => b.type === 'services')?.props;
+  if (props?.['selection'] === 'manual') {
+    const raw = Array.isArray(props['service_ids']) ? (props['service_ids'] as unknown[]) : [];
+    const seen = new Set<number>();
+    const picked: ServicePageContext['services'] = [];
+    for (const id of raw) {
+      if (picked.length >= MAX_BLOCK_SERVICE_IDS) break;
+      if (typeof id !== 'number' || !Number.isInteger(id) || id < 1 || seen.has(id)) continue;
+      const match = byId.get(id);
+      if (!match) continue;
+      seen.add(id);
+      picked.push(match);
+    }
+    const pickedIds = new Set(picked.map((s) => s.id));
+    return { services: picked, featuredIds: featuredIds.filter((id) => pickedIds.has(id)) };
+  }
+  const featured = featuredIds.map((id) => byId.get(id)).filter((s): s is ServicePageContext['services'][number] => !!s);
+  const featuredSet = new Set(featured.map((s) => s.id));
+  const rest = services.filter((s) => !featuredSet.has(s.id)).sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  return { services: [...featured, ...rest].slice(0, MAX_LISTED_SERVICES), featuredIds: featured.map((s) => s.id) };
+}
+
+/**
+ * The service page the public layout would draw with this draft: the online
+ * services the server read, picked like the public page (`selectPreviewServices`),
+ * and the secondary products of General with the photos the server knows.
  */
 export function servicePagePreview(
   payload: AppPagePreviewPayload<ServicePageSettings | null, ServicePageContext | null>,
 ): ServicePagePreview {
   const context = payload.context ?? EMPTY_SERVICE_PAGE_CONTEXT;
   const settings = payload.settings;
-  const byId = new Map(context.services.map((s) => [s.id, s]));
-  const featured = (settings?.featured ?? []).map((f) => byId.get(f.id)).filter((s): s is ServicePageContext['services'][number] => !!s);
-  const featuredSet = new Set(featured.map((s) => s.id));
-  const rest = context.services.filter((s) => !featuredSet.has(s.id)).sort((a, b) => a.name.localeCompare(b.name, 'es'));
-  const services: ServiceCardData[] = [...featured, ...rest].slice(0, MAX_LISTED_SERVICES).map((s) => ({
+  const picked = selectPreviewServices(
+    context.services,
+    (settings?.featured ?? []).map((f) => f.id),
+    payload.page,
+  );
+  const services: ServiceCardData[] = picked.services.map((s) => ({
     id: s.id,
     name: s.name,
     slug: s.slug,
     description: s.description,
-    final_price: s.price,
+    // El mismo precio que el catálogo público; un servidor viejo solo trae el regular.
+    final_price: s.final_price ?? s.price,
     image_url: s.image_url,
     service_duration_minutes: s.service_duration_minutes,
+    service_duration_unit: s.service_duration_unit ?? null,
     service_modality: (s.service_modality ?? null) as ServiceCardData['service_modality'],
     requires_booking: s.requires_booking,
+    is_plan: Boolean(s.is_plan),
     categories: s.categories,
   }));
   const products = (settings?.products ?? []).map((p) => ({
@@ -172,7 +215,7 @@ export function servicePagePreview(
     storeName: payload.storeName,
     storeLogoUrl: payload.storeLogoUrl,
     services,
-    featuredIds: featured.map((s) => s.id),
+    featuredIds: picked.featuredIds,
     productIds: products.map((p) => p.id),
     products,
     catalogProducts: Array.from(catalogById.values()),

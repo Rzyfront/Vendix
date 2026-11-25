@@ -7,6 +7,8 @@ import {
   modeSells,
 } from '../../private/modules/store/apps/templates/app-page.types';
 import { AppPageViewComponent } from '../app-page/app-page-view.component';
+import { AppPageFacts, blockConditionsMet } from '../app-page/app-page-conditions';
+import type { AppStayFacts } from '../app-page/app-page-stay';
 import { ProductComplementsComponent } from '../product-page/components/product-complements.component';
 
 /** A room type the editor's preview lists in place of the PMS engine. */
@@ -39,7 +41,7 @@ export interface BookingPreviewRoom {
   host: { class: 'block' },
   template: `
     @if (page()) {
-      <app-app-page-view kind="booking" [page]="page()" part="hero" [blockIds]="blockIds()" />
+      <app-app-page-view kind="booking" [page]="page()" part="hero" [blockIds]="blockIds()" [facts]="facts()" [stayFacts]="stayFacts()" />
     }
 
     @if (showSearch()) {
@@ -97,7 +99,7 @@ export interface BookingPreviewRoom {
     }
 
     @if (page()) {
-      <app-app-page-view kind="booking" [page]="page()" part="blocks" [blockIds]="blockIds()" />
+      <app-app-page-view kind="booking" [page]="page()" part="blocks" [blockIds]="blockIds()" [facts]="facts()" [stayFacts]="stayFacts()" />
     }
 
     @if (showProducts()) {
@@ -135,6 +137,26 @@ export class BookingPageHomeViewComponent {
   readonly blockIds = input(false);
   readonly previewRooms = input<BookingPreviewRoom[] | null>(null);
   readonly previewProducts = input<{ id: number; name: string; image_url: string | null }[] | null>(null);
+  /**
+   * Datos reales de la estadía (`stay_facts` del servidor: el mismo en la
+   * vista previa y en la página publicada) para `stay_detail` y `visible_when`.
+   */
+  readonly stayFacts = input<AppStayFacts | null>(null);
+
+  /** Datos para `visible_when`; sin `stay_facts`, fotos y disponibilidad quedan sin aplicar. */
+  readonly facts = computed<AppPageFacts>(() => {
+    const stay = this.stayFacts();
+    const page = this.page();
+    return {
+      has_photos: typeof stay?.has_photos === 'boolean' ? stay.has_photos : null,
+      has_availability: typeof stay?.has_availability === 'boolean' ? stay.has_availability : null,
+      sells: !page || modeSells(effectiveMode('booking', page)),
+    };
+  });
+  private shown(type: string): boolean {
+    const block = this.block(type);
+    return block?.enabled !== false && blockConditionsMet(block?.props, this.facts());
+  }
 
   private block(type: string) {
     return this.page()?.blocks.find((b) => b.type === type) ?? null;
@@ -151,8 +173,8 @@ export class BookingPageHomeViewComponent {
   readonly checkinBlockId = computed(() => this.markId('checkin_info'));
   readonly productsBlockId = computed(() => this.markId('products'));
 
-  readonly showSearch = computed(() => this.block('search')?.enabled !== false);
-  readonly showCheckinInfo = computed(() => this.block('checkin_info')?.enabled !== false);
+  readonly showSearch = computed(() => this.shown('search'));
+  readonly showCheckinInfo = computed(() => this.shown('checkin_info'));
   readonly checkinText = computed(() => this.text('checkin_info', 'text'));
   readonly subheading = computed(
     () =>
@@ -164,7 +186,7 @@ export class BookingPageHomeViewComponent {
     if (this.productIds().length === 0) return false;
     const page = this.page();
     if (!page) return true;
-    return modeSells(effectiveMode('booking', page)) && this.block('products')?.enabled !== false;
+    return modeSells(effectiveMode('booking', page)) && this.shown('products');
   });
   readonly productsTitle = computed(() => this.text('products', 'title') ?? 'Para tu estadía');
   readonly heading = computed(() => {

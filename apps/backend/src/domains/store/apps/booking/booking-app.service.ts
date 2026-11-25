@@ -17,7 +17,11 @@ import {
   parseBookingPageConfig,
 } from './booking-page.reader';
 import { BookingViewData, BookingViewService } from './booking-view.service';
-import { BookingPoliciesService, PolicyDefaults } from './booking-policies';
+import {
+  BookingPoliciesService,
+  BookingStayFacts,
+  PolicyDefaults,
+} from './booking-policies';
 import { PaymentLinksService } from '../../payment-links/payment-links.service';
 
 /** What the editor preview paints besides the draft page. */
@@ -26,6 +30,8 @@ export interface BookingPreviewContext extends BookingViewData {
   online_payment_ready: boolean;
   /** S11 — real policy texts that fill the empty ones, like the public page. */
   policy_defaults: PolicyDefaults;
+  /** Real data of the stay for `stay_detail` and the `visible_when` conditions, like the public page. */
+  stay_facts: BookingStayFacts;
 }
 import { PublishBookingPageDto, UpdateBookingPageConfigDto } from './booking-page.dto';
 
@@ -64,12 +70,17 @@ export class BookingAppService {
   async previewContext(): Promise<BookingPreviewContext> {
     const storeId = this.requireStoreId();
     const row = await this.findRow(storeId);
-    const [view, online_payment_ready, policy_defaults] = await Promise.all([
+    const [view, online_payment_ready, policyContext] = await Promise.all([
       this.view.read(storeId, row?.config ?? null),
       this.paymentLinks.isConfigured(),
-      this.policies.defaults(storeId),
+      this.policies.readWithStayFacts(storeId),
     ]);
-    return { ...view, online_payment_ready, policy_defaults };
+    return {
+      ...view,
+      online_payment_ready,
+      policy_defaults: policyContext.defaults,
+      stay_facts: policyContext.stayFacts,
+    };
   }
 
   async updateConfig(dto: UpdateBookingPageConfigDto): Promise<void> {

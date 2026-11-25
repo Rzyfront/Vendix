@@ -37,6 +37,54 @@ export interface ResolvedCardPrice {
   onSale: boolean;
 }
 
+/** Precio final efectivo de un producto o servicio del catálogo público tras promoción plana. */
+export interface ResolvedEcommercePrice {
+  final_price: number;
+  regular_final_price: number | null;
+  is_on_sale: boolean;
+  has_flat_promo: boolean;
+}
+
+/**
+ * Resuelve el precio final efectivo de un ítem del catálogo público aplicando
+ * la misma regla de promoción plana que el preview del backend
+ * (`resolvePreviewProductCards`):
+ * - Solo aplica promoción plana si `is_quantity_tiered !== true`,
+ *   `promotional_price` es finito > 0 y menor a `final_price`.
+ * - No aplica si el ítem expone variantes (`variant_count > 0` y sin `sale_unit`).
+ */
+export function resolveEcommerceFinalPrice(
+  product: Pick<
+    EcommerceProduct,
+    'final_price' | 'regular_final_price' | 'is_on_sale' | 'active_promotion' | 'variant_count' | 'sale_unit' | 'variants'
+  >,
+): ResolvedEcommercePrice {
+  const baseFinal = finiteNumber(product.final_price, 0);
+  const promo = product.active_promotion ?? null;
+  const promoPrice = promo ? Number(promo.promotional_price) : NaN;
+  // La promoción plana es un precio de PRODUCTO: si el ítem expone variantes,
+  // aplicarla dejaría la tarjeta más barata que cualquier variante y el precio
+  // subiría al elegir una. Misma regla que `resolvePreviewProductCards`,
+  // decidida con `variant_count` para que preview y público coincidan siempre.
+  const exposedVariantCount = product.variant_count ?? product.variants?.length ?? 0;
+  const hasExposedVariants = !product.sale_unit && exposedVariantCount > 0;
+  const hasFlatPromo =
+    !hasExposedVariants &&
+    promo !== null &&
+    promo.is_quantity_tiered !== true &&
+    Number.isFinite(promoPrice) &&
+    promoPrice > 0 &&
+    promoPrice < baseFinal;
+
+  return {
+    final_price: hasFlatPromo ? promoPrice : baseFinal,
+    regular_final_price: hasFlatPromo ? baseFinal : (product.regular_final_price ?? null),
+    // Misma regla que el preview: `is_on_sale` manda, sin exigir `sale_price`.
+    is_on_sale: hasFlatPromo || Boolean(product.is_on_sale),
+    has_flat_promo: hasFlatPromo,
+  };
+}
+
 export const PRODUCTS_SELECTIONS: readonly AppProductsSelection[] = ['auto', 'manual'];
 export const PRODUCTS_LAYOUTS: readonly AppProductsLayout[] = ['grid', 'list', 'carousel'];
 
@@ -115,37 +163,16 @@ export function mapEcommerceProductToItem(product: EcommerceProduct): AppPagePro
     is_available: v.is_available !== false,
   }));
 
-  const promo = product.active_promotion ?? null;
-  const promoPrice = promo ? Number(promo.promotional_price) : NaN;
-  // La promoción plana es un precio de PRODUCTO: si el producto expone
-  // variantes, aplicarla dejaría la tarjeta más barata que cualquier variante y
-  // el precio subiría al elegir una. Misma regla que `resolvePreviewProductCards`,
-  // decidida con `variant_count` (no con `variants`, que solo llega cuando el
-  // bloque muestra selectores) para que preview y público coincidan siempre.
-  const exposedVariantCount =
-    product.variant_count ?? variants.length;
-  const hasExposedVariants =
-    !product.sale_unit && exposedVariantCount > 0;
-  const hasFlatPromo =
-    !hasExposedVariants &&
-    promo !== null &&
-    promo.is_quantity_tiered !== true &&
-    Number.isFinite(promoPrice) &&
-    promoPrice > 0 &&
-    promoPrice < baseFinal;
-
-  const finalPrice = hasFlatPromo ? promoPrice : baseFinal;
-  const regularFinalPrice = hasFlatPromo ? baseFinal : (product.regular_final_price ?? null);
+  const resolved = resolveEcommerceFinalPrice(product);
 
   return {
     id: product.id,
     slug: product.slug,
     name: product.name,
     image_url: safeUrl(product.image_url ?? undefined),
-    final_price: finalPrice,
-    regular_final_price: regularFinalPrice,
-    // Misma regla que el preview: `is_on_sale` manda, sin exigir `sale_price`.
-    is_on_sale: hasFlatPromo || Boolean(product.is_on_sale),
+    final_price: resolved.final_price,
+    regular_final_price: resolved.regular_final_price,
+    is_on_sale: resolved.is_on_sale,
     variants,
   };
 }

@@ -56,6 +56,7 @@ import { defaultBookingSearch } from './booking-page.util';
         [page]="page()"
         [storeName]="storeSeo.storeName()"
         [hasSearch]="hasSearch()"
+        [stayFacts]="stayFacts()"
       />
     }
   `,
@@ -72,6 +73,8 @@ export class BookingPageHomeComponent {
 
   /** The owner's own page; `null` keeps the page exactly as it was (apps-f2 S5). */
   readonly page = computed(() => this.bookingPage.config()?.page ?? null);
+  /** Datos reales de la estadía para `stay_detail` y `visible_when` (apps-booking-detail). */
+  readonly stayFacts = computed(() => this.bookingPage.config()?.stay_facts ?? null);
 
   /** The search screen reads its dates from the URL once, on creation. */
   readonly hasSearch = toSignal(

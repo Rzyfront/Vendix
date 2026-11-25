@@ -80,10 +80,14 @@ describe('BookingAppService', () => {
 
   afterEach(() => jest.restoreAllMocks());
 
-  it('the preview context says whether guests can pay online and brings the real policies (S9, S11)', async () => {
+  it('the preview context says whether guests can pay online and brings the real policies in one read (S9, S11)', async () => {
     const view = { read: jest.fn().mockResolvedValue({ room_types: [], products: [] }) };
     const paymentLinks = { isConfigured: jest.fn().mockResolvedValue(false) };
-    const policies = { defaults: jest.fn().mockResolvedValue({ check_in: 'Desde las 3:00 p. m.' }) };
+    const defaults = { check_in: 'Desde las 3:00 p. m.' };
+    const stayFacts = { check_in: 'Desde las 3:00 p. m.', max_guests: 4, has_photos: true };
+    const policies = {
+      readWithStayFacts: jest.fn().mockResolvedValue({ defaults, stayFacts }),
+    };
     const withDeps = new BookingAppService(
       prisma as any,
       domains as any,
@@ -97,9 +101,11 @@ describe('BookingAppService', () => {
       room_types: [],
       products: [],
       online_payment_ready: false,
-      policy_defaults: { check_in: 'Desde las 3:00 p. m.' },
+      policy_defaults: defaults,
+      stay_facts: stayFacts,
     });
-    expect(policies.defaults).toHaveBeenCalledWith(STORE_ID);
+    expect(policies.readWithStayFacts).toHaveBeenCalledTimes(1);
+    expect(policies.readWithStayFacts).toHaveBeenCalledWith(STORE_ID);
   });
 
   it('refuses to publish for a store without the hospitality industry', async () => {
