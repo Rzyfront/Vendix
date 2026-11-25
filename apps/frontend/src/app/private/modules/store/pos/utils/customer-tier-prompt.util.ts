@@ -114,3 +114,44 @@ export function followUpRestorePrompt(
   const lines = pending.lines.filter((line) => !applied.has(line.itemId));
   return lines.length > 0 ? { mode: 'restore', tier: pending.tier, lines } : null;
 }
+
+/**
+ * Estado del acceso a la tarifa del cliente desde la orden (botón junto al
+ * cliente del carrito). `pendingItemIds` son las líneas elegibles que aún no
+ * llevan la tarifa: las mismas que ofrecería `customerTierPrompt` al elegir el
+ * cliente. `disabledReason` explica por qué no hay nada que aplicar.
+ */
+export interface CustomerTierShortcut {
+  tier: CustomerTierRef;
+  eligible: number;
+  pendingItemIds: string[];
+  disabledReason: string | null;
+}
+
+/**
+ * `null` (botón oculto) sin tarifa del cliente o sin permiso para aplicarla.
+ * Elegibilidad idéntica al aviso al elegir cliente (`acceptsTier`).
+ */
+export function customerTierShortcut(input: {
+  items: CartItem[];
+  tier: CustomerTierRef | null;
+  canApplyTier: boolean;
+}): CustomerTierShortcut | null {
+  const { items, tier, canApplyTier } = input;
+  if (!tier || !canApplyTier) return null;
+  const eligible = items.filter((item) => acceptsTier(item, tier.id));
+  const prompt = customerTierPrompt({
+    items,
+    previousTier: null,
+    nextTier: tier,
+    canApplyTier,
+  });
+  const pendingItemIds = prompt?.lines.map((line) => line.itemId) ?? [];
+  const disabledReason =
+    eligible.length === 0
+      ? `Ningún producto de la orden admite la tarifa "${tier.name}"`
+      : pendingItemIds.length === 0
+        ? 'Ya aplicada a toda la orden'
+        : null;
+  return { tier, eligible: eligible.length, pendingItemIds, disabledReason };
+}

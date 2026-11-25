@@ -28,6 +28,8 @@ import { PosCashRegisterService } from '../services/pos-cash-register.service';
 import { BookingSchedulerModalComponent } from '../../../../../shared/components/booking-scheduler-modal/booking-scheduler-modal.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { PosCustomerTierButtonComponent } from '../components/pos-customer-tier-button.component';
+import type { CustomerTierRef } from '../utils/customer-tier-prompt.util';
 import { DialogService } from '../../../../../shared/components/dialog/dialog.service';
 import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
 import {
@@ -72,6 +74,7 @@ import {
   selector: 'app-pos-cart',
   standalone: true,
   imports: [
+    PosCustomerTierButtonComponent,
     FormsModule,
     IconComponent,
     ModalComponent,
@@ -255,6 +258,12 @@ import {
                 </div>
               </div>
               <div class="flex items-center gap-1 shrink-0">
+                <app-pos-customer-tier-button
+                  [items]="cartState().items"
+                  [tier]="customerTier()"
+                  [canApplyTier]="canApplyPricingTier()"
+                  (apply)="applyCustomerTier.emit()"
+                />
                 <button
                   type="button"
                   (click)="openCustomerModal.emit()"
@@ -1745,6 +1754,10 @@ private stationBookingService = inject(PosStationBookingService);
    */
   readonly openCustomerModal = output<void>();
   readonly clearCustomer = output<void>();
+  /** Tarifa del cliente aplicado (la resuelve el shell POS). */
+  readonly customerTier = input<CustomerTierRef | null>(null);
+  /** Aplicar la tarifa del cliente a la orden: lo resuelve el shell POS. */
+  readonly applyCustomerTier = output<void>();
   readonly create = output<void>();
   /**
    * CP-POS-CREAR-EDITAR-COBRAR-001 — direct save-draft (skip the checkout

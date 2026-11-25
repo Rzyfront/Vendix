@@ -239,3 +239,84 @@ describe('POS cotizar: ubicación del cliente', () => {
     expect(component.quoteLocationId()).toBe(10);
   });
 });
+
+/**
+ * Aplicar la tarifa del cliente desde la orden (botón junto al cliente):
+ * relee la tarifa y reutiliza el flujo del aviso con todas las líneas
+ * elegibles pendientes.
+ */
+describe('POS apply customer tier from the order', () => {
+  const tierLine = (id: string, appliedTierId: number | null = null) => ({
+    id,
+    quantity: 1,
+    itemType: 'product',
+    applied_price_tier_id: appliedTierId,
+    product: {
+      id: 1,
+      name: `Producto ${id}`,
+      enabled_price_tier_ids: [7, 8],
+      has_multiple_price_tiers: true,
+    },
+  });
+
+  const harness = (opts: { tier: { id: number; name: string } | null; activeIds?: number[] }) => {
+    const component = Object.create(PosComponent.prototype) as any;
+    const toastService = {
+      success: jasmine.createSpy('success'),
+      error: jasmine.createSpy('error'),
+      info: jasmine.createSpy('info'),
+    };
+    const cartService = {
+      getCurrentState: () => ({ items: [tierLine('a'), tierLine('b', 7), tierLine('c', 8)] }),
+      applyTierToCartItems: jasmine.createSpy('applyTierToCartItems').and.returnValue(of({})),
+    };
+    Object.assign(component, {
+      lastTierCustomerId: 5,
+      applyingCustomerTier: false,
+      customerTier: signal({ id: 7, name: 'Mayorista' }),
+      customerTierPromptState: signal(null),
+      customerService: {
+        getCustomerPriceTier: jasmine.createSpy('getCustomerPriceTier').and.returnValue(of(opts.tier)),
+      },
+      priceTierCache: {
+        getActiveTiers: () =>
+          of((opts.activeIds ?? [7]).map((id) => ({ id, name: `T${id}` }))),
+      },
+      cartService,
+      toastService,
+      authFacade: { userPermissions: () => ['store:products:apply_pricing_tier'], userRoles: () => [] },
+      destroyRef: { onDestroy: () => () => undefined },
+    });
+    return { component, toastService, cartService };
+  };
+
+  it('aplica a todas las líneas elegibles sin la tarifa y muestra el toast de siempre', () => {
+    const { component, toastService, cartService } = harness({ tier: { id: 7, name: 'Mayorista' } });
+    component.onApplyCustomerTier();
+    expect(component.customerService.getCustomerPriceTier).toHaveBeenCalledWith(5);
+    expect(cartService.applyTierToCartItems).toHaveBeenCalledWith(
+      ['a', 'c'],
+      jasmine.objectContaining({ id: 7 }),
+    );
+    expect(toastService.success).toHaveBeenCalledWith('Tarifa "Mayorista" aplicada a 2 producto(s)');
+    expect(component.customerTierPromptState()).toBeNull();
+  });
+
+  it('si la tarifa del cliente cambió, usa la nueva y avisa si ya no está activa', () => {
+    const { component, toastService, cartService } = harness({
+      tier: { id: 8, name: 'Distribuidor' },
+      activeIds: [7],
+    });
+    component.onApplyCustomerTier();
+    expect(component.customerTier()).toEqual({ id: 8, name: 'Distribuidor' });
+    expect(cartService.applyTierToCartItems).not.toHaveBeenCalled();
+    expect(toastService.error).toHaveBeenCalledWith('La tarifa Distribuidor ya no está activa');
+  });
+
+  it('si el cliente ya no tiene tarifa, avisa y no toca el carrito', () => {
+    const { component, toastService, cartService } = harness({ tier: null });
+    component.onApplyCustomerTier();
+    expect(toastService.error).toHaveBeenCalledWith('El cliente ya no tiene una tarifa asignada');
+    expect(cartService.applyTierToCartItems).not.toHaveBeenCalled();
+  });
+});

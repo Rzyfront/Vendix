@@ -16,6 +16,8 @@ import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { distinctUntilChanged, map } from 'rxjs';
 
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { PosCustomerTierButtonComponent } from './pos-customer-tier-button.component';
+import type { CustomerTierRef } from '../utils/customer-tier-prompt.util';
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
 import type { QuantityClampEvent } from '../../../../../shared/components/quantity-control/quantity-control.component';
 import { showStockCapToast } from '../cart/utils/stock-toast';
@@ -62,6 +64,7 @@ import {
   selector: 'app-pos-cart-modal',
   standalone: true,
   imports: [
+    PosCustomerTierButtonComponent,
     IconComponent,
     QuantityControlComponent,
     TooltipComponent,
@@ -174,6 +177,13 @@ import {
                 </div>
               </div>
               <div class="customer-card-actions">
+                <app-pos-customer-tier-button
+                  size="md"
+                  [items]="cartState()?.items ?? []"
+                  [tier]="customerTier()"
+                  [canApplyTier]="canApplyPricingTier()"
+                  (apply)="applyCustomerTier.emit()"
+                />
                 <button
                   type="button"
                   (click)="openCustomerModal.emit()"
@@ -1956,6 +1966,10 @@ export class PosCartModalComponent {
   readonly clearCart = output<void>();
   readonly openCustomerModal = output<void>();
   readonly clearCustomer = output<void>();
+  /** Tarifa del cliente aplicado (la resuelve el shell POS). */
+  readonly customerTier = input<CustomerTierRef | null>(null);
+  /** Aplicar la tarifa del cliente a la orden: lo resuelve el shell POS. */
+  readonly applyCustomerTier = output<void>();
   readonly quote = output<void>();
   readonly layaway = output<void>();
   readonly customerSelected = output<any>();
