@@ -1,5 +1,5 @@
 import { HttpException, Injectable, Logger } from '@nestjs/common';
-import { user_state_enum } from '@prisma/client';
+import { user_state_enum, Prisma } from '@prisma/client';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import type { ErrorCodeEntry } from 'src/common/errors';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
@@ -109,8 +109,17 @@ interface ClassifiedRow {
  * Las reglas de identidad de cliente (coherencia persona/documento, NIT + DV,
  * razón social vs nombre, resolución del email, validación de la tarifa) viven
  * en `update()`. Duplicarlas aquí garantizaría deriva, así que `apply()` no
- * escribe `users` directamente: itera y llama `update(storeId, id, payload)`
+ * escribe `users` directamente: itera y llama `update(storeId, id, payload, tx)`
  * capturando el fallo de cada fila para no abortar el lote.
+ *
+ * ## Transacción por cliente
+ *
+ * `update()` acepta un cliente Prisma de transacción opcional, y `apply()` le
+ * pasa uno por fila junto con el reemplazo de etiquetas: las dos escrituras de
+ * `users` + `store_users` y las de `crm_customer_tags` entran o se van juntas.
+ * Un fallo de etiquetas ya no deja al cliente a medio escribir. El lote NO es
+ * una única transacción: la fila que falla no revierte a las demás y el
+ * operador recibe el resultado por cliente.
  *
  * ## El payload SIEMPRE lleva nombre y apellido
  *
@@ -275,32 +284,25 @@ export class CustomersBulkEditService {
         }
 
         const payload = this.buildUpdatePayload(row, changes, tier);
-        await this.customersService.update(storeId, id, payload);
 
-        // Etiquetas: se escriben DESPUÉS del update escalar. `tag_action` es
-        // idempotente por fila, así que un cliente que ya tenía la etiqueta no
-        // genera escritura. Si las etiquetas fallan, la fila NO se reporta como
-        // fallo total: los datos del cliente YA se guardaron, y decir lo
-        // contrario mandaría al operador a repetir una escritura que ya ocurrió.
-        if (tagContext) {
-          const nextTags = this.applyTagAction(currentTagIds, tagContext.action);
-          try {
-            await this.replaceCustomerTags(storeId, id, nextTags);
-          } catch (tagError) {
-            const info = this.extractErrorInfo(tagError);
-            this.logger.warn(
-              `Bulk customer edit: las etiquetas del cliente ${id} fallaron: ${info.message}`,
+        // Una transacción POR CLIENTE: el update escalar (`users` +
+        // `store_users`) y el reemplazo de etiquetas entran o se van juntos, así
+        // que un fallo de etiquetas no deja al cliente a medio escribir. El
+        // lote NO es una sola transacción: un cliente que falla no revierte a
+        // los demás, y el resultado se reporta por fila.
+        await this.prisma.$transaction(async (tx) => {
+          await this.customersService.update(storeId, id, payload, tx);
+
+          // `tag_action` es idempotente por fila: un cliente que ya tenía la
+          // etiqueta no genera escritura.
+          if (tagContext) {
+            const nextTags = this.applyTagAction(
+              currentTagIds,
+              tagContext.action,
             );
-            results.push({
-              id,
-              name: this.displayName(row),
-              status: 'error',
-              ...(info.code && { code: info.code }),
-              message: `Los datos del cliente se guardaron, pero las etiquetas no: ${info.message}`,
-            });
-            continue;
+            await this.replaceCustomerTags(storeId, id, nextTags, tx);
           }
-        }
+        });
 
         results.push({ id, name: this.displayName(row), status: 'ok' });
       } catch (error) {
@@ -813,14 +815,16 @@ export class CustomersBulkEditService {
     storeId: number,
     customerId: number,
     tagIds: number[],
+    tx?: Prisma.TransactionClient,
   ): Promise<void> {
-    await this.prisma.crm_customer_tags.deleteMany({
+    const db = tx ?? this.prisma;
+    await db.crm_customer_tags.deleteMany({
       where: { customer_id: customerId, tag_id: { notIn: tagIds } },
     });
     if (tagIds.length === 0) {
       return;
     }
-    await this.prisma.crm_customer_tags.createMany({
+    await db.crm_customer_tags.createMany({
       data: tagIds.map((tagId) => ({
         store_id: storeId,
         customer_id: customerId,
@@ -846,9 +850,18 @@ export class CustomersBulkEditService {
     changes: BulkEditableCustomerChangesDto,
     tier: PriceTierContext | undefined,
   ): UpdateCustomerDto {
+    // `null` explícito = el operador vació el campo: se manda `''` para que el
+    // borrado ocurra de verdad. Con `??` el valor anterior volvía a colarse y el
+    // preview anunciaba un cambio que el update revertía en silencio.
     const payload: UpdateCustomerDto = {
-      first_name: changes.first_name ?? row.first_name ?? '',
-      last_name: changes.last_name ?? row.last_name ?? '',
+      first_name:
+        changes.first_name === null
+          ? ''
+          : (changes.first_name ?? row.first_name ?? ''),
+      last_name:
+        changes.last_name === null
+          ? ''
+          : (changes.last_name ?? row.last_name ?? ''),
     };
 
     if (changes.legal_name !== undefined) {

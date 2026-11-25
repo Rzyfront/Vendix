@@ -118,8 +118,10 @@ export class BulkCustomerTagActionDto {
  *   se llama "crédito" en el esquema es el saldo de notas crédito de
  *   facturación (`invoices.credit_limit_reserved_at`), que es contable y no un
  *   atributo del cliente.
- * - `avatar_url`, `username`, `password`, `main_store_id`: no son datos de
- *   cliente editables (credenciales / pertenencia), no aparecen en el modal.
+ * - `avatar_url`, `username`, `password`, `main_store_id`, `birth_date`: no son
+ *   datos de cliente editables (credenciales / pertenencia). `birth_date` no
+ *   existe en `users`: es de huéspedes de hotelería y de empleados, no del
+ *   cliente.
  *
  * Los campos relacionales van aparte, como en el masivo de productos:
  * `price_tier_action` (tarifa, un solo valor por cliente) y `tag_action`
@@ -228,7 +230,10 @@ export class BulkEditCustomersDto {
   @ApiProperty({ type: [Number] })
   @IsArray()
   @ArrayNotEmpty({ message: 'Selecciona al menos un cliente' })
-  @ArrayMaxSize(MAX_BULK_EDIT_CUSTOMER_IDS)
+  @ArrayMaxSize(
+    MAX_BULK_EDIT_CUSTOMER_IDS,
+    { message: `Puedes editar hasta ${MAX_BULK_EDIT_CUSTOMER_IDS} clientes por lote` },
+  )
   @IsInt({ each: true })
   @Type(() => Number)
   ids: number[];

@@ -50,7 +50,13 @@ describe('CustomersBulkEditService', () => {
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
         createMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
+      // Transacción por cliente: el mock recibe el callback y le pasa el mismo
+      // objeto como `Prisma.TransactionClient`.
+      $transaction: jest.fn(),
     };
+    prisma.$transaction.mockImplementation(async (callback: never) =>
+      (callback as unknown as (tx: unknown) => Promise<unknown>)(prisma),
+    );
     const customersService = {
       update: jest.fn().mockImplementation(async (_storeId, id) => ({ id })),
     };
@@ -244,11 +250,16 @@ describe('CustomersBulkEditService', () => {
     const result = await service.apply(2, dto({ changes: { phone: '3009998877' } }));
 
     expect(result).toMatchObject({ total: 1, successful: 1, failed: 0 });
-    expect(customersService.update).toHaveBeenCalledWith(2, 10, {
-      first_name: 'Ana',
-      last_name: 'Díaz',
-      phone: '3009998877',
-    });
+    expect(customersService.update).toHaveBeenCalledWith(
+      2,
+      10,
+      {
+        first_name: 'Ana',
+        last_name: 'Díaz',
+        phone: '3009998877',
+      },
+      expect.anything(),
+    );
   });
 
   it('un cliente que ya tenía los valores se reporta como omitido y no se escribe', async () => {
@@ -343,6 +354,69 @@ describe('CustomersBulkEditService', () => {
     expect(prisma.crm_customer_tags.deleteMany).toHaveBeenCalledWith({
       where: { customer_id: 10, tag_id: { notIn: [8] } },
     });
+  });
+
+  // ── Transacción por cliente ──────────────────────────────────────────
+
+  it('update y etiquetas van en la misma transacción por cliente', async () => {
+    const { service, prisma, customersService } = createService();
+    prisma.users.findMany.mockResolvedValue([row()]);
+    prisma.crm_tags.count.mockResolvedValue(1);
+    prisma.crm_customer_tags.findMany.mockResolvedValue([]);
+
+    await service.apply(
+      2,
+      dto({
+        changes: {
+          phone: '3009998877',
+          tag_action: { mode: BulkCustomerTagActionMode.ADD, ids: [8] },
+        },
+      }),
+    );
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    // El cliente Prisma de la transacción es el que hace las dos escrituras.
+    expect(customersService.update.mock.calls[0][3]).toBeDefined();
+  });
+
+  it('si las etiquetas fallan, la fila se reporta como error total (rollback)', async () => {
+    const { service, prisma } = createService();
+    prisma.users.findMany.mockResolvedValue([row()]);
+    prisma.crm_tags.count.mockResolvedValue(1);
+    prisma.crm_customer_tags.findMany.mockResolvedValue([]);
+    prisma.crm_customer_tags.deleteMany.mockRejectedValue(
+      Object.assign(new Error('tag rota'), { errorCode: 'SYS_UNEXPECTED_001' }),
+    );
+
+    const result = await service.apply(
+      2,
+      dto({
+        changes: {
+          phone: '3009998877',
+          tag_action: { mode: BulkCustomerTagActionMode.ADD, ids: [8] },
+        },
+      }),
+    );
+
+    expect(result.failed).toBe(1);
+    expect(result.successful).toBe(0);
+    expect(result.results[0].message).toBe('tag rota');
+    // Ya no se afirma que los datos quedaron guardados: la transacción revierte.
+    expect(result.results[0].message).not.toContain('se guardaron');
+  });
+
+  it('vaciar el nombre lo borra de verdad y no revierte al valor anterior', async () => {
+    const { service, prisma, customersService } = createService();
+    prisma.users.findMany.mockResolvedValue([row()]);
+
+    await service.apply(2, dto({ changes: { first_name: null } }));
+
+    expect(customersService.update).toHaveBeenCalledWith(
+      2,
+      10,
+      expect.objectContaining({ first_name: '', last_name: 'Díaz' }),
+      expect.anything(),
+    );
   });
 
   it('una etiqueta que no existe en la tienda rechaza el lote entero', async () => {
