@@ -331,6 +331,15 @@ export class AppointmentQueueService {
   ): Promise<{ updated: number; promoted: number | null }> {
     const ranked = await this.computeQueueForStore(storeId, isoDay);
 
+    // Posición previa de quien quedaría primero: solo se le avisa si de verdad
+    // cambió de lugar (si ya era el 0, el aviso sería un repetido).
+    const previousTop = ranked[0]
+      ? await this.prisma.bookings.findFirst({
+          where: { id: ranked[0].booking_id },
+          select: { queue_position: true },
+        })
+      : null;
+
     // Quien salió de la cola (pasó a atención, se atendió o se canceló) no debe
     // conservar su posición vieja: se limpia antes de escribir las nuevas.
     const day = new Date(`${isoDay.slice(0, 10)}T00:00:00.000Z`);
@@ -359,9 +368,10 @@ export class AppointmentQueueService {
       ),
     );
 
-    // Notify whoever is at the top (rank 0) with `appointment_queued`.
+    // Notify whoever is at the top (rank 0) with `appointment_queued`, only when
+    // it actually moved there.
     const promoted = ranked[0];
-    if (promoted) {
+    if (promoted && (previousTop?.queue_position ?? null) !== 0) {
       try {
         await this.notifications.createAndBroadcast(
           storeId,

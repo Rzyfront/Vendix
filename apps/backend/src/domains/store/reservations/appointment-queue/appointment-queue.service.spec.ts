@@ -7,6 +7,8 @@ describe('AppointmentQueueService', () => {
   ) {
     const findMany = jest.fn().mockResolvedValue(candidates);
     const update = jest.fn().mockResolvedValue({});
+    const findFirst = jest.fn().mockResolvedValue(null);
+    const updateMany = jest.fn().mockResolvedValue({ count: 0 });
     const transaction = jest.fn(async (ops: any[]) => {
       for (const op of ops) await op;
       return [];
@@ -14,7 +16,9 @@ describe('AppointmentQueueService', () => {
     const prisma = {
       bookings: {
         findMany,
+        findFirst,
         update,
+        updateMany,
       },
       $transaction: options.transactions === false ? jest.fn() : transaction,
       store_settings: {
@@ -30,7 +34,9 @@ describe('AppointmentQueueService', () => {
     return {
       service: new AppointmentQueueService(prisma, notifications),
       findMany,
+      findFirst,
       update,
+      updateMany,
       transaction,
       notifications,
     };
@@ -269,7 +275,7 @@ describe('AppointmentQueueService', () => {
         priority: 0,
       },
     ];
-    const { service, update, transaction, notifications } = buildService(
+    const { service, update, updateMany, transaction, notifications } = buildService(
       candidates,
       { transactions: true },
     );
@@ -299,7 +305,36 @@ describe('AppointmentQueueService', () => {
       expect.any(String),
       expect.objectContaining({ booking_id: 10, queue_position: 0 }),
     );
+    // Las posiciones de quien ya no está en la cola del día se limpian.
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        store_id: 1,
+        date: new Date('2026-07-18T00:00:00.000Z'),
+        queue_position: { not: null },
+        id: { notIn: [10, 11] },
+      },
+      data: { queue_position: null },
+    });
     expect(result).toEqual({ updated: 2, promoted: 10 });
+  });
+
+  it('no repite el aviso si el primero ya estaba en la posición 0', async () => {
+    const candidate = {
+      id: 10,
+      booking_number: 'BKG-1',
+      customer_id: 100,
+      provider_id: null,
+      date: new Date('2026-07-18T00:00:00Z'),
+      end_date: null,
+      start_time: '05:00',
+      end_time: '06:00',
+      arrival_at: new Date('2026-07-18T09:55:00Z'),
+      priority: 0,
+    };
+    const { service, findFirst, notifications } = buildService([candidate]);
+    findFirst.mockResolvedValue({ queue_position: 0 });
+    await service.refreshAndBroadcastQueue(1, '2026-07-18');
+    expect(notifications.createAndBroadcast).not.toHaveBeenCalled();
   });
 
   it('swallows notification errors so the queue refresh never crashes the listener', async () => {
