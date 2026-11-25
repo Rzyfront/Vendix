@@ -36,6 +36,29 @@ const RULES: ReadonlyArray<[RegExp, Replacement]> = [
   ],
 ];
 
+/**
+ * Parámetros de ruta legibles para la trazabilidad (`orderId=123`). Se
+ * descartan los que suenan a credencial y cualquier valor que no sea un id,
+ * slug o fecha: al bot nunca le llegan tokens ni datos de clientes.
+ */
+const SECRET_PARAM =
+  /(token|secret|api[_-]?key|password|passwd|pwd|authorization|cookie|codigo|cvv|pin)/i;
+const SAFE_PARAM_VALUE = /^[\w.:-]{1,60}$/;
+
+export function safeRouteParams(
+  params: Record<string, unknown> | undefined | null,
+): Record<string, string> | null {
+  if (!params) return null;
+  const safe: Record<string, string> = {};
+  for (const [key, value] of Object.entries(params)) {
+    if (SECRET_PARAM.test(key) || value === null || value === undefined) continue;
+    const text = String(value);
+    if (!SAFE_PARAM_VALUE.test(text)) continue;
+    safe[key] = text;
+  }
+  return Object.keys(safe).length > 0 ? safe : null;
+}
+
 /** Texto saneado y truncado; `''` si no hay texto. */
 export function sanitizeAlertText(value: unknown, max = 500): string {
   if (value === null || value === undefined) return '';

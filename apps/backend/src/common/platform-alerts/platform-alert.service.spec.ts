@@ -192,6 +192,56 @@ describe('PlatformAlertService', () => {
     expect(report).not.toHaveBeenCalled();
   });
 
+  it('una respuesta lenta de tienda lleva tienda, usuario, petición y parámetros aunque el ALS esté vacío', async () => {
+    alertContext = fakeContext(NAMES);
+    const service = build();
+
+    service.captureSlowRequest({
+      method: 'POST',
+      route: '/api/store/invoicing/orders/:orderId/emit',
+      durationMs: 60_990,
+      statusCode: 200,
+      organizationId: 82,
+      storeId: 105,
+      userId: 7,
+      requestId: 'req-slow-1',
+      params: { orderId: '987' },
+    });
+    await service.flush();
+
+    const stored = prisma.rows[0] as unknown as {
+      store_id: number;
+      organization_id: number;
+      details: Record<string, unknown>;
+    };
+    expect(stored.store_id).toBe(105);
+    expect(stored.organization_id).toBe(82);
+    expect(stored.details['Parámetros']).toBe('orderId=987');
+    expect(stored.details['Petición (id)']).toBe('req-slow-1');
+    expect(JSON.stringify(stored.details)).toContain('"userId":7');
+    // El mensaje ya resuelve nombres: tienda y ejecutor visibles.
+    const text = send.mock.calls[0][0] as string;
+    expect(text).toContain('Vendix Granizzo');
+    expect(text).toContain('Ana Pérez');
+    expect(text).toContain('orderId=987');
+  });
+
+  it('un 5xx de tienda usa la identidad explícita del request', async () => {
+    const service = build();
+    service.captureHttpFailure(
+      http500('/api/store/invoicing/orders/:orderId/emit', {
+        organizationId: 82,
+        storeId: 105,
+        userId: 7,
+        params: { orderId: '987' },
+      }),
+    );
+    await service.flush();
+    const stored = prisma.rows[0] as unknown as { store_id: number; details: Record<string, unknown> };
+    expect(stored.store_id).toBe(105);
+    expect(stored.details['Parámetros']).toBe('orderId=987');
+  });
+
   it('falla grave: Telegram + un ticket/correo por PlatformIncidentService, con el número en la alerta', async () => {
     const service = build();
     service.captureHttpFailure(http500());

@@ -148,6 +148,28 @@ describe('AllExceptionsFilter — bot de monitoreo (QUI-1010)', () => {
     expect(input).not.toHaveProperty('headers');
   });
 
+  it('el 5xx de una tienda lleva tienda, organización, usuario y parámetros del request', () => {
+    const sink = { captureHttpFailure: jest.fn() };
+    const filter = new AllExceptionsFilter(sink);
+    const { host } = hostFor({
+      method: 'POST',
+      originalUrl: '/api/store/invoicing/orders/987/emit',
+      params: { orderId: '987' },
+      user: { id: 7, organization_id: 82, store_id: 105 },
+    });
+
+    filter.catch(new Error('boom'), host as any);
+
+    expect(sink.captureHttpFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: 82,
+        storeId: 105,
+        userId: 7,
+        params: { orderId: '987' },
+      }),
+    );
+  });
+
   it('los 4xx no se reportan', () => {
     const sink = { captureHttpFailure: jest.fn() };
     const { host } = hostFor({ method: 'GET', url: '/api/x' });

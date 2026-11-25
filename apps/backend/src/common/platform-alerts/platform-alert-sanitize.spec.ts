@@ -2,6 +2,7 @@ import {
   fingerprintOf,
   normalizeUrlPath,
   routeKeyOf,
+  safeRouteParams,
   sanitizeAlertDetails,
   sanitizeAlertText,
   summarizeError,
@@ -63,6 +64,14 @@ describe('platform-alert-sanitize (S7: sin contraseñas, tokens ni datos de clie
     const out = sanitizeAlertDetails({ 'Petición (id)': id, Otro: 'tel 3001234567' });
     expect(out['Petición (id)']).toBe(id);
     expect(out.Otro).toBe('tel [número]');
+  });
+
+  it('safeRouteParams deja los ids legibles y descarta credenciales y valores raros', () => {
+    expect(
+      safeRouteParams({ orderId: '987', invoiceId: 45, token: 'abc', email: 'a@b.co' }),
+    ).toEqual({ orderId: '987', invoiceId: '45' });
+    expect(safeRouteParams({})).toBeNull();
+    expect(safeRouteParams(null)).toBeNull();
   });
 
   it('tenantIdsOf solo toma ids numéricos positivos del data del job', () => {

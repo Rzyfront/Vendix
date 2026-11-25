@@ -102,7 +102,22 @@ interface Observation {
   lastAt: Date;
 }
 
-export interface HttpFailureInput {
+/**
+ * Identidad del request para la alerta. El `PerformanceInterceptor` y el
+ * filtro de excepciones corren fuera del `AsyncLocalStorage` que arma
+ * `RequestContextInterceptor`, así que la leen del `req.user` y la pasan
+ * explícita: sin esto el bot decía «Plataforma (sin tienda)» en errores que
+ * eran de una tienda y se perdía el usuario que los ejecutó.
+ */
+export interface AlertRequestIdentity {
+  organizationId?: number | null;
+  storeId?: number | null;
+  userId?: number | null;
+  /** Valores resueltos de la ruta (ids), ya saneados por el llamador. */
+  params?: Record<string, string> | null;
+}
+
+export interface HttpFailureInput extends AlertRequestIdentity {
   method: string;
   /** Ruta sin valores (`routeKeyOf`). */
   route: string;
@@ -112,11 +127,12 @@ export interface HttpFailureInput {
   requestId?: string | null;
 }
 
-export interface SlowRequestInput {
+export interface SlowRequestInput extends AlertRequestIdentity {
   method: string;
   route: string;
   durationMs: number;
   statusCode?: number;
+  requestId?: string | null;
 }
 
 /**
@@ -196,6 +212,7 @@ export class PlatformAlertService implements OnModuleInit, OnModuleDestroy {
 
   private captureHttpFailureUnsafe(input: HttpFailureInput): void {
     const context = RequestContextService.asyncLocalStorage.getStore();
+    const identity = this.requestIdentity(input, context);
     const { severity, area } = severityOfHttpFailure(input.route, input.status);
     const process = `${input.method.toUpperCase()} ${stripApiPrefix(input.route)}`;
     const described = describeHttpRoute(input.method, input.route);
@@ -212,11 +229,12 @@ export class PlatformAlertService implements OnModuleInit, OnModuleDestroy {
         'Código HTTP': input.status,
         Área: area,
         'Petición (id)': input.requestId,
+        ...(identity.params ? { Parámetros: this.paramsLine(identity.params) } : {}),
       },
-      organizationId: context?.organization_id ?? null,
-      storeId: context?.store_id ?? null,
+      organizationId: identity.organizationId,
+      storeId: identity.storeId,
       context: {
-        userId: currentRequestUserId(),
+        userId: identity.userId,
         module: described.module,
         action: described.action,
       },
@@ -240,6 +258,7 @@ export class PlatformAlertService implements OnModuleInit, OnModuleDestroy {
     const path = stripApiPrefix(input.route);
     if (slowRequestIgnore.some((ignored) => path.includes(ignored))) return;
     const context = RequestContextService.asyncLocalStorage.getStore();
+    const identity = this.requestIdentity(input, context);
     const process = `${input.method.toUpperCase()} ${path}`;
     const durationMs = Math.round(input.durationMs);
     const described = describeHttpRoute(input.method, input.route);
@@ -254,15 +273,37 @@ export class PlatformAlertService implements OnModuleInit, OnModuleDestroy {
         'Duración (ms)': durationMs,
         'Umbral (ms)': slowRequestMs,
         'Código HTTP': input.statusCode,
+        'Petición (id)': input.requestId,
+        ...(identity.params ? { Parámetros: this.paramsLine(identity.params) } : {}),
       },
-      organizationId: context?.organization_id ?? null,
-      storeId: context?.store_id ?? null,
+      organizationId: identity.organizationId,
+      storeId: identity.storeId,
       context: {
-        userId: currentRequestUserId(),
+        userId: identity.userId,
         module: described.module,
         action: described.action,
       },
     });
+  }
+
+  /** Quién y de qué tienda es la alerta: lo explícito del request manda sobre el ALS. */
+  private requestIdentity(
+    input: AlertRequestIdentity,
+    context: ReturnType<typeof RequestContextService.asyncLocalStorage.getStore>,
+  ): { organizationId: number | null; storeId: number | null; userId: number | null; params: Record<string, string> | null } {
+    return {
+      organizationId: input.organizationId ?? context?.organization_id ?? null,
+      storeId: input.storeId ?? context?.store_id ?? null,
+      userId: input.userId ?? currentRequestUserId() ?? null,
+      params: input.params ?? null,
+    };
+  }
+
+  /** `orderId=123, invoiceId=45` para que la alerta sea rastreable. */
+  private paramsLine(params: Record<string, string>): string {
+    return Object.entries(params)
+      .map(([key, value]) => `${key}=${value}`)
+      .join(', ');
   }
 
   /**
