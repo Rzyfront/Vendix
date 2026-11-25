@@ -124,7 +124,7 @@ describe('VexDesignChatService · ciclo de vida de EventSource (F4)', () => {
 
   it('cierra EventSource y propaga error cuando dispara source.onerror', () => {
     let fakeSource!: FakeEventSource;
-    let receivedError: Error | null = null;
+    const errors: Error[] = [];
 
     service
       .streamDesign('service_page', 12, 'stream-net-err', (url) => {
@@ -169,7 +169,7 @@ describe('VexDesignChatService · ciclo de vida de EventSource (F4)', () => {
 
   it('cierra EventSource y falla si el servidor envía JSON malformado', () => {
     let fakeSource!: FakeEventSource;
-    let receivedError: Error | null = null;
+    const errors: Error[] = [];
 
     service
       .streamDesign('product_page', 55, 'stream-bad-json', (url) => {
@@ -177,27 +177,27 @@ describe('VexDesignChatService · ciclo de vida de EventSource (F4)', () => {
         return fakeSource as unknown as EventSource;
       })
       .subscribe({
-        error: (err: Error) => (receivedError = err),
+        error: (err: Error) => errors.push(err),
       });
 
     fakeSource.emit('ai-chunk', '{no-es-json');
 
-    expect(receivedError?.message).toContain('no válida');
+    expect(errors[0]?.message).toContain('no válida');
     expect(fakeSource.closed).toBe(true);
   });
 
   it('falla sin abrir EventSource cuando falta el token de sesión', () => {
     localStorage.removeItem(authKey);
     const createSpy = jasmine.createSpy('createSource');
-    let receivedError: Error | null = null;
+    const errors: Error[] = [];
 
     service
       .streamDesign('product_page', 55, 'stream-no-auth', createSpy)
       .subscribe({
-        error: (err: Error) => (receivedError = err),
+        error: (err: Error) => errors.push(err),
       });
 
     expect(createSpy).not.toHaveBeenCalled();
-    expect(receivedError?.message).toContain('Sesión no válida');
+    expect(errors[0]?.message).toContain('Sesión no válida');
   });
 });
