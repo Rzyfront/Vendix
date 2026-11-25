@@ -522,6 +522,23 @@ export const TURN_CLOSE_NUDGE =
   'No cerraste el turno y no ejecutaste nada. Si tenías algo que hacer, hazlo ahora con la herramienta que corresponda; si ya terminaste, llama a finish_turn.';
 
 /**
+ * T8 — exploration budget of a Vex turn outside a plan. Conversation 309 spent
+ * 58 reads over five turns and wrote nothing. Past this many read-only calls
+ * the turn stops exploring and answers with what it knows and the one fact it
+ * still lacks. Proposing a batch and closing the turn never count.
+ */
+export const VEX_DISCOVERY_BUDGET_PER_TURN = 10;
+const DISCOVERY_BUDGET_EXEMPT = new Set([
+  'propose_write_batch',
+  'finish_turn',
+  'ask_user',
+]);
+
+/** Closing instruction once the exploration budget is spent. */
+export const DISCOVERY_BUDGET_CLOSING =
+  'Se agotó el presupuesto de exploración de este turno: ya no puedes usar más herramientas. Responde ahora en pocas frases con lo que sí sabes, con datos concretos, y di exactamente qué dato o herramienta te falta para terminar. No prometas hacerlo después ni digas que algo se aplicó.';
+
+/**
  * T4 — Vex never promises work: either a write is persisted for approval in
  * this same turn (a `propose_write_batch` card or a single write's
  * confirmation) or there is no promise. With no tool for the request it says
@@ -2483,6 +2500,9 @@ export class AIAgentService {
     let finishCalled = false;
     let closeResumed = false;
     let pendingContinuation = false;
+    // T8: read-only calls of this Vex turn and whether the budget closed it.
+    let discoveryCalls = 0;
+    let discoveryExhausted = false;
     // T4: the one resume allowed after a write promise with nothing behind it.
     let honestyResumed = false;
     let honestyFallback = false;
@@ -2921,6 +2941,33 @@ export class AIAgentService {
           toolCallsThisTurn += response.tool_calls.length - closers;
           if (closers === response.tool_calls.length)
             response = { ...response, tool_calls: undefined };
+        }
+
+        // T8: exploration budget (Vex, outside a plan). Once spent, a round
+        // that asks for more reads is not run: the turn closes with what it
+        // knows. The unanswered calls are never pushed into the history.
+        if (isVex && !params.plan && response.tool_calls?.length) {
+          const reads = response.tool_calls.filter((call) => {
+            const name = this.toolRegistry.canonicalName(call.function.name);
+            return (
+              !DISCOVERY_BUDGET_EXEMPT.has(name) &&
+              this.toolRegistry.isReadOnly(name)
+            );
+          }).length;
+          if (reads > 0 && discoveryCalls >= VEX_DISCOVERY_BUDGET_PER_TURN) {
+            discoveryExhausted = true;
+            this.logger.warn(
+              JSON.stringify({
+                event: 'agent_discovery_budget',
+                outcome: 'closed',
+                store_id: context?.store_id ?? null,
+                reads: discoveryCalls,
+                iteration,
+              }),
+            );
+            break;
+          }
+          discoveryCalls += reads;
         }
 
         // Tool calls are honoured whatever `finish_reason` says: several
@@ -4989,7 +5036,9 @@ export class AIAgentService {
       let closing = '';
       if (!timedOut && !uncertainEffect)
         closing = await inferClosing(
-          'Ya no puedes usar más herramientas en este turno. Responde ahora con lo que hayas averiguado: si encontraste algo, dilo con los datos concretos; si no, dile con naturalidad qué te faltó y qué le sugieres hacer. No menciones herramientas, rutas, reintentos ni límites internos.',
+          discoveryExhausted
+            ? DISCOVERY_BUDGET_CLOSING
+            : 'Ya no puedes usar más herramientas en este turno. Responde ahora con lo que hayas averiguado: si encontraste algo, dilo con los datos concretos; si no, dile con naturalidad qué te faltó y qué le sugieres hacer. No menciones herramientas, rutas, reintentos ni límites internos.',
         );
 
       if (closing) {
