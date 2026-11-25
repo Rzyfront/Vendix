@@ -128,7 +128,12 @@ export class AgendaShellComponent {
     // La entrada del menú abre la URL sin `?tab=`: se escribe la pestaña por
     // defecto (o se corrige una desconocida) sin agregar historial.
     if (this.route.snapshot.queryParamMap.get('tab') !== this.tab()) {
-      this.select({ tab: this.tab() }, true);
+      // Al normalizar también se limpia `seccion`: la URL vieja de la cola
+      // (`?tab=configuracion&seccion=cola`) queda en `?tab=cola`.
+      this.select(
+        { tab: this.tab(), seccion: this.tab() === 'configuracion' ? this.section() : null },
+        true,
+      );
     }
   }
 
