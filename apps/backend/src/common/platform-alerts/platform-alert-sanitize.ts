@@ -58,6 +58,8 @@ export function safeRouteParams(
   const safe: Record<string, string> = {};
   for (const [key, value] of Object.entries(params)) {
     if (!ALLOWED_PARAM_KEY.test(key)) continue;
+    // Credenciales con forma de id: sesión, acceso público, token, share.
+    if (/(public|session|share|token)/i.test(key)) continue;
     if (value === null || value === undefined) continue;
     const text = String(value);
     const looksLikeSlug = key.toLowerCase() === 'slug' && SLUG_PARAM.test(text);

@@ -246,6 +246,26 @@ describe('PlatformAlertService', () => {
     expect(prisma.rows[0]).toMatchObject({ store_id: 105, organization_id: 82 });
   });
 
+  it('una organización explícita sin tienda no hereda la tienda del contexto', async () => {
+    const service = build();
+    await RequestContextService.asyncLocalStorage.run(
+      { is_super_admin: false, is_owner: false, store_id: 105, organization_id: 111 } as never,
+      async () => {
+        service.captureSlowRequest({
+          method: 'GET',
+          route: '/api/store/x',
+          durationMs: 60_000,
+          statusCode: 200,
+          organizationId: 82,
+          storeId: null,
+          userId: null,
+        });
+      },
+    );
+    await service.flush();
+    expect(prisma.rows[0]).toMatchObject({ organization_id: 82, store_id: null });
+  });
+
   it('la identidad explícita gana sobre el contexto del request', async () => {
     const service = build();
     await RequestContextService.asyncLocalStorage.run(

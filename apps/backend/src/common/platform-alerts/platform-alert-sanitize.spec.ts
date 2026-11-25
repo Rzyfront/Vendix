@@ -82,11 +82,16 @@ describe('platform-alert-sanitize (S7: sin contraseñas, tokens ni datos de clie
     expect(safeRouteParams(null)).toBeNull();
   });
 
-  it('safeRouteParams conserva shippingMethodId (no confunde pin con shipping)', () => {
+  it('acepta claves en camelCase terminadas en Id', () => {
     expect(safeRouteParams({ shippingMethodId: 12, mappingId: '9' })).toEqual({
       shippingMethodId: '12',
       mappingId: '9',
     });
+  });
+
+  it('safeRouteParams descarta ids que son credenciales de sesión o acceso', () => {
+    expect(safeRouteParams({ sessionId: '3f1e1a9e-7f0c-4a1d-9f7e-1b2c3d4e5f60' })).toBeNull();
+    expect(safeRouteParams({ publicId: '3f1e1a9e-7f0c-4a1d-9f7e-1b2c3d4e5f60' })).toBeNull();
   });
 
   it('alertIdentityFromRequest usa req.user y cae al dominio público sin usuario', () => {
