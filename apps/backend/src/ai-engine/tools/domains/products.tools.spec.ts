@@ -1538,6 +1538,24 @@ describe('products.tools · contrato canónico T4', () => {
       });
     });
 
+    it('(b2) add sin is_main en producto sin principal: informa la principal que guardó addImage', async () => {
+      const deps = baseDeps();
+      deps.productsService.findOne.mockResolvedValue(ACTIVE_PRODUCT_ROW);
+      deps.productsService.addImage.mockResolvedValue({ id: 56, is_main: true });
+      const { tools } = buildTools(deps);
+
+      const answer = await run(tools, 'manage_product_images', {
+        action: 'add',
+        product_id: 101,
+        image_url: IMAGE_URL,
+      });
+
+      expect(answer).toEqual({
+        summary: 'Coca Cola 1L (COCA-1L): imagen agregada.',
+        data: { product_id: 101, image_id: 56, is_main: true },
+      });
+    });
+
     it('(e) preview add ok nombra al producto con la URL', async () => {
       const deps = baseDeps();
       deps.productsService.findOne.mockResolvedValue(ACTIVE_PRODUCT_ROW);
