@@ -89,6 +89,30 @@ describe('planBulkPriceTierUpdate', () => {
     expect(plan.payload).toEqual({});
   });
 
+  it('remove con flag apagado ⇒ NO enciende multi-tarifa', () => {
+    const plan = planBulkPriceTierUpdate({
+      mode: RelationalActionMode.REMOVE,
+      ids: [1],
+      currentIds: [1, 2],
+      currentFlag: false,
+    });
+    expect(plan.targetIds).toEqual([2]);
+    expect(plan.enablesFlag).toBe(false);
+    expect(plan.payload).toEqual({ enabled_price_tier_ids: [2] });
+  });
+
+  it('remove de una tarifa ajena con flag apagado ⇒ sin cambios ni flag', () => {
+    const plan = planBulkPriceTierUpdate({
+      mode: RelationalActionMode.REMOVE,
+      ids: [9],
+      currentIds: [1],
+      currentFlag: false,
+    });
+    expect(plan.enablesFlag).toBe(false);
+    expect(plan.changed).toBe(false);
+    expect(plan.payload).toEqual({});
+  });
+
   it('flag explícito en el lote ⇒ la acción no lo reenvía', () => {
     const plan = planBulkPriceTierUpdate({
       mode: RelationalActionMode.ADD,

@@ -49,6 +49,9 @@ export interface BulkPriceTierPlan {
  * Criterio del flag:
  * - Conjunto destino NO vacío y flag apagado ⇒ se envía
  *   `has_multiple_price_tiers: true` (sin el flag las tarifas no surten efecto).
+ * - Modo `remove` NUNCA enciende el flag: quitar tarifas no puede volver
+ *   multi-tarifa a un producto que hoy no lo es (y con variantes haría fallar
+ *   la fila por `PRODUCT_TIERS_VARIANTS_EXCLUSIVE`).
  * - Conjunto destino vacío ⇒ el flag NO se toca: apagar multi-tarifa es una
  *   decisión explícita del usuario (el interruptor de la misma sección), no un
  *   efecto colateral de quitar tarifas.
@@ -72,6 +75,7 @@ export function planBulkPriceTierUpdate(input: {
     currentSorted.length !== targetIds.length ||
     currentSorted.some((id, index) => id !== targetIds[index]);
   const enablesFlag =
+    input.mode !== RelationalActionMode.REMOVE &&
     targetIds.length > 0 &&
     input.currentFlag !== true &&
     input.explicitFlag === undefined;
