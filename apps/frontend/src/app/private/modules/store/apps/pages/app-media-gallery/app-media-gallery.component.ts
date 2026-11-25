@@ -1,9 +1,15 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, computed, inject, signal, viewChild } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
-import { Subject, debounceTime, switchMap, tap } from 'rxjs';
+import { EMPTY, Subject, debounceTime, switchMap, tap } from 'rxjs';
+import { catchError } from 'rxjs/operators';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-import { IconComponent, SpinnerComponent, ToastService } from '../../../../../../shared/components';
+import {
+  ConfirmationModalComponent,
+  IconComponent,
+  SpinnerComponent,
+  ToastService,
+} from '../../../../../../shared/components';
 import { AppMediaItem, AppMediaService } from '../../services/app-media.service';
 
 /**
@@ -17,7 +23,7 @@ import { AppMediaItem, AppMediaService } from '../../services/app-media.service'
 @Component({
   selector: 'app-app-media-gallery',
   standalone: true,
-  imports: [DatePipe, DecimalPipe, IconComponent, SpinnerComponent],
+  imports: [DatePipe, DecimalPipe, ConfirmationModalComponent, IconComponent, SpinnerComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="w-full max-w-6xl mx-auto px-3 py-4 md:px-6 md:py-6">
@@ -28,17 +34,23 @@ import { AppMediaItem, AppMediaService } from '../../services/app-media.service'
             Fotos guardadas en tu tienda. Úsalas en cualquier app y copia su enlace para donde lo necesites.
           </p>
         </div>
-        <label class="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-[var(--color-primary)] px-3 py-2 text-sm font-semibold text-[var(--color-text-on-primary,#fff)]">
-          <input
-            type="file"
-            accept="image/jpeg,image/png,image/webp,image/avif"
-            multiple
-            hidden
-            (change)="upload($any($event.target).files)"
-          />
+        <button
+          type="button"
+          class="inline-flex items-center gap-2 rounded-lg bg-[var(--color-primary)] px-3 py-2 text-sm font-semibold text-[var(--color-text-on-primary,#fff)]"
+          [disabled]="uploading()"
+          (click)="fileInput().nativeElement.click()"
+        >
           <app-icon name="upload" [size]="15"></app-icon>
           {{ uploading() ? 'Subiendo…' : 'Subir fotos' }}
-        </label>
+        </button>
+        <input
+          #fileInput
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/avif"
+          multiple
+          hidden
+          (change)="upload($any($event.target))"
+        />
       </header>
 
       <div class="mb-4 flex flex-wrap items-center gap-2">
@@ -117,6 +129,17 @@ import { AppMediaItem, AppMediaService } from '../../services/app-media.service'
           </div>
         }
       }
+
+      <app-confirmation-modal
+        [(isOpen)]="deleteOpen"
+        title="Quitar de la galería"
+        [message]="deleteMessage()"
+        confirmText="Quitar"
+        cancelText="Cancelar"
+        confirmVariant="danger"
+        (confirm)="confirmRemove()"
+        (cancel)="pendingDelete.set(null)"
+      />
     </div>
   `,
 })
@@ -131,6 +154,15 @@ export class AppMediaGalleryComponent {
   readonly uploading = signal(false);
   readonly search = signal('');
   readonly hasMore = computed(() => this.items().length < this.total());
+  readonly fileInput = viewChild.required<ElementRef<HTMLInputElement>>('fileInput');
+  readonly pendingDelete = signal<AppMediaItem | null>(null);
+  readonly deleteOpen = signal(false);
+  readonly deleteMessage = computed(() => {
+    const item = this.pendingDelete();
+    return item
+      ? `Se quitará «${item.alt ?? 'esta foto'}» de la galería. Las páginas publicadas que ya la usan la conservan.`
+      : '';
+  });
 
   private page = 1;
   private readonly queries = new Subject<{ term: string; page: number; replace: boolean }>();
@@ -142,7 +174,16 @@ export class AppMediaGalleryComponent {
         debounceTime(250),
         tap(() => this.loading.set(true)),
         switchMap((query) =>
-          this.media.list({ search: query.term, page: query.page, limit: 24 }),
+          this.media.list({ search: query.term, page: query.page, limit: 24 }).pipe(
+            // Un fallo no puede cerrar la cadena: la galería debe poder volver
+            // a buscar o paginar sin recargar la página.
+            catchError(() => {
+              if (!query.replace) this.page = Math.max(1, query.page - 1);
+              this.loading.set(false);
+              this.toast.error('No se pudo cargar la galería');
+              return EMPTY;
+            }),
+          ),
         ),
         takeUntilDestroyed(this.destroyRef),
       )
@@ -150,7 +191,7 @@ export class AppMediaGalleryComponent {
         next: (result) => {
           const last = this.lastQuery();
           this.total.set(result.total);
-          this.items.set(last?.replace ? result.data : [...this.items(), ...result.data]);
+          this.items.set(last?.replace ? result.data : this.mergeUnique(this.items(), result.data));
           this.loading.set(false);
         },
         error: () => {
@@ -172,8 +213,10 @@ export class AppMediaGalleryComponent {
     this.emit(this.search(), this.page, false);
   }
 
-  upload(files: FileList | null): void {
-    const list = Array.from(files ?? []);
+  upload(input: HTMLInputElement): void {
+    const list = Array.from(input.files ?? []);
+    // Permite volver a elegir el mismo archivo más adelante.
+    input.value = '';
     if (!list.length) return;
     this.uploading.set(true);
     this.media
@@ -205,9 +248,15 @@ export class AppMediaGalleryComponent {
   }
 
   remove(item: AppMediaItem): void {
-    if (!confirm('¿Quitar esta foto de la galería? Las páginas publicadas que ya la usan la conservan.')) {
-      return;
-    }
+    this.pendingDelete.set(item);
+    this.deleteOpen.set(true);
+  }
+
+  confirmRemove(): void {
+    const item = this.pendingDelete();
+    this.deleteOpen.set(false);
+    this.pendingDelete.set(null);
+    if (!item) return;
     this.media
       .remove(item.id)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -218,6 +267,12 @@ export class AppMediaGalleryComponent {
         },
         error: () => this.toast.error('No se pudo quitar la foto'),
       });
+  }
+
+  private mergeUnique(current: AppMediaItem[], incoming: AppMediaItem[]): AppMediaItem[] {
+    const byId = new Map(current.map((item) => [item.id, item]));
+    for (const item of incoming) byId.set(item.id, item);
+    return [...byId.values()];
   }
 
   /** Enlace estable: sirve en producción y no vence como una firma. */

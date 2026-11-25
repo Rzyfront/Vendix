@@ -1,0 +1,89 @@
+import { TestBed, fakeAsync, tick } from '@angular/core/testing';
+import { of, throwError } from 'rxjs';
+import { AppMediaGalleryComponent } from './app-media-gallery.component';
+import { AppMediaItem, AppMediaService } from '../../services/app-media.service';
+import { ToastService } from '../../../../../../shared/components';
+
+function item(over: Partial<AppMediaItem> = {}): AppMediaItem {
+  return {
+    id: 1,
+    app_kind: null,
+    kind: 'image',
+    mime_type: 'image/webp',
+    size_bytes: 120_000,
+    width: null,
+    height: null,
+    alt: 'Fachada',
+    created_at: '2026-11-25T10:00:00.000Z',
+    url: 'https://api.test/public/apps/media/3f1e1a9e-7f0c-4a1d-9f7e-1b2c3d4e5f60',
+    thumb_url: 'https://api.test/public/apps/media/3f1e1a9e-7f0c-4a1d-9f7e-1b2c3d4e5f60?thumb=1',
+    ...over,
+  };
+}
+
+describe('AppMediaGalleryComponent', () => {
+  let list: jasmine.Spy;
+  let remove: jasmine.Spy;
+  let toast: jasmine.SpyObj<ToastService>;
+
+  function setup() {
+    list = jasmine.createSpy('list').and.returnValue(of({ data: [item()], total: 1, page: 1, limit: 24 }));
+    remove = jasmine.createSpy('remove').and.returnValue(of({ deleted: true }));
+    toast = jasmine.createSpyObj<ToastService>('ToastService', ['success', 'error', 'info']);
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: AppMediaService,
+          useValue: {
+            list,
+            remove,
+            upload: () => of([]),
+            updateAlt: () => of(item()),
+          },
+        },
+        { provide: ToastService, useValue: toast },
+      ],
+    });
+    return TestBed.createComponent(AppMediaGalleryComponent).componentInstance;
+  }
+
+  it('copia el enlace estable del medio, no una firma', async () => {
+    const writeText = jasmine.createSpy('writeText').and.returnValue(Promise.resolve());
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const component = setup();
+    await component.copyLink(item());
+    expect(writeText).toHaveBeenCalledWith(
+      'https://api.test/public/apps/media/3f1e1a9e-7f0c-4a1d-9f7e-1b2c3d4e5f60',
+    );
+    expect(toast.success).toHaveBeenCalled();
+  });
+
+  it('quitar abre la confirmación y no borra hasta confirmar', () => {
+    const component = setup();
+    component.remove(item());
+    expect(remove).not.toHaveBeenCalled();
+    expect(component.deleteOpen()).toBe(true);
+    component.confirmRemove();
+    expect(remove).toHaveBeenCalledWith(1);
+  });
+
+  it('cancelar la confirmación no borra nada', () => {
+    const component = setup();
+    component.remove(item());
+    component.pendingDelete.set(null);
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it('la búsqueda sigue funcionando después de un error', fakeAsync(() => {
+    list.and.returnValues(
+      throwError(() => new Error('boom')),
+      of({ data: [item({ id: 9, alt: 'Otra' })], total: 1, page: 1, limit: 24 }),
+    );
+    const component = setup();
+    tick(300);
+    component.onSearch('fachada');
+    tick(300);
+    expect(component.items().map((row) => row.id)).toEqual([9]);
+    expect(component.loading()).toBe(false);
+  }));
+});

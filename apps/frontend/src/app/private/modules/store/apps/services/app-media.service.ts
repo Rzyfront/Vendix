@@ -15,7 +15,7 @@ export interface AppMediaItem {
   height: number | null;
   alt: string | null;
   created_at: string;
-  /** URL firmada para mostrarla en el editor. */
+  /** URL estable de la API (`/public/apps/media/:token`), no una firma. */
   url: string | null;
   thumb_url: string | null;
 }
