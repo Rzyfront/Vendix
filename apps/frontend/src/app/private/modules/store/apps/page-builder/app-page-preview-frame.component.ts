@@ -130,6 +130,9 @@ export class AppPagePreviewFrameComponent {
     const style = this.doc.createElement('style');
     style.textContent = SELECTED_STYLE;
     this.doc.head.appendChild(style);
+    // La portada a pantalla completa usa la altura del panel, no la de la
+    // ventana: dentro del iframe `100svh` empujaría el resto de la página.
+    this.doc.documentElement.style.setProperty('--ap-hero-min-h', '620px');
 
     const onMessage = (event: MessageEvent) => {
       const message = readFrameMessage<AppPagePreviewPayload>(event, this.origin, this.parent);
@@ -155,6 +158,7 @@ export class AppPagePreviewFrameComponent {
       view?.removeEventListener('message', onMessage);
       this.doc.removeEventListener('click', onClick, true);
       this.doc.removeEventListener('submit', onSubmit, true);
+      this.doc.documentElement.style.removeProperty('--ap-hero-min-h');
       style.remove();
     });
 
