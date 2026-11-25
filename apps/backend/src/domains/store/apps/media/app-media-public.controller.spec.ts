@@ -16,7 +16,7 @@ describe('AppMediaPublicController — fotos de la app publicada', () => {
     const { controller, prisma, res, s3 } = build({ s3_key: 'k/a.webp', thumb_key: 'k/a_thumb.webp' });
     await controller.file('token-1', undefined, res);
     expect(prisma.store_app_media.findFirst).toHaveBeenCalledWith({
-      where: { public_token: 'token-1' },
+      where: { public_token: 'token-1', kind: 'image' },
       select: { s3_key: true, thumb_key: true },
     });
     expect(s3.signUrl).toHaveBeenCalledWith('k/a.webp');
@@ -32,7 +32,19 @@ describe('AppMediaPublicController — fotos de la app publicada', () => {
 
   it('un token inexistente es 404', async () => {
     const { controller, res } = build(null);
-    await expect(controller.file('nope', undefined, res)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      controller.file('3f1e1a9e-7f0c-4a1d-9f7e-1b2c3d4e5f60', undefined, res),
+    ).rejects.toBeInstanceOf(NotFoundException);
     expect(res.redirect).not.toHaveBeenCalled();
+  });
+
+  it('solo sirve imágenes: un documento no se publica', async () => {
+    const { controller, prisma, res } = build(null);
+    await expect(
+      controller.file('3f1e1a9e-7f0c-4a1d-9f7e-1b2c3d4e5f60', undefined, res),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(prisma.store_app_media.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ kind: 'image' }) }),
+    );
   });
 });

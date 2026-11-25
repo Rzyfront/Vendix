@@ -3,6 +3,7 @@ import {
   Get,
   NotFoundException,
   Param,
+  ParseUUIDPipe,
   Query,
   Res,
 } from '@nestjs/common';
@@ -14,9 +15,9 @@ import { S3Service } from '@common/services/s3.service';
 /**
  * Medios de las apps, servidos a la página pública.
  *
- * La app guarda `/public/apps/media/:id` (estable); este endpoint firma el
- * objeto en cada visita y redirige, así que el enlace no vence nunca. No lleva
- * permiso: son las fotos que la propia página publica.
+ * La app guarda `/public/apps/media/:token` (estable y opaco); este endpoint
+ * firma el objeto en cada visita y redirige, así que el enlace no vence nunca.
+ * No lleva permiso: son las fotos que la propia página publica.
  */
 @Controller('public/apps/media')
 export class AppMediaPublicController {
@@ -28,7 +29,7 @@ export class AppMediaPublicController {
   @Public()
   @Get(':token')
   async file(
-    @Param('token') token: string,
+    @Param('token', new ParseUUIDPipe({ version: '4' })) token: string,
     @Query('thumb') thumb: string | undefined,
     @Res() res: Response,
   ): Promise<void> {
@@ -36,7 +37,8 @@ export class AppMediaPublicController {
     // Se busca por el token opaco (no por id): con ids correlativos, cualquiera
     // podía pedir el medio de otra tienda cambiando el número.
     const row = await this.prisma.store_app_media.findFirst({
-      where: { public_token: token },
+      // Solo imágenes: los documentos de la biblioteca no se sirven en público.
+      where: { public_token: token, kind: 'image' },
       select: { s3_key: true, thumb_key: true },
     });
     if (!row) throw new NotFoundException('Medio no encontrado');

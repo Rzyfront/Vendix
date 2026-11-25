@@ -42,8 +42,8 @@ export interface AppMediaRow {
  * Biblioteca de medios de las apps (apps-customization F1.1).
  *
  * Las fotos se suben a nuestro storage (S3) y quedan registradas por tienda.
- * Las apps guardan la **URL estable** (`/public/apps/media/:id`), que redirige a
- * una URL firmada fresca: nada de enlaces que vencen a las 24 h.
+ * Las apps guardan la **URL estable** (`/public/apps/media/:token`), que redirige
+ * a una URL firmada fresca: nada de enlaces que vencen a las 24 h.
  *
  * Reglas del lote: se valida TODO antes de subir nada; si falla la creación de
  * una fila, se borran de S3 los objetos ya subidos. Borrar es lógico: la fila
@@ -229,8 +229,8 @@ export class AppMediaService {
   }
 
   /**
-   * URL estable de la API (`/public/apps/media/:id`), relativa: el frontend le
-   * antepone su `environment.apiUrl`. Ese endpoint firma al vuelo, así que el
+   * URL estable de la API (`/public/apps/media/:token`), relativa: el frontend
+   * le antepone su `environment.apiUrl`. Ese endpoint firma al vuelo, así que el
    * enlace guardado en la app nunca vence.
    */
   private stableUrl(token: string, thumb = false): string {
