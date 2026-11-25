@@ -44,8 +44,14 @@ import { AppPageGeneralPanelComponent } from './app-page-general-panel.component
 import { AppPageStyleBrandKey, AppPageStylePanelComponent } from './app-page-style-panel.component';
 import { AppMediaPickerComponent } from '../components/app-media-picker/app-media-picker.component';
 import type { AppMediaItem } from '../services/app-media.service';
+import { supportsVexDesignChat } from '../services/vex-design-chat.service';
 import { blocksToPage, emptyPage, pageToBlocks } from './page-builder-document';
 import { AppPageBuilderAdapter, AppPagePreviewPayload, appPagePreviewFrameSrc } from './page-builder.types';
+import {
+  VexDesignApplyEvent,
+  VexDesignChatPanelComponent,
+  VexDesignDiscardEvent,
+} from './vex-design-chat-panel.component';
 
 export type AppPageBuilderTab = 'general' | 'content' | 'style' | 'seo' | 'preview';
 
@@ -98,6 +104,7 @@ function snapshot(value: unknown): string {
     AppPageStylePanelComponent,
     LandingSeoPanelComponent,
     AppMediaPickerComponent,
+    VexDesignChatPanelComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
@@ -142,9 +149,7 @@ function snapshot(value: unknown): string {
         <!-- Contenido y Vista previa comparten la misma vista previa (un solo iframe) -->
         @if (tab() === 'content' || tab() === 'preview') {
           <div class="grid gap-3 p-3 md:px-6"
-               [class]="tab() === 'content'
-                 ? 'lg:h-[calc(100dvh-10.5rem)] lg:grid-cols-[minmax(0,17rem)_minmax(0,22rem)_minmax(0,1fr)]'
-                 : 'h-[calc(100dvh-10.5rem)] grid-cols-1'">
+               [class]="contentGridClass()">
             @if (tab() === 'content') {
               <aside class="min-h-0 overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] lg:h-full">
                 <app-builder-outline
@@ -182,6 +187,18 @@ function snapshot(value: unknown): string {
                 (blockSelect)="onPreviewSelect($event)"
               />
             </section>
+            @if (canUseDesignChat() && designChatOpen() && designChatKind(); as chatKind) {
+              <div class="min-h-[28rem] lg:h-full lg:min-h-0">
+                <app-vex-design-chat-panel
+                  [kind]="chatKind"
+                  [draft]="page()"
+                  [open]="designChatOpen()"
+                  (close)="designChatOpen.set(false)"
+                  (applyDraft)="onDesignChatApply($event)"
+                  (discardDraft)="onDesignChatDiscard($event)"
+                />
+              </div>
+            }
           </div>
         }
 
@@ -262,11 +279,34 @@ export class AppPageBuilderPageComponent<S = unknown, C = unknown> implements On
   readonly customDomainId = signal<number | null>(null);
 
   readonly selectedId = signal<string | null>(null);
+  readonly highlightedBlockId = signal<string | null>(null);
+  readonly designChatOpen = signal(false);
   readonly device = signal<BuilderDevice>('mobile');
+  private highlightTimer: ReturnType<typeof setTimeout> | null = null;
   /** Caché local de productos resueltos por `app-product-selector` para refrescar la vista previa en vivo. */
   readonly resolvedCatalogProducts = signal<ReadonlyMap<number, AppPageProductItem>>(new Map());
 
   // ── Derived state ──────────────────────────────────────────────────────
+  readonly designChatKind = computed(() => {
+    const kind = this.adapter().kind;
+    return supportsVexDesignChat(kind) ? kind : null;
+  });
+  /** El chat de diseño con Vex solo se muestra con permiso de edición y nunca en Tienda en línea (`store_home`). */
+  readonly canUseDesignChat = computed(() => {
+    if (!this.designChatKind()) return false;
+    return this.auth.hasPermission?.('store:apps:manage') === true;
+  });
+  readonly contentGridClass = computed(() => {
+    const chatVisible = this.canUseDesignChat() && this.designChatOpen();
+    if (this.tab() === 'content') {
+      return chatVisible
+        ? 'lg:h-[calc(100dvh-10.5rem)] lg:grid-cols-[minmax(0,15rem)_minmax(0,19rem)_minmax(0,1fr)_minmax(0,21rem)]'
+        : 'lg:h-[calc(100dvh-10.5rem)] lg:grid-cols-[minmax(0,17rem)_minmax(0,22rem)_minmax(0,1fr)]';
+    }
+    return chatVisible
+      ? 'h-[calc(100dvh-10.5rem)] grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]'
+      : 'h-[calc(100dvh-10.5rem)] grid-cols-1';
+  });
   readonly frameSrc = computed(() => appPagePreviewFrameSrc(this.adapter().kind));
   /** The page as it would be saved. */
   readonly page = computed(() => blocksToPage(this.adapter().kind, this.adapter().catalog, this.base(), this.blocks()));
@@ -322,6 +362,15 @@ export class AppPageBuilderPageComponent<S = unknown, C = unknown> implements On
   readonly actions = computed<StickyHeaderActionButton[]>(() => {
     const busy = this.busy();
     const actions: StickyHeaderActionButton[] = [];
+    if (this.canUseDesignChat()) {
+      actions.push({
+        id: 'design-chat',
+        label: this.designChatOpen() ? 'Ocultar Vex' : 'Diseñar con Vex',
+        variant: 'outline',
+        icon: 'sparkles',
+        title: 'Abrir o cerrar el chat de diseño con Vex',
+      });
+    }
     const published = this.isPublished();
     // A published page has no separate draft: saving changes it live.
     if (this.dirty() && !published) {
@@ -350,6 +399,7 @@ export class AppPageBuilderPageComponent<S = unknown, C = unknown> implements On
   readonly previewPayload = computed<AppPagePreviewPayload<S | null, C | null>>(() => {
     const logo = this.auth.userStore()?.logo_url;
     const catalogProducts = Array.from(this.resolvedCatalogProducts().values());
+    const highlighted = this.highlightedBlockId();
     return {
       kind: this.adapter().kind,
       page: this.page(),
@@ -358,10 +408,14 @@ export class AppPageBuilderPageComponent<S = unknown, C = unknown> implements On
       storeName: this.storeName(),
       storeLogoUrl: typeof logo === 'string' && HTTPS.test(logo) ? logo : null,
       ...(catalogProducts.length > 0 ? { catalogProducts } : {}),
+      ...(highlighted ? { highlightedBlockId: highlighted } : {}),
     };
   });
 
   ngOnInit(): void {
+    this.destroyRef.onDestroy(() => {
+      if (this.highlightTimer) clearTimeout(this.highlightTimer);
+    });
     this.load();
   }
 
@@ -492,9 +546,49 @@ export class AppPageBuilderPageComponent<S = unknown, C = unknown> implements On
 
   // ── Header actions ─────────────────────────────────────────────────────
   onAction(id: string): void {
-    if (id === 'save') this.save();
+    if (id === 'design-chat') this.toggleDesignChat();
+    else if (id === 'save') this.save();
     else if (id === 'publish') this.publish();
     else if (id === 'unpublish') this.unpublish();
+  }
+
+  toggleDesignChat(): void {
+    if (!this.canUseDesignChat()) return;
+    const next = !this.designChatOpen();
+    this.designChatOpen.set(next);
+    if (next && this.tab() !== 'content' && this.tab() !== 'preview') {
+      this.tab.set('content');
+    }
+  }
+
+  /** Aplica el borrador generado por Vex sin guardar ni publicar, refresca el preview y resalta el bloque tocado. */
+  onDesignChatApply(event: VexDesignApplyEvent): void {
+    this.setPage(event.document);
+    if (event.touchedBlockId) {
+      if (this.blocks().some((b) => b.id === event.touchedBlockId)) {
+        this.selectedId.set(event.touchedBlockId);
+      }
+      this.flashHighlightedBlock(event.touchedBlockId);
+    }
+    this.toast.success(`Cambio aplicado al borrador: ${event.summary}`);
+  }
+
+  /** Revierte el borrador al documento previo y refresca la vista previa. */
+  onDesignChatDiscard(event: VexDesignDiscardEvent): void {
+    this.setPage(event.document);
+    if (event.touchedBlockId) {
+      this.flashHighlightedBlock(event.touchedBlockId);
+    }
+    this.toast.info('Cambio descartado en el borrador.');
+  }
+
+  private flashHighlightedBlock(blockId: string): void {
+    if (this.highlightTimer) clearTimeout(this.highlightTimer);
+    this.highlightedBlockId.set(blockId);
+    this.highlightTimer = setTimeout(() => {
+      this.highlightedBlockId.set(null);
+      this.highlightTimer = null;
+    }, 1800);
   }
 
   /** Saves the page and the settings that changed. Returns the chain so publish can continue it. */

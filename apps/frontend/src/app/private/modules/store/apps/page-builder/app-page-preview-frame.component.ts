@@ -17,8 +17,10 @@ import { ProductPagePreviewBodyComponent } from './product-page/product-page-pre
 import { ServicePageContext, ServicePageSettings, servicePagePreview } from './service-page/service-page-builder';
 import { StoreHomeContext, StoreHomeSettings, storeHomePreview } from './store-home/store-home-builder';
 
-/** Outline of the section selected in the editor. */
+/** Outline de la sección seleccionada y resalte breve del bloque tocado por Vex. */
 const SELECTED_STYLE = `[data-preview-selected="true"]{outline:2px solid var(--color-primary,#2563eb);outline-offset:-2px;}
+[data-preview-highlighted="true"]{outline:3px solid var(--color-primary,#2563eb);outline-offset:-3px;box-shadow:inset 0 0 0 9999px rgba(37,99,235,0.08);transition:outline-color 250ms ease,box-shadow 250ms ease;}
+@media (prefers-reduced-motion: reduce){[data-preview-highlighted="true"]{transition:none;}}
 [data-block-id]{cursor:pointer;}`;
 
 /**
@@ -99,6 +101,7 @@ export class AppPagePreviewFrameComponent {
   readonly kind = (inject(ActivatedRoute).snapshot.paramMap.get('kind') ?? null) as PageAppKind | null;
   readonly payload = signal<AppPagePreviewPayload | null>(null);
   readonly selectedBlockId = signal<string | null>(null);
+  readonly highlightedBlockId = signal<string | null>(null);
 
   readonly fallback = computed(() => {
     const p = this.payload();
@@ -149,6 +152,7 @@ export class AppPagePreviewFrameComponent {
       if (this.kind && message.payload?.kind !== this.kind) return;
       this.payload.set(message.payload);
       this.selectedBlockId.set(message.selectedBlockId);
+      this.highlightedBlockId.set(message.payload?.highlightedBlockId ?? null);
     };
     // The preview is a picture of the page: links and buttons never leave it;
     // a click on a section selects it in the editor.
@@ -187,6 +191,21 @@ export class AppPagePreviewFrameComponent {
           el?.setAttribute('data-preview-selected', 'true');
           if (el && scrolledTo !== id) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
           scrolledTo = id;
+        }),
+      );
+    });
+
+    // Resalta un instante el bloque tocado desde el chat de diseño con Vex.
+    effect(() => {
+      const highlightId = this.highlightedBlockId();
+      this.payload();
+      untracked(() =>
+        queueMicrotask(() => {
+          this.doc.querySelectorAll('[data-preview-highlighted]').forEach((el) => el.removeAttribute('data-preview-highlighted'));
+          if (!highlightId) return;
+          const el = this.doc.querySelector(`[data-block-id="${CSS.escape(highlightId)}"]`);
+          el?.setAttribute('data-preview-highlighted', 'true');
+          el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }),
       );
     });

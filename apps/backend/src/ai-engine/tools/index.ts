@@ -88,3 +88,8 @@ export {
 } from './domains/code-execution.tools';
 
 export { createProceduralRecipeTools } from './domains/recipe.tools';
+export {
+  createVexDesignTools,
+  VEX_DESIGN_TOOL_NAMES,
+} from './domains/vex-design.tools';
+export type { VexDesignToolDeps } from './domains/vex-design.tools';

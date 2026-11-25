@@ -1,12 +1,17 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { S3Module } from '@common/services/s3.module';
+import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+import { createVexDesignTools } from '../../../ai-engine/tools/domains/vex-design.tools';
+import { AIChatModule } from '../ai-chat/ai-chat.module';
 import { AppsController } from './apps.controller';
 import { AppMediaController } from './media/app-media.controller';
 import { AppMediaService } from './media/app-media.service';
 import { AppMediaPublicController } from './media/app-media-public.controller';
 import { AppsService } from './apps.service';
+import { VexDesignController } from './vex-design/vex-design.controller';
+import { VexDesignService } from './vex-design/vex-design.service';
 import { ProductPageAppController } from './product-page/product-page-app.controller';
 import { ProductPageAppService } from './product-page/product-page-app.service';
 import { ProductPagePublicController } from './product-page/product-page-public.controller';
@@ -53,11 +58,14 @@ import { LandingLeadService } from './landing/landing-lead.service';
     // Fuente única de precio del catálogo y promociones activas para la vista previa.
     StorefrontSharedModule,
     PromotionsModule,
+    // Apps F4 — reutiliza el stream SSE existente de Vex (`AIChatService`).
+    AIChatModule,
   ],
   controllers: [
-    // Antes que AppsController: `store/apps/media` no debe caer en `:kind`.
+    // Antes que AppsController: `store/apps/media` y `store/apps/design-chat` no deben caer en `:kind`.
     AppMediaController,
     AppMediaPublicController,
+    VexDesignController,
     ProductPageAppController,
     ProductPagePublicController,
     ServicePageAppController,
@@ -72,6 +80,7 @@ import { LandingLeadService } from './landing/landing-lead.service';
   ],
   providers: [
     AppMediaService,
+    VexDesignService,
     AppsService,
     AppDomainService,
     AppPageService,
@@ -92,4 +101,15 @@ import { LandingLeadService } from './landing/landing-lead.service';
   ],
   exports: [AppsService],
 })
-export class AppsModule {}
+export class AppsModule implements OnModuleInit {
+  constructor(
+    private readonly toolRegistry: AIToolRegistry,
+    private readonly vexDesign: VexDesignService,
+  ) {}
+
+  onModuleInit(): void {
+    this.toolRegistry.registerMany(
+      createVexDesignTools({ design: this.vexDesign }),
+    );
+  }
+}

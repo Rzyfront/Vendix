@@ -744,6 +744,38 @@ export class AIChatService {
   }
 
   /**
+   * Apps F4 — handshake SSE del chat de diseño en el constructor de apps.
+   * Reutiliza las mismas validaciones, cuotas y store de `createStreamIntent`,
+   * inyectando un `design_context` generado únicamente en el servidor.
+   */
+  async createDesignStreamIntent(
+    conversationId: number,
+    content: string,
+    designContext: {
+      app_kind: string;
+      prompt_context: string;
+      allowed_tools: string[];
+    },
+  ): Promise<string> {
+    const conversation = await this.getConversation(conversationId);
+
+    if (conversation.status === 'archived') {
+      throw new VendixHttpException(ErrorCodes.AI_CHAT_002);
+    }
+
+    const agentKey = this.turnAgentKey(conversation);
+    await this.assertVexTurnAccess(agentKey);
+    await this.assertVexTurnQuota(agentKey);
+
+    return this.streamIntents.create({
+      conversation_id: conversationId,
+      content,
+      design_context: designContext,
+      user_id: RequestContextService.getContext()?.user_id,
+    });
+  }
+
+  /**
    * Requires an active request context. The SSE controller re-enters it with
    * `RequestContextService.run()` before subscribing, because Nest's `@Sse()`
    * Observable body runs after the handler returned and the interceptor's
@@ -1029,19 +1061,29 @@ export class AIChatService {
       // `agent_enabled`, so simply opening the SSE connection turned the agent
       // off — the same question answered with data over POST and with a shrug
       // over SSE. It now runs the identical loop, narrating each tool call.
-      const goal = await this.withBlockSelection(
+      const baseGoal = await this.withBlockSelection(
         intent.continuation
           ? CONTINUATION_GOALS[intent.continuation]
           : intent.content,
         agentKey,
         conversationId,
       );
+      const goal = intent.design_context?.prompt_context
+        ? `${intent.design_context.prompt_context}\n\nSolicitud del dueño:\n${baseGoal}`
+        : baseGoal;
       const activePlan =
         continuationPlan ?? (await this.planState.getActive(conversationId));
       const storedPlan = activePlan
         ? null
         : await this.planState.get(conversationId);
-      const base = this.resolveAgentLoopArgs(chatAgent, conversation, vexTurn);
+      const rawBase = this.resolveAgentLoopArgs(chatAgent, conversation, vexTurn);
+      const base = intent.design_context?.allowed_tools?.length
+        ? {
+            ...rawBase,
+            tools: intent.design_context.allowed_tools,
+            agent_allowed_tools: intent.design_context.allowed_tools,
+          }
+        : rawBase;
       let variables: Record<string, string> | VexiSnapshot;
       let storeMemory: string | undefined;
       if (agentKey === VEX_AGENT_KEY) {

@@ -54,6 +54,8 @@ export const CODEMODE_EXCLUDED: Readonly<Record<string, string>> = Object.freeze
     'listPipelines() calls ensureDefaultCrmPipeline(), inserting default CRM pipeline and stages',
   get_store_settings:
     'getSettings() calls ensureDefaults() and lazily updates store_settings JSON in the database',
+  vex_design_read:
+    'reads the ephemeral app-builder draft bound to an active design-chat conversation',
 });
 
 /** Shape every allowlisted tool must hold, today (generation) and live (policy). */

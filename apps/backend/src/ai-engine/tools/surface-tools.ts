@@ -45,6 +45,10 @@ export const TURN_BOUND_CONVERSATION_TOOLS: ReadonlySet<string> = new Set([
   'propose_write_batch',
   // F9/T52: input and output blocks always belong to the active turn's thread.
   'run_analysis',
+  // Apps F4: el borrador de diseño siempre pertenece a la conversación activa del editor.
+  'vex_design_read',
+  'vex_design_patch',
+  'vex_design_discard',
 ]);
 
 /**
