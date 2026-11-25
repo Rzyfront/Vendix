@@ -68,4 +68,35 @@ describe('ScheduleManagementComponent — horario de la tienda / horario propio'
     expect(component.ownScheduleDraft()).toBeFalse();
     expect(component.usesStoreHours()).toBeFalse();
   });
+
+  it('editar nombre, bio o estado activo conserva has_own_schedule en memoria', () => {
+    const { component, service } = setup({
+      id: 7,
+      display_name: 'Ana',
+      bio: 'Bio inicial',
+      is_active: true,
+      has_own_schedule: true,
+    });
+    // Simula la respuesta real de PATCH /store/providers/:id sin has_own_schedule.
+    service.updateProvider.and.callFake((_id: number, dto: Partial<ServiceProvider>) =>
+      of({ id: 7, uses_store_hours: true, is_active: true, display_name: 'Ana', bio: 'Bio inicial', ...dto }),
+    );
+    component.providers.set([component.selectedProvider()!]);
+
+    component.nameValue.set('Ana María');
+    component.saveName();
+    expect(component.selectedProvider()?.has_own_schedule).toBeTrue();
+
+    component.bioValue.set('Bio nueva');
+    component.saveBio();
+    expect(component.selectedProvider()?.has_own_schedule).toBeTrue();
+
+    component.toggleActive(component.selectedProvider()!);
+    expect(component.selectedProvider()?.has_own_schedule).toBeTrue();
+
+    // Acto seguido cambiar a Horario propio no entra en borrador: aplica al instante.
+    component.setUsesStoreHours(false);
+    expect(service.updateProvider).toHaveBeenCalledWith(7, { uses_store_hours: false });
+    expect(component.ownScheduleDraft()).toBeFalse();
+  });
 });

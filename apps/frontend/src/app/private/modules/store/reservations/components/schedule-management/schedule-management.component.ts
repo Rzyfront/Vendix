@@ -435,11 +435,12 @@ export class ScheduleManagementComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (updated) => {
-          if (this.selectedProvider()?.id === updated.id) {
-            this.selectedProvider.set(updated);
+          const currentSelected = this.selectedProvider();
+          if (currentSelected?.id === updated.id) {
+            this.selectedProvider.set({ ...currentSelected, ...updated });
           }
           const list = this.providers().map((p) =>
-            p.id === updated.id ? updated : p,
+            p.id === updated.id ? { ...p, ...updated } : p,
           );
           this.providers.set(list);
           this.toastService.success(
@@ -507,9 +508,11 @@ export class ScheduleManagementComponent {
       )
       .subscribe({
         next: (updated) => {
-          this.selectedProvider.set(updated);
+          this.selectedProvider.set({ ...provider, ...updated });
           this.providers.set(
-            this.providers().map((p) => (p.id === updated.id ? updated : p)),
+            this.providers().map((p) =>
+              p.id === updated.id ? { ...p, ...updated } : p,
+            ),
           );
           this.editingName.set(false);
           this.toastService.success('Nombre actualizado');
@@ -540,9 +543,9 @@ export class ScheduleManagementComponent {
       )
       .subscribe({
         next: (updated) => {
-          this.selectedProvider.set(updated);
+          this.selectedProvider.set({ ...provider, ...updated });
           const list = this.providers().map((p) =>
-            p.id === updated.id ? updated : p,
+            p.id === updated.id ? { ...p, ...updated } : p,
           );
           this.providers.set(list);
           this.editingBio.set(false);
