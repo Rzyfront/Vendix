@@ -253,6 +253,25 @@ export class InvoiceDataRequestsService {
   }
 
   /**
+   * QUI-1062: MAX de preparación del pedido. Solo cuentan las líneas
+   * físicas o preparadas (misma regla que `account.service.getOrderSummary`);
+   * si no hay ninguna, no existe ETA de preparación (`null`).
+   */
+  private prepMinutesMaxFor(
+    items: {
+      product_type?: string | null;
+      preparation_time_minutes: number | null;
+    }[],
+    defaultPrep: number,
+  ): number | null {
+    const physical = items.filter((item) => item.product_type !== 'service');
+    if (physical.length === 0) return null;
+    return Math.max(
+      ...physical.map((item) => item.preparation_time_minutes ?? defaultPrep),
+    );
+  }
+
+  /**
    * Public read-only order summary for anonymous ecommerce checkouts.
    * Unlike getByToken(), this endpoint must keep working after the invoice
    * data request is submitted/completed so guests retain purchase support.
@@ -300,6 +319,7 @@ export class InvoiceDataRequestsService {
                 },
                 products: {
                   select: {
+                    product_type: true,
                     preparation_time_minutes: true,
                     product_images: {
                       where: { is_main: true },
@@ -432,6 +452,9 @@ export class InvoiceDataRequestsService {
         unit_price: item.unit_price,
         total_price: item.total_price,
         tax_amount_item: item.tax_amount_item,
+        // QUI-1062: la confirmación pública necesita el tipo de línea para no
+        // mostrar seguimiento ni ETA en pedidos de solo servicios.
+        product_type: item.products?.product_type ?? null,
         ...this.deriveLineGross(item as any),
         // Paso 3: cocina en vivo + prep resuelto variante→producto (null si
         // ninguno lo define; el default solo aplica al MAX agregado).
@@ -453,11 +476,9 @@ export class InvoiceDataRequestsService {
 
     // Paso 3: MAX por ítem con la regla exacta de `computeEta`
     // (variante ?? producto ?? default tienda) — coherente con el paso 5.
-    const prep_minutes_max = items.length
-      ? Math.max(
-          ...items.map((item) => item.preparation_time_minutes ?? defaultPrep),
-        )
-      : defaultPrep;
+    // QUI-1062: solo las líneas físicas/preparadas cuentan (misma regla que
+    // account.service.getOrderSummary); sin ellas no hay ETA de preparación.
+    const prep_minutes_max = this.prepMinutesMaxFor(items, defaultPrep);
 
     // Paso 3: comprobante por pago. `receipt_content_type` no se persiste
     // (igual que `getPaymentReceiptUrl`): HEAD del objeto S3 por lectura,
