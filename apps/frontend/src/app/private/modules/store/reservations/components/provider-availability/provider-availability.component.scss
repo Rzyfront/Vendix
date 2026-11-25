@@ -8,6 +8,13 @@
   min-height: 100%;
 }
 
+// Embedded en Agenda → Configuración: sin fondo propio ni alto mínimo; el
+// contenedor de la sección ya pone el fondo y el scroll.
+:host(.pa-embedded) {
+  background: transparent;
+  min-height: 0;
+}
+
 .provider-availability {
   width: 100%;
   max-width: 1400px;
@@ -16,6 +23,15 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+// Embedded: ancho completo, sin márgenes laterales (igual que Equipo de servicio).
+:host(.pa-embedded) .provider-availability {
+  max-width: none;
+  margin: 0;
+  // Solo se quitan los laterales: el respiro inferior evita que la última
+  // tarjeta quede pegada al borde del scroll.
+  padding: 0 0 24px;
 }
 
 // ===== Tokens ===============================================================

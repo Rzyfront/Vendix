@@ -126,39 +126,6 @@ export const PROVIDER_CONFIG_HEADER_ACTIONS: StickyHeaderActionButton[] = [
   { id: agendaUrl('configuracion', 'disponibilidad'), label: 'Disponibilidad', icon: 'calendar-clock', variant: 'outline' },
 ];
 
-/**
- * Otras pantallas de Reservas y Pedidos que no son configuración de
- * disponibilidad: se enlazan desde la pestaña Configuración.
- */
-export function schedulingRelatedLinks(flags: {
-  bookings: boolean;
-  scheduled: boolean;
-  service: boolean;
-}): { label: string; icon: string; route: string; description: string }[] {
-  const links: { label: string; icon: string; route: string; description: string }[] = [];
-  if (flags.bookings) {
-    links.push(
-      { label: 'Solicitudes de reagenda', icon: 'inbox', route: '/admin/reservations/reschedule-requests', description: 'Cambios de hora que piden los clientes' },
-      { label: 'Solicitudes de pago', icon: 'receipt', route: '/admin/reservations/payment-requests', description: 'Comprobantes de anticipos por confirmar' },
-      { label: 'Ajustes de reservas', icon: 'settings', route: '/admin/settings/general/reservas', description: 'Reglas de reserva, anticipos y confirmaciones' },
-    );
-    if (flags.service) {
-      links.push(
-        { label: 'Recordatorios', icon: 'bell', route: '/admin/reservations/reminders', description: 'Próximos servicios por recordar' },
-        { label: 'Estaciones', icon: 'warehouse', route: '/admin/services/stations', description: 'Estaciones, sus horarios y excepciones' },
-      );
-    }
-  }
-  if (flags.scheduled) {
-    links.push(
-      { label: 'Producción del día', icon: 'chef-hat', route: '/admin/scheduled-orders/day', description: 'Pedidos programados por preparar' },
-      { label: 'Insumos del día', icon: 'package', route: '/admin/scheduled-orders/production', description: 'Insumos consolidados para producir' },
-      { label: 'Franjas y cupos de pedidos', icon: 'clock', route: '/admin/settings/general/venta', description: 'Horario, franjas y excepciones de pedidos programados' },
-    );
-  }
-  return links;
-}
-
 /** Botón «Reagendas (n)» de la cabecera: lleva a la cola de solicitudes. */
 export function rescheduleRequestsAction(count: number, visible: boolean): StickyHeaderActionButton {
   return {

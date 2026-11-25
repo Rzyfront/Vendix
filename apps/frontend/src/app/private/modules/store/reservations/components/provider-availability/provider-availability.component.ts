@@ -72,6 +72,9 @@ import { agendaQueryParams, agendaUrl } from '../../../scheduling/scheduling-tab
   ],
   templateUrl: './provider-availability.component.html',
   styleUrls: ['./provider-availability.component.scss'],
+  // Montada dentro de Agenda → Configuración ocupa todo el ancho, como Equipo
+  // de servicio (Rafael, 2026-11-24: sobraban márgenes laterales).
+  host: { '[class.pa-embedded]': 'embedded()' },
 })
 export class ProviderAvailabilityComponent {
   /** Montada en Agenda → Configuración: sin cabecera propia (agenda-unificada F1). */
