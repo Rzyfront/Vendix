@@ -5,6 +5,7 @@ import {
   faqFields,
   galleryFields,
   highlightsFields,
+  productsFields,
   stepsFields,
   testimonialsFields,
   titleField,
@@ -87,6 +88,13 @@ export const PRODUCT_PAGE_TEMPLATE: AppPageTemplate = {
       icon: 'package-plus',
       existing: true,
       fields: [titleField()],
+    },
+    {
+      type: 'products',
+      label: 'Productos',
+      description: 'Vitrina de productos (automático: hasta 8 recientes de la tienda; manual: tu selección), variantes y diseño.',
+      icon: 'shopping-bag',
+      fields: productsFields(),
     },
     {
       type: 'shipping_warranty',

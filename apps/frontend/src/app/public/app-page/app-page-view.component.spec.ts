@@ -1,5 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideZonelessChangeDetection } from '@angular/core';
+import { provideZonelessChangeDetection, signal } from '@angular/core';
+import { provideRouter } from '@angular/router';
+import { CurrencyFormatService } from '../../shared/pipes/currency';
 import type { AppPageDocument, PageAppKind } from '../../private/modules/store/apps/templates/app-page.types';
 import { APP_PAGE_VARIANTS } from '../../private/modules/store/apps/templates';
 import { AppPageViewComponent } from './app-page-view.component';
@@ -43,7 +45,14 @@ describe('AppPageViewComponent (apps-f2 T3)', () => {
   beforeEach(() =>
     TestBed.configureTestingModule({
       imports: [AppPageViewComponent],
-      providers: [provideZonelessChangeDetection()],
+      providers: [
+        provideZonelessChangeDetection(),
+        provideRouter([]),
+        {
+          provide: CurrencyFormatService,
+          useValue: { currencyCode: signal('COP'), format: (v: number) => `$${v}`, loadCurrency: () => {} },
+        },
+      ],
     }),
   );
 
@@ -796,6 +805,61 @@ describe('AppPageViewComponent (apps-f2 T3)', () => {
         expect(section.style.backgroundImage).toBe('');
         expect(section.querySelector('[data-testid="block-overlay"]')).toBeNull();
       }
+    });
+
+    it('renderiza el bloque products en product_page respetando orden manual, variantes con precio y diseño', () => {
+      fixture = TestBed.createComponent(AppPageViewComponent);
+      fixture.componentRef.setInput('kind', 'product_page');
+      fixture.componentRef.setInput('preview', true);
+      fixture.componentRef.setInput('previewProducts', [
+        {
+          id: 1,
+          slug: 'crema',
+          name: 'Crema',
+          image_url: null,
+          final_price: 40000,
+          variants: [
+            { id: 11, name: '50 ml', final_price: 40000 },
+            { id: 12, name: '100 ml', final_price: 72000 },
+          ],
+        },
+        {
+          id: 2,
+          slug: 'jabon',
+          name: 'Jabón',
+          image_url: null,
+          final_price: 18000,
+          variants: [],
+        },
+      ]);
+      fixture.componentRef.setInput('page', {
+        schema_version: 1,
+        blocks: [
+          {
+            id: 'productos_destacados',
+            type: 'products',
+            enabled: true,
+            props: {
+              title: 'Nuestros favoritos',
+              selection: 'manual',
+              product_ids: [2, 1],
+              show_variants: true,
+              layout: 'list',
+            },
+          },
+        ],
+      });
+      fixture.detectChanges();
+
+      const el = fixture.nativeElement as HTMLElement;
+      expect(el.querySelector('[data-testid="products-layout-list"]')).not.toBeNull();
+      const cards = Array.from(el.querySelectorAll('[data-testid="product-block-card"]'));
+      expect(cards.map((c) => c.getAttribute('data-product-id'))).toEqual(['2', '1']);
+      expect(cards[1].querySelector('[data-testid="product-card-price"]')?.textContent?.trim()).toBe('$40000');
+
+      (cards[1].querySelector('[data-testid="variant-option-12"]') as HTMLButtonElement).click();
+      fixture.detectChanges();
+      expect(cards[1].querySelector('[data-testid="product-card-price"]')?.textContent?.trim()).toBe('$72000');
     });
   });
 });

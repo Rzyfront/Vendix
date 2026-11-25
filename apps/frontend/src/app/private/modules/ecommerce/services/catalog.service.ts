@@ -331,6 +331,8 @@ export interface CatalogQuery {
   is_featured?: boolean;
   fill?: boolean;
   product_type?: 'physical' | 'service';
+  /** Cuando es true, incluye variantes con precio final resuelto por el servidor. */
+  include_variants?: boolean;
 }
 
 export interface PaginatedResponse<T> {
@@ -499,6 +501,8 @@ export class CatalogService {
     }
     if (query.product_type)
       params = params.set('product_type', query.product_type);
+    if (query.include_variants)
+      params = params.set('include_variants', 'true');
 
     return this.http.get<PaginatedResponse<EcommerceProduct>>(this.api_url, {
       headers: this.getHeaders(),

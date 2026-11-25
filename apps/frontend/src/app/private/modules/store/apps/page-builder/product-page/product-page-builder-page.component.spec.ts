@@ -328,4 +328,32 @@ describe('product page builder document (F6-B)', () => {
     expect(view.product).toEqual({ name: 'Nuevo', description: null, image_url: null, variants: [] });
     expect(productPagePreview(payload({ schema_version: 1, blocks: [] }, settings)).product?.variants.length).toBe(2);
   });
+
+  it('vista previa: los datos del servidor ganan sobre catalogProducts del selector y autoProductIds sale de auto_products', () => {
+    const ctx: ProductPageContext = {
+      ...CONTEXT,
+      block_products: [
+        { id: 10, slug: 'servidor', name: 'Desde servidor', image_url: null, final_price: 95200, regular_final_price: 100000, is_on_sale: true, variants: [] },
+      ],
+      auto_products: [
+        { id: 30, slug: 'reciente', name: 'Reciente', image_url: null, final_price: 25000, variants: [] },
+      ],
+    };
+    const view = productPagePreview({
+      ...payload({ schema_version: 1, blocks: [] }, settings, ctx),
+      catalogProducts: [
+        // Mismo id que block_products -> NO debe pisar al servidor
+        { id: 10, slug: 'selector', name: 'Desde selector', image_url: null, final_price: 80000, variants: [] },
+        // Producto nuevo aún sin guardar -> sí rellena hueco
+        { id: 99, slug: 'nuevo', name: 'Recién elegido', image_url: null, final_price: 45000, variants: [] },
+      ],
+    });
+
+    const byId = new Map(view.catalogProducts.map((p) => [p.id, p]));
+    expect(byId.get(10)?.final_price).toBe(95200);
+    expect(byId.get(10)?.name).toBe('Desde servidor');
+    expect(byId.get(99)?.final_price).toBe(45000);
+    // En modo auto usa auto_products (no repite complementos)
+    expect(view.autoProductIds).toEqual([30]);
+  });
 });

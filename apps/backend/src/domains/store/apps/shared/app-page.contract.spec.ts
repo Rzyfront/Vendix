@@ -620,4 +620,100 @@ describe('app page contract', () => {
       }
     });
   });
+
+  describe('bloque products con selectores avanzados (apps-selectors)', () => {
+    it('acepta selection, product_ids (en orden y sin duplicados), show_variants y layout en product_page y service_page', () => {
+      for (const kind of ['product_page', 'service_page'] as const) {
+        const result = validateAppPage(kind, {
+          schema_version: 1,
+          blocks: [
+            {
+              id: 'products',
+              type: 'products',
+              props: {
+                title: 'Destacados',
+                selection: 'manual',
+                product_ids: [14, 3, 9, 3],
+                show_variants: true,
+                layout: 'carousel',
+              },
+            },
+          ],
+        });
+        expect(result.errors).toEqual([]);
+        expect(result.valid).toBe(true);
+        expect(result.value?.blocks[0].props).toEqual({
+          title: 'Destacados',
+          selection: 'manual',
+          product_ids: [14, 3, 9],
+          show_variants: true,
+          layout: 'carousel',
+        });
+      }
+    });
+
+    it('acepta hasta 50 product_ids y rechaza más de 50', () => {
+      const fifty = Array.from({ length: 50 }, (_, i) => i + 1);
+      const ok = validateAppPage('product_page', {
+        schema_version: 1,
+        blocks: [{ id: 'p', type: 'products', props: { selection: 'manual', product_ids: fifty } }],
+      });
+      expect(ok.valid).toBe(true);
+      expect(ok.value?.blocks[0].props['product_ids']).toEqual(fifty);
+
+      const fiftyOne = Array.from({ length: 51 }, (_, i) => i + 1);
+      const bad = validateAppPage('service_page', {
+        schema_version: 1,
+        blocks: [{ id: 'p', type: 'products', props: { selection: 'manual', product_ids: fiftyOne } }],
+      });
+      expect(bad.valid).toBe(false);
+      expect(bad.errors).toEqual(['blocks[0].props.product_ids admite máximo 50 elementos.']);
+    });
+
+    it('rechaza ids inválidos, selection desconocida, show_variants no booleano y layout desconocido', () => {
+      const result = validateAppPage('product_page', {
+        schema_version: 1,
+        blocks: [
+          {
+            id: 'p',
+            type: 'products',
+            props: {
+              selection: 'random',
+              product_ids: [0, -4, 2.5, '7'],
+              show_variants: 'sí',
+              layout: 'masonry',
+            },
+          },
+        ],
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors).toEqual(
+        expect.arrayContaining([
+          'blocks[0].props.selection debe ser uno de: auto, manual.',
+          'blocks[0].props.product_ids[0] debe ser un identificador entero positivo.',
+          'blocks[0].props.product_ids[1] debe ser un identificador entero positivo.',
+          'blocks[0].props.product_ids[2] debe ser un identificador entero positivo.',
+          'blocks[0].props.product_ids[3] debe ser un identificador entero positivo.',
+          'blocks[0].props.show_variants debe ser verdadero o falso.',
+          'blocks[0].props.layout debe ser uno de: grid, list, carousel.',
+        ]),
+      );
+    });
+
+    it('mantiene intacto un bloque products sin props nuevas y no altera booking.products', () => {
+      const legacy = validateAppPage('service_page', {
+        schema_version: 1,
+        blocks: [{ id: 'products', type: 'products', props: { title: 'También puedes comprar' } }],
+      });
+      expect(legacy.valid).toBe(true);
+      expect(legacy.value?.blocks[0].props).toEqual({ title: 'También puedes comprar' });
+
+      const bookingReject = validateAppPage('booking', {
+        schema_version: 1,
+        blocks: [{ id: 'products', type: 'products', props: { layout: 'carousel' } }],
+      });
+      expect(bookingReject.valid).toBe(false);
+      expect(bookingReject.errors).toEqual(['blocks[0].props.layout no es un campo permitido.']);
+    });
+  });
 });

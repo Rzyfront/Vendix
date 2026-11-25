@@ -7,7 +7,7 @@ import { ServicePageHomeViewComponent } from './service-page-home-view.component
 import { ServicePagePublicConfig, ServicePageService } from './service-page.service';
 import { CatalogService, EcommerceProduct } from '../../private/modules/ecommerce/services/catalog.service';
 import { StoreSeoService } from '../../private/modules/ecommerce/services/store-seo';
-import { CurrencyPipe } from '../../shared/pipes/currency';
+import { CurrencyFormatService, CurrencyPipe } from '../../shared/pipes/currency';
 import { ProductComplementsComponent } from '../product-page/components/product-complements.component';
 
 @Pipe({ name: 'currency', standalone: true })
@@ -89,6 +89,10 @@ describe('ServicePageHomeComponent (apps-module Fase 3)', () => {
         { provide: CatalogService, useValue: catalog },
         { provide: StoreSeoService, useValue: seo },
         { provide: ServicePageService, useValue: {} },
+        {
+          provide: CurrencyFormatService,
+          useValue: { currencyCode: signal('COP'), format: (v: number) => `$${v}`, loadCurrency: () => {} },
+        },
       ],
     });
     TestBed.overrideComponent(ServicePageHomeViewComponent, {
@@ -216,5 +220,52 @@ describe('ServicePageHomeComponent (apps-module Fase 3)', () => {
       jasmine.arrayContaining(['hero', 'services', 'faq', 'products']),
     );
     expect(root.querySelector('[data-testid="preview-products"]')?.textContent).toContain('Crema');
+  });
+
+  it('en el bloque products con selección manual, show_variants y layout usa orden manual y actualiza precio al elegir variante', () => {
+    const view = TestBed.createComponent(ServicePageHomeViewComponent);
+    view.componentRef.setInput('services', [service(10, 'Limpieza')]);
+    view.componentRef.setInput('productIds', [7]);
+    view.componentRef.setInput(
+      'page',
+      ownPage({
+        blocks: [
+          {
+            id: 'products',
+            type: 'products',
+            enabled: true,
+            props: {
+              title: 'Recomendados',
+              selection: 'manual',
+              product_ids: [9, 7],
+              show_variants: true,
+              layout: 'carousel',
+            },
+          },
+        ],
+      }),
+    );
+    view.componentRef.setInput('previewProducts', []);
+    view.componentRef.setInput('previewCatalogProducts', [
+      { id: 7, slug: 'crema', name: 'Crema', image_url: null, final_price: 20000, variants: [] },
+      {
+        id: 9,
+        slug: 'aceite',
+        name: 'Aceite',
+        image_url: null,
+        final_price: 30000,
+        variants: [{ id: 91, name: 'Grande', final_price: 45000 }],
+      },
+    ]);
+    view.detectChanges();
+
+    const root = view.nativeElement as HTMLElement;
+    expect(root.querySelector('[data-testid="products-layout-carousel"]')).not.toBeNull();
+    const cards = Array.from(root.querySelectorAll('[data-testid="product-block-card"]'));
+    expect(cards.map((c) => c.getAttribute('data-product-id'))).toEqual(['9', '7']);
+
+    (root.querySelector('[data-testid="variant-option-91"]') as HTMLButtonElement).click();
+    view.detectChanges();
+    expect(cards[0].querySelector('[data-testid="product-card-price"]')?.textContent?.trim()).toBe('$45000');
   });
 });

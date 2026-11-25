@@ -1,6 +1,7 @@
 import { Observable, forkJoin, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 
+import type { AppPageProductItem, AppPageProductVariant } from '../../../../../../public/app-page/app-page-products.util';
 import type { ServiceCardData } from '../../../../../../public/service-page/service-page.util';
 import type { Product } from '../../../products/interfaces/product.interface';
 import type { ProductsService } from '../../../products/services/products.service';
@@ -44,7 +45,18 @@ export interface ServicePageContext {
     categories: { id: number; name: string; slug: string }[];
   }[];
   featured_service_ids: number[];
-  products: { id: number; slug: string; name: string; image_url: string | null }[];
+  products: {
+    id: number;
+    slug: string;
+    name: string;
+    image_url: string | null;
+    final_price?: number;
+    regular_final_price?: number | null;
+    is_on_sale?: boolean;
+    variants?: AppPageProductVariant[];
+  }[];
+  /** Productos elegidos manualmente en el bloque `products`, resueltos por el backend. */
+  block_products?: AppPageProductItem[];
 }
 
 export const EMPTY_SERVICE_PAGE_CONTEXT: ServicePageContext = { services: [], featured_service_ids: [], products: [] };
@@ -99,6 +111,8 @@ export interface ServicePagePreview {
   /** Ids of the secondary products (the home view only needs to know whether there are any). */
   productIds: number[];
   products: { id: number; name: string; image_url: string | null }[];
+  /** Productos resueltos con precio y variantes para el bloque `products` en vista previa. */
+  catalogProducts: AppPageProductItem[];
 }
 
 /**
@@ -133,6 +147,26 @@ export function servicePagePreview(
     name: p.name,
     image_url: context.products.find((k) => k.id === p.id)?.image_url ?? null,
   }));
+  // Los datos resueltos por el servidor siempre ganan; el selector solo rellena huecos.
+  const catalogById = new Map<number, AppPageProductItem>();
+  for (const item of payload.catalogProducts ?? []) {
+    catalogById.set(item.id, item);
+  }
+  for (const item of context.products) {
+    catalogById.set(item.id, {
+      id: item.id,
+      slug: item.slug,
+      name: item.name,
+      image_url: item.image_url,
+      final_price: item.final_price ?? 0,
+      regular_final_price: item.regular_final_price ?? null,
+      is_on_sale: Boolean(item.is_on_sale),
+      variants: item.variants ?? [],
+    });
+  }
+  for (const item of context.block_products ?? []) {
+    catalogById.set(item.id, item);
+  }
   return {
     page: payload.page,
     storeName: payload.storeName,
@@ -141,6 +175,7 @@ export function servicePagePreview(
     featuredIds: featured.map((s) => s.id),
     productIds: products.map((p) => p.id),
     products,
+    catalogProducts: Array.from(catalogById.values()),
   };
 }
 

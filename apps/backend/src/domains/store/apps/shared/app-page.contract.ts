@@ -112,6 +112,11 @@ export const APP_HIGHLIGHTS_ICONS = [
 export const APP_BLOCK_SPACINGS = ['compact', 'normal', 'spacious'] as const;
 export const APP_TEXT_ALIGNS = ['left', 'center', 'right'] as const;
 
+/** Apps selectors — catálogos cerrados del bloque de productos (Product Page y Service Page). */
+export const APP_PRODUCTS_SELECTIONS = ['auto', 'manual'] as const;
+export const APP_PRODUCTS_LAYOUTS = ['grid', 'list', 'carousel'] as const;
+export const MAX_BLOCK_PRODUCT_IDS = 50;
+
 /**
  * Mode each app has today, before F2, when it has no saved page: the product
  * page sells, the service page and the booking page book and also sell their
@@ -140,7 +145,8 @@ type FieldSpec =
   | ScalarField
   | { kind: 'list'; max: number; item: Record<string, ScalarField> }
   | { kind: 'text_list'; max: number; itemMax: number }
-  | { kind: 'url_list'; max: number };
+  | { kind: 'url_list'; max: number }
+  | { kind: 'id_list'; max: number };
 
 type FieldsSpec = Record<string, FieldSpec>;
 
@@ -246,6 +252,15 @@ const CTA: FieldsSpec = {
   image_url: url,
 };
 
+/** Bloque de productos con selección automática/manual, variantes y diseño (Product Page y Service Page). */
+const PRODUCTS_BLOCK: FieldsSpec = {
+  title: TITLE,
+  selection: oneOf(APP_PRODUCTS_SELECTIONS),
+  product_ids: { kind: 'id_list', max: MAX_BLOCK_PRODUCT_IDS },
+  show_variants: bool,
+  layout: oneOf(APP_PRODUCTS_LAYOUTS),
+};
+
 /**
  * Block catalog of each app: block type → its props. The order of `blocks[]`
  * is the order of the page; only `SINGLE_APP_PAGE_BLOCKS` are one per page. Blocks marked
@@ -272,6 +287,8 @@ export const APP_PAGE_BLOCKS: Record<PageAppKind, Record<string, FieldsSpec>> =
       testimonials: withBlockStyle(TESTIMONIALS),
       /** Existing: "Complementa tu compra". */
       complements: withBlockStyle({ title: TITLE }),
+      /** Bloque configurable de productos con selección manual/automática, variantes y diseño. */
+      products: withBlockStyle(PRODUCTS_BLOCK),
       shipping_warranty: withBlockStyle({
         title: TITLE,
         shipping: text(500),
@@ -314,7 +331,7 @@ export const APP_PAGE_BLOCKS: Record<PageAppKind, Record<string, FieldsSpec>> =
       testimonials: withBlockStyle(TESTIMONIALS),
       faq: withBlockStyle(FAQ),
       /** Existing: the secondary "también puedes comprar" products. */
-      products: withBlockStyle({ title: TITLE }),
+      products: withBlockStyle(PRODUCTS_BLOCK),
       cta: withBlockStyle(CTA),
     },
     booking: {
@@ -685,6 +702,27 @@ function cleanFields(
           cleanScalar(scalar, item, `${fieldPath}[${i}]`, errors),
         )
         .filter((item) => item !== undefined);
+      if (items.length) out[key] = items;
+    } else if (field.kind === 'id_list') {
+      if (!Array.isArray(raw)) {
+        errors.push(`${fieldPath} debe ser una lista.`);
+        continue;
+      }
+      if (raw.length > field.max) {
+        errors.push(`${fieldPath} admite máximo ${field.max} elementos.`);
+      }
+      const seen = new Set<number>();
+      const items: number[] = [];
+      raw.forEach((item, i) => {
+        if (typeof item !== 'number' || !Number.isInteger(item) || item < 1) {
+          errors.push(`${fieldPath}[${i}] debe ser un identificador entero positivo.`);
+          return;
+        }
+        if (!seen.has(item)) {
+          seen.add(item);
+          items.push(item);
+        }
+      });
       if (items.length) out[key] = items;
     } else {
       const cleaned = cleanScalar(field, raw, fieldPath, errors);

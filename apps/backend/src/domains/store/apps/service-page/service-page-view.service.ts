@@ -1,19 +1,22 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { S3Service } from '@common/services/s3.service';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
+import { StorefrontPriceService } from '../../../ecommerce/shared/services/storefront-price.service';
+import { PromotionEngineService } from '../../promotions/promotion-engine/promotion-engine.service';
+import {
+  PREVIEW_IMAGE_ORDER,
+  PreviewProductCard,
+  PreviewProductRow,
+  buildPreviewProductSelect,
+  extractBlockProductIds,
+  resolvePreviewProductCards,
+} from '../shared/app-page-products.helper';
 import {
   onlineServicesWhere,
   orderServices,
   parseServicePageConfig,
   secondaryProductsWhere,
 } from './service-page.reader';
-
-const IMAGE_ORDER = [
-  { is_main: 'desc' as const },
-  { sort_order: 'asc' as const },
-  { id: 'asc' as const },
-];
 
 /** What the service page paints from the store's catalog: services (featured first) and secondary products. */
 export interface ServicePageViewData {
@@ -33,12 +36,9 @@ export interface ServicePageViewData {
     categories: { id: number; name: string; slug: string }[];
   }[];
   featured_service_ids: number[];
-  products: {
-    id: number;
-    slug: string;
-    name: string;
-    image_url: string | null;
-  }[];
+  products: PreviewProductCard[];
+  /** Productos elegidos manualmente en el bloque `products` activo (en el orden configurado). */
+  block_products?: PreviewProductCard[];
 }
 
 /**
@@ -58,22 +58,20 @@ export class ServicePageViewService {
   constructor(
     private readonly globalPrisma: GlobalPrismaService,
     private readonly s3: S3Service,
+    private readonly storefrontPrice: StorefrontPriceService,
+    private readonly promotionEngine: PromotionEngineService,
   ) {}
 
   async read(storeId: number, rawConfig: unknown): Promise<ServicePageViewData> {
     const config = parseServicePageConfig(rawConfig);
+    const blockProductIds = extractBlockProductIds(rawConfig);
+    const allProductIds = Array.from(new Set([...config.product_ids, ...blockProductIds]));
     const image = {
       select: { image_url: true },
-      orderBy: IMAGE_ORDER,
+      orderBy: PREVIEW_IMAGE_ORDER,
       take: 1,
     };
 
-    const productsSelect = {
-      id: true,
-      slug: true,
-      name: true,
-      product_images: image,
-    } as const;
     const [rows, productRows] = await Promise.all([
       this.globalPrisma.products.findMany({
         where: onlineServicesWhere(storeId),
@@ -96,7 +94,7 @@ export class ServicePageViewService {
         },
         orderBy: [{ name: 'asc' }, { id: 'asc' }],
       }),
-      this.findProducts(storeId, config.product_ids, productsSelect),
+      this.findProducts(storeId, allProductIds),
     ]);
 
     const { services, featuredIds } = orderServices(rows, config.featured_service_ids);
@@ -121,31 +119,45 @@ export class ServicePageViewService {
       });
     }
 
-    const byId = new Map(productRows.map((p) => [p.id, p]));
+    const { cardsById } = await resolvePreviewProductCards(productRows, {
+      prisma: this.globalPrisma as any,
+      s3: this.s3,
+      storefrontPrice: this.storefrontPrice,
+      promotionEngine: this.promotionEngine,
+    });
+
     const products: ServicePageViewData['products'] = [];
     for (const id of config.product_ids) {
-      const p = byId.get(id);
-      if (!p) continue;
-      products.push({
-        id: p.id,
-        slug: p.slug,
-        name: p.name,
-        image_url: await sign(p.product_images[0]?.image_url),
-      });
+      const card = cardsById.get(id);
+      if (card) products.push(card);
     }
 
-    return { services: serviceViews, featured_service_ids: featuredIds, products };
+    if (blockProductIds.length === 0) {
+      return { services: serviceViews, featured_service_ids: featuredIds, products };
+    }
+
+    const blockProducts: PreviewProductCard[] = [];
+    for (const id of blockProductIds) {
+      const card = cardsById.get(id);
+      if (card) blockProducts.push(card);
+    }
+
+    return {
+      services: serviceViews,
+      featured_service_ids: featuredIds,
+      products,
+      block_products: blockProducts,
+    };
   }
 
-  private async findProducts<T extends Prisma.productsSelect>(
+  private async findProducts(
     storeId: number,
     ids: number[],
-    select: T,
-  ) {
-    if (ids.length === 0) return [] as Prisma.productsGetPayload<{ select: T }>[];
-    return this.globalPrisma.products.findMany({
+  ): Promise<PreviewProductRow[]> {
+    if (ids.length === 0) return [];
+    return (await this.globalPrisma.products.findMany({
       where: secondaryProductsWhere(storeId, ids),
-      select,
-    });
+      select: buildPreviewProductSelect(false) as any,
+    })) as unknown as PreviewProductRow[];
   }
 }
