@@ -113,7 +113,7 @@ describe('GuestOrderSummaryComponent embedded physical/purchase/receipt gates', 
     create(); fixture.componentRef.setInput('summaryInput', withItems([{ product_name: 'Reserva hotel', quantity: 1, unit_price: 100, total_price: 100, product_type: 'service' }])); fixture.detectChanges();
     expect(component.trackingShown()).toBeFalse(); expect(component.etaVisible()).toBeFalse();
     expect(fixture.nativeElement.querySelector('.tracking')).toBeNull(); expect(fixture.nativeElement.querySelector('.eta')).toBeNull();
-    component.print(); expect(printer.printVoucher).toHaveBeenCalledWith(jasmine.objectContaining({ order: jasmine.objectContaining({ order_number: 'ORD95' }) }), { hidePrepEta: false, hideTracking: true });
+    component.print(); expect(printer.printVoucher).toHaveBeenCalledWith(jasmine.objectContaining({ order: jasmine.objectContaining({ order_number: 'ORD95' }) }), { hidePrepEta: true, hideTracking: true });
   });
 
   it('QUI-1062: keeps tracking for physical, prepared, mixed and untyped orders', () => {
@@ -137,6 +137,7 @@ describe('GuestOrderSummaryComponent embedded physical/purchase/receipt gates', 
       { product_name: 'Camisa', quantity: 1, unit_price: 100, total_price: 100, product_type: 'physical', cancelled_at: '2026-10-07T19:00:00Z' },
     ])); fixture.detectChanges();
     expect(component.trackingShown()).toBeFalse(); expect(component.etaVisible()).toBeFalse();
+    component.print(); expect(printer.printVoucher).toHaveBeenCalledWith(jasmine.anything(), { hidePrepEta: true, hideTracking: true });
   });
 
   it('does not trust query success for embedded purchases without parent confirmation', () => {

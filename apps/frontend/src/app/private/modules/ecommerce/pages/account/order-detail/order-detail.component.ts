@@ -204,10 +204,14 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
     return o.items.some((item) => item.product_type === 'service');
   });
 
+  // QUI-1062: misma regla que la confirmación guest y el backend — las líneas
+  // canceladas no cuentan como producto físico vivo.
   readonly hasPhysicalItems = computed(() => {
     const o = this.order();
     if (!o) return false;
-    return o.items.some((item) => item.product_type !== 'service');
+    return o.items.some(
+      (item) => item.cancelled_at == null && item.product_type !== 'service',
+    );
   });
 
   readonly postPurchaseMessage = computed(() => {

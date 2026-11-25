@@ -2254,7 +2254,10 @@ export class GuestOrderSummaryComponent implements OnInit {
       this.tenantFacade.getCurrentDomainConfig()?.customConfig?.ecommerce
         ?.orders;
     this.voucherPrint.printVoucher(summary, {
-      hidePrepEta: !this.physicalProgressAllowed() || orders?.hide_prep_eta === true,
+      hidePrepEta:
+        !this.physicalProgressAllowed() ||
+        !this.showsPhysicalProgress() ||
+        orders?.hide_prep_eta === true,
       // QUI-1062: un pedido de solo servicios o reservas nunca imprime la
       // barra de seguimiento.
       hideTracking:
