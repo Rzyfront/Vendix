@@ -144,20 +144,32 @@ export type AppPageStyleBrandKey = 'logo_url' | 'cover_url' | 'whatsapp_number' 
         <div class="mt-3 grid gap-3 sm:grid-cols-2">
           <label class="block">
             <span class="mb-1 block text-xs font-medium text-[var(--color-text-primary)]">Logo</span>
-            <input type="url" placeholder="https://…/logo.png" data-testid="style-logo"
-                   class="w-full rounded-lg border bg-[var(--color-surface)] px-3 py-2 text-sm"
-                   [class]="urlError(brand().logo_url) ? 'border-[var(--color-error,#dc2626)]' : 'border-[var(--color-border)]'"
-                   [value]="brand().logo_url ?? ''" (input)="setBrand('logo_url', $any($event.target).value)" />
+            <div class="flex items-center gap-2">
+              <input type="url" placeholder="https://…/logo.png" data-testid="style-logo"
+                     class="w-full rounded-lg border bg-[var(--color-surface)] px-3 py-2 text-sm"
+                     [class]="urlError(brand().logo_url) ? 'border-[var(--color-error,#dc2626)]' : 'border-[var(--color-border)]'"
+                     [value]="brand().logo_url ?? ''" (input)="setBrand('logo_url', $any($event.target).value)" />
+              <button type="button" class="whitespace-nowrap rounded-lg border border-[var(--color-border)] px-2.5 py-2 text-xs font-semibold text-[var(--color-text-primary)]"
+                      data-testid="style-logo-gallery" (click)="mediaRequested.emit('logo_url')">
+                Galería
+              </button>
+            </div>
             <span class="mt-1 block text-[11px]" [class]="urlError(brand().logo_url) ? 'text-[var(--color-error,#dc2626)]' : 'text-[var(--color-text-secondary)]'">
               {{ urlError(brand().logo_url) ? 'Usa un enlace que empiece por https://' : 'Vacío: el logo de tu tienda.' }}
             </span>
           </label>
           <label class="block">
             <span class="mb-1 block text-xs font-medium text-[var(--color-text-primary)]">Fondo de la portada</span>
-            <input type="url" placeholder="https://…/fondo.jpg" data-testid="style-cover"
-                   class="w-full rounded-lg border bg-[var(--color-surface)] px-3 py-2 text-sm"
-                   [class]="urlError(brand().cover_url) ? 'border-[var(--color-error,#dc2626)]' : 'border-[var(--color-border)]'"
-                   [value]="brand().cover_url ?? ''" (input)="setBrand('cover_url', $any($event.target).value)" />
+            <div class="flex items-center gap-2">
+              <input type="url" placeholder="https://…/fondo.jpg" data-testid="style-cover"
+                     class="w-full rounded-lg border bg-[var(--color-surface)] px-3 py-2 text-sm"
+                     [class]="urlError(brand().cover_url) ? 'border-[var(--color-error,#dc2626)]' : 'border-[var(--color-border)]'"
+                     [value]="brand().cover_url ?? ''" (input)="setBrand('cover_url', $any($event.target).value)" />
+              <button type="button" class="whitespace-nowrap rounded-lg border border-[var(--color-border)] px-2.5 py-2 text-xs font-semibold text-[var(--color-text-primary)]"
+                      data-testid="style-cover-gallery" (click)="mediaRequested.emit('cover_url')">
+                Galería
+              </button>
+            </div>
             <span class="mt-1 block text-[11px]" [class]="urlError(brand().cover_url) ? 'text-[var(--color-error,#dc2626)]' : 'text-[var(--color-text-secondary)]'">
               {{ urlError(brand().cover_url) ? 'Usa un enlace que empiece por https://' : 'Se ve detrás de la portada cuando no tiene imagen propia.' }}
             </span>
@@ -197,6 +209,7 @@ export type AppPageStyleBrandKey = 'logo_url' | 'cover_url' | 'whatsapp_number' 
           </span>
         </label>
       </section>
+
     </div>
   `,
 })
@@ -208,6 +221,9 @@ export class AppPageStylePanelComponent {
   readonly themeChange = output<AppPageTheme>();
   /** One brand key; `undefined` removes it. */
   readonly brandChange = output<{ key: AppPageStyleBrandKey; value: string | boolean | undefined }>();
+
+  /** Pide abrir la galería de medios para ese campo; la vista monta la galería. */
+  readonly mediaRequested = output<'logo_url' | 'cover_url'>();
 
   readonly colors = APP_THEME_COLORS;
   readonly options = APP_THEME_OPTIONS;

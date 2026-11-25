@@ -1275,6 +1275,7 @@ model stores {
 
   // Apps — catálogo de aplicaciones web por tienda
   store_apps store_apps[]
+  store_app_media               store_app_media[]
 
   service_stations_store_fkey service_stations[] @relation("service_stations_store_fkey")
   service_reminder_logs_store_id_fkey service_reminder_logs[] @relation("service_reminder_logs_store_id_fkey")
@@ -1318,6 +1319,41 @@ model store_settings {
   created_at DateTime? @default(now()) @db.Timestamp(6)
   updated_at DateTime? @default(now()) @db.Timestamp(6)
   stores     stores    @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+}
+
+/// Apps — biblioteca de medios propia de la tienda (apps-customization F1).
+/// Las apps referencian estas filas por id: la foto vive en nuestro storage y
+/// no depende de un enlace externo.
+model store_app_media {
+  id                 Int                 @id @default(autoincrement())
+  store_id           Int
+  /// `null` = compartida por todas las apps de la tienda.
+  app_kind           app_kind_enum?
+  kind               app_media_kind_enum @default(image)
+  /// Identificador opaco de la URL pública: evita enumerar fotos por id.
+  public_token       String              @unique @db.Uuid
+  s3_key             String              @db.VarChar(512)
+  thumb_key          String?             @db.VarChar(512)
+  mime_type          String              @db.VarChar(100)
+  size_bytes         Int
+  width              Int?
+  height             Int?
+  alt                String?             @db.VarChar(200)
+  /// Borrado lógico: la galería deja de mostrarlo y las apps publicadas siguen
+  /// resolviendo su archivo por id.
+  deleted_at         DateTime?           @db.Timestamptz(6)
+  created_by_user_id Int?
+  created_at         DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime            @default(now()) @updatedAt @db.Timestamptz(6)
+  stores             stores              @relation(fields: [store_id], references: [id], onDelete: Cascade)
+
+  @@index([store_id, app_kind])
+  @@index([store_id, created_at])
+}
+
+enum app_media_kind_enum {
+  image
+  document
 }
 
 /// CRM Landing (QUI-719) — landing generada con IA por tienda.
