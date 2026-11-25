@@ -273,7 +273,7 @@ describe('app page contract', () => {
           button_style: 'ghost',
           image_style: 'circle',
           content_width: 'full',
-          shadow: 'lg',
+          sparkle: 'lg',
         },
         blocks: [],
       });
@@ -287,9 +287,102 @@ describe('app page contract', () => {
           'theme.button_style debe ser uno de: solid, outline.',
           'theme.image_style debe ser uno de: square, rounded.',
           'theme.content_width debe ser uno de: narrow, normal, wide.',
-          'theme.shadow no es un campo permitido.',
+          'theme.sparkle no es un campo permitido.',
         ]),
       );
+    });
+
+    describe('extended tokens (Apps F7)', () => {
+      const extended = {
+        border_color: '#E5DED5',
+        base_font_size: 'lg',
+        heading_scale: 'display',
+        section_gap: 'airy',
+        card_style: 'soft',
+        shadow: 'strong',
+        image_ratio: '16:9',
+        image_overlay: 40,
+        hero_height: 'full',
+      };
+
+      it('accepts every extended token next to the F3 ones and keeps it as sent', () => {
+        const result = validateAppPage('product_page', {
+          schema_version: 1,
+          theme: { ...fullTheme, ...extended },
+          blocks: [],
+        });
+        expect(result.errors).toEqual([]);
+        expect(result.value?.theme).toEqual({ ...fullTheme, ...extended });
+      });
+
+      it('accepts the bounds of the image veil and every image ratio', () => {
+        for (const image_overlay of [0, 80]) {
+          expect(
+            validateAppPage('booking', { schema_version: 1, theme: { image_overlay }, blocks: [] }).value?.theme,
+          ).toEqual({ image_overlay });
+        }
+        for (const image_ratio of ['square', '4:3', '16:9', 'auto']) {
+          expect(
+            validateAppPage('service_page', { schema_version: 1, theme: { image_ratio }, blocks: [] }).valid,
+          ).toBe(true);
+        }
+      });
+
+      it('rejects values outside the closed catalogs, a malformed border and an out-of-range veil', () => {
+        const result = validateAppPage('service_page', {
+          schema_version: 1,
+          theme: {
+            border_color: 'gray',
+            base_font_size: 'xl',
+            heading_scale: 'huge',
+            section_gap: 'wide',
+            card_style: 'glass',
+            shadow: 'lg',
+            image_ratio: '3:2',
+            image_overlay: 81,
+            hero_height: 'half',
+          },
+          blocks: [],
+        });
+        expect(result.valid).toBe(false);
+        expect(result.value).toBeNull();
+        expect(result.errors).toEqual(
+          expect.arrayContaining([
+            'theme.border_color debe ser un color #RRGGBB.',
+            'theme.base_font_size debe ser uno de: sm, md, lg.',
+            'theme.heading_scale debe ser uno de: compact, normal, display.',
+            'theme.section_gap debe ser uno de: tight, normal, airy.',
+            'theme.card_style debe ser uno de: flat, outline, soft.',
+            'theme.shadow debe ser uno de: none, soft, strong.',
+            'theme.image_ratio debe ser uno de: square, 4:3, 16:9, auto.',
+            'theme.image_overlay debe ser un entero entre 0 y 80.',
+            'theme.hero_height debe ser uno de: auto, compact, full.',
+          ]),
+        );
+      });
+
+      it('rejects a veil that is negative, fractional or text', () => {
+        for (const image_overlay of [-1, 12.5, '40']) {
+          const result = validateAppPage('booking', {
+            schema_version: 1,
+            theme: { image_overlay },
+            blocks: [],
+          });
+          expect(result.errors).toEqual(['theme.image_overlay debe ser un entero entre 0 y 80.']);
+        }
+      });
+
+      it('an old page without extended tokens is returned exactly as before', () => {
+        const result = validateAppPage('product_page', {
+          schema_version: 1,
+          theme: fullTheme,
+          blocks: [],
+        });
+        expect(result.value?.theme).toEqual(fullTheme);
+        for (const key of Object.keys(extended)) {
+          expect(result.value?.theme).not.toHaveProperty(key);
+        }
+      });
     });
 
     it('drops an empty theme, so the page keeps its pre-F3 look', () => {

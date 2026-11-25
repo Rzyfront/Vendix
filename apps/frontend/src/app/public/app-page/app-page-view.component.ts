@@ -32,7 +32,7 @@ import {
   safeUrl,
   whatsappHref,
 } from './app-page-view.util';
-import { hasTheme, themeStyle } from './app-page-theme';
+import { hasTheme, themeMarkers, themeStyle } from './app-page-theme';
 
 interface PlaceholderView {
   id: string;
@@ -55,9 +55,19 @@ const HIGHLIGHTS_ICON_SET = new Set<string>(APP_HIGHLIGHTS_ICON_OPTIONS.map((o) 
  * Los bloques que representan una sección que el layout ya dibuja (`existing`)
  * se omiten en público y muestran un recuadro guía en `preview`.
  *
- * Todas las props nuevas de variantes y apariencia por sección son opcionales:
- * un documento viejo o una plantilla existente sin ellas renderiza exactamente
- * igual que antes.
+ * Las props de variantes y apariencia por sección son opcionales: un documento
+ * viejo o una plantilla existente sin ellas renderiza exactamente igual que
+ * antes.
+ *
+ * Apps F3: `page.theme` adds style tokens on the same host (`themeStyle`).
+ * The `ap-*` marker classes below only get rules under `:host(.ap-themed)`
+ * and every rule falls back to today's value, so a page without `theme`
+ * renders exactly as before.
+ *
+ * Apps F7: the extended tokens (border, type scale, section gap, cards,
+ * shadow, image ratio and veil, hero height) follow the same rule: CSS
+ * variables whose rules fall back to today's value, plus `data-ap-*` markers
+ * (`themeMarkers`) for the rules that have no neutral fallback.
  */
 @Component({
   selector: 'app-app-page-view',
@@ -71,6 +81,11 @@ const HIGHLIGHTS_ICON_SET = new Set<string>(APP_HIGHLIGHTS_ICON_OPTIONS.map((o) 
     '[style.--ap-primary]': 'primary()',
     '[style.--ap-secondary]': 'secondary()',
     '[style.font-family]': 'font()',
+    '[attr.data-ap-type]': 'markers().type',
+    '[attr.data-ap-card]': 'markers().card',
+    '[attr.data-ap-shadow]': 'markers().shadow',
+    '[attr.data-ap-overlay]': 'markers().overlay',
+    '[attr.data-ap-hero]': 'markers().hero',
   },
   styles: [
     `
@@ -105,13 +120,13 @@ const HIGHLIGHTS_ICON_SET = new Set<string>(APP_HIGHLIGHTS_ICON_OPTIONS.map((o) 
       }
       :host(.ap-themed) .ap-section {
         max-width: var(--ap-max-width, 72rem);
-        padding-top: var(--ap-section-py, 2rem);
-        padding-bottom: var(--ap-section-py, 2rem);
+        padding-top: calc(var(--ap-section-py, 2rem) * var(--ap-section-gap, 1));
+        padding-bottom: calc(var(--ap-section-py, 2rem) * var(--ap-section-gap, 1));
       }
       @media (min-width: 768px) {
         :host(.ap-themed) .ap-section {
-          padding-top: var(--ap-section-py-md, 2.5rem);
-          padding-bottom: var(--ap-section-py-md, 2.5rem);
+          padding-top: calc(var(--ap-section-py-md, 2.5rem) * var(--ap-section-gap, 1));
+          padding-bottom: calc(var(--ap-section-py-md, 2.5rem) * var(--ap-section-gap, 1));
         }
       }
       :host(.ap-themed) .ap-grid {
@@ -138,9 +153,99 @@ const HIGHLIGHTS_ICON_SET = new Set<string>(APP_HIGHLIGHTS_ICON_OPTIONS.map((o) 
       }
       :host(.ap-themed) .ap-img {
         border-radius: var(--ap-radius-image, 0.75rem);
+        aspect-ratio: var(--ap-image-ratio, 1 / 1);
       }
       :host(.ap-themed) .ap-img-hero {
         border-radius: var(--ap-radius-image, 1rem);
+        aspect-ratio: var(--ap-image-ratio, auto);
+      }
+      /* ---- Apps F7: extended tokens ---- */
+      :host(.ap-themed) .ap-hero-inner {
+        padding-top: var(--ap-hero-py, 3rem);
+        padding-bottom: var(--ap-hero-py, 3rem);
+      }
+      @media (min-width: 768px) {
+        :host(.ap-themed) .ap-hero-inner {
+          padding-top: var(--ap-hero-py-md, 4rem);
+          padding-bottom: var(--ap-hero-py-md, 4rem);
+        }
+      }
+      :host([data-ap-hero='full']) .ap-hero {
+        display: flex;
+        align-items: center;
+        /* --ap-hero-min-h la fija el preview del editor: dentro del panel,
+           100svh sería la ventana entera y empujaría el resto de la página. */
+        min-height: var(--ap-hero-min-h, 100svh);
+      }
+      :host([data-ap-card='flat']) .ap-card,
+      :host([data-ap-card='flat']) .ap-round {
+        border-color: transparent;
+      }
+      :host([data-ap-card='outline']) .ap-card,
+      :host([data-ap-card='outline']) .ap-round {
+        background-color: transparent;
+      }
+      :host([data-ap-card='soft']) .ap-card,
+      :host([data-ap-card='soft']) .ap-round {
+        border-color: transparent;
+        background-color: color-mix(
+          in srgb,
+          var(--ap-primary, var(--color-primary)) 6%,
+          var(--ap-surface, #ffffff)
+        );
+      }
+      :host([data-ap-shadow]) .ap-card,
+      :host([data-ap-shadow]) .ap-round {
+        box-shadow: var(--ap-card-shadow, none);
+      }
+      :host([data-ap-overlay]) .ap-img,
+      :host([data-ap-overlay]) .ap-img-hero {
+        filter: brightness(var(--ap-image-brightness, 1));
+      }
+      :host([data-ap-overlay]) .ap-cover-veil {
+        background-color: rgb(0 0 0 / var(--ap-image-overlay, 0.4));
+      }
+      /* Type scale: same sizes as the Tailwind classes, times the token. */
+      :host([data-ap-type]) .text-xs {
+        font-size: calc(0.75rem * var(--ap-font-scale, 1));
+      }
+      :host([data-ap-type]) .text-sm {
+        font-size: calc(0.875rem * var(--ap-font-scale, 1));
+      }
+      :host([data-ap-type]) .text-base {
+        font-size: calc(1rem * var(--ap-font-scale, 1));
+      }
+      :host([data-ap-type]) .text-lg {
+        font-size: calc(1.125rem * var(--ap-font-scale, 1));
+      }
+      :host([data-ap-type]) .ap-heading.text-base {
+        font-size: calc(1rem * var(--ap-font-scale, 1) * var(--ap-heading-scale, 1));
+      }
+      :host([data-ap-type]) .ap-heading.text-xl {
+        font-size: calc(1.25rem * var(--ap-font-scale, 1) * var(--ap-heading-scale, 1));
+      }
+      :host([data-ap-type]) .ap-heading.text-2xl {
+        font-size: calc(1.5rem * var(--ap-font-scale, 1) * var(--ap-heading-scale, 1));
+      }
+      :host([data-ap-type]) .ap-heading.text-3xl {
+        font-size: calc(1.875rem * var(--ap-font-scale, 1) * var(--ap-heading-scale, 1));
+      }
+      @media (min-width: 768px) {
+        :host([data-ap-type]) .md\\:text-base {
+          font-size: calc(1rem * var(--ap-font-scale, 1));
+        }
+        :host([data-ap-type]) .md\\:text-lg {
+          font-size: calc(1.125rem * var(--ap-font-scale, 1));
+        }
+        :host([data-ap-type]) .ap-heading.md\\:text-2xl {
+          font-size: calc(1.5rem * var(--ap-font-scale, 1) * var(--ap-heading-scale, 1));
+        }
+        :host([data-ap-type]) .ap-heading.md\\:text-3xl {
+          font-size: calc(1.875rem * var(--ap-font-scale, 1) * var(--ap-heading-scale, 1));
+        }
+        :host([data-ap-type]) .ap-heading.md\\:text-5xl {
+          font-size: calc(3rem * var(--ap-font-scale, 1) * var(--ap-heading-scale, 1));
+        }
       }
       :host(.ap-themed) .ap-hero-fallback .ap-on-fill {
         color: var(--ap-on-primary, #fff);
@@ -220,7 +325,7 @@ const HIGHLIGHTS_ICON_SET = new Set<string>(APP_HIGHLIGHTS_ICON_OPTIONS.map((o) 
   template: `
     @if (showHero() && hero(); as h) {
       <section
-        class="relative overflow-hidden border-b border-border"
+        class="ap-hero relative overflow-hidden border-b border-border"
         [class.ap-hero-fallback]="heroUseFallbackGradient()"
         [class.ap-hero--centered]="h.variant === 'centered'"
         [class.ap-hero--image-right]="h.variant === 'image_right'"
@@ -229,6 +334,7 @@ const HIGHLIGHTS_ICON_SET = new Set<string>(APP_HIGHLIGHTS_ICON_OPTIONS.map((o) 
         [class.ap-hero--auto]="h.height === 'auto'"
         [class.ap-hero--full]="h.height === 'full'"
         [style.background-image]="heroBgCss()"
+
         [style.background-size]="'cover'"
         [style.background-position]="'center'"
         [attr.data-hero-variant]="h.variant ?? null"
@@ -245,8 +351,9 @@ const HIGHLIGHTS_ICON_SET = new Set<string>(APP_HIGHLIGHTS_ICON_OPTIONS.map((o) 
           ></div>
         }
         <div
-          class="ap-wrap relative mx-auto grid w-full max-w-6xl items-center gap-8 px-4"
+          class="ap-wrap ap-hero-inner relative mx-auto grid w-full max-w-6xl items-center gap-8 px-4"
           [class]="heroContainerClass()"
+
         >
           <div class="ap-on-fill" [class]="heroCopyClass()">
             @if (h.eyebrow) {
@@ -746,6 +853,8 @@ export class AppPageViewComponent {
   readonly outlineButtons = computed(() => this.page()?.theme?.button_style === 'outline');
   /** CSS custom properties of the theme; `null` (nothing bound) without theme. */
   readonly themeVars = computed(() => themeStyle(this.page()));
+  /** Apps F7: `data-ap-*` markers of the extended tokens; all `null` without them. */
+  readonly markers = computed(() => themeMarkers(this.page()));
 
   /** The theme's color wins over the brand's; without theme the brand's, as before. */
   readonly primary = computed(

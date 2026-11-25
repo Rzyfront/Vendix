@@ -103,6 +103,16 @@ export type AppThemeDensity = 'compact' | 'comfortable' | 'spacious';
 export type AppThemeButtonStyle = 'solid' | 'outline';
 export type AppThemeImageStyle = 'square' | 'rounded';
 export type AppThemeContentWidth = 'narrow' | 'normal' | 'wide';
+// Apps F7 — extended tokens.
+export type AppThemeFontSize = 'sm' | 'md' | 'lg';
+export type AppThemeHeadingScale = 'compact' | 'normal' | 'display';
+export type AppThemeSectionGap = 'tight' | 'normal' | 'airy';
+export type AppThemeCardStyle = 'flat' | 'outline' | 'soft';
+export type AppThemeShadow = 'none' | 'soft' | 'strong';
+export type AppThemeImageRatio = 'square' | '4:3' | '16:9' | 'auto';
+export type AppThemeHeroHeight = 'auto' | 'compact' | 'full';
+/** Max opacity (%) of the veil over hero and gallery images (mirrors the backend). */
+export const APP_THEME_MAX_IMAGE_OVERLAY = 80;
 
 /** Style tokens of a page. Every token is optional: a missing one keeps today's look. */
 export interface AppPageTheme {
@@ -118,6 +128,16 @@ export interface AppPageTheme {
   button_style?: AppThemeButtonStyle;
   image_style?: AppThemeImageStyle;
   content_width?: AppThemeContentWidth;
+  border_color?: string;
+  base_font_size?: AppThemeFontSize;
+  heading_scale?: AppThemeHeadingScale;
+  section_gap?: AppThemeSectionGap;
+  card_style?: AppThemeCardStyle;
+  shadow?: AppThemeShadow;
+  image_ratio?: AppThemeImageRatio;
+  /** Opacity (0..80 %) of the veil over hero and gallery images. */
+  image_overlay?: number;
+  hero_height?: AppThemeHeroHeight;
 }
 
 export type AppThemeColorKey =
@@ -125,7 +145,8 @@ export type AppThemeColorKey =
   | 'secondary_color'
   | 'surface_color'
   | 'text_color'
-  | 'accent_color';
+  | 'accent_color'
+  | 'border_color';
 
 export const APP_THEME_COLORS: readonly { key: AppThemeColorKey; label: string; hint: string }[] = [
   { key: 'primary_color', label: 'Principal', hint: 'Botones y llamados a la acción.' },
@@ -135,7 +156,94 @@ export const APP_THEME_COLORS: readonly { key: AppThemeColorKey; label: string; 
   { key: 'accent_color', label: 'Acento', hint: 'Estrellas, enlaces y detalles.' },
 ];
 
+/** Apps F7 — border color, edited apart from the five palette colors. */
+export const APP_THEME_BORDER_COLOR: { key: AppThemeColorKey; label: string; hint: string } = {
+  key: 'border_color',
+  label: 'Bordes',
+  hint: 'Líneas de tarjetas y separadores.',
+};
+
+/** The five palette colors a quick palette sets at once. */
+export type AppThemePaletteKey = Exclude<AppThemeColorKey, 'border_color'>;
+
+/**
+ * Quick palettes of the style panel: each sets the five palette colors at
+ * once. Every pair checked by `contrastChecks` stays at 4.5:1 or more.
+ */
+export const APP_THEME_PALETTES: readonly {
+  id: string;
+  name: string;
+  colors: Record<AppThemePaletteKey, string>;
+}[] = [
+  {
+    id: 'ocean',
+    name: 'Océano',
+    colors: {
+      primary_color: '#1D4ED8',
+      secondary_color: '#1E3A8A',
+      surface_color: '#F8FAFC',
+      text_color: '#0F172A',
+      accent_color: '#0369A1',
+    },
+  },
+  {
+    id: 'forest',
+    name: 'Bosque',
+    colors: {
+      primary_color: '#166534',
+      secondary_color: '#14532D',
+      surface_color: '#F7FAF5',
+      text_color: '#1C2A1E',
+      accent_color: '#3F6212',
+    },
+  },
+  {
+    id: 'terracotta',
+    name: 'Terracota',
+    colors: {
+      primary_color: '#9A3412',
+      secondary_color: '#7C2D12',
+      surface_color: '#FFF8F1',
+      text_color: '#2A1A12',
+      accent_color: '#9A3412',
+    },
+  },
+  {
+    id: 'night',
+    name: 'Noche',
+    colors: {
+      primary_color: '#FBBF24',
+      secondary_color: '#F59E0B',
+      surface_color: '#0F172A',
+      text_color: '#F1F5F9',
+      accent_color: '#FCD34D',
+    },
+  },
+];
+
 export type AppThemeOptionKey = 'radius' | 'density' | 'button_style' | 'image_style' | 'content_width';
+
+/** Apps F7 — the extended closed tokens (style panel of product, service and booking pages). */
+export type AppThemeExtendedOptionKey =
+  | 'base_font_size'
+  | 'heading_scale'
+  | 'section_gap'
+  | 'card_style'
+  | 'shadow'
+  | 'image_ratio'
+  | 'hero_height';
+
+/** Group of the style panel an option belongs to. */
+export type AppThemeOptionGroup = 'typography' | 'spacing' | 'images';
+
+/** Group of each original (F3) option in the regrouped style panel. */
+export const APP_THEME_OPTION_GROUPS: Record<AppThemeOptionKey, AppThemeOptionGroup> = {
+  radius: 'spacing',
+  density: 'spacing',
+  button_style: 'spacing',
+  image_style: 'images',
+  content_width: 'spacing',
+};
 
 /** The closed choices of each non-color token, with their editor labels. */
 export const APP_THEME_OPTIONS: readonly {
@@ -185,6 +293,86 @@ export const APP_THEME_OPTIONS: readonly {
       { value: 'narrow', label: 'Angosto' },
       { value: 'normal', label: 'Normal' },
       { value: 'wide', label: 'Amplio' },
+    ],
+  },
+];
+
+/** Apps F7 — closed choices of the extended tokens, with their group and labels. */
+export const APP_THEME_EXTENDED_OPTIONS: readonly {
+  key: AppThemeExtendedOptionKey;
+  group: AppThemeOptionGroup;
+  label: string;
+  values: readonly { value: string; label: string }[];
+}[] = [
+  {
+    key: 'base_font_size',
+    group: 'typography',
+    label: 'Tamaño del texto',
+    values: [
+      { value: 'sm', label: 'Pequeño' },
+      { value: 'md', label: 'Normal' },
+      { value: 'lg', label: 'Grande' },
+    ],
+  },
+  {
+    key: 'heading_scale',
+    group: 'typography',
+    label: 'Tamaño de los títulos',
+    values: [
+      { value: 'compact', label: 'Compactos' },
+      { value: 'normal', label: 'Normales' },
+      { value: 'display', label: 'Destacados' },
+    ],
+  },
+  {
+    key: 'section_gap',
+    group: 'spacing',
+    label: 'Espacio entre secciones',
+    values: [
+      { value: 'tight', label: 'Junto' },
+      { value: 'normal', label: 'Normal' },
+      { value: 'airy', label: 'Aireado' },
+    ],
+  },
+  {
+    key: 'card_style',
+    group: 'spacing',
+    label: 'Tarjetas',
+    values: [
+      { value: 'flat', label: 'Planas' },
+      { value: 'outline', label: 'Con borde' },
+      { value: 'soft', label: 'Suaves' },
+    ],
+  },
+  {
+    key: 'shadow',
+    group: 'spacing',
+    label: 'Sombra de tarjetas',
+    values: [
+      { value: 'none', label: 'Sin sombra' },
+      { value: 'soft', label: 'Suave' },
+      { value: 'strong', label: 'Marcada' },
+    ],
+  },
+  {
+    key: 'image_ratio',
+    group: 'images',
+    label: 'Proporción de imágenes',
+    values: [
+      { value: 'square', label: 'Cuadrada' },
+      { value: '4:3', label: '4:3' },
+      { value: '16:9', label: '16:9' },
+      { value: 'auto', label: 'Original' },
+    ],
+  },
+  {
+    key: 'hero_height',
+    group: 'images',
+    label: 'Alto de la portada',
+    values: [
+      { value: 'auto', label: 'Automático' },
+      { value: 'compact', label: 'Compacta' },
+      { value: 'full', label: 'Pantalla completa' },
     ],
   },
 ];
