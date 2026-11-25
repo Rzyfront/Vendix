@@ -1,8 +1,19 @@
-import { AI_USAGE_GROUPS, USAGE_GROUP_QUOTA } from './ai-usage-groups.contract';
+import {
+  AI_USAGE_GROUPS,
+  USAGE_GROUP_QUOTA,
+  resolveUsageGroup,
+} from './ai-usage-groups.contract';
 
 describe('USAGE_GROUP_QUOTA', () => {
   it('la búsqueda semántica no muestra cupo: los embeddings no se cobran ni se topan', () => {
     expect(AI_USAGE_GROUPS).toContain('semantic_search');
+    expect(USAGE_GROUP_QUOTA.semantic_search).toBeNull();
+  });
+
+  it('las apps de embeddings se agrupan en búsqueda semántica, sin cupo', () => {
+    expect(resolveUsageGroup('agent_knowledge_embeddings', 'rag_embeddings')).toBe(
+      'semantic_search',
+    );
     expect(USAGE_GROUP_QUOTA.semantic_search).toBeNull();
   });
 

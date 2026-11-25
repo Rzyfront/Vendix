@@ -252,18 +252,27 @@ export class EmbeddingService {
     }
   }
 
-  /** ¿El registro ya está indexado con exactamente este texto? */
+  /**
+   * ¿El registro ya está indexado con exactamente este texto y estos metadatos?
+   * Los metadatos forman parte de la fila, así que un cambio solo en ellos
+   * también exige reindexar (y el upsert los deja al día).
+   */
   private async isUnchanged(params: StoreEmbeddingParams): Promise<boolean> {
     try {
-      const rows = await this.prisma.$queryRawUnsafe<Array<{ content: string | null }>>(
-        `SELECT content FROM ai_embeddings
+      const rows = await this.prisma.$queryRawUnsafe<
+        Array<{ content: string | null; metadata: unknown }>
+      >(
+        `SELECT content, metadata FROM ai_embeddings
           WHERE store_id = $1 AND entity_type = $2 AND entity_id = $3
           LIMIT 1`,
         params.store_id,
         params.entity_type,
         params.entity_id,
       );
-      return rows.length > 0 && rows[0].content === params.content;
+      if (rows.length === 0 || rows[0].content !== params.content) return false;
+      const stored = rows[0].metadata ?? null;
+      const incoming = params.metadata ?? null;
+      return JSON.stringify(stored) === JSON.stringify(incoming);
     } catch (error) {
       this.logger.warn(
         `No se pudo comprobar si el embedding cambió (se reindexa igual): ${(error as Error)?.message}`,
