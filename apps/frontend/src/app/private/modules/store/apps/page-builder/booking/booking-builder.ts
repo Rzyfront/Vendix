@@ -2,6 +2,7 @@ import { Observable, forkJoin, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 
 import type { BookingPreviewRoom } from '../../../../../../public/booking-page/booking-page-home-view.component';
+import type { AppStayFacts } from '../../../../../../public/app-page/app-page-stay';
 import type { Product } from '../../../products/interfaces/product.interface';
 import type { ProductsService } from '../../../products/services/products.service';
 import type { BuilderCategory } from '../../builder/builder.types';
@@ -33,6 +34,8 @@ export interface BookingContext {
   online_payment_ready?: boolean;
   /** S11 — the hotel's real rules; they fill the empty policy texts, like the public page. */
   policy_defaults?: BookingPolicyDefaults;
+  /** Datos reales de la estadía (`stay_detail` y `visible_when`), los mismos que recibe la página pública. */
+  stay_facts?: AppStayFacts;
 }
 
 export interface BookingPolicyDefaults {
@@ -96,6 +99,10 @@ const META: Record<string, PageBlockMeta> = {
     liveData: 'Tus habitaciones reales con su tarifa y disponibilidad (Hotelería).',
   },
   checkin_info: { category: 'stay', pinned: 'start', removable: false },
+  stay_detail: {
+    category: 'stay',
+    liveData: 'Horarios, capacidad, cancelación y anticipo salen de tu hotel (Hotelería); tú eliges qué mostrar.',
+  },
   highlights: { category: 'stay' },
   amenities: { category: 'stay' },
   policies: { category: 'trust' },
@@ -122,6 +129,7 @@ export interface BookingPreview {
   rooms: BookingPreviewRoom[];
   productIds: number[];
   products: { id: number; name: string; image_url: string | null }[];
+  stayFacts: AppStayFacts | null;
 }
 
 /**
@@ -143,6 +151,7 @@ export function bookingPreview(payload: AppPagePreviewPayload<BookingSettings | 
     rooms: context.room_types,
     productIds: products.map((p) => p.id),
     products,
+    stayFacts: context.stay_facts ?? null,
   };
 }
 

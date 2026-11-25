@@ -7,6 +7,7 @@ import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.s
 import { sellableProductsWhere } from '../product-page/product-page.reader';
 import {
   AppPageDocument,
+  MAX_BLOCK_SERVICE_IDS,
   carryPage,
   readAppPage,
 } from '../shared/app-page.contract';
@@ -110,13 +111,16 @@ export interface PublishedServicePage {
 }
 
 /**
- * Orders the store's online services for the page: the featured ones in the
- * owner's order (skipping any that stopped being sold online), then the rest
- * in the order given, capped at `MAX_LISTED_SERVICES`.
+ * Ordena los servicios en línea de la tienda: primero los destacados en el orden
+ * del dueño (omitiendo los que ya no se venden en línea) y luego el resto en el
+ * orden recibido. Cuando `limit` es `null` devuelve todos (usado en el contexto
+ * de vista previa y el selector); en el modo automático público recorta a
+ * `MAX_LISTED_SERVICES`.
  */
 export function orderServices<T extends { id: number }>(
   services: T[],
   featuredIds: number[],
+  limit: number | null = MAX_LISTED_SERVICES,
 ): { services: T[]; featuredIds: number[] } {
   const byId = new Map(services.map((s) => [s.id, s]));
   const featured = featuredIds
@@ -124,9 +128,52 @@ export function orderServices<T extends { id: number }>(
     .filter((s): s is T => !!s);
   const featuredSet = new Set(featured.map((s) => s.id));
   const rest = services.filter((s) => !featuredSet.has(s.id));
+  const ordered = [...featured, ...rest];
   return {
-    services: [...featured, ...rest].slice(0, MAX_LISTED_SERVICES),
+    services: limit === null ? ordered : ordered.slice(0, limit),
     featuredIds: featured.map((s) => s.id),
+  };
+}
+
+/**
+ * Apps booking-detail — the services the owner picked by hand in the
+ * `services` block (`selection: 'manual'`), in their order; `null` when the
+ * block lists automatically (absent block, `auto` or no selection), so the
+ * stored `service_ids` are never used outside manual mode. Reads the
+ * validated page, so a page that no longer validates lists automatically.
+ */
+export function manualServiceIds(page: AppPageDocument | null): number[] | null {
+  const props = page?.blocks.find((b) => b.type === 'services')?.props;
+  if (!props || props['selection'] !== 'manual') return null;
+  const ids = props['service_ids'];
+  return Array.isArray(ids)
+    ? ids
+        .filter((id): id is number => typeof id === 'number' && Number.isInteger(id) && id > 0)
+        .slice(0, MAX_BLOCK_SERVICE_IDS)
+    : [];
+}
+
+/**
+ * The services the page lists. `services` must already be the store's online
+ * services (read with `onlineServicesWhere(storeId)`), which is what scopes a
+ * manual pick to the store: an id of another store, or one no longer sold
+ * online, is simply not among them. Manual: the picked ones in the owner's
+ * order (featured badge kept only on those); auto: `orderServices`.
+ */
+export function selectPageServices<T extends { id: number }>(
+  services: T[],
+  featuredIds: number[],
+  manualIds: number[] | null,
+): { services: T[]; featuredIds: number[] } {
+  if (manualIds === null) return orderServices(services, featuredIds);
+  const byId = new Map(services.map((s) => [s.id, s]));
+  const picked = manualIds
+    .map((id) => byId.get(id))
+    .filter((s): s is T => !!s);
+  const pickedIds = new Set(picked.map((s) => s.id));
+  return {
+    services: picked,
+    featuredIds: featuredIds.filter((id) => pickedIds.has(id)),
   };
 }
 
@@ -162,9 +209,11 @@ export async function readPublishedServicePage(
   ]);
   if (allServices.length === 0) return null;
 
-  const { services, featuredIds } = orderServices(
+  const page = readAppPage('service_page', app.config);
+  const { services, featuredIds } = selectPageServices(
     allServices,
     config.featured_service_ids,
+    manualServiceIds(page),
   );
   const productsById = new Map(productRows.map((p) => [p.id, p]));
   return {
@@ -173,6 +222,6 @@ export async function readPublishedServicePage(
     products: config.product_ids
       .map((id) => productsById.get(id))
       .filter((p): p is PublishedPageItem => !!p),
-    page: readAppPage('service_page', app.config),
+    page,
   };
 }

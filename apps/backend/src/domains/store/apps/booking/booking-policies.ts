@@ -43,6 +43,62 @@ function needsFill(block: AppPageBlock): boolean {
   return block.type === 'policies' && block.enabled && POLICY_KEYS.some((k) => isBlank(block.props?.[k]));
 }
 
+/**
+ * Apps booking-detail — the hotel's real data behind the `stay_detail` block
+ * and the `visible_when` conditions of the booking page. Nothing here is typed
+ * by the owner: times come from the store settings, cancellation and deposit
+ * from the default rate plan, capacity and photos from the active room types.
+ */
+export interface BookingStayFacts {
+  /** "Desde las 3:00 p. m." */
+  check_in: string | null;
+  /** "Hasta las 12:00 m." */
+  check_out: string | null;
+  /** Policy text of the default rate plan. */
+  cancellation: string | null;
+  /** Most guests the largest active room type takes. */
+  max_guests: number | null;
+  /** Deposit (% of the stay) of the default rate plan; `null` without one. */
+  deposit_percent: number | null;
+  /** Some active room type has photos (`visible_when.has_photos`). */
+  has_photos: boolean;
+  /** Some room type can be booked (`visible_when.has_availability`). */
+  has_availability: boolean;
+}
+
+/** Facts of the stay from already-read data. Pure. */
+export function buildStayFacts(
+  defaults: PolicyDefaults,
+  depositPercent: unknown,
+  rooms: { max_occupancy: number; images: string[] | null }[],
+): BookingStayFacts {
+  const deposit = Number(depositPercent);
+  const capacity = rooms.reduce((max, r) => Math.max(max, Number(r.max_occupancy) || 0), 0);
+  return {
+    check_in: defaults.check_in || null,
+    check_out: defaults.check_out || null,
+    cancellation: defaults.cancellation || null,
+    max_guests: capacity > 0 ? capacity : null,
+    deposit_percent: Number.isFinite(deposit) && deposit > 0 ? deposit : null,
+    has_photos: rooms.some((r) => (r.images ?? []).length > 0),
+    has_availability: rooms.length > 0,
+  };
+}
+
+/**
+ * Indica si la página pública necesita los hechos reales de la estadía:
+ * un bloque `stay_detail` activo o cualquier bloque activo con `visible_when`.
+ * Las páginas sin ellos mantienen su respuesta y consultas anteriores.
+ */
+export function needsStayFacts(page: AppPageDocument): boolean {
+  return page.blocks.some(
+    (b) =>
+      b.enabled !== false &&
+      (b.type === 'stay_detail' ||
+        (!!b.props?.['visible_when'] && typeof b.props['visible_when'] === 'object')),
+  );
+}
+
 /** Fills the empty texts of the policies block; saved texts are kept. Pure. */
 export function fillPolicies(page: AppPageDocument, defaults: PolicyDefaults): AppPageDocument {
   if (!page.blocks.some(needsFill)) return page;
@@ -76,27 +132,62 @@ export class BookingPoliciesService {
 
   /** The hotel's real policy texts; the editor preview fills its draft with them too. */
   async defaults(storeId: number): Promise<PolicyDefaults> {
-    const row = await this.prisma.store_settings.findFirst({
-      where: { store_id: storeId },
-      select: { settings: true },
-    });
+    return (await this.read(storeId)).defaults;
+  }
+
+  /** Datos reales de la estadía (`stay_detail` y `visible_when`), acotados por `storeId`. */
+  async stayFacts(storeId: number): Promise<BookingStayFacts> {
+    return (await this.readWithStayFacts(storeId)).stayFacts;
+  }
+
+  /**
+   * Lee en una sola pasada las políticas del hotel y las habitaciones activas
+   * para entregar `defaults` y `stayFacts` sin duplicar consultas a Prisma.
+   */
+  async readWithStayFacts(
+    storeId: number,
+  ): Promise<{ defaults: PolicyDefaults; stayFacts: BookingStayFacts }> {
+    const [{ defaults, depositPercent }, rooms] = await Promise.all([
+      this.read(storeId),
+      this.prisma.lodging_unit_types.findMany({
+        where: { store_id: storeId, is_active: true },
+        select: { max_occupancy: true, images: true },
+      }),
+    ]);
+    return {
+      defaults,
+      stayFacts: buildStayFacts(defaults, depositPercent, rooms),
+    };
+  }
+
+  private async read(storeId: number): Promise<{ defaults: PolicyDefaults; depositPercent: unknown }> {
+    const [row, plan] = await Promise.all([
+      this.prisma.store_settings.findFirst({
+        where: { store_id: storeId },
+        select: { settings: true },
+      }),
+      this.prisma.lodging_rate_plans.findFirst({
+        where: { store_id: storeId, is_default: true, is_active: true },
+        select: {
+          deposit_percent: true,
+          cancellation_policy: {
+            select: { id: true, name: true, rules: true, no_show_penalty: true, is_active: true },
+          },
+        },
+      }),
+    ]);
     const hospitality = (mergeStoreSettingsWithDefaults(row?.settings)?.hospitality ?? {}) as {
       check_in_time?: string;
       check_out_time?: string;
     };
-    const plan = await this.prisma.lodging_rate_plans.findFirst({
-      where: { store_id: storeId, is_default: true, is_active: true },
-      select: {
-        cancellation_policy: {
-          select: { id: true, name: true, rules: true, no_show_penalty: true, is_active: true },
-        },
-      },
-    });
     const policy = plan?.cancellation_policy?.is_active ? toPolicySnapshot(plan.cancellation_policy) : null;
     return {
-      check_in: formatCheckIn(hospitality.check_in_time || '15:00'),
-      check_out: formatCheckOut(hospitality.check_out_time || '12:00'),
-      cancellation: policyText(asPolicySnapshot(policy)),
+      defaults: {
+        check_in: formatCheckIn(hospitality.check_in_time || '15:00'),
+        check_out: formatCheckOut(hospitality.check_out_time || '12:00'),
+        cancellation: policyText(asPolicySnapshot(policy)),
+      },
+      depositPercent: plan?.deposit_percent ?? null,
     };
   }
 }

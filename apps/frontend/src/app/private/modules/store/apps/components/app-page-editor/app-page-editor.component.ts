@@ -18,6 +18,7 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { AppPageViewComponent } from '../../../../../../public/app-page/app-page-view.component';
 import { AppProductSelectorComponent } from '../app-product-selector/app-product-selector.component';
+import { AppServiceSelectorComponent } from '../app-service-selector/app-service-selector.component';
 import { contrastChecks } from '../../../../../../public/app-page/app-page-theme';
 import type { StoreAppDetail } from '../../interfaces/store-app.interface';
 import { StoreAppsService } from '../../services/store-apps.service';
@@ -83,7 +84,7 @@ const APP_LABEL: Record<PageAppKind, string> = {
 @Component({
   selector: 'app-app-page-editor',
   standalone: true,
-  imports: [NgTemplateOutlet, IconComponent, AppPageViewComponent, AppProductSelectorComponent],
+  imports: [NgTemplateOutlet, IconComponent, AppPageViewComponent, AppProductSelectorComponent, AppServiceSelectorComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="space-y-4" data-testid="app-page-editor">
@@ -473,7 +474,7 @@ const APP_LABEL: Record<PageAppKind, string> = {
         @switch (def.kind) {
           @case ('bool') {
             <span class="inline-flex items-center gap-2">
-              <input type="checkbox" [checked]="read(target, def.key) === true" (change)="onBool(target, def.key, $event)" />
+              <input type="checkbox" [checked]="readBool(target, def)" (change)="onBool(target, def.key, $event)" />
               {{ def.label }}
             </span>
           }
@@ -570,6 +571,19 @@ const APP_LABEL: Record<PageAppKind, string> = {
               (selectedIdsChange)="onProductIds(i, field.key, $event)"
             />
           }
+        }
+        @case ('service_ids') {
+          @if (!field.visibleWhen || read(blockTarget(i), field.visibleWhen.key) === field.visibleWhen.value) {
+            <app-service-selector
+              [selectedIds]="productIdsOf(i, field.key)"
+              [max]="field.max"
+              [label]="field.label"
+              (selectedIdsChange)="onProductIds(i, field.key, $event)"
+            />
+          }
+        }
+        @case ('conditions') {
+          <!-- Las condiciones por bloque se editan en el constructor de páginas. -->
         }
         @default {
           <ng-container *ngTemplateOutlet="scalar; context: { def: field, target: blockTarget(i) }" />
@@ -893,7 +907,13 @@ export class AppPageEditorComponent {
     const taken = new Set(this.blocks().map((b) => b.id));
     let id = type.replace(/_/g, '-');
     for (let n = 2; taken.has(id); n++) id = `${type.replace(/_/g, '-')}-${n}`;
-    const block: AppPageBlock = { id, type, enabled: true, props: {} };
+    const defaults = this.defOf(type)?.defaultProps;
+    const block: AppPageBlock = {
+      id,
+      type,
+      enabled: true,
+      props: defaults ? ({ ...defaults } as Record<string, unknown>) : {},
+    };
     this.update((page) => page.blocks.push(block));
   }
 
@@ -953,6 +973,11 @@ export class AppPageEditorComponent {
     const group = target.g === 'hero' || target.g === 'seo' || target.g === 'brand';
     // Group fields drop empty strings (an empty URL or color would not validate).
     this.write(target, key, group && value.trim() === '' ? undefined : value);
+  }
+
+  readBool(target: FieldTarget, def: Extract<ScalarFieldDef, { kind: 'bool' }>): boolean {
+    const value = this.read(target, def.key);
+    return typeof value === 'boolean' ? value : Boolean(def.defaultValue);
   }
 
   onBool(target: FieldTarget, key: string, event: Event): void {
