@@ -450,6 +450,15 @@ describe('LodgingCheckOutService (H3.7)', () => {
       expect(prisma.lodging_folios.updateMany).not.toHaveBeenCalled();
     });
 
+    it('verificar a media estadía no suelta las noches futuras', async () => {
+      const { service, folios } = build({ verified: false });
+
+      await service.verify(7);
+
+      expect(folios.releaseUnsleptNights).not.toHaveBeenCalled();
+      expect(folios.postNightsThrough).toHaveBeenCalledWith(expect.objectContaining({ id: 40 }), expect.any(String), false);
+    });
+
     it('"Verificar folio" registra quién y a qué total', async () => {
       const { service, prisma, folios } = build({ verified: false });
 
