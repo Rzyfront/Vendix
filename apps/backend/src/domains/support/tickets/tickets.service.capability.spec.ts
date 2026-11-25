@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import {
   CAPABILITY_REQUEST_TAG,
   TicketsService,
@@ -7,6 +8,13 @@ import {
 
 /** T5 — one ticket per capability across tenants; other stores vote. */
 describe('TicketsService · solicitudes de capacidad', () => {
+  const previousSecret = process.env.JWT_SECRET;
+  beforeAll(() => {
+    process.env.JWT_SECRET = 'test-secret-capability-votes';
+  });
+  afterAll(() => {
+    process.env.JWT_SECRET = previousSecret;
+  });
   function build(existing: any = null) {
     const orgPrisma = {
       organizations: {
@@ -15,6 +23,8 @@ describe('TicketsService · solicitudes de capacidad', () => {
       support_tickets: {
         count: jest.fn().mockResolvedValue(0),
         create: jest.fn(async ({ data }: any) => ({ id: 1, ...data })),
+        findUnique: jest.fn(),
+        update: jest.fn(async ({ data }: any) => ({ id: 1, ...data })),
       },
     };
     const globalPrisma = {
@@ -45,11 +55,58 @@ describe('TicketsService · solicitudes de capacidad', () => {
     description: 'Solicitud de capacidad desde Vex.',
   };
 
-  it('el voto es un hash opaco, estable y distinto por tienda', () => {
-    expect(capabilityVoteTag(7)).toMatch(/^capability-vote:[0-9a-f]{16}$/);
+  it('el voto es un HMAC estable y distinto por tienda', () => {
+    expect(capabilityVoteTag(7)).toMatch(/^capability-vote:[0-9a-f]{24}$/);
     expect(capabilityVoteTag(7)).toBe(capabilityVoteTag(7));
     expect(capabilityVoteTag(7)).not.toBe(capabilityVoteTag(8));
-    expect(capabilityVoteTag(7)).not.toContain('store');
+  });
+
+  it('el voto no se revierte probando ids: no es un hash plano y depende del secreto', () => {
+    const tag = capabilityVoteTag(7).replace('capability-vote:', '');
+    // Brute force over small store ids with the unsalted hash finds nothing.
+    for (let id = 1; id <= 1000; id++) {
+      const plain = createHash('sha256').update(`store:${id}`).digest('hex');
+      expect(plain.startsWith(tag)).toBe(false);
+    }
+    expect(capabilityVoteTag(7, 'otro-secreto')).not.toBe(capabilityVoteTag(7));
+    expect(() => capabilityVoteTag(7, '')).toThrow(/secret/);
+  });
+
+  it('por HTTP nadie se adueña de una clave: create descarta las etiquetas reservadas', async () => {
+    const { service, orgPrisma } = build(null);
+    await service.create(3, 7, 11, {
+      title: 't',
+      description: 'd',
+      tags: [
+        'urgente',
+        CAPABILITY_REQUEST_TAG,
+        capabilityKeyTag('storefront-cart-button-color'),
+        'capability-vote:abc',
+      ],
+    } as any);
+    expect(orgPrisma.support_tickets.create.mock.calls[0][0].data.tags).toEqual([
+      'urgente',
+    ]);
+  });
+
+  it('por HTTP update no agrega ni borra etiquetas reservadas', async () => {
+    const { service, orgPrisma } = build(null);
+    orgPrisma.support_tickets.findUnique.mockResolvedValue({
+      id: 1,
+      status: 'NEW',
+      tags: [CAPABILITY_REQUEST_TAG, capabilityKeyTag('k-1'), capabilityVoteTag(9)],
+    });
+    await service.update(
+      1,
+      { tags: ['nuevo', capabilityKeyTag('otra'), 'capability-vote:zzz'] } as any,
+      11,
+    );
+    expect(orgPrisma.support_tickets.update.mock.calls[0][0].data.tags).toEqual([
+      'nuevo',
+      CAPABILITY_REQUEST_TAG,
+      capabilityKeyTag('k-1'),
+      capabilityVoteTag(9),
+    ]);
   });
 
   it('primera vez: crea UN ticket con la etiqueta de capacidad y el voto', async () => {
@@ -58,7 +115,9 @@ describe('TicketsService · solicitudes de capacidad', () => {
     expect(globalPrisma.support_tickets.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
-          tags: { has: 'capability:storefront-cart-button-color' },
+          tags: {
+            hasEvery: [CAPABILITY_REQUEST_TAG, 'capability:storefront-cart-button-color'],
+          },
           status: { notIn: ['RESOLVED', 'CLOSED'] },
         },
       }),
