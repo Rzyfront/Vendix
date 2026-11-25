@@ -43,7 +43,10 @@ export class ProviderScheduleService {
       where: { id: providerId },
       select: { id: true, uses_store_hours: true },
     });
-    if (provider?.uses_store_hours === true) {
+    if (!provider) {
+      return [];
+    }
+    if (provider.uses_store_hours === true) {
       return this.businessHours.loadProviderBlocks([providerId]);
     }
     const rows = await this.prisma.provider_schedules.findMany({

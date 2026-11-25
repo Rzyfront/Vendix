@@ -876,6 +876,84 @@ describe('AvailabilityService — horarios nocturnos (S21)', () => {
         const slots = await service.getAvailableSlots(10, SATURDAY, SATURDAY);
         expect(slots.map((s) => s.start_time)).toEqual(['09:00', '10:00']);
       });
+
+      it('chains consecutive 24 h station days across midnight without duplicating the next day', async () => {
+        const station24h = [
+          { station_id: 3, weekday: 6, start_time: '00:00', end_time: '00:00', is_active: true },
+          { station_id: 3, weekday: 0, start_time: '00:00', end_time: '00:00', is_active: true },
+        ];
+        const store24h = [
+          { day_of_week: 6, start_time: '00:00', end_time: '00:00' },
+          { day_of_week: 0, start_time: '00:00', end_time: '00:00' },
+        ];
+        const { service } = buildService({
+          product: { ...stationProduct, service_duration_minutes: 120, buffer_minutes: 15 },
+          storeHours: store24h,
+          stations: [station],
+          stationSchedules: station24h,
+        });
+        const slots = await service.getAvailableSlots(10, SATURDAY, SUNDAY);
+        const crossing = slots.find((s) => s.date === SATURDAY && s.start_time === '22:30');
+        expect(crossing).toMatchObject({
+          station_id: 3,
+          date: SATURDAY,
+          start_time: '22:30',
+          end_time: '00:30',
+          end_date: SUNDAY,
+          total_available: 1,
+        });
+        // No slot on Sunday should be duplicated by Saturday's chained window.
+        const sundayStarts = slots.filter((s) => s.date === SUNDAY).map((s) => s.start_time);
+        expect(sundayStarts[0]).toBe('00:00');
+        expect(new Set(sundayStarts).size).toBe(sundayStarts.length);
+      });
+
+      it('chains consecutive 24 h station+provider days and respects next-day provider unavailability', async () => {
+        const station24h = [
+          { station_id: 3, weekday: 6, start_time: '00:00', end_time: '00:00', is_active: true },
+          { station_id: 3, weekday: 0, start_time: '00:00', end_time: '00:00', is_active: true },
+        ];
+        const store24h = [
+          { day_of_week: 6, start_time: '00:00', end_time: '00:00' },
+          { day_of_week: 0, start_time: '00:00', end_time: '00:00' },
+        ];
+        const provider24h = [
+          { provider_id: 1, day_of_week: 6, start_time: '00:00', end_time: '00:00', is_active: true },
+          { provider_id: 1, day_of_week: 0, start_time: '00:00', end_time: '00:00', is_active: true },
+        ];
+        const { service } = buildService({
+          product: { requires_station: true, booking_mode: 'provider_required', service_duration_minutes: 120, buffer_minutes: 15 },
+          storeHours: store24h,
+          stations: [station],
+          stationProviders: [{ station_id: 3, provider_id: 1 }],
+          stationSchedules: station24h,
+          providers: [{ id: 1, display_name: 'Ana', avatar_url: null }],
+          schedules: provider24h,
+        });
+        const slots = await service.getAvailableSlots(10, SATURDAY, SATURDAY);
+        expect(slots.find((s) => s.date === SATURDAY && s.start_time === '22:30')).toMatchObject({
+          station_id: 3,
+          end_time: '00:30',
+          end_date: SUNDAY,
+          total_available: 1,
+        });
+
+        // If the provider is unavailable on Sunday, Saturday 22:30-00:30 must not be offered.
+        const blocked = buildService({
+          product: { requires_station: true, booking_mode: 'provider_required', service_duration_minutes: 120, buffer_minutes: 15 },
+          storeHours: store24h,
+          stations: [station],
+          stationProviders: [{ station_id: 3, provider_id: 1 }],
+          stationSchedules: station24h,
+          providers: [{ id: 1, display_name: 'Ana', avatar_url: null }],
+          schedules: provider24h,
+        });
+        blocked.prisma.provider_exceptions.findMany.mockResolvedValue([
+          { provider_id: 1, date: new Date(`${SUNDAY}T00:00:00.000Z`), is_unavailable: true },
+        ]);
+        const blockedSlots = await blocked.service.getAvailableSlots(10, SATURDAY, SATURDAY);
+        expect(blockedSlots.find((s) => s.start_time === '22:30')).toBeUndefined();
+      });
     });
 
     it('lets the station own schedule govern even when the store never configured its hours (D2)', async () => {

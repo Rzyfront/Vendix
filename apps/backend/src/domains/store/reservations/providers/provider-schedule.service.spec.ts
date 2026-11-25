@@ -264,4 +264,12 @@ describe('ProviderScheduleService.getSchedule (Parte 1)', () => {
     ]);
     expect(hours.loadProviderBlocks).not.toHaveBeenCalled();
   });
+
+  it('returns empty and never queries provider_schedules when the provider is not in the store', async () => {
+    const { service, prisma, hours } = build(false);
+    prisma.service_providers.findFirst.mockResolvedValue(null);
+    await expect(service.getSchedule(999)).resolves.toEqual([]);
+    expect(prisma.provider_schedules.findMany).not.toHaveBeenCalled();
+    expect(hours.loadProviderBlocks).not.toHaveBeenCalled();
+  });
 });
