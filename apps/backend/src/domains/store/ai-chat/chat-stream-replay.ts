@@ -56,6 +56,8 @@ export interface ChatReplayScope {
   organization_id: number;
   user_id: number;
   conversation_id: number;
+  /** Cuando el stream pertenece al editor de diseño, fija el `app_kind` en el alcance de replay. */
+  design_app_kind?: string;
 }
 type Frame = { type: string; replay?: ChatReplayCursor };
 type Session<T extends Frame> = {

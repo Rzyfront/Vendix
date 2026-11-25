@@ -54,6 +54,15 @@ export interface VexiStreamIntent {
    * `content` viaja vacío; el objetivo lo compone `sendMessageStream`.
    */
   continuation?: 'approved' | 'rejected' | 'resume';
+  /**
+   * Apps F4 — contexto de diseño compuesto en el servidor para el chat lateral
+   * del constructor de apps. Nunca se acepta desde el DTO público de ai-chat.
+   */
+  design_context?: {
+    app_kind: string;
+    prompt_context: string;
+    allowed_tools: string[];
+  };
 }
 
 /**
