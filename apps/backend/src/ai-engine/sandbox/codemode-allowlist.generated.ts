@@ -129,6 +129,7 @@ export const CODEMODE_ALLOWLIST: readonly CodeModeAllowlistEntry[] = Object.free
   { name: 'lookup_customer', domain: 'customers', version: '1', permissions: ['store:customers:read'], parameters_hash: '0716027863fe439fc953590dc6783b33548749e8406c385d9fa3b48dda8fdfd7' },
   { name: 'preview_archive_product', domain: 'products', version: '1', permissions: ['store:products:admin_delete'], parameters_hash: '30ff8bcd175c58b6075a7003545c41c1a480102f1defb11d80b5b14ecf652e13' },
   { name: 'preview_kitchen_fire', domain: 'kitchen', version: '1', permissions: ['store:kitchen_fire:read'], parameters_hash: 'c7af97ca782f44f0bf2016feafe643bf582c09308ac2707afd8c000625ad2dbd' },
+  { name: 'preview_product_price_tiers', domain: 'pricing', version: '1', permissions: ['store:price-tiers:read', 'store:products:read'], parameters_hash: '2591b25c596f036c83985c901390867bc30c3390b0fbd851a2de1e7883be574b' },
   { name: 'preview_refund', domain: 'orders', version: '1', permissions: ['store:orders:order_flow:read'], parameters_hash: '89fc9e23c482c04afca57d4c49705a730eb2cd44148171b00eb70021df646a6e' },
   { name: 'preview_subscription_checkout', domain: 'subscriptions', version: '1', permissions: ['subscriptions:read'], parameters_hash: 'f71e7e086ef4d0776030daf55fd0a82002161529a69eba9c3b6a2309471969d1' },
   { name: 'preview_withholding', domain: 'withholding', version: '1', permissions: ['withholding:read'], parameters_hash: '918c48f6bbe07990095cddad28bc7dbc95841228f7269ebe219afa0bed638534' },

@@ -2045,6 +2045,14 @@ export const TOOL_DISCOVERY_QUERIES_ES: Readonly<
     'Agregue una imagen nueva a ese producto y déjela de principal',
     'Oe, ¿puede quitar una imagen y dejar la otra?',
   ],
+  manage_product_price_tiers: [
+    'aplícale la tarifa Manaure a todos mis productos',
+    'ponle la tarifa mayorista a estos productos',
+    'asígnale la tarifa de bulto a las bebidas',
+    'quítale la tarifa mayorista a esos productos',
+    'habilita la tarifa en todos los productos de la tienda',
+    'que todos los productos queden con la tarifa nueva',
+  ],
   manage_production_order: [
     'Haz una orden de producción',
     'Prepara 20 unidades de esa subreceta',
@@ -2283,6 +2291,12 @@ export const TOOL_DISCOVERY_QUERIES_ES: Readonly<
     'Valida la receta y el stock antes de mandar a cocina',
     'Simula el despacho de esos renglones a la cocina',
     'Cuántos insumos se gastan si saco esos platos ya',
+  ],
+  preview_product_price_tiers: [
+    'cuántos productos ya tienen la tarifa Manaure',
+    'cuáles productos no tienen la tarifa mayorista',
+    'qué pasaría si le pongo la tarifa a todos los productos',
+    'revisa qué productos faltan por la tarifa nueva',
   ],
   preview_refund: [
     '¿Cuánto puedo devolver de ese pedido que ya se entregó?',

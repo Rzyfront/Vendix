@@ -5,6 +5,13 @@ import { RegisteredTool, ToolPreview } from '../interfaces/tool.interface';
 import { VendixHttpException } from '../../../common/errors';
 import { PriceTiersService } from '../../../domains/store/price-tiers/price-tiers.service';
 import { ProductsService } from '../../../domains/store/products/products.service';
+import { ProductsBulkEditService } from '../../../domains/store/products/products-bulk-edit.service';
+import {
+  BulkEditPreviewItemDto,
+  BulkEditProductsDto,
+  MAX_BULK_EDIT_IDS,
+  RelationalActionMode,
+} from '../../../domains/store/products/dto/bulk-edit-products.dto';
 import {
   CreatePriceTierDto,
   UpdatePriceTierDto,
@@ -14,7 +21,20 @@ import {
 export interface PricingToolDeps {
   priceTiersService: PriceTiersService;
   productsService: ProductsService;
+  /** Dueño de la edición masiva: asignar/quitar tarifas a N productos. */
+  productsBulkEditService: ProductsBulkEditService;
 }
+
+/** Nombres de las tools de asignación masiva de tarifas (T1/T2). */
+export const MANAGE_PRODUCT_PRICE_TIERS = 'manage_product_price_tiers';
+export const PREVIEW_PRODUCT_PRICE_TIERS = 'preview_product_price_tiers';
+
+/**
+ * Tope de productos que «todos mis productos» puede abarcar en un diff. Es
+ * el mismo tope de registros de un lote (`WRITE_BATCH_MAX_RECORDS`): más que
+ * eso no cabe en una aprobación y se pide acotar.
+ */
+export const PRICE_TIER_ASSIGNMENT_MAX_PRODUCTS = 500;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Doctrina de escritura (misma que `products.tools.ts`, copiada a propósito:
@@ -175,7 +195,7 @@ function tierKindLabel(kind: string): string {
  * la rechaza en el punto de escritura.
  */
 export function createPricingTools(deps: PricingToolDeps): RegisteredTool[] {
-  const { priceTiersService, productsService } = deps;
+  const { priceTiersService, productsService, productsBulkEditService } = deps;
 
   // ─── O-12 manage_price_tiers ──────────────────────────────────────────
 
@@ -279,7 +299,7 @@ export function createPricingTools(deps: PricingToolDeps): RegisteredTool[] {
           dto: checked.dto,
           changes,
           message:
-            'Al confirmar se crea la tarifa en la tienda; los productos la adoptan con set_product_tier_override.',
+            'Al confirmar se crea la tarifa en la tienda; para que los productos la usen, asígnala con manage_product_price_tiers (precio propio por producto: set_product_tier_override).',
         },
       };
     }
@@ -666,7 +686,460 @@ export function createPricingTools(deps: PricingToolDeps): RegisteredTool[] {
     };
   }
 
+  // ─── T1/T2 asignación masiva de una tarifa ────────────────────────────
+
+  type AssignmentAction = 'assign' | 'remove';
+
+  interface AssignmentProduct {
+    id: number;
+    name: string;
+  }
+
+  interface TierAssignmentDiff {
+    action: AssignmentAction;
+    tierId: number;
+    tierName: string;
+    /** Productos evaluados (los que la persona pidió, o todos los activos). */
+    scanned: number;
+    /** Cambian: la reciben (assign) o la pierden (remove). */
+    toChange: AssignmentProduct[];
+    /** Ya están como se pide: la tienen (assign) o no la tienen (remove). */
+    unchanged: AssignmentProduct[];
+    /** El bulk-edit los rechaza (variantes, archivado, no existe…). */
+    conflicts: Array<AssignmentProduct & { reason: string }>;
+  }
+
+  /** Un producto cambia de tarifas si su conjunto o su flag multi-tarifa cambia. */
+  function itemChangesTiers(item: BulkEditPreviewItemDto): boolean {
+    return (item.changes ?? []).some(
+      (change) =>
+        change.field === 'price_tiers' ||
+        change.field === 'has_multiple_price_tiers',
+    );
+  }
+
+  function chunk<T>(list: T[], size: number): T[][] {
+    const parts: T[][] = [];
+    for (let i = 0; i < list.length; i += size) {
+      parts.push(list.slice(i, i + size));
+    }
+    return parts;
+  }
+
+  /**
+   * Diff real de asignar/quitar UNA tarifa a N productos, con el MISMO
+   * `preview()` del bulk-edit de la web (no se reimplementa la lógica de
+   * tarifas). Read-only. `allowAllActive` lo habilita solo la tool de
+   * lectura: la de escritura exige `product_ids` explícitos para que el lote
+   * cuente sus registros y aplique exactamente lo que la persona vio.
+   */
+  async function resolveTierAssignment(
+    args: Record<string, any>,
+    storeId: number | undefined,
+    allowAllActive: boolean,
+  ): Promise<WriteResolution<TierAssignmentDiff>> {
+    const label = 'Tarifa en productos';
+
+    if (!storeId) {
+      return writeFailure(
+        label,
+        'Sin tienda en contexto: las tarifas se asignan siempre dentro de una tienda.',
+      );
+    }
+
+    const rawAction = args.action === undefined ? 'assign' : String(args.action);
+    if (rawAction !== 'assign' && rawAction !== 'remove') {
+      return writeFailure(
+        label,
+        `action "${rawAction}" inválida. Usa assign (asignar la tarifa) o remove (quitarla).`,
+      );
+    }
+    const action = rawAction as AssignmentAction;
+
+    const tierId = toWritePositiveInt(args.price_tier_id);
+    if (!tierId) {
+      return writeFailure(
+        label,
+        'price_tier_id inválido: indica la tarifa a asignar o quitar.',
+        'Llama a get_product_pricing o a list_capabilities del dominio pricing para ubicar la tarifa.',
+      );
+    }
+    const tier = await loadTier(tierId);
+    if (!tier) {
+      return writeFailure(
+        label,
+        `No existe una tarifa con id ${tierId} en esta tienda.`,
+      );
+    }
+    const tierLabel = `Tarifa "${tier.name}"`;
+    if (action === 'assign' && tier.is_active === false) {
+      return writeFailure(
+        tierLabel,
+        `La tarifa "${tier.name}" está desactivada y no se puede asignar.`,
+        'Reactívala primero con manage_price_tiers (action restore).',
+      );
+    }
+
+    let productIds: number[];
+    if (args.product_ids !== undefined) {
+      if (!Array.isArray(args.product_ids) || !args.product_ids.length) {
+        return writeFailure(
+          tierLabel,
+          'product_ids debe ser una lista con al menos un id de producto.',
+        );
+      }
+      const parsed = args.product_ids.map(toWritePositiveInt);
+      if (parsed.some((id: number | null) => id === null)) {
+        return writeFailure(
+          tierLabel,
+          'product_ids solo admite ids enteros positivos.',
+        );
+      }
+      productIds = [...new Set(parsed as number[])];
+      if (productIds.length > MAX_BULK_EDIT_IDS) {
+        return writeFailure(
+          tierLabel,
+          `Son ${productIds.length} productos y cada paso admite ${MAX_BULK_EDIT_IDS}.`,
+          `Parte la lista en pasos de ${MAX_BULK_EDIT_IDS} dentro de propose_write_batch (preview_product_price_tiers ya te los da partidos).`,
+        );
+      }
+    } else if (allowAllActive && args.all_active_products === true) {
+      productIds = await productsBulkEditService.listActiveProductIds(
+        PRICE_TIER_ASSIGNMENT_MAX_PRODUCTS + 1,
+      );
+      if (productIds.length > PRICE_TIER_ASSIGNMENT_MAX_PRODUCTS) {
+        return writeFailure(
+          tierLabel,
+          `La tienda tiene más de ${PRICE_TIER_ASSIGNMENT_MAX_PRODUCTS} productos activos y un lote admite ${PRICE_TIER_ASSIGNMENT_MAX_PRODUCTS} registros.`,
+          'Pide a la persona acotar (por categoría o marca) y pasa esos product_ids.',
+        );
+      }
+      if (!productIds.length) {
+        return writeFailure(
+          tierLabel,
+          'La tienda no tiene productos activos: no hay a quién asignar la tarifa.',
+        );
+      }
+    } else {
+      return writeFailure(
+        tierLabel,
+        allowAllActive
+          ? 'Indica product_ids o all_active_products: true.'
+          : 'product_ids es obligatorio.',
+        allowAllActive
+          ? undefined
+          : 'Calcula el diff con preview_product_price_tiers y usa sus batch_steps.',
+      );
+    }
+
+    const diff: TierAssignmentDiff = {
+      action,
+      tierId,
+      tierName: String(tier.name),
+      scanned: productIds.length,
+      toChange: [],
+      unchanged: [],
+      conflicts: [],
+    };
+    const mode =
+      action === 'assign'
+        ? RelationalActionMode.ADD
+        : RelationalActionMode.REMOVE;
+
+    for (const ids of chunk(productIds, MAX_BULK_EDIT_IDS)) {
+      const checked = toValidatedWriteDto(BulkEditProductsDto, {
+        ids,
+        changes: { price_tier_action: { mode, ids: [tierId] } },
+      });
+      if (!checked.ok) return writeFailure(tierLabel, checked.message);
+      try {
+        const preview = await productsBulkEditService.preview(checked.dto);
+        for (const item of preview.items) {
+          const product = { id: item.id, name: item.name || `Producto ${item.id}` };
+          if (item.status === 'error') {
+            diff.conflicts.push({
+              ...product,
+              reason: item.message ?? item.code ?? 'No se puede editar.',
+            });
+          } else if (itemChangesTiers(item)) {
+            diff.toChange.push(product);
+          } else {
+            diff.unchanged.push(product);
+          }
+        }
+      } catch (error) {
+        const { code, message } = describeWriteError(error);
+        return writeFailure(
+          tierLabel,
+          `No se pudo calcular el cambio${code ? ` (${code})` : ''}: ${message}`,
+        );
+      }
+    }
+
+    return { ok: true, value: diff };
+  }
+
+  /** «12 ya la tienen, 56 faltan, 0 en conflicto» (o su versión remove). */
+  function describeAssignmentDiff(diff: TierAssignmentDiff): string {
+    const already = diff.unchanged.length;
+    const pending = diff.toChange.length;
+    const conflicts = diff.conflicts.length;
+    return diff.action === 'assign'
+      ? `${already} ya la tienen, ${pending} faltan, ${conflicts} en conflicto.`
+      : `${pending} la tienen y la pierden, ${already} no la tienen, ${conflicts} en conflicto.`;
+  }
+
+  /** Mensaje cuando no hay nada que cambiar: nunca se propone un lote vacío. */
+  function nothingToChangeMessage(diff: TierAssignmentDiff): string {
+    const tail = diff.conflicts.length
+      ? ` ${diff.conflicts.length} producto(s) no se pueden editar: ${diff.conflicts
+          .slice(0, 5)
+          .map((p) => `${p.name} (${p.reason})`)
+          .join('; ')}.`
+      : '';
+    return diff.action === 'assign'
+      ? `Ya la tienen todos: los ${diff.unchanged.length} producto(s) evaluados ya tienen la tarifa "${diff.tierName}". No hay nada que aplicar.${tail}`
+      : `Ninguno de los ${diff.unchanged.length} producto(s) evaluados tiene la tarifa "${diff.tierName}". No hay nada que quitar.${tail}`;
+  }
+
   return [
+    // ─── T2: preview_product_price_tiers (read) ──────────────────────────
+    {
+      name: PREVIEW_PRODUCT_PRICE_TIERS,
+      version: '1',
+      domain: 'pricing',
+      readOnly: true,
+      discovery: {
+        synonyms: [
+          'aplicar tarifa a todos los productos',
+          'asignar tarifa a varios productos',
+          'quitar tarifa a productos',
+          'tarifa masiva',
+          'cuántos productos tienen la tarifa',
+        ],
+      },
+      description:
+        'Calcula, SIN escribir, qué pasaría al asignar (assign) o quitar (remove) UNA tarifa a varios productos: cuántos ya la tienen, cuántos faltan y cuáles no se pueden editar. Con all_active_products: true evalúa todos los productos activos de la tienda (los inactivos no se tocan). Devuelve batch_steps listos para propose_write_batch: úsalos tal cual para proponer UNA tarjeta. Si no falta ninguno, NO propongas lote.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['assign', 'remove'],
+            description: 'assign: asignar la tarifa (por defecto). remove: quitarla.',
+          },
+          price_tier_id: {
+            type: 'number',
+            description: 'ID de la tarifa a asignar o quitar.',
+          },
+          product_ids: {
+            type: 'array',
+            items: { type: 'number' },
+            description: `Productos a evaluar (máximo ${MAX_BULK_EDIT_IDS}). Omítelo y usa all_active_products para «todos mis productos».`,
+          },
+          all_active_products: {
+            type: 'boolean',
+            description:
+              'true para evaluar todos los productos activos de la tienda.',
+          },
+        },
+        required: ['price_tier_id'],
+      },
+      requiredPermissions: ['store:products:read', 'store:price-tiers:read'],
+      handler: async (args, context) => {
+        const resolved = await resolveTierAssignment(
+          args,
+          context.store_id,
+          true,
+        );
+        if (!resolved.ok) {
+          return writeToolError(resolved.message, resolved.nextStep);
+        }
+        const diff = resolved.value;
+        const verb = diff.action === 'assign' ? 'Asignar' : 'Quitar';
+        const parts = chunk(
+          diff.toChange.map((p) => p.id),
+          MAX_BULK_EDIT_IDS,
+        );
+        const batchSteps = parts.map((ids, index) => ({
+          tool: MANAGE_PRODUCT_PRICE_TIERS,
+          arguments: {
+            action: diff.action,
+            price_tier_id: diff.tierId,
+            product_ids: ids,
+          },
+          label:
+            parts.length > 1
+              ? `${verb} la tarifa "${diff.tierName}" a ${ids.length} productos (parte ${index + 1} de ${parts.length})`
+              : `${verb} la tarifa "${diff.tierName}" a ${ids.length} productos`,
+        }));
+        return JSON.stringify({
+          summary: diff.toChange.length
+            ? `Tarifa "${diff.tierName}": ${describeAssignmentDiff(diff)}`
+            : nothingToChangeMessage(diff),
+          data: {
+            action: diff.action,
+            price_tier_id: diff.tierId,
+            price_tier_name: diff.tierName,
+            scanned: diff.scanned,
+            already: diff.unchanged.length,
+            pending: diff.toChange.length,
+            conflicts: diff.conflicts.length,
+            conflict_items: diff.conflicts.slice(0, 20),
+            batch_steps: batchSteps,
+          },
+          next_step: diff.toChange.length
+            ? 'Muestra el diff en una frase y llama UNA vez a propose_write_batch con estos batch_steps tal cual. No digas que se aplicó: se aplica cuando la persona aprueba la tarjeta.'
+            : 'Dile a la persona que no hay nada que aplicar. No propongas un lote.',
+        });
+      },
+    },
+
+    // ─── T1: manage_product_price_tiers (write) ──────────────────────────
+    {
+      name: MANAGE_PRODUCT_PRICE_TIERS,
+      version: '1',
+      domain: 'pricing',
+      requiresConfirmation: true,
+      discovery: {
+        synonyms: [
+          'aplicar tarifa a productos',
+          'asignar tarifa',
+          'quitar tarifa de productos',
+          'habilitar tarifa en productos',
+        ],
+      },
+      description:
+        `Asigna (assign) o quita (remove) UNA tarifa a una lista de productos (máximo ${MAX_BULK_EDIT_IDS} por llamada), con la misma edición masiva de la web. Los que ya están como se pide no se tocan. Para «todos mis productos» llama antes a preview_product_price_tiers y propón sus batch_steps con propose_write_batch. No fija precios por producto: eso es set_product_tier_override.`,
+      parameters: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['assign', 'remove'],
+            description: 'assign: asignar la tarifa (por defecto). remove: quitarla.',
+          },
+          price_tier_id: {
+            type: 'number',
+            description: 'ID de la tarifa a asignar o quitar.',
+          },
+          product_ids: {
+            type: 'array',
+            items: { type: 'number' },
+            description: `IDs de los productos (1 a ${MAX_BULK_EDIT_IDS}).`,
+          },
+        },
+        required: ['price_tier_id', 'product_ids'],
+      },
+      // Mismo permiso por nombre que exige `POST /store/products/bulk-edit`
+      // más el de escribir tarifas.
+      requiredPermissions: [
+        'store:products:bulk_update',
+        'store:price-tiers:update',
+      ],
+      preview: async (args, context) => {
+        const resolved = await resolveTierAssignment(
+          args,
+          context.store_id,
+          false,
+        );
+        if (!resolved.ok) {
+          return writePreviewError(
+            resolved.label,
+            [resolved.message, resolved.nextStep].filter(Boolean).join(' '),
+            'pricing',
+          );
+        }
+        const diff = resolved.value;
+        const target = `Tarifa "${diff.tierName}" en ${diff.toChange.length} producto(s)`;
+        if (!diff.toChange.length) {
+          return writePreviewError(target, nothingToChangeMessage(diff), 'pricing');
+        }
+        const conflictNote = diff.conflicts.length
+          ? ` No se tocarán: ${diff.conflicts
+              .slice(0, 5)
+              .map((p) => `${p.name} (${p.reason})`)
+              .join('; ')}${diff.conflicts.length > 5 ? '…' : ''}.`
+          : '';
+        return {
+          status: diff.conflicts.length ? 'warning' : 'ok',
+          target,
+          changes: diff.toChange.map((product) => ({
+            field: 'price_tiers',
+            label: product.name,
+            from: diff.action === 'assign' ? 'Sin la tarifa' : `Con "${diff.tierName}"`,
+            to: diff.action === 'assign' ? `Con "${diff.tierName}"` : 'Sin la tarifa',
+          })),
+          message: `${describeAssignmentDiff(diff)}${conflictNote}`,
+          domain: 'products',
+        };
+      },
+      handler: async (args, context) => {
+        try {
+          // Re-verificación: el diff se recalcula desde cero; solo se envían
+          // los productos que todavía cambian.
+          const resolved = await resolveTierAssignment(
+            args,
+            context.store_id,
+            false,
+          );
+          if (!resolved.ok) {
+            return writeToolError(resolved.message, resolved.nextStep);
+          }
+          const diff = resolved.value;
+          if (!diff.toChange.length) {
+            return JSON.stringify({
+              summary: nothingToChangeMessage(diff),
+              data: {
+                price_tier_id: diff.tierId,
+                applied: 0,
+                failed: 0,
+                already: diff.unchanged.length,
+              },
+            });
+          }
+          const checked = toValidatedWriteDto(BulkEditProductsDto, {
+            ids: diff.toChange.map((p) => p.id),
+            changes: {
+              price_tier_action: {
+                mode:
+                  diff.action === 'assign'
+                    ? RelationalActionMode.ADD
+                    : RelationalActionMode.REMOVE,
+                ids: [diff.tierId],
+              },
+            },
+          });
+          if (!checked.ok) return writeToolError(checked.message);
+          const result = await productsBulkEditService.apply(checked.dto);
+          const failedItems = result.results
+            .filter((item) => item.status === 'error')
+            .map((item) => ({
+              id: item.id,
+              name: item.name,
+              reason: item.message ?? item.code ?? 'Error',
+            }));
+          const verb = diff.action === 'assign' ? 'aplicados' : 'quitados';
+          return JSON.stringify({
+            summary: `Tarifa "${diff.tierName}": ${result.successful} ${verb}, ${result.failed} fallidos${diff.unchanged.length ? `, ${diff.unchanged.length} ya estaban así` : ''}.`,
+            data: {
+              price_tier_id: diff.tierId,
+              action: diff.action,
+              applied: result.successful,
+              failed: result.failed,
+              already: diff.unchanged.length,
+              failed_items: failedItems,
+            },
+          });
+        } catch (error) {
+          const { code, message } = describeWriteError(error);
+          return writeToolError(
+            `No se pudo aplicar la tarifa${code ? ` (${code})` : ''}: ${message}`,
+          );
+        }
+      },
+    },
+
     // ─── Tool 1: manage_price_tiers (O-12, write) ────────────────────────
     {
       name: 'manage_price_tiers',
