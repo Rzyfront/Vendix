@@ -30,7 +30,9 @@ export function safeUrl(value: string | undefined): string | null {
 /** Convierte una URL segura a `url("...")` escapando caracteres peligrosos para CSS. */
 export function cssBgUrl(value: string | undefined): string | null {
   const url = safeUrl(value);
-  return url ? `url("${url.replace(/["()\s\\]/g, (c) => '%' + c.charCodeAt(0).toString(16))}")` : null;
+  return url
+    ? `url("${url.replace(/["'()\s\\]/g, (c) => '%' + c.charCodeAt(0).toString(16).padStart(2, '0'))}")`
+    : null;
 }
 
 /** Lee un entero opcional dentro de un rango cerrado; `null` si está ausente o fuera de rango. */

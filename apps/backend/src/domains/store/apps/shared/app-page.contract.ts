@@ -368,12 +368,18 @@ export const APP_PAGE_BLOCKS: Record<PageAppKind, Record<string, FieldsSpec>> =
     },
   };
 
-const HERO: FieldsSpec = {
+/** Portada base (usada por `store_home` para mantener la Tienda en línea aislada). */
+const HERO_BASE: FieldsSpec = {
   eyebrow: text(60),
   title: text(120),
   subtitle: text(300),
   image_url: url,
   button_label: text(40),
+};
+
+/** Portada extendida con variantes y apariencia (Product Page, Service Page y Booking). */
+const HERO: FieldsSpec = {
+  ...HERO_BASE,
   variant: oneOf(APP_HERO_VARIANTS),
   background_image_url: url,
   overlay_opacity: int(0, 80),
@@ -756,7 +762,8 @@ export function validateAppPage(
   const seo = cleanFields(SEO, value['seo'], 'seo', errors);
   const theme = cleanFields(THEME, value['theme'], 'theme', errors);
   for (const key of APP_THEME_COLOR_KEYS) checkColor(theme, key, 'theme', errors);
-  const hero = cleanFields(HERO, value['hero'], 'hero', errors);
+  const heroSpec = kind === 'store_home' ? HERO_BASE : HERO;
+  const hero = cleanFields(heroSpec, value['hero'], 'hero', errors);
 
   const catalog = APP_PAGE_BLOCKS[kind];
   const blocks: AppPageBlock[] = [];

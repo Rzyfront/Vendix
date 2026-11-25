@@ -32,7 +32,7 @@ import {
   safeUrl,
   whatsappHref,
 } from './app-page-view.util';
-import { hasTheme, themeMarkers, themeStyle } from './app-page-theme';
+import { hasTheme, onColor, themeMarkers, themeStyle } from './app-page-theme';
 
 interface PlaceholderView {
   id: string;
@@ -170,12 +170,48 @@ const HIGHLIGHTS_ICON_SET = new Set<string>(APP_HIGHLIGHTS_ICON_OPTIONS.map((o) 
           padding-bottom: var(--ap-hero-py-md, 4rem);
         }
       }
-      :host([data-ap-hero='full']) .ap-hero {
+      /* Altura "full" de la portada: una sola regla ganadora usando --ap-hero-min-h
+         (el preview del editor fija 620px; en público cae a 100svh).
+         Precedencia: el bloque (hero.height) gana sobre el tema (theme.hero_height);
+         si el bloque fija auto o compact, anula data-ap-hero="full". */
+      .ap-hero.ap-hero--full,
+      :host([data-ap-hero='full']) .ap-hero:not(.ap-hero--auto):not(.ap-hero--compact) {
         display: flex;
         align-items: center;
-        /* --ap-hero-min-h la fija el preview del editor: dentro del panel,
-           100svh sería la ventana entera y empujaría el resto de la página. */
         min-height: var(--ap-hero-min-h, 100svh);
+      }
+      /* El alto explícito del bloque prevalece sobre el padding vertical del tema. */
+      .ap-hero--compact .ap-hero-inner,
+      :host(.ap-themed) .ap-hero--compact .ap-hero-inner {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+      }
+      .ap-hero--auto .ap-hero-inner,
+      :host(.ap-themed) .ap-hero--auto .ap-hero-inner {
+        padding-top: 3rem;
+        padding-bottom: 3rem;
+      }
+      .ap-hero--full .ap-hero-inner,
+      :host(.ap-themed) .ap-hero--full .ap-hero-inner {
+        padding-top: 4rem;
+        padding-bottom: 4rem;
+      }
+      @media (min-width: 768px) {
+        .ap-hero--compact .ap-hero-inner,
+        :host(.ap-themed) .ap-hero--compact .ap-hero-inner {
+          padding-top: 2.5rem;
+          padding-bottom: 2.5rem;
+        }
+        .ap-hero--auto .ap-hero-inner,
+        :host(.ap-themed) .ap-hero--auto .ap-hero-inner {
+          padding-top: 4rem;
+          padding-bottom: 4rem;
+        }
+        .ap-hero--full .ap-hero-inner,
+        :host(.ap-themed) .ap-hero--full .ap-hero-inner {
+          padding-top: 6rem;
+          padding-bottom: 6rem;
+        }
       }
       :host([data-ap-card='flat']) .ap-card,
       :host([data-ap-card='flat']) .ap-round {
@@ -202,6 +238,7 @@ const HIGHLIGHTS_ICON_SET = new Set<string>(APP_HIGHLIGHTS_ICON_OPTIONS.map((o) 
       :host([data-ap-overlay]) .ap-img-hero {
         filter: brightness(var(--ap-image-brightness, 1));
       }
+      .ap-cover-veil,
       :host([data-ap-overlay]) .ap-cover-veil {
         background-color: rgb(0 0 0 / var(--ap-image-overlay, 0.4));
       }
@@ -290,9 +327,52 @@ const HIGHLIGHTS_ICON_SET = new Set<string>(APP_HIGHLIGHTS_ICON_OPTIONS.map((o) 
         margin-top: 0.75rem;
         margin-bottom: 0.75rem;
       }
-      .ap-section--on-image > .ap-section-content > h2,
-      .ap-section--on-image > .ap-section-content > div > h2 {
-        color: #ffffff;
+      .ap-section--on-dark {
+        --ap-on-fill: #ffffff;
+        --ap-surface: #0f172a;
+        --color-text-primary-rgb: 255, 255, 255;
+        --color-text-secondary-rgb: 226, 232, 240;
+        --color-surface-rgb: 15, 23, 42;
+        --color-border: rgba(255, 255, 255, 0.22);
+        color: var(--ap-on-fill);
+      }
+      .ap-section--on-dark .ap-section-content :is(h2, h3, p, dt, dd, summary, blockquote, figcaption, li, a, .ap-accent-text) {
+        color: var(--ap-on-fill, #ffffff);
+      }
+      .ap-section--on-dark .ap-accent-soft {
+        background-color: rgba(255, 255, 255, 0.16);
+        color: var(--ap-on-fill, #ffffff);
+      }
+      .ap-section--on-dark .ap-card,
+      .ap-section--on-dark .ap-round,
+      .ap-section--on-dark .ap-highlights-band-box,
+      :host(.ap-themed) .ap-section--on-dark .ap-card,
+      :host(.ap-themed) .ap-section--on-dark .ap-round,
+      :host([data-ap-card]) .ap-section--on-dark .ap-card,
+      :host([data-ap-card]) .ap-section--on-dark .ap-round {
+        background-color: rgba(15, 23, 42, 0.55);
+        border-color: rgba(255, 255, 255, 0.22);
+      }
+      .ap-section--on-light {
+        --ap-on-fill: #111827;
+        --ap-surface: #ffffff;
+        --color-text-primary-rgb: 17, 24, 39;
+        --color-text-secondary-rgb: 55, 65, 81;
+        --color-surface-rgb: 255, 255, 255;
+        --color-border: rgba(17, 24, 39, 0.14);
+        color: var(--ap-on-fill);
+      }
+      .ap-section--on-light .ap-section-content :is(h2, h3, p, dt, dd, summary, blockquote, figcaption, li) {
+        color: var(--ap-on-fill, #111827);
+      }
+      /* El recuadro CTA conserva su propio relleno primario y contraste --ap-on-primary. */
+      .ap-section--on-dark .ap-cta-box,
+      .ap-section--on-light .ap-cta-box {
+        color: var(--ap-on-primary, #ffffff);
+      }
+      .ap-section--on-dark .ap-cta-box :is(h2, p),
+      .ap-section--on-light .ap-cta-box :is(h2, p) {
+        color: inherit;
       }
       .ap-highlight-icon {
         background-color: color-mix(
@@ -314,11 +394,6 @@ const HIGHLIGHTS_ICON_SET = new Set<string>(APP_HIGHLIGHTS_ICON_OPTIONS.map((o) 
           var(--ap-block-accent, var(--ap-accent, var(--ap-primary, var(--color-primary)))) 9%,
           var(--ap-surface, var(--color-surface, #ffffff))
         );
-      }
-      .ap-hero--full {
-        min-height: 75vh;
-        display: flex;
-        align-items: center;
       }
     `,
   ],
@@ -343,7 +418,12 @@ const HIGHLIGHTS_ICON_SET = new Set<string>(APP_HIGHLIGHTS_ICON_OPTIONS.map((o) 
         data-testid="app-page-hero"
         [attr.data-block-id]="blockIds() ? 'hero' : null"
       >
-        @if (heroOverlayCss(); as veil) {
+        @if (heroLegacyCoverVeil()) {
+          <div
+            class="ap-cover-veil pointer-events-none absolute inset-0"
+            [style.background-color]="heroExplicitOverlayCss()"
+          ></div>
+        } @else if (heroOverlayCss(); as veil) {
           <div
             class="pointer-events-none absolute inset-0"
             [style.background-color]="veil"
@@ -418,6 +498,8 @@ const HIGHLIGHTS_ICON_SET = new Set<string>(APP_HIGHLIGHTS_ICON_OPTIONS.map((o) 
             class="ap-section mx-auto w-full max-w-6xl px-4 py-8 md:py-10"
             [class.ap-section--bg]="blockHasBackground(item.block)"
             [class.ap-section--on-image]="!!blockBgImage(item.block)"
+            [class.ap-section--on-dark]="blockSurfaceTone(item.block) === 'dark'"
+            [class.ap-section--on-light]="blockSurfaceTone(item.block) === 'light'"
             [class.ap-spacing--compact]="blockSpacing(item.block) === 'compact'"
             [class.ap-spacing--normal]="blockSpacing(item.block) === 'normal'"
             [class.ap-spacing--spacious]="blockSpacing(item.block) === 'spacious'"
@@ -919,12 +1001,39 @@ export class AppPageViewComponent {
   /** Superficie oscura del hero (degradado de marca o imagen de fondo con velo): texto blanco. */
   readonly heroDarkSurface = computed(() => !!this.heroBgCss() || this.heroUseFallbackGradient());
 
-  /** Velo oscuro sobre la imagen de fondo del hero (`null` si no hay fondo con imagen). */
+  /** Opacidad del velo definida en el tema F7 (`theme.image_overlay`, 0..80), o `null`. */
+  readonly themeImageOverlay = computed<number | null>(() => {
+    const v = this.page()?.theme?.image_overlay;
+    return typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 80 ? v : null;
+  });
+
+  /**
+   * Velo clásico de portada (`.ap-cover-veil`) para documentos sin `image_url`,
+   * sin `background_image_url` y fuera de la variante `background`, cuando usan
+   * `brand.cover_url`. Su color sale del token `--ap-image-overlay` (F7).
+   */
+  readonly heroLegacyCoverVeil = computed(() => {
+    const h = this.hero();
+    return !!h && !h.background_image_url && h.variant !== 'background' && !h.image_url && !!this.coverCss();
+  });
+
+  /** Override explícito de `hero.overlay_opacity` sobre `.ap-cover-veil` (`null` si hereda del token). */
+  readonly heroExplicitOverlayCss = computed(() => {
+    const h = this.hero();
+    return h && h.overlay_opacity !== undefined ? overlayRgba(h.overlay_opacity, 40) : null;
+  });
+
+  /**
+   * Velo propio de la variante `background` o de `hero.background_image_url`
+   * (`data-testid="hero-overlay"`). Hereda `theme.image_overlay` si el bloque
+   * no fija `overlay_opacity`, con respaldo de 45 % en `background` y 40 % en
+   * el resto.
+   */
   readonly heroOverlayCss = computed(() => {
     const h = this.hero();
-    if (!h || !this.heroBgCss()) return null;
+    if (!h || !this.heroBgCss() || this.heroLegacyCoverVeil()) return null;
     const fallback = h.variant === 'background' ? 45 : 40;
-    return overlayRgba(h.overlay_opacity, fallback);
+    return overlayRgba(h.overlay_opacity ?? this.themeImageOverlay(), fallback);
   });
 
   /** Alineación efectiva del texto del hero (`center` por defecto en variante `centered`). */
@@ -1021,7 +1130,20 @@ export class AppPageViewComponent {
   }
 
   blockOverlayCss(block: AppPageBlock): string {
-    return overlayRgba(blockInt(block.props, 'overlay_opacity', 0, 80), 40);
+    return overlayRgba(blockInt(block.props, 'overlay_opacity', 0, 80) ?? this.themeImageOverlay(), 40);
+  }
+
+  /**
+   * Tono de contraste del fondo de una sección:
+   * - `'dark'` si tiene imagen de fondo (con velo oscuro) o un `background_color` oscuro.
+   * - `'light'` si tiene un `background_color` claro sin imagen de fondo.
+   * - `null` si no personaliza fondo (conserva el contraste heredado de la página).
+   */
+  blockSurfaceTone(block: AppPageBlock): 'dark' | 'light' | null {
+    if (this.blockBgImage(block)) return 'dark';
+    const bg = this.blockBgColor(block);
+    if (!bg) return null;
+    return onColor(bg) === '#ffffff' ? 'dark' : 'light';
   }
 
   blockSpacing(block: AppPageBlock): AppBlockSpacing | null {

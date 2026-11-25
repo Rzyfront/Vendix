@@ -533,6 +533,8 @@ export type ScalarFieldDef =
       max: number;
       step?: number;
       unit?: string;
+      defaultValue?: number;
+      defaultByProp?: { key: string; values: Readonly<Record<string, number>> };
       hint?: string;
       group?: 'appearance';
     }
@@ -678,6 +680,7 @@ export const BLOCK_APPEARANCE_FIELDS: readonly ScalarFieldDef[] = [
     max: 80,
     step: 5,
     unit: '%',
+    defaultValue: 40,
     hint: 'Oscurece la imagen de fondo para mejorar la lectura.',
     group: 'appearance',
   },
@@ -758,6 +761,7 @@ export const galleryFields = (): FieldDef[] => [
     max: 4,
     step: 1,
     unit: ' col.',
+    defaultValue: 3,
   },
   {
     key: 'aspect_ratio',
@@ -816,6 +820,8 @@ export const HERO_CUSTOM_FIELDS: ScalarFieldDef[] = [
     max: 80,
     step: 5,
     unit: '%',
+    defaultValue: 40,
+    defaultByProp: { key: 'variant', values: { background: 45 } },
     group: 'appearance',
   },
   {

@@ -61,6 +61,10 @@ export type BuilderScalarFieldDef =
       max: number;
       step?: number;
       unit?: string;
+      /** Valor efectivo cuando la prop no está definida (p. ej. 40 % para el velo). */
+      defaultValue?: number;
+      /** Valor por defecto según el valor de otra prop del mismo bloque (p. ej. `variant: { background: 45 }`). */
+      defaultByProp?: { key: string; values: Readonly<Record<string, number>> };
       hint?: string;
       group?: 'appearance';
     }

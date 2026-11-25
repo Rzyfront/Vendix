@@ -559,18 +559,65 @@ describe('app page contract', () => {
       );
     });
 
-    it('keeps store_home blocks untouched by the new section appearance props', () => {
+    it('keeps store_home blocks and hero isolated from the new section customization props', () => {
+      const okHero = validateAppPage('store_home', {
+        schema_version: 1,
+        hero: {
+          eyebrow: 'Bienvenidos',
+          title: 'Mi tienda',
+          subtitle: 'Todo en un lugar',
+          image_url: 'https://cdn.x.co/home.jpg',
+          button_label: 'Explorar',
+        },
+        blocks: [],
+      });
+      expect(okHero.valid).toBe(true);
+
       const result = validateAppPage('store_home', {
         schema_version: 1,
+        hero: {
+          title: 'Mi tienda',
+          variant: 'background',
+          background_image_url: 'https://cdn.x.co/bg.jpg',
+          overlay_opacity: 40,
+          height: 'full',
+          align: 'center',
+        },
         blocks: [{ id: 'hl', type: 'highlights', props: { variant: 'band', spacing: 'compact' } }],
       });
       expect(result.valid).toBe(false);
       expect(result.errors).toEqual(
         expect.arrayContaining([
+          'hero.variant no es un campo permitido.',
+          'hero.background_image_url no es un campo permitido.',
+          'hero.overlay_opacity no es un campo permitido.',
+          'hero.height no es un campo permitido.',
+          'hero.align no es un campo permitido.',
           'blocks[0].props.variant no es un campo permitido.',
           'blocks[0].props.spacing no es un campo permitido.',
         ]),
       );
+    });
+
+    it('rejects javascript: and data: URLs in background_image_url (hero and block)', () => {
+      for (const badUrl of ['javascript:alert(1)', 'data:image/svg+xml,<svg onload=alert(1)>']) {
+        const result = validateAppPage('product_page', {
+          schema_version: 1,
+          hero: { title: 'Producto', background_image_url: badUrl },
+          blocks: [
+            {
+              id: 'faq1',
+              type: 'faq',
+              props: { title: 'FAQ', background_image_url: badUrl },
+            },
+          ],
+        });
+        expect(result.valid).toBe(false);
+        expect(result.errors).toEqual([
+          'hero.background_image_url debe ser una URL https.',
+          'blocks[0].props.background_image_url debe ser una URL https.',
+        ]);
+      }
     });
   });
 });

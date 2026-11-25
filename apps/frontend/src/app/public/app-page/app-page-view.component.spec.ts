@@ -3,6 +3,7 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import type { AppPageDocument, PageAppKind } from '../../private/modules/store/apps/templates/app-page.types';
 import { APP_PAGE_VARIANTS } from '../../private/modules/store/apps/templates';
 import { AppPageViewComponent } from './app-page-view.component';
+import { cssBgUrl } from './app-page-view.util';
 
 const page = (over: Partial<AppPageDocument> = {}): AppPageDocument => ({
   schema_version: 1,
@@ -520,6 +521,281 @@ describe('AppPageViewComponent (apps-f2 T3)', () => {
       expect(firstSection.classList.contains('ap-section--bg')).toBeFalse();
       expect(firstSection.hasAttribute('data-spacing')).toBeFalse();
       expect(firstSection.hasAttribute('data-align')).toBeFalse();
+    });
+
+    it('inherits F7 image_overlay on legacy cover (.ap-cover-veil), background hero and blocks, with block overriding theme', () => {
+      // Legacy cover without image_url: .ap-cover-veil reads color from --ap-image-overlay token (not hardcoded 0.4)
+      const legacy = render(
+        page({
+          brand: { cover_url: 'https://cdn.test/cover.jpg' },
+          theme: { image_overlay: 65 },
+        }),
+      );
+      const coverVeil = legacy.querySelector<HTMLElement>('.ap-cover-veil')!;
+      expect(coverVeil).not.toBeNull();
+      expect(legacy.querySelector('[data-testid="hero-overlay"]')).toBeNull();
+      expect(getComputedStyle(coverVeil).backgroundColor).toBe('rgba(0, 0, 0, 0.65)');
+
+      // Background variant hero inherits theme.image_overlay when hero.overlay_opacity is absent
+      const bgInherited = render({
+        schema_version: 1,
+        theme: { image_overlay: 65 },
+        hero: {
+          title: 'Hereda velo',
+          variant: 'background',
+          background_image_url: 'https://cdn.x.co/bg.jpg',
+        },
+        blocks: [
+          {
+            id: 'f1',
+            type: 'faq',
+            enabled: true,
+            props: {
+              title: 'FAQ',
+              background_image_url: 'https://cdn.x.co/sec.jpg',
+              items: [{ question: 'Q', answer: 'A' }],
+            },
+          },
+        ],
+      });
+      expect(bgInherited.querySelector('.ap-cover-veil')).toBeNull();
+      const heroOverlay = bgInherited.querySelector<HTMLElement>('[data-testid="hero-overlay"]')!;
+      expect(heroOverlay.style.backgroundColor).toBe('rgba(0, 0, 0, 0.65)');
+      const blockOverlay = bgInherited.querySelector<HTMLElement>('[data-testid="block-overlay"]')!;
+      expect(blockOverlay.style.backgroundColor).toBe('rgba(0, 0, 0, 0.65)');
+
+      // Explicit block overlay_opacity wins over theme.image_overlay
+      const overridden = render({
+        schema_version: 1,
+        theme: { image_overlay: 65 },
+        hero: {
+          title: 'Gana bloque',
+          variant: 'background',
+          background_image_url: 'https://cdn.x.co/bg.jpg',
+          overlay_opacity: 20,
+        },
+        blocks: [
+          {
+            id: 'f1',
+            type: 'faq',
+            enabled: true,
+            props: {
+              title: 'FAQ',
+              background_image_url: 'https://cdn.x.co/sec.jpg',
+              overlay_opacity: 25,
+              items: [{ question: 'Q', answer: 'A' }],
+            },
+          },
+        ],
+      });
+      expect(overridden.querySelector<HTMLElement>('[data-testid="hero-overlay"]')!.style.backgroundColor).toBe(
+        'rgba(0, 0, 0, 0.2)',
+      );
+      expect(overridden.querySelector<HTMLElement>('[data-testid="block-overlay"]')!.style.backgroundColor).toBe(
+        'rgba(0, 0, 0, 0.25)',
+      );
+    });
+
+    it('unifies full hero height on var(--ap-hero-min-h, 100svh) with block height winning over theme.hero_height', () => {
+      const md = () => window.matchMedia('(min-width: 768px)').matches;
+
+      // .ap-hero--full reads --ap-hero-min-h (unified with theme.hero_height='full')
+      const blockFull = render({
+        schema_version: 1,
+        hero: { title: 'Full bloque', height: 'full' },
+        blocks: [],
+      });
+      blockFull.style.setProperty('--ap-hero-min-h', '620px');
+      const blockFullHero = blockFull.querySelector<HTMLElement>('[data-testid="app-page-hero"]')!;
+      expect(getComputedStyle(blockFullHero).display).toBe('flex');
+      expect(getComputedStyle(blockFullHero).minHeight).toBe('620px');
+
+      // theme.hero_height='full' inherited when hero.height is absent
+      const themeFull = render({
+        schema_version: 1,
+        theme: { hero_height: 'full' },
+        hero: { title: 'Full tema' },
+        blocks: [],
+      });
+      themeFull.style.setProperty('--ap-hero-min-h', '620px');
+      const themeFullHero = themeFull.querySelector<HTMLElement>('[data-testid="app-page-hero"]')!;
+      expect(getComputedStyle(themeFullHero).display).toBe('flex');
+      expect(getComputedStyle(themeFullHero).minHeight).toBe('620px');
+
+      // theme.hero_height='compact' inherited when hero.height is absent
+      const themeCompact = render({
+        schema_version: 1,
+        theme: { hero_height: 'compact' },
+        hero: { title: 'Compact tema' },
+        blocks: [],
+      });
+      const themeCompactInner = themeCompact.querySelector<HTMLElement>('.ap-hero-inner')!;
+      expect(getComputedStyle(themeCompactInner).paddingTop).toBe(md() ? '40px' : '32px');
+
+      // Precedence: block hero.height='compact' overrides theme.hero_height='full'
+      const blockCompactWins = render({
+        schema_version: 1,
+        theme: { hero_height: 'full' },
+        hero: { title: 'Compact gana', height: 'compact' },
+        blocks: [],
+      });
+      blockCompactWins.style.setProperty('--ap-hero-min-h', '620px');
+      const compactWinsHero = blockCompactWins.querySelector<HTMLElement>('[data-testid="app-page-hero"]')!;
+      expect(getComputedStyle(compactWinsHero).minHeight).toBe('0px');
+      expect(getComputedStyle(blockCompactWins.querySelector<HTMLElement>('.ap-hero-inner')!).paddingTop).toBe(
+        md() ? '40px' : '32px',
+      );
+
+      // Precedence: block hero.height='full' overrides theme.hero_height='compact'
+      const blockFullWins = render({
+        schema_version: 1,
+        theme: { hero_height: 'compact' },
+        hero: { title: 'Full gana', height: 'full' },
+        blocks: [],
+      });
+      blockFullWins.style.setProperty('--ap-hero-min-h', '620px');
+      const fullWinsHero = blockFullWins.querySelector<HTMLElement>('[data-testid="app-page-hero"]')!;
+      expect(getComputedStyle(fullWinsHero).display).toBe('flex');
+      expect(getComputedStyle(fullWinsHero).minHeight).toBe('620px');
+    });
+
+    it('applies readable light text on dark/image section backgrounds and dark text on light section backgrounds', () => {
+      // Dark background_color & background_image_url -> ap-section--on-dark + white text across p, dl, faq, testimonials
+      const darkDoc = render({
+        schema_version: 1,
+        blocks: [
+          {
+            id: 'specs_dark',
+            type: 'specifications',
+            enabled: true,
+            props: {
+              title: 'Ficha',
+              background_color: '#0F172A',
+              items: [{ label: 'Peso', value: '200 g' }],
+            },
+          },
+          {
+            id: 'faq_img',
+            type: 'faq',
+            enabled: true,
+            props: {
+              title: 'Preguntas',
+              background_image_url: 'https://cdn.x.co/bg.jpg',
+              items: [{ question: '¿Envían?', answer: 'Sí, a todo el país.' }],
+            },
+          },
+          {
+            id: 'test_dark',
+            type: 'testimonials',
+            enabled: true,
+            props: {
+              title: 'Opiniones',
+              background_color: '#1E293B',
+              items: [{ name: 'Ana', city: 'Cali', quote: 'Excelente', rating: 5 }],
+            },
+          },
+        ],
+      });
+
+      const specsDark = darkDoc.querySelector<HTMLElement>('section[data-block="specifications"]')!;
+      expect(specsDark.classList.contains('ap-section--on-dark')).toBeTrue();
+      expect(specsDark.classList.contains('ap-section--on-light')).toBeFalse();
+      expect(getComputedStyle(specsDark.querySelector('h2')!).color).toBe('rgb(255, 255, 255)');
+      expect(getComputedStyle(specsDark.querySelector('dt')!).color).toBe('rgb(255, 255, 255)');
+      expect(getComputedStyle(specsDark.querySelector('dd')!).color).toBe('rgb(255, 255, 255)');
+
+      const faqImg = darkDoc.querySelector<HTMLElement>('section[data-block="faq"]')!;
+      expect(faqImg.classList.contains('ap-section--on-dark')).toBeTrue();
+      expect(getComputedStyle(faqImg.querySelector('summary')!).color).toBe('rgb(255, 255, 255)');
+      expect(getComputedStyle(faqImg.querySelector('p')!).color).toBe('rgb(255, 255, 255)');
+
+      const testDark = darkDoc.querySelector<HTMLElement>('section[data-block="testimonials"]')!;
+      expect(testDark.classList.contains('ap-section--on-dark')).toBeTrue();
+      expect(getComputedStyle(testDark.querySelector('blockquote')!).color).toBe('rgb(255, 255, 255)');
+      expect(getComputedStyle(testDark.querySelector('figcaption')!).color).toBe('rgb(255, 255, 255)');
+
+      // Light background_color (even inside a dark theme) -> ap-section--on-light + dark text
+      const lightOnDarkTheme = render({
+        schema_version: 1,
+        theme: { surface_color: '#0F172A', text_color: '#F1F5F9' },
+        blocks: [
+          {
+            id: 'specs_light',
+            type: 'specifications',
+            enabled: true,
+            props: {
+              title: 'Ficha clara',
+              background_color: '#F8FAFC',
+              items: [{ label: 'Material', value: 'Algodón' }],
+            },
+          },
+          {
+            id: 'faq_light',
+            type: 'faq',
+            enabled: true,
+            props: {
+              title: 'FAQ claro',
+              background_color: '#FFFFFF',
+              items: [{ question: '¿Garantía?', answer: '1 año.' }],
+            },
+          },
+          {
+            id: 'test_light',
+            type: 'testimonials',
+            enabled: true,
+            props: {
+              title: 'Testimonios claros',
+              background_color: '#FEF9C3',
+              items: [{ name: 'Luis', city: 'Bogotá', quote: 'Muy bueno', rating: 5 }],
+            },
+          },
+        ],
+      });
+
+      const specsLight = lightOnDarkTheme.querySelector<HTMLElement>('section[data-block="specifications"]')!;
+      expect(specsLight.classList.contains('ap-section--on-light')).toBeTrue();
+      expect(specsLight.classList.contains('ap-section--on-dark')).toBeFalse();
+      expect(getComputedStyle(specsLight.querySelector('h2')!).color).toBe('rgb(17, 24, 39)');
+      expect(getComputedStyle(specsLight.querySelector('dt')!).color).toBe('rgb(17, 24, 39)');
+      expect(getComputedStyle(specsLight.querySelector('dd')!).color).toBe('rgb(17, 24, 39)');
+
+      const faqLight = lightOnDarkTheme.querySelector<HTMLElement>('section[data-block="faq"]')!;
+      expect(faqLight.classList.contains('ap-section--on-light')).toBeTrue();
+      expect(getComputedStyle(faqLight.querySelector('summary')!).color).toBe('rgb(17, 24, 39)');
+      expect(getComputedStyle(faqLight.querySelector('p')!).color).toBe('rgb(17, 24, 39)');
+
+      const testLight = lightOnDarkTheme.querySelector<HTMLElement>('section[data-block="testimonials"]')!;
+      expect(testLight.classList.contains('ap-section--on-light')).toBeTrue();
+      expect(getComputedStyle(testLight.querySelector('blockquote')!).color).toBe('rgb(17, 24, 39)');
+      expect(getComputedStyle(testLight.querySelector('figcaption')!).color).toBe('rgb(17, 24, 39)');
+    });
+
+    it('escapes quotes, parentheses and newlines in cssBgUrl and rejects javascript:/data: in background_image_url', () => {
+      const escaped = cssBgUrl('https://cdn.x.co/a"b\'c(d)\ne\rf.jpg');
+      expect(escaped).toBe('url("https://cdn.x.co/a%22b%27c%28d%29%0ae%0df.jpg")');
+      expect(cssBgUrl('javascript:alert(1)')).toBeNull();
+      expect(cssBgUrl('data:image/svg+xml,<svg onload=alert(1)>')).toBeNull();
+
+      for (const badUrl of ['javascript:alert(1)', 'data:image/png;base64,AAAA']) {
+        const el = render({
+          schema_version: 1,
+          hero: { title: 'Seguro', variant: 'background', background_image_url: badUrl },
+          blocks: [
+            {
+              id: 'faq_bad',
+              type: 'faq',
+              enabled: true,
+              props: { title: 'FAQ', background_image_url: badUrl, items: [{ question: 'Q', answer: 'A' }] },
+            },
+          ],
+        });
+        const hero = el.querySelector<HTMLElement>('[data-testid="app-page-hero"]')!;
+        expect(hero.style.backgroundImage).toBe('');
+        expect(el.querySelector('[data-testid="hero-overlay"]')).toBeNull();
+        const section = el.querySelector<HTMLElement>('section[data-block="faq"]')!;
+        expect(section.style.backgroundImage).toBe('');
+        expect(section.querySelector('[data-testid="block-overlay"]')).toBeNull();
+      }
     });
   });
 });

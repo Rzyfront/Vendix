@@ -281,7 +281,7 @@ export interface BuilderPropChange {
             <span class="text-xs font-semibold text-[var(--color-text-primary)]">{{ field.label }}</span>
             <div class="flex items-center gap-2">
               <span class="text-xs font-medium text-[var(--color-text-secondary)]" data-testid="builder-range-value">
-                {{ hasNumber(b, field.key) ? numeric(b, field.key) + (field.unit ?? '') : 'Por defecto' }}
+                {{ rangeValueText(b, field) }}
               </span>
               @if (hasNumber(b, field.key)) {
                 <button type="button" class="text-[11px] font-medium text-[var(--color-primary)] hover:underline"
@@ -295,11 +295,12 @@ export interface BuilderPropChange {
           <input
             type="range"
             class="w-full cursor-pointer accent-[var(--color-primary)]"
-            [min]="field.min"
-            [max]="field.max"
-            [step]="field.step ?? 1"
-            [value]="hasNumber(b, field.key) ? numeric(b, field.key) : field.min"
+            [attr.min]="field.min"
+            [attr.max]="field.max"
+            [attr.step]="field.step ?? 1"
+            [value]="rangeValue(b, field)"
             [attr.aria-label]="field.label"
+            [attr.aria-valuetext]="rangeValueText(b, field)"
             (input)="setNumber(b, field.key, $any($event.target).value)"
           />
           @if (field.hint) {
@@ -435,6 +436,29 @@ export class BuilderInspectorComponent {
   numeric(block: BuilderBlock, key: string): number {
     const value = block.props[key];
     return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  }
+
+  /** Valor por defecto real de un control deslizante cuando la prop no está definida. */
+  rangeDefault(block: BuilderBlock, field: Extract<BuilderScalarFieldDef, { kind: 'range' }>): number {
+    if (field.defaultByProp) {
+      const propVal = block.props[field.defaultByProp.key];
+      if (typeof propVal === 'string' && propVal in field.defaultByProp.values) {
+        return field.defaultByProp.values[propVal];
+      }
+    }
+    return field.defaultValue ?? field.min;
+  }
+
+  rangeValue(block: BuilderBlock, field: Extract<BuilderScalarFieldDef, { kind: 'range' }>): number {
+    return this.hasNumber(block, field.key) ? this.numeric(block, field.key) : this.rangeDefault(block, field);
+  }
+
+  /** Texto legible para etiqueta y `aria-valuetext` (p. ej. "Por defecto (40 %)" o "40 %"). */
+  rangeValueText(block: BuilderBlock, field: Extract<BuilderScalarFieldDef, { kind: 'range' }>): string {
+    const val = this.rangeValue(block, field);
+    const unit = field.unit ?? '';
+    const formatted = unit === '%' ? `${val} %` : `${val}${unit}`;
+    return this.hasNumber(block, field.key) ? formatted : `Por defecto (${formatted})`;
   }
 
   validHex(block: BuilderBlock, key: string): string | null {

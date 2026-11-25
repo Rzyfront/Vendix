@@ -90,6 +90,8 @@ function scalarField(def: ScalarFieldDef): BuilderScalarFieldDef {
         max: def.max,
         step: def.step,
         unit: def.unit,
+        defaultValue: def.defaultValue,
+        defaultByProp: def.defaultByProp,
         hint: def.hint,
         group: def.group,
       };

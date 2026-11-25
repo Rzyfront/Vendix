@@ -51,8 +51,10 @@ describe('AppMediaFieldComponent', () => {
 
   const el = () => fixture.nativeElement as HTMLElement;
 
-  it('abre la galería y emite la URL estable elegida al hacer clic en una foto', async () => {
-    (el().querySelector('[data-testid="media-field-gallery"]') as HTMLButtonElement).click();
+  it('abre la galería y emite la URL estable elegida al hacer clic en una foto, devolviendo el foco al botón', async () => {
+    const galleryBtn = el().querySelector('[data-testid="media-field-gallery"]') as HTMLButtonElement;
+    expect(galleryBtn.getAttribute('aria-haspopup')).toBe('dialog');
+    galleryBtn.click();
     fixture.detectChanges();
     await fixture.whenStable();
 
@@ -65,30 +67,57 @@ describe('AppMediaFieldComponent', () => {
     const thumbBtn = el().querySelector('.amp-thumb') as HTMLButtonElement;
     expect(thumbBtn).not.toBeNull();
 
+    thumbBtn.focus();
     thumbBtn.click();
     fixture.detectChanges();
 
     expect(emitted).toEqual(['https://api.vendix.online/api/public/apps/media/42']);
     expect(fixture.componentInstance.pickerOpen()).toBeFalse();
+    expect(document.activeElement).toBe(galleryBtn);
   });
 
-  it('muestra miniatura cuando recibe una URL https y permite limpiarla', () => {
+  it('devuelve el foco al botón Galería al cerrar el modal sin elegir foto', () => {
+    const galleryBtn = el().querySelector('[data-testid="media-field-gallery"]') as HTMLButtonElement;
+    galleryBtn.click();
+    fixture.detectChanges();
+    expect(fixture.componentInstance.pickerOpen()).toBeTrue();
+
+    const input = el().querySelector('[data-testid="media-field-input"]') as HTMLInputElement;
+    input.focus();
+    fixture.componentInstance.closePicker();
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.pickerOpen()).toBeFalse();
+    expect(document.activeElement).toBe(galleryBtn);
+  });
+
+  it('muestra miniatura decorativa (alt="") cuando recibe una URL https y permite limpiarla', () => {
     fixture.componentRef.setInput('value', sampleItem.url);
     fixture.detectChanges();
 
     const img = el().querySelector('[data-testid="media-field-preview"] img') as HTMLImageElement;
     expect(img).not.toBeNull();
     expect(img.src).toBe(sampleItem.url!);
+    expect(img.getAttribute('alt')).toBe('');
+
+    const input = el().querySelector('[data-testid="media-field-input"]') as HTMLInputElement;
+    expect(input.getAttribute('aria-invalid')).toBeNull();
+    expect(input.getAttribute('aria-describedby')).toBeNull();
 
     (el().querySelector('[data-testid="media-field-clear"]') as HTMLButtonElement).click();
     expect(emitted).toEqual(['']);
   });
 
-  it('marca error si se escribe una URL que no empieza por https://', () => {
+  it('marca error con aria-invalid y aria-describedby si la URL no empieza por https://', () => {
     fixture.componentRef.setInput('value', 'http://inseguro.co/foto.jpg');
     fixture.detectChanges();
 
-    expect(el().querySelector('[data-testid="media-field-error"]')?.textContent).toContain('https://');
+    const errorEl = el().querySelector('[data-testid="media-field-error"]') as HTMLElement;
+    const input = el().querySelector('[data-testid="media-field-input"]') as HTMLInputElement;
+    expect(errorEl?.textContent).toContain('https://');
+    expect(errorEl?.id).toBeTruthy();
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+    expect(input.getAttribute('aria-describedby')).toBe(errorEl.id);
     expect(el().querySelector('[data-testid="media-field-preview"] img')).toBeNull();
   });
 });

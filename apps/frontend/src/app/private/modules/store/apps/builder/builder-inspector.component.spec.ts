@@ -119,4 +119,29 @@ describe('BuilderInspectorComponent (F6-A)', () => {
     expect(appearance?.querySelector('[data-field="spacing"] [data-testid="builder-chip-spacious"]')).not.toBeNull();
     expect(appearance?.querySelector('[data-field="align"] [data-testid="builder-chip-center"]')).not.toBeNull();
   });
+
+  it('el slider del velo arranca en el valor por defecto real (40 % o 45 % en background) y expone aria-valuetext', async () => {
+    // Bloque normal sin overlay_opacity -> arranca en 40 %
+    await render({ id: 'gal_1', type: 'gallery', props: {} }, PRODUCT_PAGE_BUILDER_CATALOG);
+    let slider = el().querySelector('[data-field="overlay_opacity"] input[type="range"]') as HTMLInputElement;
+    expect(slider.value).toBe('40');
+    expect(slider.getAttribute('aria-valuetext')).toBe('Por defecto (40 %)');
+
+    // Portada con variante background sin overlay_opacity -> arranca en 45 %
+    TestBed.resetTestingModule();
+    await render({ id: 'hero', type: 'hero', props: { variant: 'background' } }, PRODUCT_PAGE_BUILDER_CATALOG);
+    slider = el().querySelector('[data-field="overlay_opacity"] input[type="range"]') as HTMLInputElement;
+    expect(slider.value).toBe('45');
+    expect(slider.getAttribute('aria-valuetext')).toBe('Por defecto (45 %)');
+
+    // Valor explícito (40) -> aria-valuetext "40 %"
+    TestBed.resetTestingModule();
+    await render(
+      { id: 'hero', type: 'hero', props: { variant: 'background', overlay_opacity: 40 } },
+      PRODUCT_PAGE_BUILDER_CATALOG,
+    );
+    slider = el().querySelector('[data-field="overlay_opacity"] input[type="range"]') as HTMLInputElement;
+    expect(slider.value).toBe('40');
+    expect(slider.getAttribute('aria-valuetext')).toBe('40 %');
+  });
 });
