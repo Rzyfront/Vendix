@@ -477,7 +477,11 @@ describe('PlatformAlertService', () => {
     await expect(service.flush()).resolves.toBeUndefined();
   });
   describe('QUI-1031: contexto legible y «Límite de plan»', () => {
-    /** El trabajo real del ticket: ai-embedding/embed de un producto, tienda 105, sin cupo. */
+    /**
+     * Trabajo con cupo de IA (cola `ai-generation`, feature `async_queue`).
+     * Los embeddings ya no tienen cupo (2026-11-24), así que la alerta de plan
+     * se prueba con una cola que sí lo consume.
+     */
     const quotaJob = (over: Partial<PlatformAlertEvent> = {}, data: Record<string, unknown> = {}): PlatformAlertEvent => {
       const jobData = withJobOrigin(
         { store_id: 105, organization_id: 82, entity_type: 'product', entity_id: 123, ...data },
@@ -486,21 +490,21 @@ describe('PlatformAlertService', () => {
       );
       return {
         source: 'job',
-        process: 'cola ai-embedding · embed',
+        process: 'cola ai-generation · generate',
         errorType: 'job_failed',
         severity: 'warning',
-        title: 'Trabajo fallido en la cola ai-embedding',
+        title: 'Trabajo fallido en la cola ai-generation',
         message: 'Error: AI quota exceeded for this billing period',
-        details: { Cola: 'ai-embedding', Trabajo: 'embed' },
+        details: { Cola: 'ai-generation', Trabajo: 'generate' },
         storeId: 105,
         organizationId: 82,
-        context: jobContext('ai-embedding', { name: 'embed', data: jobData }),
+        context: jobContext('ai-generation', { name: 'generate', data: jobData }),
         occurredAt: new Date('2026-11-10T15:00:00Z'),
         ...over,
       };
     };
 
-    it('el cupo de IA agotado llega como «Límite de plan» informativo, con nombres, módulo, registro, plan y cupo; sin ticket', async () => {
+    it('el cupo de IA agotado llega como «Límite de plan» informativo, con nombres, módulo, plan y cupo; sin ticket', async () => {
       alertContext = fakeContext(NAMES);
       const service = build();
       service.capture(quotaJob());
@@ -519,9 +523,8 @@ describe('PlatformAlertService', () => {
       expect(text).toContain('<b>Tienda:</b> Vendix Granizzo (testbalmes, id 105)');
       expect(text).toContain('<b>Organización:</b> Demo Vendix (id 82)');
       expect(text).toContain('<b>Usuario:</b> Ana Pérez · ana.perez@vendix.test (id 7)');
-      expect(text).toContain('<b>Módulo:</b> Productos');
-      expect(text).toContain('<b>Acción:</b> indexar el producto para la búsqueda con IA');
-      expect(text).toContain('<b>Registro:</b> producto «Kit de freno NKD» (id 123)');
+      expect(text).toContain('<b>Módulo:</b> Motor de IA');
+      expect(text).toContain('<b>Acción:</b> ejecutar una generación de IA en segundo plano');
       expect(text).toContain('<b>Origen:</b> Evento product.updated');
       expect(text).toContain('<b>Plan:</b> Pro (pro) · estado active');
       expect(text).toContain('<b>Cupo:</b> 1.000 de 1.000');
@@ -530,12 +533,10 @@ describe('PlatformAlertService', () => {
       expect(prisma.rows[0].details).toMatchObject({
         _context: {
           userId: 7,
-          module: 'Productos',
-          entityType: 'product',
-          entityId: 123,
+          module: 'Motor de IA',
           category: 'plan_limit',
           planLimitCode: 'SUBSCRIPTION_006',
-          aiFeature: 'rag_embeddings',
+          aiFeature: 'async_queue',
           period: '202611',
         },
         'Error original': 'Error: AI quota exceeded for this billing period',
