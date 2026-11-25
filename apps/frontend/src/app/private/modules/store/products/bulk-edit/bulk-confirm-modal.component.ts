@@ -243,6 +243,9 @@ export class BulkConfirmModalComponent {
     if (key === 'tax_categories' || key === 'tax_category_action') {
       return 'Impuestos';
     }
+    if (key === 'price_tiers' || key === 'price_tier_action') {
+      return 'Tarifas';
+    }
     return (
       findBulkEditableField(key as BulkEditableFieldKey)?.label ?? key
     );
@@ -346,7 +349,18 @@ export class BulkConfirmModalComponent {
       return value ? 'Sí' : 'No';
     }
     if (Array.isArray(value)) {
-      return value.length > 0 ? value.join(', ') : 'Ninguno';
+      if (value.length === 0) {
+        return field === 'price_tiers' ? 'Ninguna' : 'Ninguno';
+      }
+      // Diffs relacionales (`price_tiers`, `tax_categories`) viajan como
+      // `{ id, name }`: se muestran por nombre, no como `[object Object]`.
+      return value
+        .map((entry) =>
+          entry && typeof entry === 'object' && 'name' in entry
+            ? String((entry as { name: unknown }).name)
+            : String(entry),
+        )
+        .join(', ');
     }
 
     const meta = findBulkEditableField(field as BulkEditableFieldKey);

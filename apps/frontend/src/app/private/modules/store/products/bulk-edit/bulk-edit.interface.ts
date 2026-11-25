@@ -98,9 +98,22 @@ export interface BulkRelationalTaxAction {
   tax_inclusive_map?: Record<string, boolean>;
 }
 
+/**
+ * Espejo de `BulkRelationalPriceTierActionDto`: añadir / quitar / reemplazar
+ * tarifas del catálogo. Con conjunto destino no vacío el backend enciende
+ * `has_multiple_price_tiers` en el producto.
+ */
+export interface BulkRelationalPriceTierAction {
+  mode: RelationalActionMode;
+  ids: number[];
+}
+
 export interface BulkEditableChanges {
   // ===== Impuestos =====
   tax_category_action?: BulkRelationalTaxAction;
+
+  // ===== Tarifas (multi-tarifa) =====
+  price_tier_action?: BulkRelationalPriceTierAction;
 
   // ===== Tipo y estado =====
   product_type?: BulkEditProductTypeValue;
@@ -215,6 +228,8 @@ export interface BulkEditPreviewResult {
   ok: number;
   warnings: number;
   errors: number;
+  /** Productos cuyo conjunto de tarifas o flag multi-tarifa cambiaría. */
+  price_tier_changes?: number;
   items: BulkEditPreviewItem[];
 }
 
@@ -232,6 +247,8 @@ export interface BulkEditResult {
   total: number;
   successful: number;
   failed: number;
+  /** Productos actualizados cuyo conjunto de tarifas o flag cambió. */
+  price_tier_changes?: number;
   results: BulkEditResultItem[];
 }
 
@@ -386,6 +403,7 @@ export type BulkEditControlType =
   | 'textarea'
   | 'dimensions'
   | 'tax-action'
+  | 'price-tier-action'
   | 'account-code';
 
 /**
@@ -432,6 +450,7 @@ export type BulkEditOptionsRef =
   | 'uom-stock'
   | 'document-templates'
   | 'tax-categories'
+  | 'price-tiers'
   | 'kds-stations';
 
 /**

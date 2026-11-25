@@ -37,6 +37,7 @@ import {
   untracked,
 } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import {
   BULK_TAX_INCLUSIVE_CONTROL,
   catalogInclusiveDefault,
@@ -69,6 +70,7 @@ import { AccountCodeSelectComponent } from '../components/account-code-select.co
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     ReactiveFormsModule,
+    RouterLink,
     IconComponent,
     InputComponent,
     SelectorComponent,
@@ -92,6 +94,8 @@ export class BulkEditFieldControlComponent {
   readonly dynamicOptions = input<readonly SelectorOption[]>([]);
   /** Catálogo completo de categorías de impuestos para chips interactivos. */
   readonly taxCategories = input<readonly TaxCategory[]>([]);
+  /** `true` cuando el catálogo de tarifas ya respondió (estado vacío). */
+  readonly priceTiersLoaded = input<boolean>(false);
   /**
    * `true` cuando el campo del que este depende (`dependsOn`) no está activado.
    * No bloquea nada — el backend no valida la dependencia — pero se avisa para

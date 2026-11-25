@@ -115,12 +115,17 @@ import {
   BulkEditableChanges,
   BulkEditableField,
   BulkEditableFieldKey,
+  BulkRelationalPriceTierAction,
+  RelationalActionMode,
 } from './bulk-edit.interface';
 import {
   ProductsBulkEditService,
   type BulkEditProductQuery,
 } from './products-bulk-edit.service';
 import { coerceBulkTaxAction } from '../utils/product-tax-inclusive.util';
+import { PriceTierCacheService } from '../../price-tiers/services/price-tier-cache.service';
+import type { PriceTier } from '../../price-tiers/interfaces';
+import { describePriceTierRule } from '../../price-tiers/utils/price-tier-rule.util';
 
 /** Tope del endpoint de ids (`MAX_PRODUCT_IDS` en el backend). */
 const MAX_FILTER_IDS = 1000;
@@ -149,6 +154,7 @@ export class ProductsBulkEditPageComponent {
   private readonly authFacade = inject(AuthFacade);
   private readonly uomService = inject(UomService);
   private readonly taxesService = inject(TaxesService);
+  private readonly priceTierCache = inject(PriceTierCacheService);
   private readonly kdsStationsService = inject(KdsStationsService);
   private readonly toastService = inject(ToastService);
   private readonly router = inject(Router);
@@ -378,6 +384,21 @@ export class ProductsBulkEditPageComponent {
     });
   });
 
+  /** Tarifas activas de la tienda (`optionsRef: 'price-tiers'`). */
+  readonly priceTiers = signal<PriceTier[]>([]);
+  /** `true` cuando el catálogo de tarifas ya respondió (vacío o no). */
+  readonly priceTiersLoaded = signal<boolean>(false);
+
+  readonly priceTierOptions = computed<SelectorOption[]>(() =>
+    this.priceTiers().map((tier) => {
+      const rule = describePriceTierRule(tier);
+      return {
+        value: tier.id,
+        label: rule ? `${tier.name} (${rule})` : tier.name,
+      };
+    }),
+  );
+
   // ───────────────────────────────────────────────────────────────────────────
   // Confirmación
   // ───────────────────────────────────────────────────────────────────────────
@@ -457,6 +478,7 @@ export class ProductsBulkEditPageComponent {
     this.loadUomCatalog();
     this.loadTemplateCatalog();
     this.loadTaxCategories();
+    this.loadPriceTiers();
 
     // Las estaciones KDS solo existen para tiendas con industria restaurante:
     // se piden una única vez, cuando la señal de industrias lo confirma.
@@ -563,6 +585,17 @@ export class ProductsBulkEditPageComponent {
       .subscribe({
         next: (taxes) => this.taxCategories.set(taxes),
         error: () => this.taxCategories.set([]),
+      });
+  }
+
+  /** Catálogo de tarifas activas, una vez por entrada (caché compartida). */
+  private loadPriceTiers(): void {
+    this.priceTierCache
+      .getActiveTiers()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((tiers) => {
+        this.priceTiers.set(tiers);
+        this.priceTiersLoaded.set(true);
       });
   }
 
@@ -816,7 +849,10 @@ function buildChangesFormDefaults(): Record<string, unknown> {
   for (const field of BULK_EDITABLE_FIELDS) {
     if (field.control === 'dimensions') {
       defaults[field.key] = { length: null, width: null, height: null };
-    } else if (field.control === 'tax-action') {
+    } else if (
+      field.control === 'tax-action' ||
+      field.control === 'price-tier-action'
+    ) {
       defaults[field.key] = { mode: 'add', ids: [] };
     } else if (field.control === 'toggle') {
       defaults[field.key] = false;
@@ -848,7 +884,10 @@ function buildChangesForm(): FormGroup<{ [key: string]: AbstractControl }> {
       });
       continue;
     }
-    if (field.control === 'tax-action') {
+    if (
+      field.control === 'tax-action' ||
+      field.control === 'price-tier-action'
+    ) {
       controls[field.key] = new FormGroup({
         mode: new FormControl<string>('add', { nonNullable: true }),
         ids: new FormControl<number[]>([], { nonNullable: true }),
@@ -871,6 +910,36 @@ function buildChangesForm(): FormGroup<{ [key: string]: AbstractControl }> {
   }
 
   return new FormGroup<{ [key: string]: AbstractControl }>(controls);
+}
+
+const RELATIONAL_MODES: readonly RelationalActionMode[] = [
+  'add',
+  'remove',
+  'replace',
+];
+
+/**
+ * `{ mode, ids }` del control de tarifas → cuerpo de `price_tier_action`.
+ * Sin tarifas elegidas no se envía nada (el backend exige `ids` no vacío).
+ */
+export function coerceBulkPriceTierAction(
+  raw: unknown,
+): BulkRelationalPriceTierAction | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const action = raw as { mode?: unknown; ids?: unknown };
+  const mode = (typeof action.mode === 'string' ? action.mode : 'add') as
+    RelationalActionMode;
+  if (!RELATIONAL_MODES.includes(mode)) return undefined;
+  const rawIds = Array.isArray(action.ids) ? action.ids : [];
+  const ids = [
+    ...new Set(
+      rawIds
+        .map((id) => Number(id))
+        .filter((n) => Number.isInteger(n) && n > 0),
+    ),
+  ];
+  if (ids.length === 0) return undefined;
+  return { mode, ids };
 }
 
 /** Numéricos cuyo vacío significa `null` (limpiar), no "no elegí". */
@@ -903,6 +972,9 @@ export function coerceBulkEditValue(
 
     case 'tax-action':
       return coerceBulkTaxAction(raw);
+
+    case 'price-tier-action':
+      return coerceBulkPriceTierAction(raw);
 
     case 'number':
     case 'currency': {
