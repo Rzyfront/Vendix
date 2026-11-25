@@ -522,6 +522,55 @@ export const TURN_CLOSE_NUDGE =
   'No cerraste el turno y no ejecutaste nada. Si tenías algo que hacer, hazlo ahora con la herramienta que corresponda; si ya terminaste, llama a finish_turn.';
 
 /**
+ * T9 — a «sí, hazlo» closes the question. Conversation 309: the person said
+ * yes and the next turn asked the same thing again. When the person's message
+ * is a short affirmative answer to a question Vex just asked, the turn is told
+ * so, and a reply that asks for the same confirmation again is resumed once
+ * and, failing that, replaced by an honest line.
+ */
+const AFFIRMATIVE_REPLY =
+  /^(?:s[ií]|sip|dale|h[aá]zlo|h[aá]gale|h[aá]gamoslo|procede|proced[eé]|adelante|ok(?:ay)?|de una|listo|claro|confirmo|confirmado|va|vale|perfecto|aplica(?:lo|la)?|apl[ií]calo|apl[ií]cala|sigue|contin[uú]a|correcto|eso|exacto)(?=$|[\s,.;:!¡?¿])/i;
+
+export function isAffirmativeReply(goal: string | undefined): boolean {
+  if (!goal) return false;
+  const text = goal.trim();
+  return text.length > 0 && text.length <= 80 && AFFIRMATIVE_REPLY.test(text);
+}
+
+/** A question asking for the same go-ahead again. */
+const CONFIRMATION_QUESTION =
+  /¿\s*(?:quieres|quiere|deseas|desea|confirmas|confirma|te parece|le parece|procedo|lo hago|la aplico|lo aplico|aplico|seguro|segura|est[aá]s segur|le doy|est[aá]s de acuerdo|me confirmas|me das permiso|autorizas)/i;
+
+export function asksConfirmationAgain(text: string | undefined): boolean {
+  return !!text && CONFIRMATION_QUESTION.test(text);
+}
+
+export function confirmedQuestionRule(question: string): string {
+  const excerpt = question.replace(/\s+/g, ' ').trim().slice(-300);
+  return `La persona ya respondió que sí a tu pregunta anterior («${excerpt}»). No vuelvas a pedir confirmación: actúa ahora (propón el lote o la escritura) o di en una frase por qué no puedes.`;
+}
+
+export const CONFIRMATION_NUDGE =
+  'La persona ya te confirmó. No vuelvas a preguntarle lo mismo: haz el cambio ahora con la herramienta que corresponde o dile en una frase por qué no puedes.';
+
+export const CONFIRMED_BUT_NOT_DONE =
+  'Ya me lo confirmaste, pero en este turno no logré dejar el cambio listo para aprobar, así que no se aplicó nada.';
+
+/** The question of the last assistant message of the history, if any. */
+function lastAssistantQuestion(
+  history: Array<{ role: string; content?: unknown }> | undefined,
+): string | null {
+  for (let i = (history?.length ?? 0) - 1; i >= 0; i--) {
+    const message = history![i];
+    if (message.role === 'user') return null;
+    if (message.role !== 'assistant') continue;
+    if (typeof message.content !== 'string' || !message.content.trim()) continue;
+    return message.content.includes('?') ? message.content : null;
+  }
+  return null;
+}
+
+/**
  * T8 — exploration budget of a Vex turn outside a plan. Conversation 309 spent
  * 58 reads over five turns and wrote nothing. Past this many read-only calls
  * the turn stops exploring and answers with what it knows and the one fact it
@@ -2370,6 +2419,17 @@ export class AIAgentService {
         : params.goal,
     });
 
+    // T9: «sí, hazlo» answering Vex's own question closes that question.
+    const confirmedQuestion =
+      isVex && isAffirmativeReply(params.goal)
+        ? lastAssistantQuestion(params.messages as any)
+        : null;
+    if (confirmedQuestion)
+      messages.push({
+        role: 'system',
+        content: confirmedQuestionRule(confirmedQuestion),
+      });
+
     if (contextSpan)
       activeTrace?.endSpan(contextSpan, {
         attributes: {
@@ -2503,6 +2563,9 @@ export class AIAgentService {
     // T8: read-only calls of this Vex turn and whether the budget closed it.
     let discoveryCalls = 0;
     let discoveryExhausted = false;
+    // T9: the one resume allowed after asking an already-confirmed question.
+    let confirmationResumed = false;
+    let confirmationFallback = false;
     // T4: the one resume allowed after a write promise with nothing behind it.
     let honestyResumed = false;
     let honestyFallback = false;
@@ -3008,6 +3071,35 @@ export class AIAgentService {
             }
           }
 
+          // T9 gate: the person already said yes to Vex's question; asking
+          // for the same go-ahead again (with nothing persisted) is resumed
+          // once, and replaced by an honest line if it happens again.
+          if (
+            confirmedQuestion &&
+            asksConfirmationAgain(response.content) &&
+            !turnHasPersistedWrite(toolsUsed, pendingConfirmation)
+          ) {
+            const canResume =
+              !confirmationResumed &&
+              iteration < maxIterations &&
+              Date.now() - startTime - waitedMs < timeoutMs;
+            this.logger.warn(
+              JSON.stringify({
+                event: 'agent_confirmation_gate',
+                outcome: canResume ? 'resumed' : 'replaced',
+                store_id: context?.store_id ?? null,
+                iteration,
+              }),
+            );
+            if (canResume) {
+              confirmationResumed = true;
+              messages.push({ role: 'assistant', content: response.content! });
+              messages.push({ role: 'system', content: CONFIRMATION_NUDGE });
+              continue;
+            }
+            confirmationFallback = true;
+          }
+
           // T4 honesty gate (Vex): a reply that promises a write when this
           // turn persisted none (no batch card, no confirmation, nothing
           // applied) is resumed ONCE; promising again, the reply is replaced
@@ -3093,7 +3185,9 @@ export class AIAgentService {
             ? this.describePendingWrite(pendingConfirmation)
             : honestyFallback
               ? HONEST_NO_WRITE_FALLBACK
-              : response.content?.trim();
+              : confirmationFallback
+                ? CONFIRMED_BUT_NOT_DONE
+                : response.content?.trim();
           if (narration && LEAKED_TOOL_MARKUP.test(narration)) {
             this.logger.warn(
               `Leaked tool-call markup as final answer at iteration ${iteration}; closing inference`,
