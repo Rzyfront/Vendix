@@ -140,6 +140,37 @@ export function findExistingCapabilities(
     .slice(0, limit);
 }
 
+/**
+ * Short, deterministic catalog context for the tie-breaker classifier: the
+ * near misses (entries sharing at least one of the intent's stems, which the
+ * strict check above did not accept) and the release's capability domains.
+ * Only release metadata: tool/route names and domains, never customer data.
+ */
+export function summarizeCatalogFor(
+  intent: string,
+  corpus: readonly CapabilityCorpusEntry[],
+  limit = 12,
+): string {
+  const wanted = new Set(capabilityStems(intent));
+  const near: Array<{ name: string; hits: number }> = [];
+  const domains = new Set<string>();
+  for (const entry of corpus) {
+    domains.add(entry.domain);
+    if (!wanted.size) continue;
+    const have = capabilityStems(`${entry.name} ${entry.text}`);
+    const hits = have.filter((stem) => wanted.has(stem)).length;
+    if (hits) near.push({ name: entry.name, hits });
+  }
+  near.sort((a, b) => b.hits - a.hits || a.name.localeCompare(b.name));
+  const nearText = near.length
+    ? near
+        .slice(0, limit)
+        .map((n) => n.name)
+        .join(', ')
+    : 'ninguna';
+  return `Capacidades parecidas: ${nearText}. Dominios del catálogo: ${[...domains].sort().join(', ')}.`;
+}
+
 /** Domains that are agent plumbing, not business capabilities. */
 const NON_CAPABILITY_DOMAINS = new Set([
   'discovery',

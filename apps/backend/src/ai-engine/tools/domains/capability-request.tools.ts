@@ -4,7 +4,12 @@ import {
   CapabilityMatch,
   capabilityStems,
   findExistingCapabilities,
+  summarizeCatalogFor,
 } from '../capability-gap';
+import type {
+  ClassifierVerdict,
+  MissingToolReading,
+} from '../../vex-classifier.service';
 import type {
   CapabilityRequestInput,
   CapabilityRequestStatus,
@@ -30,6 +35,41 @@ export interface CapabilityRequestToolDeps {
   tickets: CapabilityTicketsPort;
   /** Whole release catalog flagged with the caller's reach (T6). */
   corpus: () => CapabilityCorpusEntry[];
+  /**
+   * Optional tie-breaker (`VexClassifierService.needsMissingTool`). Consulted
+   * only when the deterministic catalog check found nothing; `unavailable`
+   * keeps today's behavior. Never throws (the service guarantees it; the
+   * call is still guarded).
+   */
+  classifier?: {
+    needsMissingTool(
+      request: string,
+      catalogSummary: string,
+    ): Promise<ClassifierVerdict<MissingToolReading>>;
+  };
+}
+
+/** Classifier opinion attached to the ticket as evidence. */
+type ClassifierEvidence = {
+  verdict: 'missing';
+  confidence: number | null;
+  criteria_version: string;
+};
+
+const CLASSIFIER_REFUSALS: Record<'exists' | 'unclear', string> = {
+  exists:
+    'El clasificador de Vendix ve que eso probablemente ya se puede hacer con una herramienta existente: no se crea ticket. Busca la herramienta (search_tools) o explícale a la persona cómo se hace.',
+  unclear:
+    'No queda claro que sea una capacidad que falte: no se crea ticket. Pide a la persona que diga con más detalle qué quiere lograr.',
+};
+
+function describeEvidence(evidence: ClassifierEvidence | null): string {
+  if (!evidence) return '';
+  const confidence =
+    evidence.confidence === null
+      ? 'sin dato'
+      : evidence.confidence.toFixed(2);
+  return `\n\nEvidencia del clasificador: ${evidence.verdict} (criterios ${evidence.criteria_version}, confianza ${confidence}).`;
 }
 
 /** Only a missing capability opens a ticket; the rest are not product gaps. */
@@ -80,6 +120,7 @@ type Resolution =
       storeId: number;
       userId: number;
       status: CapabilityRequestStatus;
+      evidence: ClassifierEvidence | null;
     }
   | { ok: false; message: string; existing?: CapabilityMatch[] };
 
@@ -169,6 +210,34 @@ export function createCapabilityRequestTools(
       return { ok: false, message: describeExisting(existing), existing };
     }
 
+    // Tie-breaker: the catalog found nothing, so the request may still be a
+    // capability under other words. Only an explicit `missing` keeps the
+    // ticket with evidence; `exists`/`unclear` refuse; `unavailable` (off,
+    // failed, capped) keeps today's behavior.
+    let evidence: ClassifierEvidence | null = null;
+    if (deps.classifier) {
+      let verdict: ClassifierVerdict<MissingToolReading> | null = null;
+      try {
+        const intent = `${userRequest} ${title}`;
+        verdict = await deps.classifier.needsMissingTool(
+          intent,
+          summarizeCatalogFor(intent, deps.corpus()),
+        );
+      } catch {
+        verdict = null;
+      }
+      if (verdict?.value === 'exists' || verdict?.value === 'unclear') {
+        return { ok: false, message: CLASSIFIER_REFUSALS[verdict.value] };
+      }
+      if (verdict?.value === 'missing') {
+        evidence = {
+          verdict: 'missing',
+          confidence: verdict.confidence,
+          criteria_version: verdict.criteria_version,
+        };
+      }
+    }
+
     const status = await deps.tickets.findCapabilityRequest(
       key,
       organizationId,
@@ -191,6 +260,7 @@ export function createCapabilityRequestTools(
       storeId,
       userId,
       status,
+      evidence,
     };
   }
 
@@ -284,7 +354,7 @@ export function createCapabilityRequestTools(
             userId: resolved.userId,
             capabilityKey: resolved.key,
             title: resolved.title,
-            description: `Solicitud de capacidad desde Vex.\n\nLo que pidió la persona: ${resolved.userRequest}\n\nClave: ${resolved.key}`,
+            description: `Solicitud de capacidad desde Vex.\n\nLo que pidió la persona: ${resolved.userRequest}\n\nClave: ${resolved.key}${describeEvidence(resolved.evidence)}`,
           });
           const summary =
             result.outcome === 'created'

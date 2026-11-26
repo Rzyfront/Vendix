@@ -1,4 +1,4 @@
-import { Module, OnModuleInit } from '@nestjs/common';
+import { Module, OnModuleInit, Optional } from '@nestjs/common';
 import { TicketsController } from './tickets.controller';
 import { TicketsService } from './tickets.service';
 import { S3Service } from '@common/services/s3.service';
@@ -10,6 +10,7 @@ import { ApiCatalogService } from '../../../ai-engine/tools/bridge/api-catalog.s
 import { createCapabilityRequestTools } from '../../../ai-engine/tools/domains/capability-request.tools';
 import { buildCapabilityCorpus } from '../../../ai-engine/tools/capability-gap';
 import { RequestContextService } from '@common/context/request-context.service';
+import { VexClassifierService } from '../../../ai-engine/vex-classifier.service';
 
 @Module({
   imports: [EventEmitterModule, SupportNotificationsModule],
@@ -26,6 +27,8 @@ export class TicketsModule implements OnModuleInit {
     private readonly toolRegistry: AIToolRegistry,
     private readonly apiCatalog: ApiCatalogService,
     private readonly ticketsService: TicketsService,
+    // Tie-breaker only; absent or off = today's behavior.
+    @Optional() private readonly classifier?: VexClassifierService,
   ) {}
 
   /**
@@ -36,6 +39,7 @@ export class TicketsModule implements OnModuleInit {
     this.toolRegistry.registerMany(
       createCapabilityRequestTools({
         tickets: this.ticketsService,
+        classifier: this.classifier,
         corpus: () => {
           const context = RequestContextService.getContext();
           const granted = context?.permissions?.length
