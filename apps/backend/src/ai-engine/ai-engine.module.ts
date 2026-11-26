@@ -25,6 +25,7 @@ import { AIEngineService } from './ai-engine.service';
 import { AgentRuntimeConfigService } from './agent-runtime-config.service';
 import { AILoggingService } from './ai-logging.service';
 import { AgentTraceService } from './observability/agent-trace.service';
+import { VexClassifierService } from './vex-classifier.service';
 import { AIQueueModule } from './queue/ai-queue.module';
 import { AIStreamController } from './ai-stream.controller';
 import { AIAgentService } from './ai-agent.service';
@@ -147,8 +148,11 @@ import { RequestContextService } from '../common/context/request-context.service
     // import would close a cycle.
     AIAgentProcessor,
     ConversationCompactorService,
+    // Vex tie-breaker classifier: optional opinion, never replaces text.
+    VexClassifierService,
   ],
   exports: [
+    VexClassifierService,
     AgentObjectiveRepository,
     AgentTaskContextService,
     AgentEvidenceService,

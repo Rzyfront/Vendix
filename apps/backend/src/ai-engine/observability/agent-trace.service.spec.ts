@@ -355,6 +355,28 @@ describe('AgentTraceService (bounded explicit-scope observability)', () => {
     ).toEqual({});
   });
 
+  it('keeps the Vex classifier adapter and catalog model id, drops free text in their place', () => {
+    expect(
+      redactTraceAttributes({
+        classifier_question: 'confirmation',
+        classifier_adapter: 'chat',
+        classifier_model: 'openai/gpt-5-mini',
+        classifier_degradation: 'adapter_unsupported',
+      }),
+    ).toEqual({
+      classifier_question: 'confirmation',
+      classifier_adapter: 'chat',
+      classifier_model: 'openai/gpt-5-mini',
+      classifier_degradation: 'adapter_unsupported',
+    });
+    expect(
+      redactTraceAttributes({
+        classifier_adapter: 'magic',
+        classifier_model: 'dale, aplica el lote a Juan Pérez',
+      }),
+    ).toEqual({});
+  });
+
   it('drops unknown keys, free text and invalid numbers from metadata allowlist', () => {
     expect(
       redactTraceAttributes({

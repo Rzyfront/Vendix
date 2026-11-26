@@ -197,4 +197,129 @@ describe('request_capability (T5/T6)', () => {
     const preview = await tool.preview!(ARGS, { user_id: 11 } as any);
     expect(preview.status).toBe('error');
   });
+
+  describe('clasificador de desempate (vex_classifier)', () => {
+    const CREATED = {
+      outcome: 'created',
+      exists: true,
+      already_voted: true,
+      own: true,
+      ticket_number: 'TKT30002',
+      votes: 1,
+    };
+
+    function withClassifier(verdict: unknown) {
+      const needsMissingTool =
+        verdict instanceof Error
+          ? jest.fn().mockRejectedValue(verdict)
+          : jest.fn().mockResolvedValue(verdict);
+      const tickets = {
+        findCapabilityRequest: jest.fn().mockResolvedValue({
+          exists: false,
+          already_voted: false,
+          own: false,
+          ticket_number: null,
+          votes: 0,
+        }),
+        recordCapabilityRequest: jest.fn().mockResolvedValue(CREATED),
+      };
+      const [tool] = createCapabilityRequestTools({
+        tickets,
+        corpus: () => [PRICING_TOOL],
+        classifier: { needsMissingTool },
+      });
+      // `handler` is optional on RegisteredTool; request_capability always has one.
+      const { handler } = tool;
+      if (!handler) throw new Error('request_capability sin handler');
+      return { tool, handler, tickets, needsMissingTool };
+    }
+
+    it('con «exists» no crea ticket', async () => {
+      const { tool, handler, tickets } = withClassifier({
+        value: 'exists',
+        confidence: 0.92,
+        criteria_version: 'v1',
+        latency_ms: 120,
+      });
+      const preview = await tool.preview!(ARGS, CTX);
+      expect(preview.status).toBe('error');
+      expect(preview.message).toContain('no se crea ticket');
+      const out = JSON.parse(await handler(ARGS, CTX));
+      expect(out.error).toContain('no se crea ticket');
+      expect(tickets.recordCapabilityRequest).not.toHaveBeenCalled();
+    });
+
+    it('con «unclear» no crea ticket', async () => {
+      const { handler, tickets } = withClassifier({
+        value: 'unclear',
+        confidence: 0.8,
+        criteria_version: 'v1',
+        latency_ms: 90,
+      });
+      const out = JSON.parse(await handler(ARGS, CTX));
+      expect(out.error).toContain('no se crea ticket');
+      expect(tickets.recordCapabilityRequest).not.toHaveBeenCalled();
+    });
+
+    it('con «missing» y catálogo sin coincidencias crea el ticket con la evidencia', async () => {
+      const { handler, tickets, needsMissingTool } = withClassifier({
+        value: 'missing',
+        confidence: 0.91,
+        criteria_version: 'v1',
+        latency_ms: 140,
+      });
+      const out = JSON.parse(await handler(ARGS, CTX));
+      expect(out.data).toMatchObject({ outcome: 'created', ticket_number: 'TKT30002' });
+      const [request, summary] = needsMissingTool.mock.calls[0];
+      expect(request).toContain('cámbiame el color del botón del carrito');
+      expect(summary).toContain('Dominios del catálogo: pricing');
+      expect(tickets.recordCapabilityRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          description: expect.stringContaining(
+            'Evidencia del clasificador: missing (criterios v1, confianza 0.91).',
+          ),
+        }),
+      );
+    });
+
+    it('con «unavailable» se comporta como hoy (crea el ticket, sin evidencia)', async () => {
+      const { handler, tickets } = withClassifier({
+        value: 'unavailable',
+        reason: 'timeout',
+        latency_ms: 800,
+      });
+      const out = JSON.parse(await handler(ARGS, CTX));
+      expect(out.data.outcome).toBe('created');
+      const description = tickets.recordCapabilityRequest.mock.calls[0][0].description;
+      expect(description).not.toContain('Evidencia del clasificador');
+    });
+
+    it('si el clasificador lanza, el turno sigue como hoy', async () => {
+      const { handler } = withClassifier(new Error('boom'));
+      const out = JSON.parse(await handler(ARGS, CTX));
+      expect(out.data.outcome).toBe('created');
+    });
+
+    it('el catálogo determinista manda: con coincidencia ni siquiera consulta al clasificador', async () => {
+      const { handler, tickets, needsMissingTool } = withClassifier({
+        value: 'missing',
+        confidence: 0.99,
+        criteria_version: 'v1',
+        latency_ms: 10,
+      });
+      const out = JSON.parse(
+        await handler(
+          {
+            ...ARGS,
+            user_request: 'aplicar tarifa a un producto',
+            title: 'Tarifa por producto',
+          },
+          CTX,
+        ),
+      );
+      expect(out.error).toContain('set_product_tier_override');
+      expect(needsMissingTool).not.toHaveBeenCalled();
+      expect(tickets.recordCapabilityRequest).not.toHaveBeenCalled();
+    });
+  });
 });
