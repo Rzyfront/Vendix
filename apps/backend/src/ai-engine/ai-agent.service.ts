@@ -522,90 +522,6 @@ export const TURN_CLOSE_NUDGE =
   'No cerraste el turno y no ejecutaste nada. Si tenías algo que hacer, hazlo ahora con la herramienta que corresponda; si ya terminaste, llama a finish_turn.';
 
 /**
- * T9 — a «sí, hazlo» closes the question. Conversation 309: the person said
- * yes and the next turn asked the same thing again. When the person's message
- * is a short affirmative answer to a question Vex just asked, the turn is told
- * so, and a reply that asks for the same confirmation again is resumed once
- * and, failing that, replaced by an honest line.
- */
-const AFFIRMATIVE_REPLY =
-  /^(?:s[ií]|sip|dale|h[aá]zlo|h[aá]gale|h[aá]gamoslo|procede|proced[eé]|adelante|ok(?:ay)?|de una|listo|claro|confirmo|confirmado|va|vale|perfecto|aplica(?:lo|la)?|apl[ií]calo|apl[ií]cala|sigue|contin[uú]a|correcto|eso|exacto)(?=$|[\s,.;:!¡?¿])/i;
-
-/**
- * B2 — a refusal, a cancel or a condition riding on an affirmative opener
- * («ok, mejor no lo hagas», «claro que no», «vale, pero no toques los
- * precios», «listo, cancela eso», «perfecto, pero primero muéstrame…») is not
- * a go-ahead.
- */
-const NOT_A_GO_AHEAD =
-  /(?:^|[\s,.;:!¡?¿])(?:no|nunca|tampoco|ni|pero|aunque|mejor|primero|antes de|espera|esp[eé]rate|cancel\w*|det[eé]n\w*|para(?:lo|la)?\s*$|olv[ií]d\w*|d[eé]ja(?:lo|la)|todav[ií]a no|a[uú]n no)(?=$|[\s,.;:!¡?¿])/i;
-
-export function isAffirmativeReply(goal: string | undefined): boolean {
-  if (!goal) return false;
-  const text = goal.trim();
-  return (
-    text.length > 0 &&
-    text.length <= 80 &&
-    AFFIRMATIVE_REPLY.test(text) &&
-    !NOT_A_GO_AHEAD.test(text)
-  );
-}
-
-/**
- * B2 — the go-ahead only closes a question that offered a write («¿Quieres que
- * le asigne la tarifa…?», «¿Confirmas que la aplico?», «¿Procedo?»). A «sí» to
- * «¿Quieres ver el detalle de ventas de hoy?» asks for a read: nothing to
- * enforce. Matches a write verb conjugated as an offer (infinitive,
- * subjunctive or first person), never the noun («los cambios», «el cargo»).
- */
-const WRITE_OFFER =
-  /(?:^|[\s¿,(])(?:(?:aplic|asign|actualiz|modific|cambi|carg|quit|agreg|elimin|borr|ajust|registr|guard)(?:ar|e|en|emos|o|amos)|(?:apliqu|actualic|modifiqu|cargu|agregu)(?:e|en|emos)|añad(?:ir|a|an|amos|o)|cre(?:ar|e|en|emos|o|amos)|proced(?:er|o|a|emos|amos))(?:l[oa]s?|les?|se(?:l[oa]s?)?)?(?=$|[\s,.;:!?¡¿)])|\b(?:l[oa]s?|le)\s+hag[oa]\b|\bhacerlo\b/i;
-
-/** Each question sentence of a message (`¿…?`, or a sentence ending in `?`). */
-function questionSentences(text: string): string[] {
-  return text.match(/¿[^¿?]*\?|[^.!?¿\n]*\?/g) ?? [];
-}
-
-export function offersWrite(question: string | null | undefined): boolean {
-  return (
-    !!question && questionSentences(question).some((q) => WRITE_OFFER.test(q))
-  );
-}
-
-/** A question asking for the same go-ahead again. */
-const CONFIRMATION_QUESTION =
-  /¿\s*(?:quieres|quiere|deseas|desea|confirmas|confirma|te parece|le parece|procedo|lo hago|la aplico|lo aplico|aplico|seguro|segura|est[aá]s segur|le doy|est[aá]s de acuerdo|me confirmas|me das permiso|autorizas)/i;
-
-export function asksConfirmationAgain(text: string | undefined): boolean {
-  return !!text && CONFIRMATION_QUESTION.test(text);
-}
-
-export function confirmedQuestionRule(question: string): string {
-  const excerpt = question.replace(/\s+/g, ' ').trim().slice(-300);
-  return `La persona ya respondió que sí a tu pregunta anterior («${excerpt}»). No vuelvas a pedir confirmación: actúa ahora (propón el lote o la escritura) o di en una frase por qué no puedes.`;
-}
-
-export const CONFIRMATION_NUDGE =
-  'La persona ya te confirmó. No vuelvas a preguntarle lo mismo: haz el cambio ahora con la herramienta que corresponde o dile en una frase por qué no puedes.';
-
-export const CONFIRMED_BUT_NOT_DONE =
-  'Ya me lo confirmaste, pero en este turno no logré dejar el cambio listo para aprobar, así que no se aplicó nada.';
-
-/** The question of the last assistant message of the history, if any. */
-function lastAssistantQuestion(
-  history: Array<{ role: string; content?: unknown }> | undefined,
-): string | null {
-  for (let i = (history?.length ?? 0) - 1; i >= 0; i--) {
-    const message = history![i];
-    if (message.role === 'user') return null;
-    if (message.role !== 'assistant') continue;
-    if (typeof message.content !== 'string' || !message.content.trim()) continue;
-    return message.content.includes('?') ? message.content : null;
-  }
-  return null;
-}
-
-/**
  * T8 — exploration budget of a Vex turn outside a plan. Conversation 309 spent
  * 58 reads over five turns and wrote nothing. Past this many read-only calls
  * the turn stops exploring and answers with what it knows and the one fact it
@@ -635,73 +551,6 @@ export function honestyRule(capabilityRequestOffered: boolean): string {
       ? 'Si no tienes herramienta para lo que pide, dilo en UNA frase y ofrece pedirla al equipo de Vendix (request_capability, solo si la persona acepta); no sigas explorando.'
       : 'Si no tienes herramienta para lo que pide, dilo en UNA frase y no sigas explorando.',
   ].join(' ');
-}
-
-/**
- * A first-person announcement of a future write (B1): the write verb itself
- * must be conjugated as the speaker's own future or ongoing action, with no
- * free words in between —
- *   - «voy a / vamos a / procedo a / me encargo de / paso a» + infinitive
- *     («voy a aplicar», «vamos a asignarla»);
- *   - simple future («aplicaré», «la asignaremos»);
- *   - «estoy / estamos» + gerund («estoy procesando»);
- *   - a present-tense write after a clitic or a time adverb («la aplico»,
- *     «luego aplico», «ahora mismo actualizo», «en un momento asigno»);
- *   - «te aviso cuando…».
- * Nouns and participles («cambios», «proceso», «creados», «cargos») and read
- * announcements («voy a revisar los cambios») never match.
- */
-const WRITE_INFINITIVE =
-  '(?:aplicar|asignar|actualizar|cambiar|modificar|cargar|ejecutar|procesar|quitar|agregar|añadir|crear|eliminar|borrar|ajustar|registrar|guardar)';
-const WRITE_GERUND =
-  '(?:aplicando|asignando|actualizando|cambiando|modificando|cargando|ejecutando|procesando|quitando|agregando|añadiendo|creando|eliminando|borrando|ajustando|registrando|guardando)';
-const WRITE_PRESENT_1S =
-  '(?:aplico|asigno|actualizo|cambio|modifico|cargo|ejecuto|proceso|quito|agrego|añado|elimino|borro|ajusto|registro|guardo|hago|pongo)';
-const CLITIC = '(?:se)?(?:l[oa]s?|les?)?';
-const PROMISED_WRITE_PATTERN = new RegExp(
-  [
-    `\\b(?:voy a|vamos a|procedo a|procedemos a|me encargo de|nos encargamos de|paso a)\\s+${WRITE_INFINITIVE}${CLITIC}(?![\\wáéíóúñ])`,
-    `\\b${WRITE_INFINITIVE}(?:é|emos)(?![\\wáéíóúñ])`,
-    `\\b(?:l[oa]s?|les?)\\s+har(?:é|emos)(?![\\wáéíóúñ])`,
-    `\\b(?:estoy|estamos)\\s+${WRITE_GERUND}${CLITIC}(?![\\wáéíóúñ])`,
-    `(?:^|[\\s,.;:¡!])(?:(?:se\\s+)?(?:l[oa]s?|les?)|ahora mismo|ya mismo|ahorita|enseguida|en seguida|en un momento|en un rato|luego|después|despues)\\s+(?:(?:se\\s+)?(?:l[oa]s?|les?)\\s+)?${WRITE_PRESENT_1S}(?![\\wáéíóúñ])`,
-    `\\bte aviso cuando\\b`,
-  ].join('|'),
-  'i',
-);
-
-/** The reply ends asking the person something: it is a question, not a promise. */
-function endsInQuestion(text: string): boolean {
-  return /\?[\s"'»)\]]*$/.test(text.trim());
-}
-
-export function promisesUnbackedWrite(text: string | undefined): boolean {
-  return !!text && !endsInQuestion(text) && PROMISED_WRITE_PATTERN.test(text);
-}
-
-/** The single resume after a write promise with nothing persisted behind it. */
-export const HONESTY_NUDGE =
-  'Prometiste un cambio pero en este turno no dejaste ninguna tarjeta para aprobar, así que no va a pasar nada. Si tienes la herramienta, propón ahora el cambio (propose_write_batch o la escritura); si no la tienes, dilo en una frase. No prometas trabajo futuro.';
-
-/** What the person reads if the model promises again after the resume. */
-export const HONEST_NO_WRITE_FALLBACK =
-  'No dejé ningún cambio listo para aprobar en este turno, así que no se aplicó nada. Si quieres, lo intento de nuevo o te digo qué me falta para hacerlo.';
-
-/**
- * True when this turn left a write behind the words: a proposed batch, an
- * applied write, or a write awaiting its confirmation.
- */
-export function turnHasPersistedWrite(
-  toolsUsed: AgentResult['tools_used'],
-  pendingConfirmation: unknown,
-): boolean {
-  if (pendingConfirmation) return true;
-  return (toolsUsed ?? []).some(
-    (use: any) =>
-      (use?.name === 'propose_write_batch' &&
-        use?.execution?.status === 'ok') ||
-      use?.execution?.effect_status === 'applied',
-  );
 }
 
 /**
@@ -2484,20 +2333,6 @@ export class AIAgentService {
         : params.goal,
     });
 
-    // T9: «sí, hazlo» answering Vex's own question closes that question.
-    const previousQuestion =
-      isVex && isAffirmativeReply(params.goal)
-        ? lastAssistantQuestion(params.messages as any)
-        : null;
-    const confirmedQuestion = offersWrite(previousQuestion)
-      ? previousQuestion
-      : null;
-    if (confirmedQuestion)
-      messages.push({
-        role: 'system',
-        content: confirmedQuestionRule(confirmedQuestion),
-      });
-
     if (contextSpan)
       activeTrace?.endSpan(contextSpan, {
         attributes: {
@@ -2631,10 +2466,6 @@ export class AIAgentService {
     // T8: read-only calls of this Vex turn and whether the budget closed it.
     let discoveryCalls = 0;
     let discoveryExhausted = false;
-    // T9: the one resume allowed after asking an already-confirmed question.
-    let confirmationResumed = false;
-    // T4: the one resume allowed after a write promise with nothing behind it.
-    let honestyResumed = false;
     // Time spent blocked on the browser (`ui_*` results). It is the person's
     // screen latency, not the model's work, so it must not eat the turn budget.
     let waitedMs = 0;
@@ -2713,22 +2544,6 @@ export class AIAgentService {
         const text = (lastCall?.content ?? '').trim();
         if (LEAKED_TOOL_MARKUP.test(text))
           this.logger.warn('Closing inference leaked tool-call markup');
-        // T4: a tool-free closing cannot persist anything, so a write promise
-        // in it is false by construction; it never reaches the person.
-        if (
-          isVex &&
-          promisesUnbackedWrite(text) &&
-          !turnHasPersistedWrite(toolsUsed, pendingConfirmation)
-        ) {
-          this.logger.warn(
-            JSON.stringify({
-              event: 'agent_honesty_gate',
-              outcome: 'closing_replaced',
-              store_id: context?.store_id ?? null,
-            }),
-          );
-          return HONEST_NO_WRITE_FALLBACK;
-        }
         return lastCall?.success !== false &&
           text &&
           !LEAKED_TOOL_MARKUP.test(text) &&
@@ -3137,72 +2952,6 @@ export class AIAgentService {
             }
           }
 
-          // B2: whether the reply is replaced is decided on THIS iteration's
-          // reply only; an earlier iteration's verdict never carries over to
-          // a later, valid answer.
-          let confirmationFallback = false;
-          let honestyFallback = false;
-
-          // T9 gate: the person already said yes to Vex's question; asking
-          // for the same go-ahead again (with nothing persisted) is resumed
-          // once, and replaced by an honest line if it happens again.
-          if (
-            confirmedQuestion &&
-            asksConfirmationAgain(response.content) &&
-            !turnHasPersistedWrite(toolsUsed, pendingConfirmation)
-          ) {
-            const canResume =
-              !confirmationResumed &&
-              iteration < maxIterations &&
-              Date.now() - startTime - waitedMs < timeoutMs;
-            this.logger.warn(
-              JSON.stringify({
-                event: 'agent_confirmation_gate',
-                outcome: canResume ? 'resumed' : 'replaced',
-                store_id: context?.store_id ?? null,
-                iteration,
-              }),
-            );
-            if (canResume) {
-              confirmationResumed = true;
-              messages.push({ role: 'assistant', content: response.content! });
-              messages.push({ role: 'system', content: CONFIRMATION_NUDGE });
-              continue;
-            }
-            confirmationFallback = true;
-          }
-
-          // T4 honesty gate (Vex): a reply that promises a write when this
-          // turn persisted none (no batch card, no confirmation, nothing
-          // applied) is resumed ONCE; promising again, the reply is replaced
-          // by an honest sentence. Never runs with a write awaiting approval.
-          if (
-            isVex &&
-            promisesUnbackedWrite(response.content) &&
-            !turnHasPersistedWrite(toolsUsed, pendingConfirmation)
-          ) {
-            const canResume =
-              !honestyResumed &&
-              iteration < maxIterations &&
-              Date.now() - startTime - waitedMs < timeoutMs;
-            this.logger.warn(
-              JSON.stringify({
-                event: 'agent_honesty_gate',
-                outcome: canResume ? 'resumed' : 'replaced',
-                store_id: context?.store_id ?? null,
-                agent_key: params.agent_key ?? 'vexi',
-                iteration,
-              }),
-            );
-            if (canResume) {
-              honestyResumed = true;
-              messages.push({ role: 'assistant', content: response.content! });
-              messages.push({ role: 'system', content: HONESTY_NUDGE });
-              continue;
-            }
-            honestyFallback = true;
-          }
-
           // Turn-close gate (structural, never a reading of the text): a chat
           // turn that ends in prose having run no tool and without calling
           // `finish_turn` is incomplete — typically «ya voy a buscar…» and
@@ -3255,11 +3004,7 @@ export class AIAgentService {
           // loses a little; a false report about the business would cost more.
           let narration = pendingConfirmation
             ? this.describePendingWrite(pendingConfirmation)
-            : honestyFallback
-              ? HONEST_NO_WRITE_FALLBACK
-              : confirmationFallback
-                ? CONFIRMED_BUT_NOT_DONE
-                : response.content?.trim();
+            : response.content?.trim();
           if (narration && LEAKED_TOOL_MARKUP.test(narration)) {
             this.logger.warn(
               `Leaked tool-call markup as final answer at iteration ${iteration}; closing inference`,
