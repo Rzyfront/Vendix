@@ -253,6 +253,35 @@ const ENUM_KEYS: Record<string, ReadonlySet<string>> = {
   cost_measurement: new Set(['reported', 'estimated', 'unknown']),
   context_budget_source: new Set(['configured', 'fallback']),
   estimation_method: new Set(['conservative_estimate']),
+  // Vex tie-breaker classifier (`VexClassifierService`): question, verdict
+  // and degradation reason only, never the classified text.
+  classifier_question: new Set(['confirmation', 'write_promise', 'missing_tool']),
+  classifier_verdict: new Set([
+    'accept',
+    'reject',
+    'ambiguous',
+    'promise',
+    'description',
+    'question',
+    'exists',
+    'missing',
+    'unclear',
+    'unavailable',
+  ]),
+  classifier_degradation: new Set([
+    'not_configured',
+    'inactive',
+    'no_api_key',
+    'config_error',
+    'turn_cap',
+    'timeout',
+    'network_error',
+    'http_error',
+    'invalid_response',
+    'refusal',
+    'low_confidence',
+    'empty_input',
+  ]),
 };
 
 /** Only technical fingerprints/counts are retained; arbitrary metadata is discarded. */
