@@ -228,11 +228,14 @@ describe('request_capability (T5/T6)', () => {
         corpus: () => [PRICING_TOOL],
         classifier: { needsMissingTool },
       });
-      return { tool, tickets, needsMissingTool };
+      // `handler` is optional on RegisteredTool; request_capability always has one.
+      const { handler } = tool;
+      if (!handler) throw new Error('request_capability sin handler');
+      return { tool, handler, tickets, needsMissingTool };
     }
 
     it('con «exists» no crea ticket', async () => {
-      const { tool, tickets } = withClassifier({
+      const { tool, handler, tickets } = withClassifier({
         value: 'exists',
         confidence: 0.92,
         criteria_version: 'v1',
@@ -241,31 +244,31 @@ describe('request_capability (T5/T6)', () => {
       const preview = await tool.preview!(ARGS, CTX);
       expect(preview.status).toBe('error');
       expect(preview.message).toContain('no se crea ticket');
-      const out = JSON.parse(await tool.handler(ARGS, CTX));
+      const out = JSON.parse(await handler(ARGS, CTX));
       expect(out.error).toContain('no se crea ticket');
       expect(tickets.recordCapabilityRequest).not.toHaveBeenCalled();
     });
 
     it('con «unclear» no crea ticket', async () => {
-      const { tool, tickets } = withClassifier({
+      const { handler, tickets } = withClassifier({
         value: 'unclear',
         confidence: 0.8,
         criteria_version: 'v1',
         latency_ms: 90,
       });
-      const out = JSON.parse(await tool.handler(ARGS, CTX));
+      const out = JSON.parse(await handler(ARGS, CTX));
       expect(out.error).toContain('no se crea ticket');
       expect(tickets.recordCapabilityRequest).not.toHaveBeenCalled();
     });
 
     it('con «missing» y catálogo sin coincidencias crea el ticket con la evidencia', async () => {
-      const { tool, tickets, needsMissingTool } = withClassifier({
+      const { handler, tickets, needsMissingTool } = withClassifier({
         value: 'missing',
         confidence: 0.91,
         criteria_version: 'v1',
         latency_ms: 140,
       });
-      const out = JSON.parse(await tool.handler(ARGS, CTX));
+      const out = JSON.parse(await handler(ARGS, CTX));
       expect(out.data).toMatchObject({ outcome: 'created', ticket_number: 'TKT30002' });
       const [request, summary] = needsMissingTool.mock.calls[0];
       expect(request).toContain('cámbiame el color del botón del carrito');
@@ -280,32 +283,32 @@ describe('request_capability (T5/T6)', () => {
     });
 
     it('con «unavailable» se comporta como hoy (crea el ticket, sin evidencia)', async () => {
-      const { tool, tickets } = withClassifier({
+      const { handler, tickets } = withClassifier({
         value: 'unavailable',
         reason: 'timeout',
         latency_ms: 800,
       });
-      const out = JSON.parse(await tool.handler(ARGS, CTX));
+      const out = JSON.parse(await handler(ARGS, CTX));
       expect(out.data.outcome).toBe('created');
       const description = tickets.recordCapabilityRequest.mock.calls[0][0].description;
       expect(description).not.toContain('Evidencia del clasificador');
     });
 
     it('si el clasificador lanza, el turno sigue como hoy', async () => {
-      const { tool } = withClassifier(new Error('boom'));
-      const out = JSON.parse(await tool.handler(ARGS, CTX));
+      const { handler } = withClassifier(new Error('boom'));
+      const out = JSON.parse(await handler(ARGS, CTX));
       expect(out.data.outcome).toBe('created');
     });
 
     it('el catálogo determinista manda: con coincidencia ni siquiera consulta al clasificador', async () => {
-      const { tool, tickets, needsMissingTool } = withClassifier({
+      const { handler, tickets, needsMissingTool } = withClassifier({
         value: 'missing',
         confidence: 0.99,
         criteria_version: 'v1',
         latency_ms: 10,
       });
       const out = JSON.parse(
-        await tool.handler(
+        await handler(
           {
             ...ARGS,
             user_request: 'aplicar tarifa a un producto',

@@ -37,15 +37,15 @@ function build(opts: {
       update,
     },
   };
-  const service = Object.assign(
-    Object.create(AIChatService.prototype) as AIChatService,
-    {
-      prisma,
-      logger: new Logger('spec'),
-      classifier:
-        opts.withClassifier === false ? undefined : { readConfirmation },
-    },
-  );
+  // Assign onto a typed instance: `Object.assign`'s return type intersects the
+  // class's private members with the literal and collapses to `never`.
+  const service = Object.create(AIChatService.prototype) as AIChatService;
+  Object.assign(service, {
+    prisma,
+    logger: new Logger('spec'),
+    classifier:
+      opts.withClassifier === false ? undefined : { readConfirmation },
+  });
   return { service, update, findBatch, readConfirmation };
 }
 
