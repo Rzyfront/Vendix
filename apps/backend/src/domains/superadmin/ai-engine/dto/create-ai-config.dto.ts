@@ -17,6 +17,10 @@ import {
   AIModelType,
   SdkType,
 } from '../../../../ai-engine/interfaces/ai-provider.interface';
+import {
+  aiEngineAllowedHosts,
+  checkAiBaseUrl,
+} from '../../../../ai-engine/ai-config-security';
 
 /**
  * Must stay in step with the `switch` in `AIEngineService.initializeProvider`.
@@ -179,6 +183,44 @@ export function IsAIConfigSettings(validationOptions?: ValidationOptions) {
   };
 }
 
+/**
+ * SSRF guard (B2, PR #1428): a provider `base_url` receives the config key as
+ * `Bearer`, so it may only name an allowed public provider host over https
+ * (see `checkAiBaseUrl`). IP literals, `localhost`, `.internal` and other
+ * private names are rejected; the deployment may extend the host list with
+ * `AI_ENGINE_ALLOWED_HOSTS`, never the row.
+ */
+@ValidatorConstraint({ name: 'AllowedAIBaseUrl', async: false })
+export class AllowedAIBaseUrlConstraint implements ValidatorConstraintInterface {
+  validate(value: unknown): boolean {
+    if (value === undefined || value === null) return true;
+    if (typeof value !== 'string') return false;
+    return checkAiBaseUrl(value, aiEngineAllowedHosts()).ok;
+  }
+
+  defaultMessage(args: ValidationArguments): string {
+    const value = typeof args.value === 'string' ? args.value : '';
+    const check = checkAiBaseUrl(value, aiEngineAllowedHosts());
+    const reason = check.ok ? 'invalid' : check.reason;
+    return (
+      `${args.property} is not allowed (${reason}): use https on one of ` +
+      `${aiEngineAllowedHosts().join(', ')}`
+    );
+  }
+}
+
+export function IsAllowedAIBaseUrl(validationOptions?: ValidationOptions) {
+  return function (object: object, propertyName: string) {
+    registerDecorator({
+      name: 'IsAllowedAIBaseUrl',
+      target: object.constructor,
+      propertyName,
+      options: validationOptions,
+      validator: AllowedAIBaseUrlConstraint,
+    });
+  };
+}
+
 export class CreateAIConfigDto {
   @IsString()
   @IsNotEmpty()
@@ -203,6 +245,7 @@ export class CreateAIConfigDto {
   @IsOptional()
   @IsString()
   @IsUrl({ require_tld: false }, { message: 'base_url must be a valid URL' })
+  @IsAllowedAIBaseUrl()
   @MaxLength(500)
   base_url?: string | null;
 

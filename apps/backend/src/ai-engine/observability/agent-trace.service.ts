@@ -100,6 +100,7 @@ export interface AgentSpanEnd {
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HASH = /^[0-9a-f]{64}$/;
+const CLASSIFIER_MODEL_ID = /^[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9._-]+)*(?::[a-z0-9._-]+)?$/i;
 const OUTCOMES = new Set<AgentOutcome>([
   'completed_verified',
   'awaiting_approval',
@@ -253,6 +254,38 @@ const ENUM_KEYS: Record<string, ReadonlySet<string>> = {
   cost_measurement: new Set(['reported', 'estimated', 'unknown']),
   context_budget_source: new Set(['configured', 'fallback']),
   estimation_method: new Set(['conservative_estimate']),
+  // Vex tie-breaker classifier (`VexClassifierService`): question, verdict
+  // and degradation reason only, never the classified text.
+  classifier_question: new Set(['confirmation', 'write_promise', 'missing_tool']),
+  classifier_verdict: new Set([
+    'accept',
+    'reject',
+    'ambiguous',
+    'promise',
+    'description',
+    'question',
+    'exists',
+    'missing',
+    'unclear',
+    'unavailable',
+  ]),
+  classifier_adapter: new Set(['decisions', 'chat']),
+  classifier_degradation: new Set([
+    'not_configured',
+    'inactive',
+    'no_api_key',
+    'config_error',
+    'no_model',
+    'adapter_unsupported',
+    'turn_cap',
+    'timeout',
+    'network_error',
+    'http_error',
+    'invalid_response',
+    'refusal',
+    'low_confidence',
+    'empty_input',
+  ]),
 };
 
 /** Only technical fingerprints/counts are retained; arbitrary metadata is discarded. */
@@ -267,6 +300,7 @@ export function redactTraceAttributes(
     ...BOOLEAN_KEYS,
     ...Object.keys(ENUM_KEYS),
     'catalog_version',
+    'classifier_model',
   ]) {
     const value = input[key];
     if (HASH_KEYS.has(key) && typeof value === 'string' && HASH.test(value))
@@ -300,6 +334,13 @@ export function redactTraceAttributes(
       typeof value === 'string' &&
       /^v?\d+(?:\.\d+){0,3}$/.test(value)
     )
+      safe[key] = value;
+    else if (
+      key === 'classifier_model' &&
+      typeof value === 'string' &&
+      CLASSIFIER_MODEL_ID.test(value)
+    )
+      // A catalog model id (`vendor/model[:variant]`), never user content.
       safe[key] = value;
   }
   return safe;

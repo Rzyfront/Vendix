@@ -116,6 +116,14 @@ import {
   ConversationTitleService,
   TITLE_TIMEOUT_MS,
 } from './conversation-title.service';
+import { VexClassifierService } from '../../../ai-engine/vex-classifier.service';
+
+/**
+ * Conversation state key for the tie-breaker reading of the person's reply
+ * to a pending write-batch card. Opinion only: the card is still the only
+ * thing that authorizes, and the reply text is never altered.
+ */
+export const VEX_CONFIRMATION_READING_KEY = 'vex_confirmation_reading';
 
 /**
  * The stored trace is for the human reading the transcript later, not for the
@@ -333,6 +341,9 @@ export class AIChatService {
     // Native vision (T42): signs the turn's image handles. Optional-final;
     // without it every turn stays text + handles.
     @Optional() private readonly vexAttachments?: VexiAttachmentsService,
+    // Tie-breaker classifier (Vex only). Optional-final like the rest:
+    // without it (or with `vex_classifier` off) the turn is unchanged.
+    @Optional() private readonly classifier?: VexClassifierService,
   ) {}
 
   async createConversation(
@@ -1145,6 +1156,18 @@ export class AIChatService {
       intent.content
         ? this.titles.start(conversationId, intent.content, TITLE_TIMEOUT_MS)
         : null;
+    // Tie-breaker reading of a «sí/no» to a pending batch card. Runs beside
+    // the turn, never awaited by it and never rejecting: it only records
+    // conversation state next to the card.
+    if (
+      vexTurn &&
+      this.classifier &&
+      !intent.continuation &&
+      intent.content &&
+      conversation.messages.length > 0
+    ) {
+      void this.readPendingBatchReply(conversationId, intent.content);
+    }
     // Held back until after the audio and timing frames. Both the SSE controller
     // and the browser close the connection the moment `done` arrives, so anything
     // emitted after it is never seen. See the agent branch below for the original
@@ -2104,6 +2127,69 @@ export class AIChatService {
    * without `VexBlockService` (positional test constructions) there is simply
    * no selection to fold.
    */
+  /**
+   * When the conversation has a write-batch card still waiting for approval,
+   * asks the classifier how the person's reply reads (accept / reject /
+   * ambiguous / unavailable) and stores it as conversation state keyed by the
+   * batch. Never alters the reply, never approves: the card stays the only
+   * authority, and `ambiguous`/`unavailable` change nothing for the turn.
+   */
+  async readPendingBatchReply(
+    conversationId: number,
+    reply: string,
+  ): Promise<void> {
+    if (!this.classifier) return;
+    try {
+      const batch = await this.prisma.ai_agent_write_batches.findFirst({
+        where: {
+          conversation_id: conversationId,
+          status: 'proposed',
+          expires_at: { gt: new Date() },
+        },
+        orderBy: { created_at: 'desc' },
+        select: { id: true, goal: true, step_count: true },
+      });
+      if (!batch) return;
+      const verdict = await this.classifier.readConfirmation(
+        reply,
+        `¿Aplico el lote «${batch.goal}» (${batch.step_count} cambio(s))?`,
+      );
+      // Fresh read right before the write: other keys stay as they are now.
+      const row = await this.prisma.ai_conversations.findFirst({
+        where: { id: conversationId },
+        select: { metadata: true },
+      });
+      if (!row) return;
+      const metadata =
+        row.metadata &&
+        typeof row.metadata === 'object' &&
+        !Array.isArray(row.metadata)
+          ? (row.metadata as Record<string, unknown>)
+          : {};
+      await this.prisma.ai_conversations.update({
+        where: { id: conversationId },
+        data: {
+          metadata: {
+            ...metadata,
+            [VEX_CONFIRMATION_READING_KEY]: {
+              batch_id: batch.id,
+              verdict: verdict.value,
+              ...('reason' in verdict ? { reason: verdict.reason } : {}),
+              ...(verdict.criteria_version
+                ? { criteria_version: verdict.criteria_version }
+                : {}),
+              read_at: new Date().toISOString(),
+            },
+          } as Prisma.InputJsonValue,
+        },
+      });
+    } catch (error) {
+      this.logger.debug(
+        `vex_classifier confirmation reading skipped: ${error instanceof Error ? error.message : 'unknown'}`,
+      );
+    }
+  }
+
   private async withBlockSelection(
     goal: string,
     agentKey: string | null,
