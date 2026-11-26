@@ -581,15 +581,25 @@ export class VexChatStore {
 
     this._loading_audio_message_id.set(message.id);
     void firstValueFrom(this.api.synthesizeSpeech(text))
-      .then((segments) => {
+      .then(({ segments, complete }) => {
         if (requestId !== this.listen_request_id) return;
         if (!segments.length) {
           this.toast.warning?.(
-            'Este mensaje no tiene texto para reproducir en voz alta.',
+            complete
+              ? 'Este mensaje no tiene texto para reproducir en voz alta.'
+              : 'No se pudo generar el audio de este mensaje. Intenta de nuevo.',
           );
           return;
         }
-        this.cacheMessageAudio(cacheKey, segments);
+        // Only a complete synthesis is the message's audio. A fragment plays
+        // once and the next click synthesizes again from the full text.
+        if (complete) {
+          this.cacheMessageAudio(cacheKey, segments);
+        } else {
+          this.toast.warning?.(
+            'Parte del audio no se pudo generar. Vuelve a tocar «Escuchar» para oírlo completo.',
+          );
+        }
         this.playMessageSegments(message.id, segments);
       })
       .catch((error) => {
@@ -2330,6 +2340,9 @@ export class VexChatStore {
     let reconcileRequired = false;
     let voiceFinished = false;
     const liveAudioSegments: VexSpeechSegment[] = [];
+    // Set by the `voice_status` frame. The live audio becomes the message's
+    // reusable audio only when the server confirms no segment was lost.
+    let voiceComplete = false;
     const finishVoiceTurn = () => {
       if (voiceFinished) return;
       voiceFinished = true;
@@ -2371,11 +2384,17 @@ export class VexChatStore {
           // T14: the answer arrives as text only; say why once.
           if (chunk.type === 'voice_notice' && chunk.message)
             this.voice.notice(chunk.message);
+          if (chunk.type === 'voice_status')
+            voiceComplete = chunk.complete === true;
           if (chunk.type === 'done' || chunk.type === 'error') {
             finishVoiceTurn();
           }
           this.applyChunk(conversation_id, target, chunk);
-          if (chunk.type === 'done' && liveAudioSegments.length > 0) {
+          if (
+            chunk.type === 'done' &&
+            voiceComplete &&
+            liveAudioSegments.length > 0
+          ) {
             const finalText = this.findMessageContent(conversation_id, target);
             if (finalText) {
               const ordered = [...liveAudioSegments]
