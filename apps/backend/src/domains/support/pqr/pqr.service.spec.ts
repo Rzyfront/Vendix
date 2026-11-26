@@ -34,6 +34,7 @@ describe('PqrService — QUI-791 multi-tenant PQR flow', () => {
       findMany: jest.fn(),
       count: jest.fn(),
       create: jest.fn(),
+      update: jest.fn(),
     },
     $queryRaw: jest.fn(),
   };
@@ -355,6 +356,76 @@ describe('PqrService — QUI-791 multi-tenant PQR flow', () => {
           },
         }),
       );
+    });
+  });
+
+  /**
+   * B3 — `PATCH /store/support/pqr/:id` cannot plant Vex capability tags on a
+   * PQR (nor drop ones a ticket already has): those belong to the capability
+   * flow, and a planted key would collect other stores' votes.
+   */
+  describe('adminUpdate() — B3 etiquetas reservadas de capacidad', () => {
+    it('descarta vex-capability-request, capability:<clave> y capability-vote:<hmac>', async () => {
+      mockGlobalPrisma.organizations.findFirst.mockResolvedValue(mockPlatformOrg);
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: 10,
+        organization_id: 6,
+      } as any);
+      mockGlobalPrisma.support_tickets.findFirst.mockResolvedValue({
+        id: 50,
+        tags: ['pqr', 'complaint'],
+      });
+      mockGlobalPrisma.support_tickets.update.mockImplementation(
+        async ({ data }: any) => ({
+          id: 50,
+          ticket_number: 'PQR-6-0001',
+          category: 'COMPLAINT',
+          status: 'OPEN',
+          priority: 'P3',
+          created_at: new Date(),
+          updated_at: new Date(),
+          ...data,
+        }),
+      );
+
+      await service.adminUpdate(
+        50,
+        {
+          tags: [
+            'pqr',
+            'vex-capability-request',
+            'capability:storefront-cart-button-color',
+            'capability-vote:abc',
+            'seguimiento',
+          ],
+        } as any,
+        11,
+      );
+
+      expect(
+        mockGlobalPrisma.support_tickets.update.mock.calls[0][0].data.tags,
+      ).toEqual(['pqr', 'seguimiento']);
+    });
+
+    it('sin tags en el DTO no toca las etiquetas', async () => {
+      mockGlobalPrisma.organizations.findFirst.mockResolvedValue(mockPlatformOrg);
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: 10,
+        organization_id: 6,
+      } as any);
+      mockGlobalPrisma.support_tickets.findFirst.mockResolvedValue({
+        id: 50,
+        tags: ['pqr'],
+      });
+      mockGlobalPrisma.support_tickets.update.mockImplementation(
+        async ({ data }: any) => ({ id: 50, ticket_number: 'PQR-6-0001', ...data }),
+      );
+
+      await service.adminUpdate(50, { priority: 'P2' } as any, 11);
+
+      expect(
+        mockGlobalPrisma.support_tickets.update.mock.calls[0][0].data.tags,
+      ).toBeUndefined();
     });
   });
 });

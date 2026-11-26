@@ -118,6 +118,8 @@ describe('TicketsService · solicitudes de capacidad', () => {
           tags: {
             hasEvery: [CAPABILITY_REQUEST_TAG, 'capability:storefront-cart-button-color'],
           },
+          category: 'SERVICE_REQUEST',
+          NOT: { tags: { has: 'pqr' } },
           status: { notIn: ['RESOLVED', 'CLOSED'] },
         },
       }),
@@ -181,5 +183,57 @@ describe('TicketsService · solicitudes de capacidad', () => {
     expect(orgPrisma.support_tickets.create).not.toHaveBeenCalled();
     expect(globalPrisma.support_tickets.update).not.toHaveBeenCalled();
     expect(out).toMatchObject({ outcome: 'already_voted', ticket_number: 'TKT30001' });
+  });
+
+  /**
+   * B3 — a store admin can still edit a PQR's tags over HTTP
+   * (`PATCH /store/support/pqr/:id`). Even if a PQR carried both capability
+   * tags, it is not the capability ticket: another store asking for that key
+   * opens the real one and its vote never lands on the PQR.
+   */
+  it('B3: una PQR con las etiquetas reservadas no se toma como ticket de capacidad', async () => {
+    const pqr = {
+      id: 50,
+      ticket_number: 'PQR-6-0001',
+      organization_id: 6,
+      category: 'COMPLAINT',
+      status: 'OPEN',
+      tags: [
+        'pqr',
+        'complaint',
+        CAPABILITY_REQUEST_TAG,
+        capabilityKeyTag(INPUT.capabilityKey),
+      ],
+    };
+    const { service, orgPrisma, globalPrisma } = build(null);
+    // Same semantics the database applies to the `where` the service sends.
+    globalPrisma.support_tickets.findFirst.mockImplementation(
+      async ({ where }: any) =>
+        [pqr].find(
+          (t) =>
+            where.tags.hasEvery.every((tag: string) => t.tags.includes(tag)) &&
+            (!where.category || t.category === where.category) &&
+            !(where.NOT?.tags?.has && t.tags.includes(where.NOT.tags.has)) &&
+            !where.status.notIn.includes(t.status),
+        ) ?? null,
+    );
+
+    const status = await service.findCapabilityRequest(INPUT.capabilityKey, 9, 42);
+    expect(status).toMatchObject({ exists: false, votes: 0 });
+
+    const out = await service.recordCapabilityRequest({
+      ...INPUT,
+      organizationId: 9,
+      storeId: 42,
+    });
+    expect(globalPrisma.support_tickets.update).not.toHaveBeenCalled();
+    expect(orgPrisma.support_tickets.create).toHaveBeenCalledTimes(1);
+    expect(orgPrisma.support_tickets.create.mock.calls[0][0].data).toMatchObject({
+      organization_id: 9,
+      store_id: 42,
+      category: 'SERVICE_REQUEST',
+    });
+    expect(out).toMatchObject({ outcome: 'created', own: true, votes: 1 });
+    expect(pqr.tags).not.toContain(capabilityVoteTag(42));
   });
 });

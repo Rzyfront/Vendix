@@ -1,5 +1,4 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
-import { createHmac } from 'crypto';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { CreateTicketDto } from './dto/create-ticket.dto';
@@ -18,48 +17,22 @@ import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { ImageContext } from '@common/config/image-presets';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import {
+  CAPABILITY_REQUEST_TAG,
+  CAPABILITY_VOTE_TAG_PREFIX,
+  capabilityKeyTag,
+  capabilityVoteTag,
+  isReservedCapabilityTag,
+  withoutReservedCapabilityTags,
+} from './capability-tags';
 
-/** Label of every ticket Vex files for a missing capability. */
-export const CAPABILITY_REQUEST_TAG = 'vex-capability-request';
-const CAPABILITY_KEY_TAG_PREFIX = 'capability:';
-const CAPABILITY_VOTE_TAG_PREFIX = 'capability-vote:';
-
-/** Tag that makes one capability one ticket, whatever store asks for it. */
-export function capabilityKeyTag(capabilityKey: string): string {
-  return `${CAPABILITY_KEY_TAG_PREFIX}${capabilityKey}`;
-}
-
-/**
- * A store's vote: HMAC of the store id under a server secret. A plain hash of
- * a small integer is reversible by brute force; the ticket belongs to the
- * organization that asked first, and its people must not learn which other
- * stores voted. Fails closed without a secret.
- */
-export function capabilityVoteTag(
-  storeId: number,
-  secret: string | undefined = process.env.JWT_SECRET,
-): string {
-  if (!secret) {
-    throw new Error('capabilityVoteTag: missing server secret (JWT_SECRET)');
-  }
-  const digest = createHmac('sha256', secret)
-    .update(`vex-capability-vote:store:${storeId}`)
-    .digest('hex')
-    .slice(0, 24);
-  return `${CAPABILITY_VOTE_TAG_PREFIX}${digest}`;
-}
-
-/**
- * Tags only the capability flow may write. Stripped from HTTP create/update
- * so nobody can pre-claim a capability key and collect other stores' votes.
- */
-export function isReservedCapabilityTag(tag: string): boolean {
-  return (
-    tag === CAPABILITY_REQUEST_TAG ||
-    tag.startsWith(CAPABILITY_KEY_TAG_PREFIX) ||
-    tag.startsWith(CAPABILITY_VOTE_TAG_PREFIX)
-  );
-}
+export {
+  CAPABILITY_REQUEST_TAG,
+  capabilityKeyTag,
+  capabilityVoteTag,
+  isReservedCapabilityTag,
+  withoutReservedCapabilityTags,
+} from './capability-tags';
 
 /**
  * What the caller may learn about the open request for a capability. The
@@ -281,11 +254,15 @@ export class TicketsService {
   private async findOpenCapabilityTicket(capabilityKey: string) {
     return this.globalPrisma.support_tickets.findFirst({
       where: {
-        // Both tags: only tickets the capability flow created (HTTP cannot
-        // write reserved tags) can collect votes.
+        // Both tags: only tickets the capability flow created (no HTTP writer
+        // keeps reserved tags) can collect votes. The flow files them as
+        // SERVICE_REQUEST and never as a PQR, so a PQR or another category
+        // carrying the tags anyway is never taken (B3: PQR admin update).
         tags: {
           hasEvery: [CAPABILITY_REQUEST_TAG, capabilityKeyTag(capabilityKey)],
         },
+        category: ticket_category_enum.SERVICE_REQUEST,
+        NOT: { tags: { has: 'pqr' } },
         status: {
           notIn: [ticket_status_enum.RESOLVED, ticket_status_enum.CLOSED],
         },
@@ -549,12 +526,10 @@ export class TicketsService {
       // neither add them nor drop the ones the ticket already has.
       const data = { ...updateTicketDto } as Record<string, unknown>;
       if (Array.isArray(data.tags)) {
-        data.tags = [
-          ...(data.tags as string[]).filter(
-            (tag) => !isReservedCapabilityTag(tag),
-          ),
-          ...(ticket.tags ?? []).filter(isReservedCapabilityTag),
-        ];
+        data.tags = withoutReservedCapabilityTags(
+          data.tags as string[],
+          ticket.tags ?? [],
+        );
       }
       const updated = await this.prisma.support_tickets.update({
         where: { id: ticketId },
