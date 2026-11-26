@@ -12,6 +12,7 @@ import {
   VexiSpeechService,
 } from './vexi-speech.service';
 import { VexiSpeechCache } from './vexi-speech.cache';
+import { isSynthesisLoss } from './vexi-speech.pipeline';
 import { SEGMENT_TARGETS, VOICE_FILLERS } from './vexi-speech.constants';
 
 describe('firstSentenceEnd', () => {
@@ -680,7 +681,8 @@ describe('VexiSpeechService', () => {
       expect(first).toEqual(
         expect.objectContaining({ generated: true, audioBase64: 'AAAA' }),
       );
-      expect(first!.seconds).toBeCloseTo(text.length / 15, 5);
+      if (!first || isSynthesisLoss(first)) throw new Error('expected audio');
+      expect(first.seconds).toBeCloseTo(text.length / 15, 5);
       expect(second).toEqual(
         expect.objectContaining({ generated: false, seconds: 0 }),
       );
