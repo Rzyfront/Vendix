@@ -1,5 +1,6 @@
 import { validate } from 'class-validator';
 import { CreateAIConfigDto } from './create-ai-config.dto';
+import { UpdateAIConfigDto } from './update-ai-config.dto';
 
 describe('CreateAIConfigDto', () => {
   const buildDto = (baseUrl: string | null): CreateAIConfigDto => {
@@ -12,10 +13,53 @@ describe('CreateAIConfigDto', () => {
     return dto;
   };
 
-  it('accepts localhost base URLs with an explicit protocol', async () => {
+  it('accepts an https base URL on an allowed provider host', async () => {
     await expect(
-      validate(buildDto('http://localhost:11434/v1')),
+      validate(buildDto('https://openrouter.ai/api/v1')),
     ).resolves.toHaveLength(0);
+  });
+
+  describe('base_url SSRF guard (B2, PR #1428)', () => {
+    const saved = process.env.AI_ENGINE_ALLOWED_HOSTS;
+    afterEach(() => {
+      if (saved === undefined) delete process.env.AI_ENGINE_ALLOWED_HOSTS;
+      else process.env.AI_ENGINE_ALLOWED_HOSTS = saved;
+    });
+
+    it.each([
+      ['cloud metadata over http', 'http://169.254.169.254/latest'],
+      ['cloud metadata over https', 'https://169.254.169.254/latest'],
+      ['localhost over https', 'https://localhost/v1'],
+      ['local Ollama (previously accepted)', 'http://localhost:11434/v1'],
+      ['an .internal name', 'https://metadata.google.internal/'],
+      ['a private IP', 'https://192.168.1.10/v1'],
+      ['an unknown external host', 'https://attacker.example.com/v1'],
+      ['an allowed host over http', 'http://api.openai.com/v1'],
+      ['an allowed host with credentials', 'https://user:pass@openrouter.ai/api/v1'],
+    ])('rejects %s (%s)', async (_label, url) => {
+      const errors = await validate(buildDto(url));
+      expect(errors.map((e) => e.property)).toContain('base_url');
+    });
+
+    it('rejects private names even when the deployment lists them', async () => {
+      process.env.AI_ENGINE_ALLOWED_HOSTS = 'localhost,gw.example.com';
+      const errors = await validate(buildDto('https://localhost/v1'));
+      expect(errors.map((e) => e.property)).toContain('base_url');
+    });
+
+    it('accepts a host the deployment adds with AI_ENGINE_ALLOWED_HOSTS', async () => {
+      process.env.AI_ENGINE_ALLOWED_HOSTS = 'gw.example.com';
+      await expect(
+        validate(buildDto('https://gw.example.com/v1')),
+      ).resolves.toHaveLength(0);
+    });
+
+    it('applies to updates too (PartialType keeps the validator)', async () => {
+      const dto = new UpdateAIConfigDto();
+      dto.base_url = 'https://169.254.169.254/latest';
+      const errors = await validate(dto);
+      expect(errors.map((e) => e.property)).toContain('base_url');
+    });
   });
 
   it('accepts null so updates can clear the base URL', async () => {
@@ -31,14 +75,14 @@ describe('CreateAIConfigDto', () => {
 
   describe('model_type', () => {
     it('accepts a valid model_type from the enum (e.g. image)', async () => {
-      const dto = buildDto('http://localhost:11434/v1');
+      const dto = buildDto('https://openrouter.ai/api/v1');
       dto.model_type = 'image';
 
       await expect(validate(dto)).resolves.toHaveLength(0);
     });
 
     it('rejects an invalid model_type like foobar', async () => {
-      const dto = buildDto('http://localhost:11434/v1');
+      const dto = buildDto('https://openrouter.ai/api/v1');
       // Force an invalid value through the API surface to exercise @IsIn.
       (dto as any).model_type = 'foobar';
 
@@ -52,7 +96,7 @@ describe('CreateAIConfigDto', () => {
     });
 
     it('treats model_type as optional — DTO with no model_type validates clean', async () => {
-      const dto = buildDto('http://localhost:11434/v1');
+      const dto = buildDto('https://openrouter.ai/api/v1');
       // model_type intentionally omitted.
 
       await expect(validate(dto)).resolves.toHaveLength(0);

@@ -69,6 +69,7 @@ import { AILoggingService } from './ai-logging.service';
 import { RequestContextService } from '../common/context/request-context.service';
 import { SubscriptionAccessService } from '../domains/store/subscriptions/services/subscription-access.service';
 import { AgentQuotaService } from '../domains/store/subscriptions/services/agent-quota.service';
+import { resolveConfigApiKey } from './ai-config-security';
 import { SubscriptionGateConfig } from '../domains/store/subscriptions/config/subscription-gate.config';
 import {
   AIFeatureKey,
@@ -264,9 +265,10 @@ export class AIEngineService implements OnModuleInit {
   }
 
   private resolveApiKey(config: any): string {
-    if (config.api_key_ref) return config.api_key_ref;
-    const envKey = `AI_${config.provider.toUpperCase().replace(/\s+/g, '_')}_API_KEY`;
-    return process.env[envKey] || this.configService.get<string>(envKey) || '';
+    return resolveConfigApiKey(
+      config,
+      (envKey) => process.env[envKey] || this.configService.get<string>(envKey),
+    );
   }
 
   private getDefaultProvider(): AIProvider {
