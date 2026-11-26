@@ -9,6 +9,7 @@ import {
   asksConfirmationAgain,
   confirmedQuestionRule,
   isAffirmativeReply,
+  offersWrite,
 } from './ai-agent.service';
 import { RequestContextService } from '../common/context/request-context.service';
 import { AIStreamChunk } from './interfaces/ai-provider.interface';
@@ -211,5 +212,99 @@ describe('Vex T9: un «hazlo» cierra la pregunta', () => {
     const { chunks } = await f.drain({ agent_key: 'vex', messages: HISTORY_309 });
     expect(f.chat).toHaveBeenCalledTimes(1);
     expect(finalText(chunks)).toContain('¿Cuál uso');
+  });
+
+  // ---------------------------------------------------------------- B2
+  it('B2: negativas, cancelaciones y condiciones no son un «sí»', () => {
+    for (const notYes of [
+      'ok, mejor no lo hagas',
+      'claro que no',
+      'vale, pero no toques los precios',
+      'listo, cancela eso',
+      'eso no era lo que pedí',
+      'perfecto, pero primero muéstrame la lista',
+      'sí, pero espera',
+      'dale, aunque solo a las bebidas',
+    ])
+      expect({ text: notYes, yes: isAffirmativeReply(notYes) }).toEqual({
+        text: notYes,
+        yes: false,
+      });
+    for (const yes of ['sí, hazlo', 'dale', 'ok', 'sí, aplícala para todos', 'listo, procede'])
+      expect({ text: yes, yes: isAffirmativeReply(yes) }).toEqual({ text: yes, yes: true });
+  });
+
+  it('B2: solo una pregunta que ofrece una escritura queda cerrada por el sí', () => {
+    for (const write of [
+      QUESTION,
+      '¿Confirmas que la aplico?',
+      '¿Aplico la tarifa a los 56?',
+      '¿Procedo?',
+      '¿Quieres que cree el producto con ese precio?',
+      '¿Lo hago?',
+    ])
+      expect({ q: write, offers: offersWrite(write) }).toEqual({ q: write, offers: true });
+    for (const read of [
+      '¿Quieres ver el detalle de ventas de hoy?',
+      '¿Quieres que te muestre los cambios de precio de esta semana?',
+      '¿Te explico el proceso de facturación?',
+      'Ya apliqué la tarifa. Listo.',
+      null,
+    ])
+      expect({ q: read, offers: offersWrite(read) }).toEqual({ q: read, offers: false });
+  });
+
+  it('B2: «sí» a una pregunta de lectura no activa el gate y la respuesta con datos llega', async () => {
+    const f = build();
+    const answer =
+      'Tus ventas de hoy: Café x12, Pan x30. ¿Quieres que te lo exporte a Excel?';
+    f.chat.mockResolvedValueOnce(ok({ content: answer }));
+    const { chunks } = await f.drain({
+      agent_key: 'vex',
+      goal: 'sí',
+      messages: [
+        { role: 'user', content: '¿cómo voy hoy?' },
+        { role: 'assistant', content: '¿Quieres ver el detalle de ventas de hoy?' },
+      ],
+    });
+    const first = f.chat.mock.calls[0][0] as any[];
+    expect(first.some((m) => String(m.content).startsWith('La persona ya respondió'))).toBe(false);
+    expect(f.chat).toHaveBeenCalledTimes(1);
+    expect(finalText(chunks)).toBe(answer);
+  });
+
+  it('B2: «ok, mejor no lo hagas» no se trata como confirmación', async () => {
+    const f = build();
+    f.chat.mockResolvedValueOnce(
+      ok({ content: 'Entendido, no aplico nada. ¿Quieres que la aplique solo a las bebidas?' }),
+    );
+    const { chunks } = await f.drain({
+      agent_key: 'vex',
+      goal: 'ok, mejor no lo hagas',
+      messages: HISTORY_309,
+    });
+    const first = f.chat.mock.calls[0][0] as any[];
+    expect(first.some((m) => String(m.content).startsWith('La persona ya respondió'))).toBe(false);
+    expect(f.chat).toHaveBeenCalledTimes(1);
+    expect(finalText(chunks)).toContain('no aplico nada');
+  });
+
+  it('B2: el reemplazo se decide sobre la respuesta final, no queda pegado de una iteración anterior', async () => {
+    const f = build();
+    f.executeTool.mockResolvedValueOnce(
+      JSON.stringify(
+        buildToolSuccessEnvelope('list_products', { tiers: ['Mayorista', 'Detal'] }),
+      ),
+    );
+    const real =
+      'No existe la tarifa Manaure en tu tienda; tus tarifas son Mayorista y Detal.';
+    f.chat
+      .mockResolvedValueOnce(ok({ content: '¿Confirmas que la aplico?' }))
+      .mockResolvedValueOnce(ok({ content: '¿Seguro? Voy a aplicar la tarifa.' }))
+      .mockResolvedValueOnce(ok({ tool_calls: [call('r1', 'list_products')] }))
+      .mockResolvedValueOnce(ok({ content: real }));
+    const { chunks } = await f.drain({ agent_key: 'vex', messages: HISTORY_309 });
+    expect(f.chat).toHaveBeenCalledTimes(4);
+    expect(finalText(chunks)).toBe(real);
   });
 });

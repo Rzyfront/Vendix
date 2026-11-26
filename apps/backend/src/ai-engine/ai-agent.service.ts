@@ -531,10 +531,45 @@ export const TURN_CLOSE_NUDGE =
 const AFFIRMATIVE_REPLY =
   /^(?:s[ií]|sip|dale|h[aá]zlo|h[aá]gale|h[aá]gamoslo|procede|proced[eé]|adelante|ok(?:ay)?|de una|listo|claro|confirmo|confirmado|va|vale|perfecto|aplica(?:lo|la)?|apl[ií]calo|apl[ií]cala|sigue|contin[uú]a|correcto|eso|exacto)(?=$|[\s,.;:!¡?¿])/i;
 
+/**
+ * B2 — a refusal, a cancel or a condition riding on an affirmative opener
+ * («ok, mejor no lo hagas», «claro que no», «vale, pero no toques los
+ * precios», «listo, cancela eso», «perfecto, pero primero muéstrame…») is not
+ * a go-ahead.
+ */
+const NOT_A_GO_AHEAD =
+  /(?:^|[\s,.;:!¡?¿])(?:no|nunca|tampoco|ni|pero|aunque|mejor|primero|antes de|espera|esp[eé]rate|cancel\w*|det[eé]n\w*|para(?:lo|la)?\s*$|olv[ií]d\w*|d[eé]ja(?:lo|la)|todav[ií]a no|a[uú]n no)(?=$|[\s,.;:!¡?¿])/i;
+
 export function isAffirmativeReply(goal: string | undefined): boolean {
   if (!goal) return false;
   const text = goal.trim();
-  return text.length > 0 && text.length <= 80 && AFFIRMATIVE_REPLY.test(text);
+  return (
+    text.length > 0 &&
+    text.length <= 80 &&
+    AFFIRMATIVE_REPLY.test(text) &&
+    !NOT_A_GO_AHEAD.test(text)
+  );
+}
+
+/**
+ * B2 — the go-ahead only closes a question that offered a write («¿Quieres que
+ * le asigne la tarifa…?», «¿Confirmas que la aplico?», «¿Procedo?»). A «sí» to
+ * «¿Quieres ver el detalle de ventas de hoy?» asks for a read: nothing to
+ * enforce. Matches a write verb conjugated as an offer (infinitive,
+ * subjunctive or first person), never the noun («los cambios», «el cargo»).
+ */
+const WRITE_OFFER =
+  /(?:^|[\s¿,(])(?:(?:aplic|asign|actualiz|modific|cambi|carg|quit|agreg|elimin|borr|ajust|registr|guard)(?:ar|e|en|emos|o|amos)|(?:apliqu|actualic|modifiqu|cargu|agregu)(?:e|en|emos)|añad(?:ir|a|an|amos|o)|cre(?:ar|e|en|emos|o|amos)|proced(?:er|o|a|emos|amos))(?:l[oa]s?|les?|se(?:l[oa]s?)?)?(?=$|[\s,.;:!?¡¿)])|\b(?:l[oa]s?|le)\s+hag[oa]\b|\bhacerlo\b/i;
+
+/** Each question sentence of a message (`¿…?`, or a sentence ending in `?`). */
+function questionSentences(text: string): string[] {
+  return text.match(/¿[^¿?]*\?|[^.!?¿\n]*\?/g) ?? [];
+}
+
+export function offersWrite(question: string | null | undefined): boolean {
+  return (
+    !!question && questionSentences(question).some((q) => WRITE_OFFER.test(q))
+  );
 }
 
 /** A question asking for the same go-ahead again. */
@@ -603,15 +638,45 @@ export function honestyRule(capabilityRequestOffered: boolean): string {
 }
 
 /**
- * A first-person announcement of a future write: «voy a aplicar…», «ahora
- * mismo actualizo…», «te aviso cuando termine». Read-only announcements
- * («voy a revisar») are left to the turn-close gate.
+ * A first-person announcement of a future write (B1): the write verb itself
+ * must be conjugated as the speaker's own future or ongoing action, with no
+ * free words in between —
+ *   - «voy a / vamos a / procedo a / me encargo de / paso a» + infinitive
+ *     («voy a aplicar», «vamos a asignarla»);
+ *   - simple future («aplicaré», «la asignaremos»);
+ *   - «estoy / estamos» + gerund («estoy procesando»);
+ *   - a present-tense write after a clitic or a time adverb («la aplico»,
+ *     «luego aplico», «ahora mismo actualizo», «en un momento asigno»);
+ *   - «te aviso cuando…».
+ * Nouns and participles («cambios», «proceso», «creados», «cargos») and read
+ * announcements («voy a revisar los cambios») never match.
  */
-const PROMISED_WRITE_PATTERN =
-  /\b(?:voy a|vamos a|procedo a|me encargo de|ahora mismo|enseguida|en un momento|ya mismo|estoy)\s+(?:[\wáéíóúñ]+\s+){0,3}?(?:aplic|asign|actualiz|cambi|modific|carg|ejecut|proces|quit|agreg|cre[oaáé]|hag[oa]|pong[oa])\w*|\bte aviso cuando\b/i;
+const WRITE_INFINITIVE =
+  '(?:aplicar|asignar|actualizar|cambiar|modificar|cargar|ejecutar|procesar|quitar|agregar|añadir|crear|eliminar|borrar|ajustar|registrar|guardar)';
+const WRITE_GERUND =
+  '(?:aplicando|asignando|actualizando|cambiando|modificando|cargando|ejecutando|procesando|quitando|agregando|añadiendo|creando|eliminando|borrando|ajustando|registrando|guardando)';
+const WRITE_PRESENT_1S =
+  '(?:aplico|asigno|actualizo|cambio|modifico|cargo|ejecuto|proceso|quito|agrego|añado|elimino|borro|ajusto|registro|guardo|hago|pongo)';
+const CLITIC = '(?:se)?(?:l[oa]s?|les?)?';
+const PROMISED_WRITE_PATTERN = new RegExp(
+  [
+    `\\b(?:voy a|vamos a|procedo a|procedemos a|me encargo de|nos encargamos de|paso a)\\s+${WRITE_INFINITIVE}${CLITIC}(?![\\wáéíóúñ])`,
+    `\\b${WRITE_INFINITIVE}(?:é|emos)(?![\\wáéíóúñ])`,
+    `\\b(?:l[oa]s?|les?)\\s+har(?:é|emos)(?![\\wáéíóúñ])`,
+    `\\b(?:estoy|estamos)\\s+${WRITE_GERUND}${CLITIC}(?![\\wáéíóúñ])`,
+    `(?:^|[\\s,.;:¡!])(?:(?:se\\s+)?(?:l[oa]s?|les?)|ahora mismo|ya mismo|ahorita|enseguida|en seguida|en un momento|en un rato|luego|después|despues)\\s+(?:(?:se\\s+)?(?:l[oa]s?|les?)\\s+)?${WRITE_PRESENT_1S}(?![\\wáéíóúñ])`,
+    `\\bte aviso cuando\\b`,
+  ].join('|'),
+  'i',
+);
+
+/** The reply ends asking the person something: it is a question, not a promise. */
+function endsInQuestion(text: string): boolean {
+  return /\?[\s"'»)\]]*$/.test(text.trim());
+}
 
 export function promisesUnbackedWrite(text: string | undefined): boolean {
-  return !!text && PROMISED_WRITE_PATTERN.test(text);
+  return !!text && !endsInQuestion(text) && PROMISED_WRITE_PATTERN.test(text);
 }
 
 /** The single resume after a write promise with nothing persisted behind it. */
@@ -2420,10 +2485,13 @@ export class AIAgentService {
     });
 
     // T9: «sí, hazlo» answering Vex's own question closes that question.
-    const confirmedQuestion =
+    const previousQuestion =
       isVex && isAffirmativeReply(params.goal)
         ? lastAssistantQuestion(params.messages as any)
         : null;
+    const confirmedQuestion = offersWrite(previousQuestion)
+      ? previousQuestion
+      : null;
     if (confirmedQuestion)
       messages.push({
         role: 'system',
@@ -2565,10 +2633,8 @@ export class AIAgentService {
     let discoveryExhausted = false;
     // T9: the one resume allowed after asking an already-confirmed question.
     let confirmationResumed = false;
-    let confirmationFallback = false;
     // T4: the one resume allowed after a write promise with nothing behind it.
     let honestyResumed = false;
-    let honestyFallback = false;
     // Time spent blocked on the browser (`ui_*` results). It is the person's
     // screen latency, not the model's work, so it must not eat the turn budget.
     let waitedMs = 0;
@@ -3070,6 +3136,12 @@ export class AIAgentService {
               continue;
             }
           }
+
+          // B2: whether the reply is replaced is decided on THIS iteration's
+          // reply only; an earlier iteration's verdict never carries over to
+          // a later, valid answer.
+          let confirmationFallback = false;
+          let honestyFallback = false;
 
           // T9 gate: the person already said yes to Vex's question; asking
           // for the same go-ahead again (with nothing persisted) is resumed

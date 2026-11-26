@@ -240,4 +240,45 @@ describe('Vex T4: sin lote persistido no hay promesa', () => {
     // there is replaced, never shown.
     expect(finalText(chunks)).toBe(HONEST_NO_WRITE_FALLBACK);
   });
+
+  // ---------------------------------------------------------------- B1
+  it('B1: sustantivos, participios, lecturas y preguntas no son promesa', () => {
+    for (const text of [
+      'Ahora mismo no hay cambios pendientes en tus productos.',
+      'Voy a revisar los cambios de precio de esta semana.',
+      'Vamos a ver el proceso de facturación paso a paso.',
+      'Estoy listo para crear productos o cambiar precios cuando quieras.',
+      'Vamos a crear tu producto. ¿Cómo se llama y qué precio tiene?',
+      'Ahora mismo tienes 12 productos creados y 3 tarifas activas.',
+      'Estoy revisando los cargos de este mes.',
+    ])
+      expect({ text, promise: promisesUnbackedWrite(text) }).toEqual({
+        text,
+        promise: false,
+      });
+  });
+
+  it('B1: las promesas reales en futuro o primera persona sí se detectan', () => {
+    for (const text of [
+      'Luego aplico la tarifa a todos.',
+      'Aplicaré la tarifa a todos tus productos.',
+      'Dame un momento y la aplico.',
+      'Vamos a asignarla a los 56 que faltan.',
+      'Lo haré enseguida.',
+      'Estamos actualizando los precios.',
+    ])
+      expect({ text, promise: promisesUnbackedWrite(text) }).toEqual({
+        text,
+        promise: true,
+      });
+  });
+
+  it('B1: «créame un producto» → la pregunta por el dato que falta llega intacta', async () => {
+    const f = build();
+    const ask = 'Vamos a crear tu producto. ¿Cómo se llama y qué precio tiene?';
+    f.chat.mockResolvedValueOnce(ok({ content: ask }));
+    const { chunks } = await f.drain({ agent_key: 'vex', goal: 'créame un producto' });
+    expect(f.chat).toHaveBeenCalledTimes(1);
+    expect(finalText(chunks)).toBe(ask);
+  });
 });
