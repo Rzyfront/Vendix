@@ -62,7 +62,7 @@ test('production routes only the published pilot guides (SEO-OPS-36)', () => {
   const src = configSrc();
   assert.match(src, /ROUTED_SECTOR_GUIDES[^=]*=\s*SECTOR_GUIDES_ENABLED\s*\?\s*SECTOR_GUIDE_KEYS\s*:\s*PUBLISHED_SECTOR_GUIDES/);
   const published = listIn(src, 'PUBLISHED_SECTOR_GUIDES');
-  assert.deepEqual(published, ['comandas-restaurantes', 'ventas-mayoristas-al-detal', 'pasar-productos-excel-a-pos', 'preparar-demostracion']);
+  assert.deepEqual(published, ['comandas-restaurantes', 'ventas-mayoristas-al-detal', 'pasar-productos-excel-a-pos', 'preparar-demostracion', 'cierre-de-caja', 'control-de-inventario', 'elegir-software-pos']);
   for (const key of published) assert.ok(GUIDE_KEYS.includes(key));
   const repo = path.resolve(front, '../../..');
   const sitemap = fs.readFileSync(path.join(repo, 'apps/backend/src/domains/public/seo/marketing-sitemap.registry.ts'), 'utf8');

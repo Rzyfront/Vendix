@@ -44,6 +44,80 @@ describe('list_capabilities', () => {
   });
 });
 
+describe('list_capabilities · herramientas nativas (T7)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { createPricingTools } = require('../domains/pricing.tools');
+  const pricing = createPricingTools({
+    priceTiersService: {},
+    productsService: {},
+    productsBulkEditService: {},
+  }) as Array<{ name: string; domain: string; description: string; readOnly?: boolean }>;
+  const native = pricing.map((t) => ({
+    name: t.name,
+    domain: t.domain,
+    description: t.description,
+    readOnly: t.readOnly === true,
+  }));
+
+  function build(nativeTools = () => native) {
+    const [tool] = createCapabilityTools({
+      capabilities: {
+        describeDomain: jest.fn().mockReturnValue([]),
+        listDomains: jest.fn().mockReturnValue([]),
+        gaps: jest.fn().mockReturnValue([]),
+      } as unknown as CapabilityRegistryService,
+      nativeTools,
+    });
+    return tool;
+  }
+
+  it("list_capabilities({domain:'pricing'}) devuelve las tools nativas, no «sin rutas»", async () => {
+    const answer = JSON.parse(
+      await build().handler!({ domain: 'pricing' }, {} as never),
+    );
+    const names = answer.herramientas.map((h: any) => h.name);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'manage_price_tiers',
+        'set_product_tier_override',
+        'manage_product_price_tiers',
+      ]),
+    );
+    expect(
+      answer.herramientas.find((h: any) => h.name === 'preview_product_price_tiers').tipo,
+    ).toBe('consulta');
+    expect(
+      answer.herramientas.find((h: any) => h.name === 'manage_product_price_tiers').tipo,
+    ).toBe('cambio');
+    expect(answer.next_step).toMatch(/herramientas propias/);
+    expect(answer.next_step).not.toMatch(/no tiene rutas del puente/);
+  });
+
+  it('sin rutas ni herramientas: una búsqueda y luego decirlo en una frase', async () => {
+    const answer = JSON.parse(
+      await build(() => []).handler!({ domain: 'pricing' }, {} as never),
+    );
+    expect(answer.herramientas).toBeUndefined();
+    expect(answer.next_step).toMatch(/dile en una frase que no puedes/);
+  });
+
+  it('el índice de áreas suma las áreas servidas por herramientas', async () => {
+    const answer = JSON.parse(await build().handler!({}, {} as never));
+    expect(answer.areas_con_herramientas).toEqual([
+      { domain: 'pricing', herramientas: native.length },
+    ]);
+  });
+
+  it('las tools de andamiaje no aparecen como área', async () => {
+    const answer = JSON.parse(
+      await build(() => [
+        { name: 'search_tools', domain: 'discovery', description: 'x', readOnly: true },
+      ]).handler!({}, {} as never),
+    );
+    expect(answer.areas_con_herramientas).toBeUndefined();
+  });
+});
+
 describe('frontera de dominio del puente (E2E g09)', () => {
   // Imports diferidos: el resto de este spec usa dobles y no carga el catálogo.
   /* eslint-disable @typescript-eslint/no-require-imports */

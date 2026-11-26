@@ -705,6 +705,9 @@ describe('AIAgentService.runAgentStream', () => {
   });
 
   it('(vex-ii) vex default budget is 40 iterations, default stays 10', async () => {
+    // T8 caps READ calls of a Vex turn (VEX_DISCOVERY_BUDGET_PER_TURN); this
+    // pins the iteration budget, so the filler tool is not a read here.
+    registry.isReadOnly = () => false;
     chat.mockImplementation((_msgs: any, opts: any) =>
       opts && Object.keys(opts).length === 0
         ? ok({ content: 'cierre' })
@@ -1246,6 +1249,8 @@ describe('AIAgentService.runAgentStream', () => {
   });
 
   it('(rx2-b2) explicit row max_iterations=40 runs 40 iterations without a plan', async () => {
+    // Iteration budget, not the T8 read budget: the filler tool is not a read.
+    registry.isReadOnly = () => false;
     chat.mockImplementation((_msgs: any, opts: any) =>
       opts && Object.keys(opts).length === 0
         ? ok({ content: 'cierre' })

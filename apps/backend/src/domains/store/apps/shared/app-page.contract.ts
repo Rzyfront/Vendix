@@ -149,7 +149,7 @@ export const DEFAULT_APP_MODE: Record<PageAppKind, AppPageMode> = {
 // Field specs
 // ---------------------------------------------------------------------------
 
-type ScalarField =
+export type ScalarField =
   | { kind: 'text'; max: number }
   | { kind: 'url' }
   | { kind: 'color' }
@@ -157,7 +157,7 @@ type ScalarField =
   | { kind: 'int'; min: number; max: number }
   | { kind: 'enum'; values: readonly string[] };
 
-type FieldSpec =
+export type FieldSpec =
   | ScalarField
   | { kind: 'list'; max: number; item: Record<string, ScalarField> }
   | { kind: 'text_list'; max: number; itemMax: number }
@@ -165,7 +165,7 @@ type FieldSpec =
   | { kind: 'id_list'; max: number }
   | { kind: 'conditions'; keys: readonly string[] };
 
-type FieldsSpec = Record<string, FieldSpec>;
+export type FieldsSpec = Record<string, FieldSpec>;
 
 const text = (max: number): ScalarField => ({ kind: 'text', max });
 const url: ScalarField = { kind: 'url' };
@@ -459,7 +459,7 @@ const HERO_BASE: FieldsSpec = {
 };
 
 /** Portada extendida con variantes y apariencia (Product Page, Service Page y Booking). */
-const HERO: FieldsSpec = {
+export const APP_HERO_FIELDS: FieldsSpec = {
   ...HERO_BASE,
   variant: oneOf(APP_HERO_VARIANTS),
   background_image_url: url,
@@ -467,6 +467,7 @@ const HERO: FieldsSpec = {
   height: oneOf(APP_HERO_HEIGHTS),
   align: oneOf(APP_TEXT_ALIGNS),
 };
+const HERO = APP_HERO_FIELDS;
 
 const BRAND: FieldsSpec = {
   logo_url: url,
@@ -495,7 +496,7 @@ export const SINGLE_APP_PAGE_BLOCKS: Record<PageAppKind, readonly string[]> = {
 
 const WHATSAPP_RE = /^\+?[0-9]{7,15}$/;
 
-const THEME: FieldsSpec = {
+export const APP_THEME_FIELDS: FieldsSpec = {
   primary_color: text(7),
   secondary_color: text(7),
   surface_color: text(7),
@@ -518,6 +519,7 @@ const THEME: FieldsSpec = {
   image_overlay: int(0, APP_THEME_MAX_IMAGE_OVERLAY),
   hero_height: oneOf(APP_THEME_HERO_HEIGHTS),
 };
+const THEME = APP_THEME_FIELDS;
 
 const SEO: FieldsSpec = {
   title: text(70),

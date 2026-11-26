@@ -295,6 +295,9 @@ export class VendixLandingComponent implements OnInit {
     { key: 'ventas-mayoristas-al-detal', label: 'Guía: precio mayorista y al detal' },
     { key: 'pasar-productos-excel-a-pos', label: 'Guía: de Excel a tu POS' },
     { key: 'preparar-demostracion', label: 'Guía: preparar una demostración' },
+    { key: 'cierre-de-caja', label: 'Guía: cierre de caja diario' },
+    { key: 'control-de-inventario', label: 'Guía: control de inventario' },
+    { key: 'elegir-software-pos', label: 'Guía: cómo elegir un software POS' },
   ].filter((guide) => PUBLISHED_SECTOR_GUIDES.includes(guide.key));
   // El pie solo enlaza páginas cuyas rutas existen: si se apaga un interruptor, no queda un enlace roto.
   readonly sectorPagesEnabled = SECTOR_PAGES_ENABLED;

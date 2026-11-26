@@ -94,6 +94,7 @@ export class ProductsModule implements OnModuleInit {
     private readonly priceResolver: PriceResolverService,
     private readonly settingsService: SettingsService,
     private readonly priceTiersService: PriceTiersService,
+    private readonly productsBulkEditService: ProductsBulkEditService,
     private readonly aiScanRegistry: AiScanHandlerRegistry,
     private readonly bulkJobRegistry: BulkUploadHandlerRegistry,
     private readonly productsBulkJobHandler: ProductsBulkJobHandler,
@@ -137,7 +138,8 @@ export class ProductsModule implements OnModuleInit {
       }),
     );
 
-    // O-12/O-13 — `manage_price_tiers` + `set_product_tier_override`.
+    // O-12/O-13 — `manage_price_tiers` + `set_product_tier_override`, y
+    // T1/T2 — `preview_/manage_product_price_tiers` (bulk-edit de tarifas).
     // Delegan en `PriceTiersService` (dueño, importado vía
     // `PriceTiersModule`) y `ProductsService` (contexto producto/variantes
     // para la exclusión multi-tarifa ⊕ variantes).
@@ -145,6 +147,7 @@ export class ProductsModule implements OnModuleInit {
       createPricingTools({
         priceTiersService: this.priceTiersService,
         productsService: this.productsService,
+        productsBulkEditService: this.productsBulkEditService,
       }),
     );
 

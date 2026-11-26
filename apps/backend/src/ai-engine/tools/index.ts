@@ -33,6 +33,7 @@ export { createSupplierTools } from './domains/suppliers.tools';
 export { createReservationsTools } from './domains/reservations.tools';
 export { createServiceTools } from './domains/services.tools';
 export { createPricingTools } from './domains/pricing.tools';
+export { createCapabilityRequestTools } from './domains/capability-request.tools';
 export { createReturnTools } from './domains/returns.tools';
 export { createEcommerceSupportTools } from './domains/ecommerce-support.tools';
 export { createReportingTools } from './domains/reporting.tools';
@@ -88,3 +89,8 @@ export {
 } from './domains/code-execution.tools';
 
 export { createProceduralRecipeTools } from './domains/recipe.tools';
+export {
+  createVexDesignTools,
+  VEX_DESIGN_TOOL_NAMES,
+} from './domains/vex-design.tools';
+export type { VexDesignToolDeps } from './domains/vex-design.tools';

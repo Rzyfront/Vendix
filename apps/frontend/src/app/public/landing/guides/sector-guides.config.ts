@@ -27,6 +27,10 @@ export const PUBLISHED_SECTOR_GUIDES: readonly string[] = [
   'pasar-productos-excel-a-pos',
   // Quinto piloto, aprobado por Adel el 20-nov-2026.
   'preparar-demostracion',
+  // SEO-OPS-23: aprobadas por Adel el 25-nov-2026 (cierre de caja sin la parte contable).
+  'cierre-de-caja',
+  'control-de-inventario',
+  'elegir-software-pos',
 ];
 
 /** Guías con ruta: todas en vista previa; solo las publicadas en producción. */

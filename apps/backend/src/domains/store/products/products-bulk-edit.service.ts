@@ -573,6 +573,22 @@ export class ProductsBulkEditService {
     };
   }
 
+  /**
+   * Ids de los productos ACTIVOS de la tienda del contexto, ascendentes y con
+   * tope `limit`. Read-only. Lo usa el agente para resolver «todos mis
+   * productos» antes de llamar a `preview()`: los inactivos y archivados no
+   * entran (quedan intactos). `products` es store-scoped en StorePrismaService.
+   */
+  async listActiveProductIds(limit: number): Promise<number[]> {
+    const rows = await this.prisma.products.findMany({
+      where: { state: ProductState.ACTIVE },
+      select: { id: true },
+      orderBy: { id: 'asc' },
+      take: Math.max(1, Math.floor(limit)),
+    });
+    return rows.map((row: { id: number }) => row.id);
+  }
+
   // ===========================================================================
   // APPLY
   // ===========================================================================

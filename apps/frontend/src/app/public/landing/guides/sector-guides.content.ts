@@ -213,9 +213,16 @@ export const SECTOR_GUIDES: Readonly<Record<string, SectorGuide>> = {
       {
         heading: 'Cómo se hace en Vendix',
         paragraphs: [
-          'Activa el control de caja en la configuración del POS. Al iniciar el turno eliges Abrir Caja y escribes el Monto de Apertura; una caja no puede tener dos turnos abiertos y cada usuario trabaja con una caja a la vez. Las entradas y salidas que no son ventas se registran como Movimiento de Efectivo, con monto y referencia.',
-          'Al cerrar, Vendix muestra las ventas por medio de pago y el Efectivo Esperado en Caja, calculado con la misma fórmula. Escribes el Conteo Real de Efectivo y Vendix indica si hay sobrante o faltante; puedes dejar notas de cierre e imprimir el informe. Si quedan órdenes pendientes, te avisa y pide un motivo para cerrar de todas formas.',
+          'Activa el control de caja en la configuración del POS. Al iniciar el turno eliges Abrir Caja y escribes el Monto de Apertura; una caja no puede tener dos turnos abiertos y cada usuario trabaja con una caja a la vez. Las entradas y salidas que no son ventas se registran como Movimiento de Efectivo, con monto y referencia; en una salida también debes escribir el motivo.',
+          'Al cerrar, Vendix muestra las ventas por medio de pago y el Efectivo Esperado en Caja, calculado con la misma fórmula. Escribes el Conteo Real de Efectivo y Vendix indica si hay sobrante o faltante; puedes dejar notas de cierre e imprimir el informe. Si quedan órdenes pendientes, te avisa y pide un motivo para cerrar de todas formas. Ese aviso también cuenta ventas que ya cobraste pero no marcaste como entregadas, como un pedido para llevar: ese dinero ya está en el efectivo esperado.',
           'Vendix muestra el efectivo esperado antes de que escribas tu conteo. Si quieres contar a ciegas, cuenta primero y anota tu cifra antes de abrir el cierre. Abrir, cerrar y registrar movimientos son permisos distintos.',
+        ],
+      },
+      {
+        heading: 'Así lo probamos en Vendix',
+        paragraphs: [
+          'El 18 de noviembre de 2026, en la tienda de demostración de Vendix y con datos de prueba, un usuario con rol de cajero abrió la caja con $200.000, cobró dos ventas en efectivo por $34.000 entregando el cambio y registró una salida de $15.000 con su motivo. El efectivo esperado fue $200.000 + $34.000 − $15.000 = $219.000; contó $219.000 y la caja cerró sin diferencia.',
+          'En una prueba anterior, el 11 de noviembre, el conteo quedó $1.000 por debajo del esperado y Vendix cerró la caja indicando el faltante.',
         ],
       },
     ],
@@ -266,6 +273,13 @@ export const SECTOR_GUIDES: Readonly<Record<string, SectorGuide>> = {
         paragraphs: [
           'En Inventario › Ubicaciones creas cada bodega o local y marcas la bodega principal; con la configuración por defecto, el punto de venta descuenta de ella. En Ajustes de Stock registras la cantidad contada con su tipo (Daño, Pérdida, Robo, Vencido, Conteo o Corrección) y Vendix calcula la diferencia; para un conteo completo puedes usar la carga masiva con la plantilla de productos existentes.',
           'El umbral de stock bajo se define para toda la tienda (10 unidades por defecto) o por producto, y Vendix crea una notificación de stock bajo cuando se alcanza. En Transferencias registras origen, destino y productos; al aprobar se apartan las unidades y al recibir se suman al destino. En Movimientos ves el historial de ventas, compras, ajustes y transferencias.',
+        ],
+      },
+      {
+        heading: 'Así lo probamos en Vendix',
+        paragraphs: [
+          'El 13 de noviembre de 2026, en la tienda de demostración de Vendix y con un archivo de muestra ficticio, cargamos el catálogo con la plantilla: 125 unidades quedaron registradas como carga inicial en la ubicación principal, y al subir el mismo archivo otra vez no se duplicaron las existencias.',
+          'El 18 de noviembre de 2026, al enviar un plato a cocina, el historial de Movimientos registró el consumo de los insumos de su receta con la referencia de la orden. En esas pruebas no se hizo una transferencia entre ubicaciones.',
         ],
       },
     ],
@@ -322,6 +336,12 @@ export const SECTOR_GUIDES: Readonly<Record<string, SectorGuide>> = {
         paragraphs: [
           'Lleva 10 de tus productos: uno que se venda por peso, uno con variantes y uno con código de barras. Vende dos productos en efectivo y uno con tarjeta. Haz una devolución y revisa que el stock vuelva. Cierra la caja y mira si el efectivo esperado coincide con tu cuenta (guía de cierre de caja: /guias/cierre-de-caja). Imprime el comprobante en tu impresora y pide ver el flujo de facturación electrónica de principio a fin, con lo que falta para habilitarlo.',
           'Después puntúa cada criterio de 1 a 5 y multiplícalo por el peso que le das según tu negocio. Compara hasta tres proveedores con la misma lista.',
+        ],
+      },
+      {
+        heading: 'Así hicimos esta prueba en Vendix',
+        paragraphs: [
+          'El 18 de noviembre de 2026, en la tienda de demostración de Vendix y con datos de prueba, un usuario con rol de cajero vendió un producto con variante y otro sin variante en efectivo, con cambio, registró una salida de efectivo y cerró la caja: el efectivo esperado y el contado coincidieron en $219.000. En esa prueba no usamos lector de códigos ni impresora térmica, y no emitimos facturas electrónicas: la tienda de demostración no tiene la facturación electrónica activa.',
         ],
       },
       {

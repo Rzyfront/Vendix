@@ -63,6 +63,8 @@ export interface AppPagePreviewPayload<S = unknown, C = unknown> {
   storeLogoUrl: string | null;
   /** Productos resueltos en vivo desde el selector del inspector (antes de guardar). */
   catalogProducts?: AppPageProductItem[];
+  /** Bloque recién modificado desde el chat de diseño con Vex para resaltarlo un instante. */
+  highlightedBlockId?: string | null;
 }
 
 /** Route of the shared preview frame, outside the admin layout (`store_admin.routes.ts`). */

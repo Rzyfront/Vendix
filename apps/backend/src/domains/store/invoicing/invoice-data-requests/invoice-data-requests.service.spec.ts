@@ -367,6 +367,43 @@ describe('InvoiceDataRequestsService (paso 3: summary guest)', () => {
     expect(kitchenStatusFor([])).toBeNull();
     expect(kitchenStatusFor(null)).toBeNull();
   });
+
+  describe('QUI-1062 · prepMinutesMaxFor', () => {
+    const prep = (items: any[]) =>
+      (service as any).prepMinutesMaxFor(items, 15) as number | null;
+
+    it('devuelve null cuando el pedido es solo de servicios', () => {
+      expect(
+        prep([
+          { product_type: 'service', preparation_time_minutes: 60 },
+          { product_type: 'service', preparation_time_minutes: null },
+        ]),
+      ).toBeNull();
+    });
+
+    it('ignora los servicios al calcular el MAX de un pedido mixto', () => {
+      expect(
+        prep([
+          { product_type: 'service', preparation_time_minutes: 60 },
+          { product_type: 'physical', preparation_time_minutes: 20 },
+          { product_type: 'prepared', preparation_time_minutes: 25 },
+        ]),
+      ).toBe(25);
+    });
+
+    it('usa el default de la tienda cuando la línea no define preparación', () => {
+      expect(
+        prep([{ product_type: 'physical', preparation_time_minutes: null }]),
+      ).toBe(15);
+    });
+
+    it('trata una línea sin product_type como física (pedidos heredados)', () => {
+      expect(
+        prep([{ product_type: null, preparation_time_minutes: 7 }]),
+      ).toBe(7);
+      expect(prep([{ preparation_time_minutes: null }])).toBe(15);
+    });
+  });
 });
 
 describe('InvoiceDataRequestsService#deriveLineGross (ADR-10, impuesto por unidad)', () => {

@@ -64,6 +64,11 @@ describe('pricing.tools · contrato canónico T4', () => {
       productsService: {
         findProductVariantWriteContextForAgent: jest.fn(),
       } as any,
+      productsBulkEditService: {
+        preview: jest.fn(),
+        apply: jest.fn(),
+        listActiveProductIds: jest.fn(),
+      } as any,
     } satisfies PricingToolDeps;
   }
 
@@ -101,9 +106,11 @@ describe('pricing.tools · contrato canónico T4', () => {
 
   // ─── (d)+(e) Registro: permisos, categoría y forma ────────────────────
   describe('registro', () => {
-    it('expone exactamente los 2 writes de pricing', () => {
+    it('expone exactamente las tools de pricing', () => {
       const { tools } = buildTools();
       expect(tools.map((tool) => tool.name)).toEqual([
+        'preview_product_price_tiers',
+        'manage_product_price_tiers',
         'manage_price_tiers',
         'set_product_tier_override',
       ]);
@@ -131,9 +138,9 @@ describe('pricing.tools · contrato canónico T4', () => {
       ).toEqual(['store:price-tiers:update']);
     });
 
-    it('los 2 son writes con circuito completo (confirmación + preview)', () => {
+    it('los writes tienen circuito completo (confirmación + preview)', () => {
       const { tools } = buildTools();
-      for (const tool of tools) {
+      for (const tool of tools.filter((t) => t.readOnly !== true)) {
         expect(tool.readOnly ?? false).toBe(false);
         expect(tool.requiresConfirmation).toBe(true);
         expect(typeof tool.preview).toBe('function');
@@ -222,7 +229,7 @@ describe('pricing.tools · contrato canónico T4', () => {
           { field: 'kind', label: 'Eje', from: null, to: 'sale_unit' },
         ],
         message:
-          'Al confirmar se crea la tarifa en la tienda; los productos la adoptan con set_product_tier_override.',
+          'Al confirmar se crea la tarifa en la tienda; para que los productos la usen, asígnala con manage_product_price_tiers (precio propio por producto: set_product_tier_override).',
         domain: 'pricing',
       });
       // El preview es solo lectura: no escribe.
@@ -737,6 +744,297 @@ describe('pricing.tools · contrato canónico T4', () => {
       expect(answer).toEqual({
         error: 'No se pudo guardar el precio por tarifa: conflicto de unicidad',
       });
+    });
+  });
+
+  // ─── T1/T2: asignación masiva de una tarifa (bulk-edit) ───────────────
+  describe('preview_product_price_tiers + manage_product_price_tiers', () => {
+    const MANAURE = { ...TIER_ROW, id: 21, name: 'Manaure', kind: 'customer_tier' };
+    const ALL_IDS = Array.from({ length: 68 }, (_, i) => i + 1);
+    const HAVE_IT = new Set(ALL_IDS.slice(0, 12));
+
+    /** Réplica del preview del bulk-edit: 12 ya la tienen, 56 cambian. */
+    function bulkPreviewFor(dto: any, opts: { conflicts?: number[] } = {}) {
+      const items = dto.ids.map((id: number) => {
+        const base = { id, name: `Producto ${id}`, sku: null };
+        if (opts.conflicts?.includes(id)) {
+          return {
+            ...base,
+            status: 'error',
+            changes: [],
+            code: 'PRODUCT_TIERS_VARIANTS_EXCLUSIVE',
+            message: 'Este producto tiene 2 variantes.',
+          };
+        }
+        const changes = HAVE_IT.has(id)
+          ? []
+          : [{ field: 'price_tiers', current: [], next: [{ id: 21, name: 'Manaure' }] }];
+        return { ...base, status: 'ok', changes };
+      });
+      return { total: items.length, ok: items.length, warnings: 0, errors: 0, items };
+    }
+
+    function depsWithStore(opts: { conflicts?: number[] } = {}) {
+      const deps = baseDeps();
+      deps.priceTiersService.findOne.mockResolvedValue(MANAURE);
+      deps.productsBulkEditService.listActiveProductIds.mockResolvedValue(ALL_IDS);
+      deps.productsBulkEditService.preview.mockImplementation(async (dto: any) =>
+        bulkPreviewFor(dto, opts),
+      );
+      return deps;
+    }
+
+    it('registro: lectura sin confirmación y escritura con permisos del bulk-edit', () => {
+      const { tools } = buildTools();
+      const read = getTool(tools, 'preview_product_price_tiers');
+      expect(read.readOnly).toBe(true);
+      expect(read.requiresConfirmation ?? false).toBe(false);
+      expect(read.requiredPermissions).toEqual([
+        'store:products:read',
+        'store:price-tiers:read',
+      ]);
+      const write = getTool(tools, 'manage_product_price_tiers');
+      expect(write.requiresConfirmation).toBe(true);
+      expect(write.requiredPermissions).toEqual([
+        'store:products:bulk_update',
+        'store:price-tiers:update',
+      ]);
+      expect(write.parameters.required).toEqual(['price_tier_id', 'product_ids']);
+      expect(write.parameters.properties.action.enum).toEqual(['assign', 'remove']);
+    });
+
+    it('T2: 68 productos activos, 12 con la tarifa → faltan 56 y un solo paso de lote', async () => {
+      const { deps, tools } = buildTools(depsWithStore());
+      const out = await run(tools, 'preview_product_price_tiers', {
+        price_tier_id: 21,
+        all_active_products: true,
+      });
+      expect(deps.productsBulkEditService.listActiveProductIds).toHaveBeenCalledWith(501);
+      expect(deps.productsBulkEditService.preview).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ids: ALL_IDS,
+          changes: expect.objectContaining({
+            price_tier_action: { mode: 'add', ids: [21] },
+          }),
+        }),
+      );
+      expect(out.summary).toBe(
+        'Tarifa "Manaure": 12 ya la tienen, 56 faltan, 0 en conflicto.',
+      );
+      expect(out.data).toMatchObject({
+        scanned: 68,
+        already: 12,
+        pending: 56,
+        conflicts: 0,
+      });
+      expect(out.data.batch_steps).toEqual([
+        {
+          tool: 'manage_product_price_tiers',
+          arguments: {
+            action: 'assign',
+            price_tier_id: 21,
+            product_ids: ALL_IDS.slice(12),
+          },
+          label: 'Asignar la tarifa "Manaure" a 56 productos',
+        },
+      ]);
+      expect(deps.productsBulkEditService.apply).not.toHaveBeenCalled();
+    });
+
+    it('T2: los conflictos se cuentan aparte con su motivo', async () => {
+      const { tools } = buildTools(depsWithStore({ conflicts: [13, 14] }));
+      const out = await run(tools, 'preview_product_price_tiers', {
+        price_tier_id: 21,
+        all_active_products: true,
+      });
+      expect(out.summary).toBe(
+        'Tarifa "Manaure": 12 ya la tienen, 54 faltan, 2 en conflicto.',
+      );
+      expect(out.data.conflict_items[0]).toEqual({
+        id: 13,
+        name: 'Producto 13',
+        reason: 'Este producto tiene 2 variantes.',
+      });
+      expect(out.data.batch_steps[0].arguments.product_ids).toHaveLength(54);
+    });
+
+    it('T2: más de 100 faltantes se parten en pasos de 100', async () => {
+      const deps = depsWithStore();
+      const many = Array.from({ length: 230 }, (_, i) => 1000 + i);
+      deps.productsBulkEditService.listActiveProductIds.mockResolvedValue(many);
+      const { tools } = buildTools(deps);
+      const out = await run(tools, 'preview_product_price_tiers', {
+        price_tier_id: 21,
+        all_active_products: true,
+      });
+      expect(deps.productsBulkEditService.preview).toHaveBeenCalledTimes(3);
+      expect(
+        out.data.batch_steps.map((s: any) => s.arguments.product_ids.length),
+      ).toEqual([100, 100, 30]);
+      expect(out.data.batch_steps[2].label).toBe(
+        'Asignar la tarifa "Manaure" a 30 productos (parte 3 de 3)',
+      );
+    });
+
+    it('T2: si ya la tienen todos, no ofrece pasos y prohíbe el lote vacío', async () => {
+      const deps = depsWithStore();
+      deps.productsBulkEditService.listActiveProductIds.mockResolvedValue(
+        ALL_IDS.slice(0, 12),
+      );
+      const { tools } = buildTools(deps);
+      const out = await run(tools, 'preview_product_price_tiers', {
+        price_tier_id: 21,
+        all_active_products: true,
+      });
+      expect(out.summary).toBe(
+        'Ya la tienen todos: los 12 producto(s) evaluados ya tienen la tarifa "Manaure". No hay nada que aplicar.',
+      );
+      expect(out.data.batch_steps).toEqual([]);
+      expect(out.next_step).toBe(
+        'Dile a la persona que no hay nada que aplicar. No propongas un lote.',
+      );
+    });
+
+    it('T2: más de 500 productos activos → error guiado, sin preview', async () => {
+      const deps = depsWithStore();
+      deps.productsBulkEditService.listActiveProductIds.mockResolvedValue(
+        Array.from({ length: 501 }, (_, i) => i + 1),
+      );
+      const { tools } = buildTools(deps);
+      const out = await run(tools, 'preview_product_price_tiers', {
+        price_tier_id: 21,
+        all_active_products: true,
+      });
+      expect(out.error).toContain('más de 500 productos activos');
+      expect(deps.productsBulkEditService.preview).not.toHaveBeenCalled();
+    });
+
+    it('T1: preview de escritura lista un cambio por producto y el diff', async () => {
+      const { tools } = buildTools(depsWithStore());
+      const result = await preview(tools, 'manage_product_price_tiers', {
+        price_tier_id: 21,
+        product_ids: ALL_IDS,
+      });
+      expect(result.status).toBe('ok');
+      expect(result.target).toBe('Tarifa "Manaure" en 56 producto(s)');
+      expect(result.changes).toHaveLength(56);
+      expect(result.changes[0]).toEqual({
+        field: 'price_tiers',
+        label: 'Producto 13',
+        from: 'Sin la tarifa',
+        to: 'Con "Manaure"',
+      });
+      expect(result.message).toBe('12 ya la tienen, 56 faltan, 0 en conflicto.');
+    });
+
+    it('T1: preview sin nada que cambiar es error (no acuña token ni lote vacío)', async () => {
+      const { tools } = buildTools(depsWithStore());
+      const result = await preview(tools, 'manage_product_price_tiers', {
+        price_tier_id: 21,
+        product_ids: ALL_IDS.slice(0, 12),
+      });
+      expect(result.status).toBe('error');
+      expect(result.message).toContain('Ya la tienen todos');
+    });
+
+    it('T1: la escritura exige product_ids explícitos (no all_active_products)', async () => {
+      const { deps, tools } = buildTools(depsWithStore());
+      const result = await preview(tools, 'manage_product_price_tiers', {
+        price_tier_id: 21,
+        all_active_products: true,
+      });
+      expect(result.status).toBe('error');
+      expect(result.message).toContain('product_ids es obligatorio');
+      expect(deps.productsBulkEditService.preview).not.toHaveBeenCalled();
+    });
+
+    it('T1: handler re-verifica y aplica solo los que cambian, con resultado por ítem', async () => {
+      const deps = depsWithStore();
+      deps.productsBulkEditService.apply.mockImplementation(async (dto: any) => ({
+        total: dto.ids.length,
+        successful: dto.ids.length - 1,
+        failed: 1,
+        results: dto.ids.map((id: number, i: number) =>
+          i === 0
+            ? { id, name: `Producto ${id}`, status: 'error', message: 'Archivado' }
+            : { id, name: `Producto ${id}`, status: 'ok' },
+        ),
+      }));
+      const { tools } = buildTools(deps);
+      const out = await run(tools, 'manage_product_price_tiers', {
+        price_tier_id: 21,
+        product_ids: ALL_IDS,
+      });
+      expect(deps.productsBulkEditService.preview).toHaveBeenCalledTimes(1);
+      expect(deps.productsBulkEditService.apply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ids: ALL_IDS.slice(12),
+          changes: expect.objectContaining({
+            price_tier_action: { mode: 'add', ids: [21] },
+          }),
+        }),
+      );
+      expect(out.summary).toBe(
+        'Tarifa "Manaure": 55 aplicados, 1 fallidos, 12 ya estaban así.',
+      );
+      expect(out.data.failed_items).toEqual([
+        { id: 13, name: 'Producto 13', reason: 'Archivado' },
+      ]);
+    });
+
+    it('(a) sad: tarifa desactivada no se asigna y no toca el bulk-edit', async () => {
+      const deps = baseDeps();
+      deps.priceTiersService.findOne.mockResolvedValue({ ...MANAURE, is_active: false });
+      const { tools } = buildTools(deps);
+      const out = await run(tools, 'manage_product_price_tiers', {
+        price_tier_id: 21,
+        product_ids: [1, 2],
+      });
+      expect(out).toEqual({
+        error: 'La tarifa "Manaure" está desactivada y no se puede asignar.',
+        next_step: 'Reactívala primero con manage_price_tiers (action restore).',
+      });
+      expect(deps.productsBulkEditService.preview).not.toHaveBeenCalled();
+      expect(deps.productsBulkEditService.apply).not.toHaveBeenCalled();
+    });
+
+    it('(a) sad: más de 100 product_ids en un paso → error guiado', async () => {
+      const { deps, tools } = buildTools(depsWithStore());
+      const out = await run(tools, 'manage_product_price_tiers', {
+        price_tier_id: 21,
+        product_ids: Array.from({ length: 101 }, (_, i) => i + 1),
+      });
+      expect(out.error).toBe('Son 101 productos y cada paso admite 100.');
+      expect(deps.productsBulkEditService.apply).not.toHaveBeenCalled();
+    });
+
+    it('(c) si no se aplica ninguno, el handler devuelve {error} (no un éxito vacío)', async () => {
+      const deps = depsWithStore();
+      deps.productsBulkEditService.apply.mockResolvedValue({
+        total: 1,
+        successful: 0,
+        failed: 1,
+        results: [{ id: 20, name: 'Producto 20', status: 'error', message: 'Archivado' }],
+      });
+      const { tools } = buildTools(deps);
+      const out = await run(tools, 'manage_product_price_tiers', {
+        price_tier_id: 21,
+        product_ids: [20],
+      });
+      expect(out).toEqual({
+        error: 'Tarifa "Manaure": 0 aplicados, 1 fallidos. Producto 20: Archivado',
+      });
+    });
+
+    it('(c) el bulk-edit lanza → {error} con mensaje, nunca throw', async () => {
+      const deps = depsWithStore();
+      deps.productsBulkEditService.apply.mockRejectedValue(new Error('db caída'));
+      const { tools } = buildTools(deps);
+      const out = await run(tools, 'manage_product_price_tiers', {
+        price_tier_id: 21,
+        product_ids: [20],
+      });
+      expect(out).toEqual({ error: 'No se pudo aplicar la tarifa: db caída' });
     });
   });
 });

@@ -78,6 +78,7 @@ describe('GuestOrderSummaryComponent embedded physical/purchase/receipt gates', 
     fixture.detectChanges();
   }
   const payment = (method_type: string | null = 'bank_transfer', state = 'pending'): GuestOrderPayment => ({ payment_id: 63, state, method_type, has_receipt: true });
+  const withItems = (items: unknown[]): GuestOrderSummary => ({ ...SUMMARY, order: { ...SUMMARY.order, items: items as GuestOrderSummary['order']['items'] } });
 
   it('hides tracking/ETA and print preparation for service-only opt-out', () => {
     create(); fixture.componentRef.setInput('physicalProgressAllowed', false); fixture.detectChanges();
@@ -106,6 +107,37 @@ describe('GuestOrderSummaryComponent embedded physical/purchase/receipt gates', 
     expect(component.justPurchased()).toBeTrue(); expect(fixture.nativeElement.querySelector('.confirmed')).not.toBeNull();
     fixture.componentRef.setInput('purchaseConfirmed', false); fixture.detectChanges();
     expect(component.justPurchased()).toBeFalse(); expect(fixture.nativeElement.querySelector('.confirmed')).toBeNull();
+  });
+
+  it('QUI-1062: hides tracking/ETA and print bar for service-only orders', () => {
+    create(); fixture.componentRef.setInput('summaryInput', withItems([{ product_name: 'Reserva hotel', quantity: 1, unit_price: 100, total_price: 100, product_type: 'service' }])); fixture.detectChanges();
+    expect(component.trackingShown()).toBeFalse(); expect(component.etaVisible()).toBeFalse();
+    expect(fixture.nativeElement.querySelector('.tracking')).toBeNull(); expect(fixture.nativeElement.querySelector('.eta')).toBeNull();
+    component.print(); expect(printer.printVoucher).toHaveBeenCalledWith(jasmine.objectContaining({ order: jasmine.objectContaining({ order_number: 'ORD95' }) }), { hidePrepEta: true, hideTracking: true });
+  });
+
+  it('QUI-1062: keeps tracking for physical, prepared, mixed and untyped orders', () => {
+    for (const items of [
+      [{ product_name: 'Camisa', quantity: 1, unit_price: 100, total_price: 100, product_type: 'physical' as const }],
+      [{ product_name: 'Almuerzo', quantity: 1, unit_price: 100, total_price: 100, product_type: 'prepared' as const }],
+      [{ product_name: 'Reserva', quantity: 1, unit_price: 100, total_price: 100, product_type: 'service' as const },
+       { product_name: 'Camisa', quantity: 1, unit_price: 100, total_price: 100, product_type: 'physical' as const }],
+      [{ product_name: 'Sin tipo', quantity: 1, unit_price: 100, total_price: 100, product_type: null }],
+    ]) {
+      create(); fixture.componentRef.setInput('summaryInput', withItems(items)); fixture.detectChanges();
+      expect(component.trackingShown()).withContext(JSON.stringify(items)).toBeTrue();
+      expect(component.etaVisible()).toBeTrue();
+      component.print(); expect(printer.printVoucher).toHaveBeenCalledWith(jasmine.anything(), { hidePrepEta: false, hideTracking: false });
+    }
+  });
+
+  it('QUI-1062: ignores cancelled physical lines when only services remain', () => {
+    create(); fixture.componentRef.setInput('summaryInput', withItems([
+      { product_name: 'Reserva', quantity: 1, unit_price: 100, total_price: 100, product_type: 'service' },
+      { product_name: 'Camisa', quantity: 1, unit_price: 100, total_price: 100, product_type: 'physical', cancelled_at: '2026-10-07T19:00:00Z' },
+    ])); fixture.detectChanges();
+    expect(component.trackingShown()).toBeFalse(); expect(component.etaVisible()).toBeFalse();
+    component.print(); expect(printer.printVoucher).toHaveBeenCalledWith(jasmine.anything(), { hidePrepEta: true, hideTracking: true });
   });
 
   it('does not trust query success for embedded purchases without parent confirmation', () => {

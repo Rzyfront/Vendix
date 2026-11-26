@@ -6,7 +6,7 @@ const { createSmoke, parseArgs, TOKEN_RE, MARKETING_TITLE } = require('./seo-smo
 const BASE = 'https://vendix.online';
 const NOW = Date.parse('2026-11-03T12:00:00Z');
 const SEC = { 'strict-transport-security': 'max-age=1', 'x-content-type-options': 'nosniff', 'referrer-policy': 'x', 'x-frame-options': 'DENY', 'cache-control': 'max-age=0' };
-const PAGES = [['/', true], ['/pricing', true], ['/ayuda', false], ['/legal/terminos', true], ['/legal/privacidad', true], ['/legal/cookies', true], ['/soluciones/software-pos', true], ['/sectores/restaurantes', true], ['/implementacion', true], ['/migracion', true], ['/guias/comandas-restaurantes', true], ['/guias/ventas-mayoristas-al-detal', true], ['/guias/pasar-productos-excel-a-pos', true], ['/guias/preparar-demostracion', true], ['/pqr', false], ['/auth/login', false], ['/auth/register', false]];
+const PAGES = [['/', true], ['/pricing', true], ['/ayuda', false], ['/legal/terminos', true], ['/legal/privacidad', true], ['/legal/cookies', true], ['/soluciones/software-pos', true], ['/sectores/restaurantes', true], ['/implementacion', true], ['/migracion', true], ['/guias/comandas-restaurantes', true], ['/guias/ventas-mayoristas-al-detal', true], ['/guias/pasar-productos-excel-a-pos', true], ['/guias/preparar-demostracion', true], ['/guias/cierre-de-caja', true], ['/guias/control-de-inventario', true], ['/guias/elegir-software-pos', true], ['/pqr', false], ['/auth/login', false], ['/auth/register', false]];
 
 function page(p, index) {
   const canon = index ? `<link rel="canonical" href="${BASE}${p}">` : '';
