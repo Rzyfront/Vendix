@@ -60,6 +60,11 @@ const PUBLIC_TOOLS = [
   // only after the person approves the card and only for a missing capability.
   'request_capability',
   // agent scaffolding
+  // turn-close contract: no effects, no data, nothing to confirm (it only
+  // marks that the agent closed its turn). It was public before this list and
+  // the reviewed list simply never included it; the PR regression run is the
+  // first that exercises this spec on a branch, which is why it surfaced now.
+  'finish_turn',
   'search_tools',
   'suggest_followup',
   'propose_plan',
