@@ -5,7 +5,7 @@ import { RequestContextService } from '../common/context/request-context.service
 import { AgentTraceService } from './observability/agent-trace.service';
 
 /**
- * Vex tie-breaker classifier (OpenRouter Decisions API).
+ * Vex tie-breaker classifier (OpenRouter: Decisions API or chat completions).
  *
  * The turn state decides; this classifier only gives an opinion when the
  * answer lives in free text (a «sí/no», a promise vs. a description, a missing
@@ -19,13 +19,42 @@ import { AgentTraceService } from './observability/agent-trace.service';
  *   switch, `rate_limit.max_calls_per_turn` the turn cap, `retry_config`
  *   `{ timeout_ms, max_retries }`, `metadata.criteria_version` and optional
  *   `metadata.min_confidence`.
- * - Its `config` (`ai_engine_configs`): `model_id`, optional `base_url` (the
- *   full Decisions endpoint) and `api_key_ref`, the NAME of the environment
- *   variable holding the key. The key itself is never stored in the table.
+ * - `metadata.adapter`: `auto` (default) | `decisions` | `chat`. `auto` uses
+ *   the Decisions API only for models listed in `DECISIONS_MODEL_PREFIXES`
+ *   and chat completions for any other OpenRouter model. A forced
+ *   `decisions` on a model outside that list is `adapter_unsupported`.
+ * - `metadata.temperature` / `max_tokens` / `reasoning_effort`: sent only by
+ *   the chat adapter and only when present and valid; never invented.
+ * - `metadata.json_mode` (default true): send `response_format: json_object`
+ *   in chat. The message always demands strict JSON as well.
+ * - Its `config` (`ai_engine_configs`): `model_id` (the only source of the
+ *   model: none is written in code; empty → `no_model`), optional `base_url`
+ *   (only its https origin is used) and `api_key_ref`, the NAME of the
+ *   environment variable holding the key. The key itself is never stored in
+ *   the table.
  */
 
 export const VEX_CLASSIFIER_APP_KEY = 'vex_classifier';
-export const DECISIONS_ENDPOINT = 'https://openrouter.ai/api/alpha/decisions';
+export const OPENROUTER_ORIGIN = 'https://openrouter.ai';
+export const DECISIONS_PATH = '/api/alpha/decisions';
+export const CHAT_COMPLETIONS_PATH = '/api/v1/chat/completions';
+export const DECISIONS_ENDPOINT = `${OPENROUTER_ORIGIN}${DECISIONS_PATH}`;
+export const CHAT_COMPLETIONS_ENDPOINT = `${OPENROUTER_ORIGIN}${CHAT_COMPLETIONS_PATH}`;
+
+/**
+ * Catalog `model_id` prefixes that speak the OpenRouter Decisions API
+ * (`/api/alpha/decisions`). With `adapter: 'auto'` only these use it; every
+ * other model goes through chat completions. To add a model family, append
+ * its prefix here (and to the table in REPORTE.md).
+ */
+export const DECISIONS_MODEL_PREFIXES: readonly string[] = ['typesafe/'];
+
+export type ClassifierAdapterSetting = 'auto' | 'decisions' | 'chat';
+export type ClassifierAdapter = 'decisions' | 'chat';
+
+export function supportsDecisions(modelId: string): boolean {
+  return DECISIONS_MODEL_PREFIXES.some((prefix) => modelId.startsWith(prefix));
+}
 
 const DEFAULT_TIMEOUT_MS = 800;
 const MIN_TIMEOUT_MS = 100;
@@ -37,6 +66,10 @@ const SETTINGS_TTL_MS = 30_000;
 const TURN_COUNTER_TTL_MS = 10 * 60_000;
 const MAX_TRACKED_TURNS = 1_000;
 const MAX_STATE_CHARS = 4_000;
+const MAX_RAW_ANSWER_CHARS = 500;
+/** Id of the single question in both adapters (`answers.verdict` / `{"verdict": …}`). */
+const QUESTION_ID = 'verdict';
+const REASONING_EFFORTS = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']);
 /** Environment variable names only: a literal key is never accepted. */
 const ENV_NAME = /^[A-Z][A-Z0-9_]{1,99}$/;
 
@@ -54,6 +87,8 @@ export type ClassifierDegradation =
   | 'inactive'
   | 'no_api_key'
   | 'config_error'
+  | 'no_model'
+  | 'adapter_unsupported'
   | 'turn_cap'
   | 'timeout'
   | 'network_error'
@@ -93,9 +128,18 @@ export type ClassifierHttpClient = (
 ) => Promise<ClassifierHttpResponse>;
 export const VEX_CLASSIFIER_HTTP = Symbol('VEX_CLASSIFIER_HTTP');
 
+interface ChatParams {
+  temperature?: number;
+  max_tokens?: number;
+  reasoning?: { effort: string };
+}
+
 interface ClassifierSettings {
+  adapter: ClassifierAdapter;
   endpoint: string;
   model: string;
+  chatParams: ChatParams;
+  jsonMode: boolean;
   apiKey: string;
   timeoutMs: number;
   maxRetries: 0 | 1;
@@ -106,7 +150,23 @@ interface ClassifierSettings {
 
 type Resolved =
   | { ok: true; settings: ClassifierSettings }
+  | {
+      ok: false;
+      reason: ClassifierDegradation;
+      adapter?: ClassifierAdapter;
+      model?: string;
+    };
+
+/** Adapter outcome before the shared confidence gate. */
+type AdapterOutcome =
+  | { ok: true; value: string; confidence: number | null }
   | { ok: false; reason: ClassifierDegradation };
+
+/** What the span records besides the verdict: never user content. */
+interface CallMeta {
+  adapter?: ClassifierAdapter;
+  model?: string;
+}
 
 interface ChoiceQuestion<T extends string> {
   question: ClassifierQuestion;
@@ -130,6 +190,87 @@ function clip(text: string): string {
   return clean.length > MAX_STATE_CHARS
     ? clean.slice(0, MAX_STATE_CHARS)
     : clean;
+}
+
+type ChatParse =
+  | { kind: 'valid'; value: string }
+  | { kind: 'refusal' }
+  | { kind: 'invalid'; raw: string };
+
+/**
+ * Validates a chat completion against the question schema: exactly one key
+ * (`verdict`) whose value is one of the allowed criteria. Tolerates a
+ * ```json fence around the object; nothing else.
+ */
+function parseChatAnswer(body: unknown, allowed: string[]): ChatParse {
+  const choices = record(body)?.choices;
+  const first = Array.isArray(choices) ? record(choices[0]) : null;
+  const message = record(first?.message);
+  if (
+    (typeof message?.refusal === 'string' && message.refusal.trim()) ||
+    first?.finish_reason === 'content_filter'
+  )
+    return { kind: 'refusal' };
+  const content = typeof message?.content === 'string' ? message.content : '';
+  const raw = content
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/, '')
+    .trim();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { kind: 'invalid', raw: content };
+  }
+  const obj = record(parsed);
+  const keys = obj ? Object.keys(obj) : [];
+  const value = obj?.[QUESTION_ID];
+  if (
+    keys.length !== 1 ||
+    keys[0] !== QUESTION_ID ||
+    typeof value !== 'string' ||
+    !allowed.includes(value)
+  )
+    return { kind: 'invalid', raw: content };
+  return { kind: 'valid', value };
+}
+
+/** Only the chat params present and valid in metadata; never defaults. */
+function chatParamsFrom(meta: Record<string, unknown>): ChatParams {
+  const params: ChatParams = {};
+  const temperature = meta.temperature;
+  if (
+    typeof temperature === 'number' &&
+    Number.isFinite(temperature) &&
+    temperature >= 0 &&
+    temperature <= 2
+  )
+    params.temperature = temperature;
+  const maxTokens = meta.max_tokens;
+  if (
+    typeof maxTokens === 'number' &&
+    Number.isInteger(maxTokens) &&
+    maxTokens > 0 &&
+    maxTokens <= 32_000
+  )
+    params.max_tokens = maxTokens;
+  const effort = meta.reasoning_effort;
+  if (typeof effort === 'string' && REASONING_EFFORTS.has(effort))
+    params.reasoning = { effort };
+  return params;
+}
+
+/** Only the https origin of `base_url` is honored; paths come from the adapter. */
+function originFrom(baseUrl: string | null | undefined): string {
+  const base = baseUrl?.trim();
+  if (!base) return OPENROUTER_ORIGIN;
+  try {
+    const url = new URL(base);
+    return url.protocol === 'https:' ? url.origin : OPENROUTER_ORIGIN;
+  } catch {
+    return OPENROUTER_ORIGIN;
+  }
 }
 
 @Injectable()
@@ -232,9 +373,10 @@ export class VexClassifierService {
   ): Promise<ClassifierVerdict<T>> {
     const started = Date.now();
     const span = this.safeStartSpan(q.question);
+    const meta: CallMeta = {};
     let verdict: ClassifierVerdict<T>;
     try {
-      verdict = await this.classify(q, started);
+      verdict = await this.classify(q, started, meta);
     } catch {
       // Defensive: classify() already maps every failure; nothing escapes.
       verdict = {
@@ -243,13 +385,14 @@ export class VexClassifierService {
         latency_ms: Date.now() - started,
       };
     }
-    this.observe(q.question, verdict, span);
+    this.observe(q.question, verdict, meta, span);
     return verdict;
   }
 
   private async classify<T extends string>(
     q: ChoiceQuestion<T>,
     started: number,
+    meta: CallMeta,
   ): Promise<ClassifierVerdict<T>> {
     const unavailable = (
       reason: ClassifierDegradation,
@@ -262,56 +405,151 @@ export class VexClassifierService {
     });
 
     const resolved = await this.resolve();
-    if (!resolved.ok) return unavailable(resolved.reason);
+    if (!resolved.ok) {
+      meta.adapter = resolved.adapter;
+      meta.model = resolved.model;
+      return unavailable(resolved.reason);
+    }
     const s = resolved.settings;
+    meta.adapter = s.adapter;
+    meta.model = s.model;
     if (!q.state.trim()) return unavailable('empty_input', s.criteriaVersion);
     if (!this.takeTurnSlot(s.maxCallsPerTurn))
       return unavailable('turn_cap', s.criteriaVersion);
 
+    const outcome =
+      s.adapter === 'decisions'
+        ? await this.viaDecisions(q, s)
+        : await this.viaChat(q, s);
+    if (!outcome.ok) return unavailable(outcome.reason, s.criteriaVersion);
+    if (
+      s.minConfidence > 0 &&
+      (outcome.confidence === null || outcome.confidence < s.minConfidence)
+    )
+      return unavailable('low_confidence', s.criteriaVersion);
+    return {
+      value: outcome.value as T,
+      confidence: outcome.confidence,
+      criteria_version: s.criteriaVersion,
+      latency_ms: Date.now() - started,
+    };
+  }
+
+  /** Transport call with the single retry for 429/5xx/timeout/network. */
+  private async send(
+    s: ClassifierSettings,
+    body: string,
+  ): Promise<AttemptResult> {
+    let attempt = await this.post(s, body);
+    if (!attempt.ok && attempt.retryable && s.maxRetries > 0)
+      attempt = await this.post(s, body);
+    return attempt;
+  }
+
+  /** Decisions API: typed `choice` question, answer keyed by question id. */
+  private async viaDecisions<T extends string>(
+    q: ChoiceQuestion<T>,
+    s: ClassifierSettings,
+  ): Promise<AdapterOutcome> {
     const body = JSON.stringify({
       model: s.model,
       state: q.state,
       questions: {
-        verdict: {
+        [QUESTION_ID]: {
           type: 'choice',
           instructions: `${q.instructions} (criterios ${s.criteriaVersion})`,
           criteria: q.criteria,
         },
       },
     });
+    const attempt = await this.send(s, body);
+    if (!attempt.ok) return { ok: false, reason: attempt.reason };
 
-    let attempt = await this.post(s, body);
-    if (!attempt.ok && attempt.retryable && s.maxRetries > 0)
-      attempt = await this.post(s, body);
-    if (!attempt.ok) return unavailable(attempt.reason, s.criteriaVersion);
-
-    const answer = record(record(record(attempt.body)?.answers)?.verdict);
-    if (!answer) return unavailable('invalid_response', s.criteriaVersion);
-    if (answer.type === 'refusal')
-      return unavailable('refusal', s.criteriaVersion);
+    const answer = record(record(record(attempt.body)?.answers)?.[QUESTION_ID]);
+    if (!answer) return { ok: false, reason: 'invalid_response' };
+    if (answer.type === 'refusal') return { ok: false, reason: 'refusal' };
     const choice = answer.choice;
     if (
       answer.type !== 'choice' ||
       typeof choice !== 'string' ||
       !Object.prototype.hasOwnProperty.call(q.criteria, choice)
     )
-      return unavailable('invalid_response', s.criteriaVersion);
+      return { ok: false, reason: 'invalid_response' };
     const confidence =
       typeof answer.confidence === 'number' &&
       Number.isFinite(answer.confidence)
         ? answer.confidence
         : null;
-    if (
-      s.minConfidence > 0 &&
-      (confidence === null || confidence < s.minConfidence)
-    )
-      return unavailable('low_confidence', s.criteriaVersion);
-    return {
-      value: choice as T,
-      confidence,
-      criteria_version: s.criteriaVersion,
-      latency_ms: Date.now() - started,
-    };
+    return { ok: true, value: choice, confidence };
+  }
+
+  /**
+   * Chat completions, for any OpenRouter model: same state and criteria as a
+   * message demanding strict JSON `{ "verdict": "<value>" }`, validated
+   * against the same allowed values. One repair turn if it does not
+   * validate; a second invalid answer is `invalid_response`.
+   */
+  private async viaChat<T extends string>(
+    q: ChoiceQuestion<T>,
+    s: ClassifierSettings,
+  ): Promise<AdapterOutcome> {
+    const allowed = Object.keys(q.criteria);
+    const shape = `{"${QUESTION_ID}": "<${allowed.join(' | ')}>"}`;
+    const criteria = allowed
+      .map((value) => `- "${value}": ${q.criteria[value as T]}`)
+      .join('\n');
+    const messages: Array<{ role: string; content: string }> = [
+      {
+        role: 'system',
+        content: [
+          `${q.instructions} (criterios ${s.criteriaVersion})`,
+          `Valores permitidos para "${QUESTION_ID}":\n${criteria}`,
+          `Responde SOLO con un objeto JSON válido, sin texto adicional ni bloques de código, con exactamente esta forma: ${shape}`,
+        ].join('\n\n'),
+      },
+      { role: 'user', content: q.state },
+    ];
+
+    for (let turn = 0; turn < 2; turn++) {
+      const attempt = await this.sendChat(s, messages);
+      if (!attempt.ok) return { ok: false, reason: attempt.reason };
+      const parsed = parseChatAnswer(attempt.body, allowed);
+      if (parsed.kind === 'refusal') return { ok: false, reason: 'refusal' };
+      if (parsed.kind === 'valid')
+        return { ok: true, value: parsed.value, confidence: null };
+      if (turn === 0) {
+        messages.push(
+          { role: 'assistant', content: parsed.raw.slice(0, MAX_RAW_ANSWER_CHARS) },
+          {
+            role: 'user',
+            content: `Tu respuesta no es válida. Responde SOLO con JSON con exactamente esta forma: ${shape}`,
+          },
+        );
+      }
+    }
+    return { ok: false, reason: 'invalid_response' };
+  }
+
+  /**
+   * Sends `response_format: json_object` when `json_mode` is on; if the
+   * provider rejects the request with 400, retries once without it (the
+   * message already demands JSON).
+   */
+  private async sendChat(
+    s: ClassifierSettings,
+    messages: Array<{ role: string; content: string }>,
+  ): Promise<AttemptResult> {
+    const payload = (json: boolean) =>
+      JSON.stringify({
+        model: s.model,
+        messages,
+        ...s.chatParams,
+        ...(json ? { response_format: { type: 'json_object' } } : {}),
+      });
+    const attempt = await this.send(s, payload(s.jsonMode));
+    if (!attempt.ok && s.jsonMode && attempt.status === 400)
+      return this.send(s, payload(false));
+    return attempt;
   }
 
   private async post(
@@ -384,15 +622,29 @@ export class VexClassifierService {
     const config = app.config;
     if (!config) return { ok: false, reason: 'not_configured' };
     if (!config.is_active) return { ok: false, reason: 'inactive' };
-    if (!config.model_id) return { ok: false, reason: 'config_error' };
+    const model = config.model_id?.trim() ?? '';
+    if (!model) return { ok: false, reason: 'no_model' };
+
+    const meta = record(app.metadata) ?? {};
+    const adapterSetting = meta.adapter ?? 'auto';
+    let adapter: ClassifierAdapter;
+    if (adapterSetting === 'auto')
+      adapter = supportsDecisions(model) ? 'decisions' : 'chat';
+    else if (adapterSetting === 'chat') adapter = 'chat';
+    else if (adapterSetting === 'decisions') {
+      // Forced Decisions on a model that does not speak it: fail closed,
+      // never guess a fallback the admin did not ask for.
+      if (!supportsDecisions(model))
+        return { ok: false, reason: 'adapter_unsupported', adapter: 'decisions', model };
+      adapter = 'decisions';
+    } else return { ok: false, reason: 'config_error', model };
 
     const ref = config.api_key_ref?.trim() ?? '';
     const apiKey = ENV_NAME.test(ref) ? (process.env[ref] ?? '').trim() : '';
-    if (!apiKey) return { ok: false, reason: 'no_api_key' };
+    if (!apiKey) return { ok: false, reason: 'no_api_key', adapter, model };
 
     const retry = record(app.retry_config) ?? {};
     const rate = record(app.rate_limit) ?? {};
-    const meta = record(app.metadata) ?? {};
     const timeoutRaw = Number(retry.timeout_ms);
     const timeoutMs = Number.isFinite(timeoutRaw)
       ? Math.min(MAX_TIMEOUT_MS, Math.max(MIN_TIMEOUT_MS, timeoutRaw))
@@ -412,12 +664,16 @@ export class VexClassifierService {
       /^[\w.-]{1,20}$/.test(meta.criteria_version)
         ? meta.criteria_version
         : DEFAULT_CRITERIA_VERSION;
-    const base = config.base_url?.trim();
+    const origin = originFrom(config.base_url);
     return {
       ok: true,
       settings: {
-        endpoint: base && /^https:\/\//.test(base) ? base : DECISIONS_ENDPOINT,
-        model: config.model_id,
+        adapter,
+        endpoint: `${origin}${adapter === 'decisions' ? DECISIONS_PATH : CHAT_COMPLETIONS_PATH}`,
+        model,
+        // Decisions ignores sampling params: it has its own typed contract.
+        chatParams: adapter === 'chat' ? chatParamsFrom(meta) : {},
+        jsonMode: meta.json_mode !== false,
         apiKey,
         timeoutMs,
         maxRetries: Number(retry.max_retries) === 0 ? 0 : 1,
@@ -462,6 +718,7 @@ export class VexClassifierService {
   private observe(
     question: ClassifierQuestion,
     verdict: ClassifierVerdict<string>,
+    meta: CallMeta,
     span: ReturnType<VexClassifierService['safeStartSpan']>,
   ): void {
     const degraded = verdict.value === 'unavailable';
@@ -474,6 +731,8 @@ export class VexClassifierService {
         attributes: {
           classifier_question: question,
           classifier_verdict: verdict.value,
+          ...(meta.adapter ? { classifier_adapter: meta.adapter } : {}),
+          ...(meta.model ? { classifier_model: meta.model } : {}),
           ...(reason ? { classifier_degradation: reason } : {}),
         },
       });
@@ -481,7 +740,7 @@ export class VexClassifierService {
       // Telemetry never affects the turn.
     }
     this.logger.debug(
-      `vex_classifier question=${question} verdict=${verdict.value}${reason ? ` reason=${reason}` : ''} latency_ms=${verdict.latency_ms}`,
+      `vex_classifier question=${question} adapter=${meta.adapter ?? '-'} model=${meta.model ?? '-'} verdict=${verdict.value}${reason ? ` reason=${reason}` : ''} latency_ms=${verdict.latency_ms}`,
     );
   }
 }

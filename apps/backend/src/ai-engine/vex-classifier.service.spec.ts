@@ -1,6 +1,8 @@
 import {
+  CHAT_COMPLETIONS_ENDPOINT,
   ClassifierHttpClient,
   DECISIONS_ENDPOINT,
+  DECISIONS_MODEL_PREFIXES,
   VexClassifierService,
 } from './vex-classifier.service';
 import { RequestContextService } from '../common/context/request-context.service';
@@ -124,7 +126,12 @@ describe('VexClassifierService', () => {
     expect(Object.keys(body.questions.verdict.criteria)).toEqual(['accept', 'reject', 'ambiguous']);
     // Span: question/verdict only, never the text.
     const end = trace.endSpan.mock.calls[0][1];
-    expect(end.attributes).toEqual({ classifier_question: 'confirmation', classifier_verdict: 'accept' });
+    expect(end.attributes).toEqual({
+      classifier_question: 'confirmation',
+      classifier_verdict: 'accept',
+      classifier_adapter: 'decisions',
+      classifier_model: 'typesafe/jev-1.14',
+    });
     expect(JSON.stringify(end)).not.toContain('dale');
   });
 
@@ -260,5 +267,207 @@ describe('VexClassifierService', () => {
       throw new Error('trace broken');
     });
     await expect(service.needsMissingTool('a', 'b')).resolves.toMatchObject({ value: 'missing' });
+  });
+
+  describe('adaptadores (decisions | chat)', () => {
+    const GENERIC = 'openai/gpt-5-mini';
+
+    function withModel(model: string, metadata: Record<string, unknown> = {}) {
+      const base = appRow();
+      return {
+        ...base,
+        metadata: { criteria_version: 'v1', ...metadata },
+        config: { ...base.config, model_id: model },
+      };
+    }
+
+    function chatReply(content: string) {
+      return ok({ id: 'c1', choices: [{ message: { role: 'assistant', content }, finish_reason: 'stop' }] });
+    }
+
+    it('la lista de modelos con Decisions es una constante (typesafe/*)', () => {
+      expect(DECISIONS_MODEL_PREFIXES).toContain('typesafe/');
+    });
+
+    it('auto + typesafe/jev-1.14 → /api/alpha/decisions', async () => {
+      const http = jest.fn().mockResolvedValue(choice('missing'));
+      const { service } = build(withModel('typesafe/jev-1.14', { adapter: 'auto' }), http);
+      await expect(service.needsMissingTool('pedir x', 'catálogo')).resolves.toMatchObject({ value: 'missing' });
+      expect(http.mock.calls[0][0]).toBe(DECISIONS_ENDPOINT);
+    });
+
+    it('auto + modelo cualquiera → /api/v1/chat/completions con response_format JSON', async () => {
+      const http = jest.fn().mockResolvedValue(chatReply('{"verdict":"accept"}'));
+      const { service, trace } = build(withModel(GENERIC), http);
+      const verdict = await service.readConfirmation('dale', '¿Aplico el lote?');
+      expect(verdict).toMatchObject({ value: 'accept', confidence: null, criteria_version: 'v1' });
+      const [url, init] = http.mock.calls[0];
+      expect(url).toBe(CHAT_COMPLETIONS_ENDPOINT);
+      expect(init.headers.Authorization).toBe('Bearer sk-spec');
+      const body = JSON.parse(init.body);
+      expect(body.model).toBe(GENERIC);
+      expect(body.response_format).toEqual({ type: 'json_object' });
+      expect(body.messages[0].content).toContain('"accept"');
+      expect(body.messages[0].content).toContain('{"verdict": "<accept | reject | ambiguous>"}');
+      expect(body.messages[1].content).toContain('dale');
+      // Never invented: absent in metadata → absent in the request.
+      expect(body).not.toHaveProperty('temperature');
+      expect(body).not.toHaveProperty('max_tokens');
+      expect(body).not.toHaveProperty('reasoning');
+      const end = trace.endSpan.mock.calls[0][1];
+      expect(end.attributes).toMatchObject({ classifier_adapter: 'chat', classifier_model: GENERIC });
+      expect(JSON.stringify(end)).not.toContain('dale');
+    });
+
+    it('chat envía temperature, max_tokens y reasoning_effort de metadata; decisions los ignora', async () => {
+      const params = { temperature: 0, max_tokens: 20, reasoning_effort: 'low' };
+      const chatHttp = jest.fn().mockResolvedValue(chatReply('{"verdict":"exists"}'));
+      await build(withModel(GENERIC, params), chatHttp).service.needsMissingTool('a', 'b');
+      const chatBody = JSON.parse(chatHttp.mock.calls[0][1].body);
+      expect(chatBody).toMatchObject({ temperature: 0, max_tokens: 20, reasoning: { effort: 'low' } });
+
+      const decHttp = jest.fn().mockResolvedValue(choice('exists'));
+      await build(withModel('typesafe/jev-1.14', params), decHttp).service.needsMissingTool('a', 'b');
+      const decBody = JSON.parse(decHttp.mock.calls[0][1].body);
+      expect(Object.keys(decBody).sort()).toEqual(['model', 'questions', 'state']);
+    });
+
+    it("adapter 'chat' forzado con typesafe/* → chat igualmente", async () => {
+      const http = jest.fn().mockResolvedValue(chatReply('{"verdict":"reject"}'));
+      const { service } = build(withModel('typesafe/jev-1.14', { adapter: 'chat' }), http);
+      await expect(service.readConfirmation('no', '¿Aplico?')).resolves.toMatchObject({ value: 'reject' });
+      expect(http.mock.calls[0][0]).toBe(CHAT_COMPLETIONS_ENDPOINT);
+    });
+
+    it("adapter 'decisions' forzado con un modelo que no la soporta → unavailable adapter_unsupported, sin llamada", async () => {
+      const http = jest.fn();
+      const { service, trace } = build(withModel(GENERIC, { adapter: 'decisions' }), http);
+      await expect(service.readConfirmation('sí', '¿Aplico?')).resolves.toMatchObject({
+        value: 'unavailable',
+        reason: 'adapter_unsupported',
+      });
+      expect(http).not.toHaveBeenCalled();
+      expect(trace.endSpan.mock.calls[0][1].attributes).toMatchObject({
+        classifier_adapter: 'decisions',
+        classifier_model: GENERIC,
+        classifier_degradation: 'adapter_unsupported',
+      });
+    });
+
+    it('adapter desconocido en metadata → unavailable config_error (no adivina)', async () => {
+      const http = jest.fn();
+      const { service } = build(withModel(GENERIC, { adapter: 'magic' }), http);
+      await expect(service.readConfirmation('sí', '¿Aplico?')).resolves.toMatchObject({
+        value: 'unavailable',
+        reason: 'config_error',
+      });
+      expect(http).not.toHaveBeenCalled();
+    });
+
+    it('JSON inválido → un reintento de reparación que valida', async () => {
+      const http = jest
+        .fn()
+        .mockResolvedValueOnce(chatReply('Claro: la persona acepta'))
+        .mockResolvedValueOnce(chatReply('```json\n{"verdict":"accept"}\n```'));
+      const { service } = build(withModel(GENERIC), http);
+      await expect(service.readConfirmation('sí', '¿Aplico?')).resolves.toMatchObject({ value: 'accept' });
+      expect(http).toHaveBeenCalledTimes(2);
+      const repair = JSON.parse(http.mock.calls[1][1].body).messages;
+      expect(repair).toHaveLength(4);
+      expect(repair[3].content).toContain('no es válida');
+    });
+
+    it.each([
+      ['texto libre', 'acepta'],
+      ['valor fuera del criterio', '{"verdict":"maybe"}'],
+      ['claves extra', '{"verdict":"accept","why":"x"}'],
+    ])('JSON inválido dos veces (%s) → unavailable invalid_response', async (_label, content) => {
+      const http = jest.fn().mockResolvedValue(chatReply(content));
+      const { service } = build(withModel(GENERIC), http);
+      await expect(service.readConfirmation('sí', '¿Aplico?')).resolves.toMatchObject({
+        value: 'unavailable',
+        reason: 'invalid_response',
+      });
+      expect(http).toHaveBeenCalledTimes(2);
+    });
+
+    it('refusal en chat → unavailable refusal, sin reparación', async () => {
+      const http = jest.fn().mockResolvedValue(
+        ok({ choices: [{ message: { content: null, refusal: 'no puedo' }, finish_reason: 'stop' }] }),
+      );
+      const { service } = build(withModel(GENERIC), http);
+      await expect(service.readConfirmation('sí', '¿Aplico?')).resolves.toMatchObject({
+        value: 'unavailable',
+        reason: 'refusal',
+      });
+      expect(http).toHaveBeenCalledTimes(1);
+    });
+
+    it('400 con response_format → reintenta una vez sin response_format', async () => {
+      const http = jest
+        .fn()
+        .mockResolvedValueOnce({ status: 400, json: async () => ({ error: { code: 400 } }) })
+        .mockResolvedValueOnce(chatReply('{"verdict":"exists"}'));
+      const { service } = build(withModel(GENERIC), http);
+      await expect(service.needsMissingTool('a', 'b')).resolves.toMatchObject({ value: 'exists' });
+      expect(JSON.parse(http.mock.calls[1][1].body)).not.toHaveProperty('response_format');
+    });
+
+    it('json_mode=false → sin response_format, solo instrucción en el mensaje', async () => {
+      const http = jest.fn().mockResolvedValue(chatReply('{"verdict":"exists"}'));
+      const { service } = build(withModel(GENERIC, { json_mode: false }), http);
+      await service.needsMissingTool('a', 'b');
+      const body = JSON.parse(http.mock.calls[0][1].body);
+      expect(body).not.toHaveProperty('response_format');
+      expect(body.messages[0].content).toContain('Responde SOLO con un objeto JSON');
+    });
+
+    it.each(['', '   ', null])('model_id vacío (%p) → deshabilitado, sin llamada', async (model) => {
+      const http = jest.fn();
+      const { service } = build(withModel(model as string), http);
+      await expect(service.readConfirmation('sí', '¿Aplico?')).resolves.toMatchObject({
+        value: 'unavailable',
+        reason: 'no_model',
+      });
+      expect(http).not.toHaveBeenCalled();
+    });
+
+    it('base_url de la config: solo se usa su origen https', async () => {
+      const http = jest.fn().mockResolvedValue(chatReply('{"verdict":"exists"}'));
+      const row = withModel(GENERIC);
+      const withBase = { ...row, config: { ...row.config, base_url: 'https://gw.example.com/api/v1' } };
+      await build(withBase, http).service.needsMissingTool('a', 'b');
+      expect(http.mock.calls[0][0]).toBe('https://gw.example.com/api/v1/chat/completions');
+    });
+
+    describe.each([
+      ['decisions', 'typesafe/jev-1.14'],
+      ['chat', GENERIC],
+    ])('fallas de transporte (%s): el turno sigue', (_adapter, model) => {
+      it('timeout → unavailable', async () => {
+        const http = jest.fn(
+          (_url: string, init: { signal: AbortSignal }) =>
+            new Promise((_resolve, reject) =>
+              init.signal.addEventListener('abort', () => reject(new Error('aborted'))),
+            ),
+        );
+        const { service } = build(withModel(model), http);
+        await expect(service.readConfirmation('sí', '¿Aplico?')).resolves.toMatchObject({
+          value: 'unavailable',
+          reason: 'timeout',
+        });
+        expect(http).toHaveBeenCalledTimes(2);
+      });
+
+      it.each([429, 500])('HTTP %i → unavailable', async (status) => {
+        const http = jest.fn().mockResolvedValue({ status, json: async () => ({ error: { code: status } }) });
+        const { service } = build(withModel(model), http);
+        await expect(service.needsMissingTool('pedir x', 'catálogo')).resolves.toMatchObject({
+          value: 'unavailable',
+          reason: 'http_error',
+        });
+        expect(http).toHaveBeenCalledTimes(2);
+      });
+    });
   });
 });
