@@ -1,6 +1,13 @@
-import { VexiSpeechTurn, SpeechSource } from './vexi-speech.pipeline';
+import {
+  VexiSpeechTurn,
+  SpeechSource,
+  type SynthesisLoss,
+} from './vexi-speech.pipeline';
 import type { CachedAudio, SpeechCacheParams } from './vexi-speech.cache';
-import { SYNTHESIS_PREFETCH_DEPTH, VOICE_FILLERS } from './vexi-speech.constants';
+import {
+  DEFAULT_SYNTHESIS_CONCURRENCY,
+  VOICE_FILLERS,
+} from './vexi-speech.constants';
 
 const PARAMS: SpeechCacheParams = {
   model: 'gpt-4o-mini-tts',
@@ -23,14 +30,14 @@ class StubSource implements SpeechSource {
   fillerCalls: string[] = [];
   inFlight = 0;
   maxInFlight = 0;
-  /** Texts that should come back with no audio, simulating a provider failure. */
+  /** Texts the provider fails for good on (after its retries): a loss. */
   failOn = new Set<string>();
 
   private pending: Array<() => void> = [];
 
   constructor(private readonly mode: 'immediate' | 'manual' = 'immediate') {}
 
-  async synthesize(text: string): Promise<CachedAudio | null> {
+  async synthesize(text: string): Promise<CachedAudio | SynthesisLoss | null> {
     this.calls.push(text);
     this.inFlight++;
     this.maxInFlight = Math.max(this.maxInFlight, this.inFlight);
@@ -39,7 +46,12 @@ class StubSource implements SpeechSource {
       if (this.mode === 'manual') {
         await new Promise<void>((resolve) => this.pending.push(resolve));
       }
-      if (this.failOn.has(text)) return null;
+      if (this.failOn.has(text)) {
+        return {
+          lost: true,
+          reason: '429: Provider returned error',
+        };
+      }
       return { audioBase64: `b64:${text}`, contentType: 'audio/mp3' };
     } finally {
       this.inFlight--;
@@ -99,6 +111,21 @@ const SIX_SENTENCES = 'Uno. Dos. Tres. Cuatro. Cinco. Seis. ';
  * number of awaits in the implementation; `setImmediate` does not.
  */
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+/** Parallel depth for the tests about ordering under concurrent synthesis. */
+const PARALLEL = 3;
+
+/** A turn configured to allow `PARALLEL` jobs in flight (not the default). */
+function parallelTurn(source: SpeechSource): VexiSpeechTurn {
+  return new VexiSpeechTurn(
+    source,
+    PARAMS,
+    Date.now(),
+    undefined,
+    undefined,
+    PARALLEL,
+  );
+}
 
 describe('VexiSpeechTurn', () => {
   describe('filler', () => {
@@ -165,10 +192,10 @@ describe('VexiSpeechTurn', () => {
   describe('playback order', () => {
     it('indexes by segmentation order even when synthesis finishes backwards', async () => {
       const source = new StubSource('manual');
-      const turn = new VexiSpeechTurn(source, PARAMS);
+      const turn = parallelTurn(source);
 
       turn.push('Uno. Dos. Tres. ');
-      // Three cut, three in flight (exactly the prefetch depth).
+      // Three cut, three in flight (exactly the configured depth).
       expect(source.calls).toEqual(['Uno.', 'Dos.', 'Tres.']);
 
       // Invert completion: the last job started resolves first.
@@ -203,46 +230,79 @@ describe('VexiSpeechTurn', () => {
     });
   });
 
-  describe('prefetch bound', () => {
-    it('never exceeds the configured depth', async () => {
+  describe('provider concurrency', () => {
+    it('defaults to one call at a time: never two syntheses in flight', async () => {
+      expect(DEFAULT_SYNTHESIS_CONCURRENCY).toBe(1);
       const source = new StubSource('manual');
       const turn = new VexiSpeechTurn(source, PARAMS);
 
       turn.push(SIX_SENTENCES);
-
-      expect(source.calls).toHaveLength(SYNTHESIS_PREFETCH_DEPTH);
-      expect(source.maxInFlight).toBe(SYNTHESIS_PREFETCH_DEPTH);
+      expect(source.calls).toEqual(['Uno.']);
+      expect(source.waiting).toBe(1);
 
       await source.runToCompletion();
       await turn.settle();
 
-      // All six eventually run — the depth bounds concurrency, not throughput.
+      // All six run, strictly one after another.
       expect(source.calls).toHaveLength(6);
-      expect(source.maxInFlight).toBe(SYNTHESIS_PREFETCH_DEPTH);
+      expect(source.maxInFlight).toBe(1);
     });
 
-    it('refills a slot as soon as one job finishes', async () => {
+    it('honours a higher configured concurrency without exceeding it', async () => {
+      const source = new StubSource('manual');
+      const turn = parallelTurn(source);
+
+      turn.push(SIX_SENTENCES);
+      expect(source.calls).toHaveLength(PARALLEL);
+
+      await source.runToCompletion();
+      await turn.settle();
+
+      expect(source.calls).toHaveLength(6);
+      expect(source.maxInFlight).toBe(PARALLEL);
+    });
+
+    it('starts the next segment as soon as the previous one finishes', async () => {
       const source = new StubSource('manual');
       const turn = new VexiSpeechTurn(source, PARAMS);
 
       turn.push(SIX_SENTENCES);
-      expect(source.calls).toHaveLength(3);
+      expect(source.calls).toHaveLength(1);
 
       source.releaseLast();
       await tick();
 
-      expect(source.calls).toHaveLength(4);
-      expect(source.maxInFlight).toBe(SYNTHESIS_PREFETCH_DEPTH);
+      expect(source.calls).toEqual(['Uno.', 'Dos.']);
+      expect(source.maxInFlight).toBe(1);
 
       await source.runToCompletion();
       await turn.settle();
+    });
+
+    it('treats an invalid concurrency as one', async () => {
+      const source = new StubSource('manual');
+      const turn = new VexiSpeechTurn(
+        source,
+        PARAMS,
+        Date.now(),
+        undefined,
+        undefined,
+        0,
+      );
+
+      turn.push(SIX_SENTENCES);
+      expect(source.calls).toHaveLength(1);
+
+      await source.runToCompletion();
+      await turn.settle();
+      expect(source.maxInFlight).toBe(1);
     });
   });
 
   describe('abort', () => {
     it('stops spending on segments that were only queued', async () => {
       const source = new StubSource('manual');
-      const turn = new VexiSpeechTurn(source, PARAMS);
+      const turn = parallelTurn(source);
 
       turn.push(SIX_SENTENCES);
       expect(source.calls).toHaveLength(3);
@@ -306,6 +366,73 @@ describe('VexiSpeechTurn', () => {
       expect(frames.map((f) => f.index)).toEqual([0, 2]);
     });
 
+    it('records the lost segment with its index and reason, and marks the turn incomplete', async () => {
+      const source = new StubSource();
+      source.failOn.add('Dos.');
+      source.failOn.add('Cuatro.');
+      const turn = new VexiSpeechTurn(source, PARAMS);
+
+      turn.push('Uno. Dos. Tres. Cuatro. Cinco. ');
+      turn.flush();
+      await turn.settle();
+
+      // The rest of the turn is still read.
+      expect(turn.drain().map((f) => f.audio_base64)).toEqual([
+        'b64:Uno.',
+        'b64:Tres.',
+        'b64:Cinco.',
+      ]);
+      expect(turn.lostSegments()).toEqual([
+        { index: 1, reason: '429: Provider returned error' },
+        { index: 3, reason: '429: Provider returned error' },
+      ]);
+      expect(turn.isComplete()).toBe(false);
+      expect(turn.status()).toEqual({
+        type: 'voice_status',
+        complete: false,
+        lost_segments: 2,
+      });
+    });
+
+    it('reports a turn with every segment synthesized as complete', async () => {
+      const source = new StubSource();
+      const turn = new VexiSpeechTurn(source, PARAMS);
+
+      turn.push('Uno. Dos. ');
+      turn.flush();
+      await turn.settle();
+
+      expect(turn.lostSegments()).toEqual([]);
+      expect(turn.status()).toEqual({
+        type: 'voice_status',
+        complete: true,
+        lost_segments: 0,
+      });
+    });
+
+    it('does not count a segment with nothing speakable as lost', async () => {
+      const source = new StubSource();
+      jest.spyOn(source, 'synthesize').mockResolvedValueOnce(null);
+      const turn = new VexiSpeechTurn(source, PARAMS);
+
+      turn.push('Uno. Dos. ');
+      turn.flush();
+      await turn.settle();
+
+      expect(turn.isComplete()).toBe(true);
+    });
+
+    it('an aborted turn is never complete', async () => {
+      const source = new StubSource();
+      const turn = new VexiSpeechTurn(source, PARAMS);
+
+      turn.push('Uno. Dos. ');
+      turn.abort();
+      await turn.settle();
+
+      expect(turn.isComplete()).toBe(false);
+    });
+
     it('survives a synthesizer that throws', async () => {
       const source = new StubSource();
       jest
@@ -324,6 +451,76 @@ describe('VexiSpeechTurn', () => {
       // SSE turn down over a piece of audio.
       await expect(turn.settle()).resolves.toBeUndefined();
       expect(turn.drain().map((f) => f.audio_base64)).toEqual(['b64:Dos.']);
+      expect(turn.lostSegments()).toEqual([{ index: 0, reason: 'threw: boom' }]);
+      expect(turn.isComplete()).toBe(false);
+    });
+  });
+
+  describe('markdown over the whole answer', () => {
+    async function spokenFrom(chunks: string[]): Promise<string> {
+      const source = new StubSource();
+      const turn = new VexiSpeechTurn(source, PARAMS);
+      for (const chunk of chunks) turn.push(chunk);
+      turn.flush();
+      await turn.settle();
+      return source.calls.join(' | ');
+    }
+
+    it('never reads a fenced JSON block split across chunks and segments', async () => {
+      const spoken = await spokenFrom([
+        'Te dejo el resumen de la venta. ',
+        'Aquí está el detalle:\n```json\n{"order_id": 4512, ',
+        '"total": 150000, "items": [{"sku": "QA-1"}]',
+        '}\n``',
+        '`\nListo, eso es todo por ahora.',
+      ]);
+
+      expect(spoken).not.toMatch(/order_id|sku|QA-1|[{}"`]/);
+      expect(spoken).toContain('Te dejo el resumen de la venta.');
+      expect(spoken).toContain('Listo, eso es todo por ahora.');
+    });
+
+    it('never reads a code block longer than a segment budget', async () => {
+      const code = Array.from(
+        { length: 20 },
+        (_, i) => `const variable${i} = calcular(${i});`,
+      ).join('\n');
+      const spoken = await spokenFrom([
+        'Este es el script.\n```ts\n',
+        code.slice(0, 200),
+        code.slice(200),
+        '\n```\nFin.',
+      ]);
+
+      expect(spoken).not.toMatch(/const|variable|calcular/);
+      expect(spoken).toContain('Este es el script.');
+      expect(spoken).toContain('Fin.');
+    });
+
+    it('reads a link label, never its URL, when the link arrives in pieces', async () => {
+      const spoken = await spokenFrom([
+        'Revisa el [reporte de ',
+        'ventas](https://vendix.com/re',
+        'portes/123) cuando puedas.',
+      ]);
+
+      expect(spoken).toContain('reporte de ventas');
+      expect(spoken).not.toMatch(/https|vendix\.com|\(|\)|\[|\]/);
+    });
+
+    it('drops list and heading markers even when a line arrives split', async () => {
+      const spoken = await spokenFrom([
+        '## Ven',
+        'tas de hoy\n',
+        '1',
+        '. Arepas: 12 unidades.\n- ',
+        '**Café**: 8 unidades.\n',
+      ]);
+
+      expect(spoken).not.toMatch(/[#*]|^1\. |\| 1\. /);
+      expect(spoken).toContain('Ventas de hoy');
+      expect(spoken).toContain('Arepas: 12 unidades.');
+      expect(spoken).toContain('Café: 8 unidades.');
     });
   });
 
@@ -410,7 +607,7 @@ describe('VexiSpeechTurn', () => {
 
     it('emits every segment in strict ascending index order even when synthesis finishes backwards', async () => {
       const source = new StubSource('manual');
-      const turn = new VexiSpeechTurn(source, PARAMS);
+      const turn = parallelTurn(source);
 
       turn.push('Uno. Dos. Tres. Cuatro. ');
       turn.flush();

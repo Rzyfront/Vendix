@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
-import { SYNTHESIS_PREFETCH_DEPTH } from './vexi-speech.constants';
+import { DEFAULT_SYNTHESIS_CONCURRENCY } from './vexi-speech.constants';
+import { SpeechMarkdownFilter } from './vexi-speech.markdown';
 import { VexiSpeechSegmenter } from './vexi-speech.segmenter';
 import type { CachedAudio, SpeechCacheParams } from './vexi-speech.cache';
 
@@ -57,10 +58,50 @@ export interface VexiVoiceNoticeFrame {
   message: string;
 }
 
+/**
+ * Closing report of a spoken turn, emitted after its last audio frame.
+ *
+ * `complete: false` means at least one segment could not be synthesized (the
+ * provider kept failing after the retries): the audio the client holds is a
+ * fragment of the answer. The client must not keep it as the message's audio —
+ * «Escuchar» has to synthesize again from the full text instead of replaying
+ * the fragment.
+ */
+export interface VexiVoiceStatusFrame {
+  type: 'voice_status';
+  complete: boolean;
+  lost_segments: number;
+}
+
 export type VexiVoiceFrame =
   | VexiAudioFrame
   | VexiTimingFrame
-  | VexiVoiceNoticeFrame;
+  | VexiVoiceNoticeFrame
+  | VexiVoiceStatusFrame;
+
+/** A segment the provider could not synthesize, with why. */
+export interface LostSegment {
+  index: number;
+  reason: string;
+}
+
+/**
+ * What `synthesize` returns when the provider failed for good (after its
+ * retries). Distinct from `null`, which means the segment had nothing
+ * speakable: an empty segment is not a loss, a provider failure is.
+ */
+export interface SynthesisLoss {
+  lost: true;
+  reason: string;
+}
+
+export function isSynthesisLoss(value: unknown): value is SynthesisLoss {
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    (value as { lost?: unknown }).lost === true
+  );
+}
 
 /**
  * Receives the duration of every segment the provider actually generated
@@ -87,7 +128,7 @@ export interface SpeechSource {
     text: string,
     params: SpeechCacheParams,
     currency?: string,
-  ): Promise<MeteredAudio | null>;
+  ): Promise<MeteredAudio | SynthesisLoss | null>;
   pickFiller(previous?: string | null): string;
   fillerAudio(
     phrase: string,
@@ -116,6 +157,8 @@ interface QueuedSegment {
 export class VexiSpeechTurn {
   private readonly logger = new Logger(VexiSpeechTurn.name);
   private readonly segmenter = new VexiSpeechSegmenter();
+  /** Cleans markdown over the whole answer before the segmenter cuts it. */
+  private readonly markdown = new SpeechMarkdownFilter();
 
   /** Cut, indexed, waiting for a prefetch slot. */
   private readonly queue: QueuedSegment[] = [];
@@ -127,6 +170,12 @@ export class VexiSpeechTurn {
   private readonly orderedReady = new Map<number, VexiAudioFrame>();
   /** Indices whose synthesis returned null/threw so ordered emission never stalls. */
   private readonly skipped = new Set<number>();
+  /** Segments the provider never produced, in the order they were given up. */
+  private readonly lost: LostSegment[] = [];
+  /** Segments that reached audio (provider or cache). */
+  private synthesized = 0;
+  /** The closing diagnostic line is written once per turn. */
+  private reported = false;
 
   private nextIndex = 0;
   private nextOrderedIndex = 0;
@@ -146,6 +195,11 @@ export class VexiSpeechTurn {
     private readonly currency?: string,
     /** Per-agent voice quota (T14); absent = nothing is metered. */
     private readonly meter?: VoiceMeter,
+    /**
+     * Synthesis jobs this turn may have in flight. Comes from configuration
+     * (`metadata.speech.max_concurrency`); one by default.
+     */
+    private readonly concurrency: number = DEFAULT_SYNTHESIS_CONCURRENCY,
   ) {}
 
   /**
@@ -195,7 +249,10 @@ export class VexiSpeechTurn {
     this.mark('first_token');
     if (this.aborted) return;
 
-    for (const segment of this.segmenter.push(text)) this.enqueue(segment);
+    const clean = this.markdown.push(text);
+    if (clean) {
+      for (const segment of this.segmenter.push(clean)) this.enqueue(segment);
+    }
     this.pump();
   }
 
@@ -203,8 +260,34 @@ export class VexiSpeechTurn {
   flush(): void {
     if (this.aborted) return;
 
+    const clean = this.markdown.flush();
+    if (clean) {
+      for (const segment of this.segmenter.push(clean)) this.enqueue(segment);
+    }
     for (const segment of this.segmenter.flush()) this.enqueue(segment);
     this.pump();
+  }
+
+  /** Segments the provider could not synthesize on this turn. */
+  lostSegments(): LostSegment[] {
+    return [...this.lost];
+  }
+
+  /**
+   * True when every segment that had something to say reached audio. Only a
+   * complete turn may be offered as the message's reusable audio.
+   */
+  isComplete(): boolean {
+    return !this.aborted && this.lost.length === 0;
+  }
+
+  /** Closing report for the client; emit after the last audio frame. */
+  status(): VexiVoiceStatusFrame {
+    return {
+      type: 'voice_status',
+      complete: this.isComplete(),
+      lost_segments: this.lost.length,
+    };
   }
 
   /**
@@ -247,6 +330,7 @@ export class VexiSpeechTurn {
       if (!this.active.size) break;
       await Promise.race(this.active.values());
     }
+    this.report();
   }
 
   /**
@@ -264,7 +348,10 @@ export class VexiSpeechTurn {
       for (const frame of this.drainOrdered()) yield frame;
     }
 
-    if (this.aborted) return;
+    if (this.aborted) {
+      this.report();
+      return;
+    }
 
     // Defensive tail flush: if anything remains in orderedReady after all jobs
     // finished, emit in ascending index order so no segment is ever stranded.
@@ -277,6 +364,7 @@ export class VexiSpeechTurn {
       }
       this.nextOrderedIndex = this.nextIndex;
     }
+    this.report();
   }
 
   /**
@@ -292,6 +380,33 @@ export class VexiSpeechTurn {
     this.queue.length = 0;
     this.orderedReady.clear();
     this.skipped.clear();
+    this.report();
+  }
+
+  /**
+   * One diagnostic line per spoken turn: which provider and model read it and
+   * how many segments made it. Counts and timings only — never the text, which
+   * is the user's business data.
+   *
+   * `segments_total` counts every cut segment; the ones neither ok nor failed
+   * cleaned down to nothing speakable (or were dropped by an abort).
+   */
+  report(): void {
+    if (this.reported) return;
+    this.reported = true;
+    this.logger.log(
+      [
+        'Speech turn',
+        `provider=${this.params.provider ?? 'app_default'}`,
+        `model_id=${this.params.model}`,
+        `segments_total=${this.nextIndex}`,
+        `segments_ok=${this.synthesized}`,
+        `segments_failed=${this.lost.length}`,
+        `ms_total=${this.since()}`,
+        `complete=${this.isComplete()}`,
+        ...(this.aborted ? ['aborted=true'] : []),
+      ].join(' '),
+    );
   }
 
   /** The marks observed on this turn, in the order they were reached. */
@@ -310,16 +425,17 @@ export class VexiSpeechTurn {
   }
 
   /**
-   * Starts jobs up to the prefetch depth.
+   * Starts jobs up to the configured concurrency (one by default).
    *
-   * Bounded rather than unbounded so a long answer does not fire twenty calls
-   * that a barge-in then throws away. Three is enough to keep the speaker fed:
-   * while segment N plays, N+1 and N+2 are already audio.
+   * Bounded so a long answer does not fire twenty calls that a barge-in then
+   * throws away, and so a rate-limited provider never sees a burst of
+   * parallel requests from one answer (see `DEFAULT_SYNTHESIS_CONCURRENCY`).
    */
   private pump(): void {
+    const limit = Math.max(1, Math.floor(this.concurrency) || 1);
     while (
       !this.aborted &&
-      this.active.size < SYNTHESIS_PREFETCH_DEPTH &&
+      this.active.size < limit &&
       this.queue.length
     ) {
       const job = this.queue.shift()!;
@@ -339,11 +455,15 @@ export class VexiSpeechTurn {
         this.params,
         this.currency,
       );
-      // No audio means the provider failed or the segment cleaned down to
-      // nothing. Either way the turn degrades to text-only — captions and
-      // history are unaffected, which is the correct direction to fail.
+      // Nothing speakable after cleaning: not a loss, just nothing to say.
       if (!audio) {
         this.skipped.add(job.index);
+        return;
+      }
+      // The provider failed for good. The rest of the turn is still read; the
+      // gap is recorded so the turn is never offered as complete audio.
+      if (isSynthesisLoss(audio)) {
+        this.loseSegment(job.index, audio.reason);
         return;
       }
 
@@ -363,20 +483,24 @@ export class VexiSpeechTurn {
         return;
       }
 
+      this.synthesized++;
       this.mark('first_audio');
       this.marks.set('last_audio', this.since());
       const frame = this.frame(job.index, audio, false);
       this.ready.push(frame);
       this.orderedReady.set(job.index, frame);
     } catch (error) {
-      this.skipped.add(job.index);
       // `synthesize` is documented not to throw, but a throw here would reach
       // `settle()` as an unhandled rejection and take the whole SSE turn down
       // over a piece of audio.
-      this.logger.warn(
-        `Segment ${job.index} synthesis threw: ${(error as Error).message}`,
-      );
+      this.loseSegment(job.index, `threw: ${(error as Error).message}`);
     }
+  }
+
+  private loseSegment(index: number, reason: string): void {
+    this.skipped.add(index);
+    this.lost.push({ index, reason });
+    this.logger.warn(`Speech segment ${index} lost: ${reason}`);
   }
 
   private frame(

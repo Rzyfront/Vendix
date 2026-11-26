@@ -6,16 +6,23 @@ import { VexiSpeechCache, CachedAudio } from './vexi-speech.cache';
 import { VexiSpeechSegmenter, hasWordCharacter } from './vexi-speech.segmenter';
 import {
   VexiSpeechTurn,
+  type LostSegment,
+  type SynthesisLoss,
   type VexiAudioFrame,
   type VoiceMeter,
 } from './vexi-speech.pipeline';
+import { stripMarkdownForSpeech } from './vexi-speech.markdown';
 import type { SpeechCacheParams } from './vexi-speech.cache';
 import { estimateSpeechSeconds } from './vexi-speech.duration';
 import { agentVoiceFromSpeechMetadata } from '../../../ai-engine/agent-runtime-config.service';
 import {
   CURRENCY_SPOKEN_WORDS,
   DEFAULT_SPOKEN_CURRENCY,
+  DEFAULT_SYNTHESIS_CONCURRENCY,
+  MAX_RETRY_AFTER_MS,
+  MAX_SYNTHESIS_CONCURRENCY,
   MIN_GROUPED_DIGITS,
+  SYNTHESIS_RETRY_DELAYS_MS,
   VOICE_FILLERS,
   VOICE_TTS_APP_KEY,
 } from './vexi-speech.constants';
@@ -58,39 +65,54 @@ export interface SpeechTurnOptions {
   meter?: VoiceMeter;
 }
 
+export { stripMarkdownForSpeech };
+
 /**
- * Strips markdown so the synthesizer receives prose.
- *
- * Runs on the audio branch only, and per emitted segment rather than over the
- * buffer: fenced blocks and links need their full pattern, and a half-arrived
- * one would be mangled. Captions and history keep whatever the chat produced —
- * the reader wants the formatting, the listener cannot hear it.
- *
- * Deletion rather than pairing for the emphasis markers: an unclosed `**` at a
- * segment boundary is normal, and no asterisk is ever spoken, so removing them
- * unconditionally is both simpler and more robust than tracking pairs.
+ * Failure messages that mean "try again shortly" when the provider gave no
+ * HTTP status: network errors, timeouts, rate limits worded in the body, and
+ * a 200 that carried no audio (an empty body is not a verdict on the text).
+ * Anything else (bad voice, bad key, unknown model) fails the same on retry.
  */
-export function stripMarkdownForSpeech(text: string): string {
-  return (
-    text
-      // Code is not prose. Reading it aloud is never what the listener wanted.
-      .replace(/```[\s\S]*?```/g, ' ')
-      // Keep the label, drop the target — nobody wants a URL dictated.
-      .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
-      // A table separator row is pure layout.
-      .replace(/^\s*\|[-:\s|]*\|\s*$/gm, ' ')
-      // Remaining pipes separate cells; a space reads as the pause they imply.
-      .replace(/\|/g, ' ')
-      .replace(/^\s{0,3}#{1,6}\s+/gm, '')
-      .replace(/^\s{0,3}>\s?/gm, '')
-      // The trailing space is load-bearing in both list patterns: it is what
-      // distinguishes the marker "1. " from the amount "1.500".
-      .replace(/^\s*[-*+]\s+/gm, '')
-      .replace(/^\s*\d+[.)]\s+/gm, '')
-      .replace(/[*_`~]/g, '')
-      .replace(/\s+/g, ' ')
-      .trim()
-  );
+const TRANSIENT_SPEECH_MESSAGE =
+  /returned no audio|rate.?limit|too many requests|\b429\b|\b5\d\d\b|timed? ?out|timeout|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|fetch failed|overloaded|temporarily|unavailable/i;
+
+/**
+ * Whether a failed synthesis is worth retrying. The HTTP status decides when
+ * there is one (408, 425, 429, 5xx); otherwise the message does.
+ */
+export function isTransientSpeechError(
+  message: string,
+  statusCode?: number,
+): boolean {
+  if (statusCode !== undefined) {
+    return (
+      statusCode === 408 ||
+      statusCode === 425 ||
+      statusCode === 429 ||
+      statusCode >= 500
+    );
+  }
+  return TRANSIENT_SPEECH_MESSAGE.test(message);
+}
+
+/** Result of synthesizing a whole message on demand («Escuchar»). */
+export interface SynthesizedText {
+  frames: VexiAudioFrame[];
+  /** False when a segment was lost: the frames are a fragment of the text. */
+  complete: boolean;
+  lost: LostSegment[];
+}
+
+/** Outcome of one provider call, after its retries. */
+type ProviderResult =
+  | { ok: true; audio: CachedAudio }
+  | { ok: false; reason: string };
+
+/** One failed attempt, classified. */
+interface FailedAttempt {
+  reason: string;
+  transient: boolean;
+  retryAfterMs?: number;
 }
 
 /** Inserts thousands separators into a bare digit run: 1500000 → 1.500.000 */
@@ -185,11 +207,56 @@ export class VexiSpeechService {
     // change only when somebody edits a setting, and either query on the
     // critical path of every segment would cost more than the cache saves.
     // Concurrent because they hit different tables and neither needs the other.
-    const [params, currency] = await Promise.all([
+    const [params, currency, concurrency] = await Promise.all([
       this.resolveParams(options.agentKey),
       this.resolveCurrency(),
+      this.resolveSynthesisConcurrency(),
     ]);
-    return new VexiSpeechTurn(this, params, startedAt, currency, options.meter);
+    return new VexiSpeechTurn(
+      this,
+      params,
+      startedAt,
+      currency,
+      options.meter,
+      concurrency,
+    );
+  }
+
+  /**
+   * How many segments of one turn may be synthesizing at once, read from
+   * `vexi_voice_tts.metadata.speech.max_concurrency` (integer 1–8). That app is
+   * the one every spoken turn runs through — also when a catalog voice (Gemini
+   * via OpenRouter, MiniMax…) does the synthesis — so the knob is the same for
+   * every provider. A missing, invalid or unreadable value means 1.
+   */
+  async resolveSynthesisConcurrency(): Promise<number> {
+    let limit = DEFAULT_SYNTHESIS_CONCURRENCY;
+    try {
+      const app = await this.prisma.ai_engine_applications.findUnique({
+        where: { key: VOICE_TTS_APP_KEY },
+        select: { metadata: true },
+      });
+      const raw = (
+        (app?.metadata as Record<string, any> | null)?.speech as
+          | Record<string, any>
+          | undefined
+      )?.max_concurrency;
+      const parsed = Number(raw);
+      if (
+        raw !== null &&
+        raw !== undefined &&
+        raw !== '' &&
+        Number.isInteger(parsed) &&
+        parsed >= 1
+      ) {
+        limit = Math.min(parsed, MAX_SYNTHESIS_CONCURRENCY);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Synthesis concurrency unreadable; using ${DEFAULT_SYNTHESIS_CONCURRENCY}: ${(error as Error).message}`,
+      );
+    }
+    return limit;
   }
 
   /**
@@ -227,7 +294,10 @@ export class VexiSpeechService {
 
       const app = await this.prisma.ai_engine_applications.findUnique({
         where: { key: VOICE_TTS_APP_KEY },
-        select: { metadata: true, config: { select: { model_id: true } } },
+        select: {
+          metadata: true,
+          config: { select: { model_id: true, provider: true } },
+        },
       });
 
       const speech =
@@ -254,6 +324,7 @@ export class VexiSpeechService {
             this.positive(speech.vol) ??
             DEFAULT_SPEECH_PARAMS.vol,
           configId: profile.configId,
+          ...(profile.provider ? { provider: profile.provider } : {}),
         };
       }
 
@@ -275,6 +346,9 @@ export class VexiSpeechService {
           this.positive(own.vol) ??
           this.positive(speech.vol) ??
           DEFAULT_SPEECH_PARAMS.vol,
+        ...(this.text(app?.config?.provider)
+          ? { provider: this.text(app?.config?.provider)! }
+          : {}),
       };
     } catch (error) {
       // A voice turn must not die because the config lookup failed; the
@@ -298,6 +372,7 @@ export class VexiSpeechService {
   private async resolveVoiceProfile(agentKey: string): Promise<{
     configId: number;
     model: string;
+    provider?: string;
     voice: string;
     speed: number | null;
     vol: number | null;
@@ -313,7 +388,12 @@ export class VexiSpeechService {
               vol: true,
               is_active: true,
               config: {
-                select: { id: true, model_id: true, is_active: true },
+                select: {
+                  id: true,
+                  model_id: true,
+                  is_active: true,
+                  provider: true,
+                },
               },
             },
           },
@@ -327,6 +407,7 @@ export class VexiSpeechService {
       return {
         configId: profile.config.id,
         model: profile.config.model_id,
+        provider: this.text(profile.config.provider) ?? undefined,
         voice,
         speed: this.positive(profile.speed),
         vol: this.positive(profile.vol),
@@ -342,16 +423,16 @@ export class VexiSpeechService {
   /**
    * Synthesizes one segment, serving a cache hit when there is one.
    *
-   * Returns null — never throws — when the text has nothing speakable in it or
-   * the provider failed. A failed synthesis degrades the turn to text-only,
-   * which is a worse voice experience but still a correct answer; throwing here
-   * would take the whole SSE turn down with it, captions included.
+   * Never throws. Returns null when the text has nothing speakable in it, and
+   * a `SynthesisLoss` (with the reason) when the provider still failed after
+   * its retries, so the turn can record the lost segment and keep reading the
+   * rest; throwing here would take the whole SSE turn down, captions included.
    */
   async synthesize(
     rawText: string,
     params: SpeechCacheParams,
     currency?: string,
-  ): Promise<SynthesizedAudio | null> {
+  ): Promise<SynthesizedAudio | SynthesisLoss | null> {
     // Order matters: the markdown strip has to run first because it is what
     // removes the list marker "1. ", and the number pass would otherwise see the
     // "1" as a quantity. The strip's own comment already flags that the trailing
@@ -369,8 +450,9 @@ export class VexiSpeechService {
     const hit = this.cache.get(key);
     if (hit) return { ...hit, generated: false, seconds: 0 };
 
-    const audio = await this.callProvider(spoken, params);
-    if (!audio) return null;
+    const result = await this.callProvider(spoken, params);
+    if (!result.ok) return { lost: true, reason: result.reason };
+    const audio = result.audio;
     this.cache.set(key, audio);
     // Measured here, at synthesis (§3.7): the only place that knows a provider
     // call produced audio. Cache hits above are free and never counted.
@@ -402,11 +484,13 @@ export class VexiSpeechService {
   async synthesizeText(
     rawText: string,
     options?: SpeechTurnOptions,
-  ): Promise<VexiAudioFrame[]> {
+  ): Promise<SynthesizedText> {
     const trimmed = (rawText ?? '').trim();
-    if (!trimmed) return [];
+    if (!trimmed) return { frames: [], complete: true, lost: [] };
 
     const turn = await this.openTurn(Date.now(), options);
+    // The whole text is pushed at once, so the markdown filter sees every
+    // construct complete before anything is cut.
     turn.push(trimmed);
     turn.flush();
 
@@ -414,7 +498,11 @@ export class VexiSpeechService {
     for await (const frame of turn.settleOrdered()) {
       frames.push(frame);
     }
-    return frames;
+    return {
+      frames,
+      complete: turn.isComplete(),
+      lost: turn.lostSegments(),
+    };
   }
 
   /**
@@ -437,9 +525,9 @@ export class VexiSpeechService {
         continue;
       }
 
-      const audio = await this.callProvider(phrase, params);
-      if (audio) {
-        this.cache.pin(key, audio);
+      const result = await this.callProvider(phrase, params);
+      if (result.ok) {
+        this.cache.pin(key, result.audio);
         synthesized++;
       }
     }
@@ -517,15 +605,55 @@ export class VexiSpeechService {
     const hit = this.cache.get(key);
     if (hit) return hit;
 
-    const audio = await this.callProvider(phrase, params);
-    if (audio) this.cache.pin(key, audio);
-    return audio;
+    const result = await this.callProvider(phrase, params);
+    if (!result.ok) return null;
+    this.cache.pin(key, result.audio);
+    return result.audio;
   }
 
+  /** Overridable in specs so retries do not wait real time. */
+  protected wait(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * One provider call, retried with a short backoff when the failure is
+   * transient (see `isTransientSpeechError`); a provider `Retry-After` is
+   * honoured up to `MAX_RETRY_AFTER_MS`. Never throws: the reason of the last
+   * failure comes back so the caller records the lost segment instead of
+   * dropping it silently.
+   */
   private async callProvider(
     text: string,
     params: SpeechCacheParams,
-  ): Promise<CachedAudio | null> {
+  ): Promise<ProviderResult> {
+    for (let attempt = 0; ; attempt++) {
+      const outcome = await this.attemptProvider(text, params);
+      if ('audio' in outcome) return { ok: true, audio: outcome.audio };
+      const failure = outcome;
+
+      const backoff = SYNTHESIS_RETRY_DELAYS_MS[attempt];
+      if (!failure.transient || backoff === undefined) {
+        this.logger.warn(
+          `Speech synthesis failed after ${attempt + 1} attempt(s): ${failure.reason}`,
+        );
+        return { ok: false, reason: failure.reason };
+      }
+      const delay = Math.max(
+        backoff,
+        Math.min(failure.retryAfterMs ?? 0, MAX_RETRY_AFTER_MS),
+      );
+      this.logger.warn(
+        `Speech synthesis transient failure (attempt ${attempt + 1}), retrying in ${delay} ms: ${failure.reason}`,
+      );
+      await this.wait(delay);
+    }
+  }
+
+  private async attemptProvider(
+    text: string,
+    params: SpeechCacheParams,
+  ): Promise<FailedAttempt | { audio: CachedAudio }> {
     try {
       const response = await this.aiEngine.runSpeech(
         VOICE_TTS_APP_KEY,
@@ -549,20 +677,33 @@ export class VexiSpeechService {
         ...(params.configId ? [{ configId: params.configId }] : []),
       );
 
-      if (!response.success || !response.audioBase64) {
-        this.logger.warn(
-          `Speech synthesis failed: ${response.error ?? 'no audio returned'}`,
-        );
-        return null;
+      if (response.success && response.audioBase64) {
+        return {
+          audio: {
+            audioBase64: response.audioBase64,
+            contentType: response.contentType || `audio/${params.format}`,
+          },
+        };
       }
-
+      const reason =
+        response.error ??
+        (response.success ? 'provider returned no audio' : 'no audio returned');
       return {
-        audioBase64: response.audioBase64,
-        contentType: response.contentType || `audio/${params.format}`,
+        reason: response.statusCode
+          ? `${response.statusCode}: ${reason}`
+          : reason,
+        transient: isTransientSpeechError(reason, response.statusCode),
+        retryAfterMs: response.retryAfterMs,
       };
     } catch (error) {
-      this.logger.warn(`Speech synthesis threw: ${(error as Error).message}`);
-      return null;
+      // `runSpeech` throws its own gates (app rate limit = 429, inactive app);
+      // a VendixHttpException carries the status, a network error does not.
+      const status = (error as { getStatus?: () => number }).getStatus?.();
+      const reason = (error as Error).message || 'synthesis threw';
+      return {
+        reason: status ? `${status}: ${reason}` : reason,
+        transient: isTransientSpeechError(reason, status),
+      };
     }
   }
 

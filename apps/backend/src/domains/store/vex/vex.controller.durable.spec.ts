@@ -112,7 +112,13 @@ describe('Vex durable objective aliases', () => {
       { type: 'audio', index: 0, audio_base64: 'AAA', content_type: 'audio/mp3' },
       { type: 'audio', index: 1, audio_base64: 'BBB', content_type: 'audio/mp3' },
     ];
-    c.speech = { synthesizeText: jest.fn(async () => segments) };
+    c.speech = {
+      synthesizeText: jest.fn(async () => ({
+        frames: segments,
+        complete: true,
+        lost: [],
+      })),
+    };
 
     const result = await c.synthesizeSpeech({ text: 'Hola. Todo bien.' });
 
@@ -120,7 +126,25 @@ describe('Vex durable objective aliases', () => {
       'Hola. Todo bien.',
       expect.objectContaining({ agentKey: 'vex' }),
     );
-    expect(result).toEqual({ segments });
+    expect(result).toEqual({ segments, complete: true });
+  });
+
+  it('reports an incomplete synthesis so the client does not keep it as the message audio', async () => {
+    const c = fixture();
+    const segments = [
+      { type: 'audio', index: 0, audio_base64: 'AAA', content_type: 'audio/mp3' },
+    ];
+    c.speech = {
+      synthesizeText: jest.fn(async () => ({
+        frames: segments,
+        complete: false,
+        lost: [{ index: 1, reason: 'in-flight requests' }],
+      })),
+    };
+
+    const result = await c.synthesizeSpeech({ text: 'Hola. Todo bien.' });
+
+    expect(result).toEqual({ segments, complete: false });
   });
 
   describe('synthesizeSpeech voice plan and quota', () => {
@@ -140,7 +164,7 @@ describe('Vex durable objective aliases', () => {
       c.speech = {
         synthesizeText: jest.fn(async (_text: string, options: any) => {
           options.meter(1.25, 0);
-          return [];
+          return { frames: [], complete: true, lost: [] };
         }),
       };
       return c;
@@ -203,6 +227,7 @@ describe('Vex durable objective aliases', () => {
       c.agentQuota.checkAgentVoice.mockRejectedValue(new Error('redis down'));
       await expect(c.synthesizeSpeech({ text: 'Hola.' })).resolves.toEqual({
         segments: [],
+        complete: true,
       });
     });
   });
