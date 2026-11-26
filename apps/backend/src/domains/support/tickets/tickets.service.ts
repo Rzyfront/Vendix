@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
+import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { TicketQueryDto } from './dto/ticket-query.dto';
@@ -16,6 +17,45 @@ import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { ImageContext } from '@common/config/image-presets';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import {
+  CAPABILITY_REQUEST_TAG,
+  CAPABILITY_VOTE_TAG_PREFIX,
+  capabilityKeyTag,
+  capabilityVoteTag,
+  isReservedCapabilityTag,
+  withoutReservedCapabilityTags,
+} from './capability-tags';
+
+export {
+  CAPABILITY_REQUEST_TAG,
+  capabilityKeyTag,
+  capabilityVoteTag,
+  isReservedCapabilityTag,
+  withoutReservedCapabilityTags,
+} from './capability-tags';
+
+/**
+ * What the caller may learn about the open request for a capability. The
+ * ticket number is only revealed to the organization that owns the ticket.
+ */
+export interface CapabilityRequestStatus {
+  exists: boolean;
+  /** This store already asked (it filed it or voted). */
+  already_voted: boolean;
+  /** The ticket belongs to the caller's organization. */
+  own: boolean;
+  ticket_number: string | null;
+  votes: number;
+}
+
+export interface CapabilityRequestInput {
+  organizationId: number;
+  storeId: number;
+  userId: number;
+  capabilityKey: string;
+  title: string;
+  description: string;
+}
 
 @Injectable()
 export class TicketsService {
@@ -23,6 +63,12 @@ export class TicketsService {
 
   constructor(
     private readonly prisma: OrganizationPrismaService,
+    /**
+     * Only for capability requests (Vex T5): one ticket per capability across
+     * tenants. Reads by capability tag and appends a hashed vote tag; it never
+     * returns another organization's data to the caller.
+     */
+    private readonly globalPrisma: GlobalPrismaService,
     private readonly s3Service: S3Service,
     private readonly s3PathHelper: S3PathHelper,
     private readonly eventEmitter: EventEmitter2,
@@ -33,6 +79,8 @@ export class TicketsService {
     storeId: number | undefined,
     userId: number,
     createTicketDto: CreateTicketDto,
+    /** Internal: only `recordCapabilityRequest` may write capability tags. */
+    options: { allowReservedTags?: boolean } = {},
   ) {
     try {
       // Get organization for S3 path
@@ -68,7 +116,9 @@ export class TicketsService {
           related_order_id: createTicketDto.related_order_id,
           related_order_type: createTicketDto.related_order_type,
           related_product_id: createTicketDto.related_product_id,
-          tags: createTicketDto.tags || [],
+          tags: (createTicketDto.tags || []).filter(
+            (tag) => options.allowReservedTags || !isReservedCapabilityTag(tag),
+          ),
           sla_deadline: slaDeadline,
           created_at: new Date(),
           updated_at: new Date(),
@@ -116,6 +166,127 @@ export class TicketsService {
       this.logger.error(`Error creating ticket: ${error.message}`);
       throw error;
     }
+  }
+
+  /**
+   * The open capability request for `capabilityKey`, as the caller may see
+   * it. Cross-tenant on purpose (one ticket per capability), read-only.
+   */
+  async findCapabilityRequest(
+    capabilityKey: string,
+    organizationId: number,
+    storeId: number,
+  ): Promise<CapabilityRequestStatus> {
+    const ticket = await this.findOpenCapabilityTicket(capabilityKey);
+    if (!ticket) {
+      return {
+        exists: false,
+        already_voted: false,
+        own: false,
+        ticket_number: null,
+        votes: 0,
+      };
+    }
+    return this.toCapabilityStatus(ticket, organizationId, storeId);
+  }
+
+  /**
+   * Files the capability request, or adds this store's vote to the open one.
+   * Idempotent per store: asking twice never adds a second vote or ticket.
+   * Known limit: two stores asking for a brand-new capability at the same
+   * instant can open two tickets (no unique constraint without a migration).
+   */
+  async recordCapabilityRequest(
+    input: CapabilityRequestInput,
+  ): Promise<CapabilityRequestStatus & { outcome: 'created' | 'voted' | 'already_voted' }> {
+    const voteTag = capabilityVoteTag(input.storeId);
+    const existing = await this.findOpenCapabilityTicket(input.capabilityKey);
+
+    if (!existing) {
+      const created = await this.create(
+        input.organizationId,
+        input.storeId,
+        input.userId,
+        {
+          title: input.title,
+          description: input.description,
+          category: ticket_category_enum.SERVICE_REQUEST,
+          priority: ticket_priority_enum.P3,
+          tags: [
+            CAPABILITY_REQUEST_TAG,
+            capabilityKeyTag(input.capabilityKey),
+            voteTag,
+          ],
+        } as CreateTicketDto,
+        { allowReservedTags: true },
+      );
+      return {
+        outcome: 'created',
+        exists: true,
+        already_voted: true,
+        own: true,
+        ticket_number: created.data.ticket_number,
+        votes: 1,
+      };
+    }
+
+    if (existing.tags.includes(voteTag)) {
+      return {
+        outcome: 'already_voted',
+        ...this.toCapabilityStatus(existing, input.organizationId, input.storeId),
+      };
+    }
+
+    const updated = await this.globalPrisma.support_tickets.update({
+      where: { id: existing.id },
+      data: { tags: { push: voteTag }, updated_at: new Date() },
+      select: { id: true, ticket_number: true, organization_id: true, tags: true },
+    });
+    this.logger.log(
+      `Capability vote added: ${input.capabilityKey} (ticket ${updated.id})`,
+    );
+    return {
+      outcome: 'voted',
+      ...this.toCapabilityStatus(updated, input.organizationId, input.storeId),
+    };
+  }
+
+  private async findOpenCapabilityTicket(capabilityKey: string) {
+    return this.globalPrisma.support_tickets.findFirst({
+      where: {
+        // Both tags: only tickets the capability flow created (no HTTP writer
+        // keeps reserved tags) can collect votes. The flow files them as
+        // SERVICE_REQUEST and never as a PQR, so a PQR or another category
+        // carrying the tags anyway is never taken (B3: PQR admin update).
+        tags: {
+          hasEvery: [CAPABILITY_REQUEST_TAG, capabilityKeyTag(capabilityKey)],
+        },
+        category: ticket_category_enum.SERVICE_REQUEST,
+        NOT: { tags: { has: 'pqr' } },
+        status: {
+          notIn: [ticket_status_enum.RESOLVED, ticket_status_enum.CLOSED],
+        },
+      },
+      orderBy: { id: 'asc' },
+      select: { id: true, ticket_number: true, organization_id: true, tags: true },
+    });
+  }
+
+  private toCapabilityStatus(
+    ticket: { ticket_number: string; organization_id: number; tags: string[] },
+    organizationId: number,
+    storeId: number,
+  ): CapabilityRequestStatus {
+    const own = ticket.organization_id === organizationId;
+    return {
+      exists: true,
+      already_voted: ticket.tags.includes(capabilityVoteTag(storeId)),
+      own,
+      ticket_number: own ? ticket.ticket_number : null,
+      votes: ticket.tags.filter((tag) =>
+        tag.startsWith(CAPABILITY_VOTE_TAG_PREFIX),
+      ).length,
+    };
   }
 
   async findAll(
@@ -351,9 +522,18 @@ export class TicketsService {
         throw new VendixHttpException(ErrorCodes.SUP_TICKET_001);
       }
 
+      // Capability tags are owned by the capability flow: an HTTP update can
+      // neither add them nor drop the ones the ticket already has.
+      const data = { ...updateTicketDto } as Record<string, unknown>;
+      if (Array.isArray(data.tags)) {
+        data.tags = withoutReservedCapabilityTags(
+          data.tags as string[],
+          ticket.tags ?? [],
+        );
+      }
       const updated = await this.prisma.support_tickets.update({
         where: { id: ticketId },
-        data: updateTicketDto as unknown as Prisma.support_ticketsUncheckedUpdateInput,
+        data: data as unknown as Prisma.support_ticketsUncheckedUpdateInput,
       });
 
       // Emit event if status changed

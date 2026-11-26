@@ -6,6 +6,7 @@ import {
   CloseTicketDto,
 } from '../../support/tickets/dto/ticket-status.dto';
 import { AssignTicketDto } from '../../support/tickets/dto/ticket-assignment.dto';
+import { withoutReservedCapabilityTags } from '../../support/tickets/capability-tags';
 import { ticket_status_enum, ticket_priority_enum } from '@prisma/client';
 import { S3Service } from '@common/services/s3.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -311,6 +312,15 @@ export class SuperadminSupportService {
         where: { id: ticketId },
         data: {
           ...updateTicketDto,
+          // Capability tags belong to Vex's capability flow (B3).
+          ...(Array.isArray(updateTicketDto?.tags)
+            ? {
+                tags: withoutReservedCapabilityTags(
+                  updateTicketDto.tags,
+                  ticket.tags ?? [],
+                ),
+              }
+            : {}),
           updated_at: new Date(),
         },
       });

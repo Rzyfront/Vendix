@@ -7,6 +7,7 @@ import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { CreatePqrPublicDto } from './dto/create-pqr-public.dto';
 import { PqrQueryDto } from './dto/pqr-query.dto';
 import { UpdatePqrDto } from './dto/update-pqr.dto';
+import { withoutReservedCapabilityTags } from '../tickets/capability-tags';
 import { UpdatePqrStatusDto } from './dto/update-pqr-status.dto';
 import { AddPqrCommentDto } from './dto/add-pqr-comment.dto';
 import { AssignPqrDto } from './dto/assign-pqr.dto';
@@ -834,7 +835,7 @@ export class PqrService {
         ...this.buildPqrScope(),
         id,
       },
-      select: { id: true },
+      select: { id: true, tags: true },
     });
     if (!existing) {
       throw new VendixHttpException(ErrorCodes.SUP_PQR_003);
@@ -845,7 +846,8 @@ export class PqrService {
       data: {
         priority: dto.priority,
         assigned_to_user_id: dto.assigned_to_user_id,
-        tags: dto.tags,
+        // Capability tags belong to Vex's capability flow (B3).
+        tags: withoutReservedCapabilityTags(dto.tags, existing.tags ?? []),
         updated_at: new Date(),
       },
     });

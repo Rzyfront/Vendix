@@ -16,6 +16,8 @@ import {
   WRITE_BATCH_MAX_STEPS_PER_CALL,
   createWriteBatchTools,
 } from './tools/domains/write-batch.tools';
+import { createPricingTools } from './tools/domains/pricing.tools';
+import { WriteBatchService } from '../domains/store/vex/services/write-batch.service';
 
 /**
  * Vex: a goal that needs 2+ writes is proposed as ONE batch with ONE approval.
@@ -267,5 +269,146 @@ describe('Vex: 2+ escrituras → una propuesta en lote', () => {
       `Propón lotes de ${WRITE_BATCH_MAX_STEPS_PER_CALL} cambios (el máximo por llamada), nunca cambios sueltos.`,
     );
     expect(raw).not.toContain('uno por uno');
+  });
+
+  // T3 — la asignación masiva de tarifas es un paso válido del lote.
+  describe('T3: manage_product_price_tiers como paso de propose_write_batch', () => {
+    const ALL = Array.from({ length: 68 }, (_, i) => i + 1);
+    const HAVE = new Set(ALL.slice(0, 12));
+
+    function harness(granted: string[]) {
+      const bulk = {
+        listActiveProductIds: jest.fn().mockResolvedValue(ALL),
+        apply: jest.fn(),
+        preview: jest.fn(async (dto: any) => ({
+          items: dto.ids.map((id: number) => ({
+            id,
+            name: `Producto ${id}`,
+            sku: null,
+            status: 'ok',
+            changes: HAVE.has(id) ? [] : [{ field: 'price_tiers', current: [], next: [] }],
+          })),
+        })),
+      };
+      const tools = createPricingTools({
+        priceTiersService: {
+          findOne: jest.fn().mockResolvedValue({ id: 21, name: 'Manaure', is_active: true }),
+        } as any,
+        productsService: {} as any,
+        productsBulkEditService: bulk as any,
+      });
+      const byName = new Map(tools.map((t) => [t.name, t]));
+      const createMany = jest.fn().mockResolvedValue({ count: 1 });
+      const registry = {
+        canonicalName: (n: string) => n,
+        get: (n: string) => byName.get(n),
+        isIrreversible: (n: string) => byName.get(n)?.irreversible === true,
+        getToolVersion: () => '1',
+        // Same gate as the real registry: an error preview mints nothing.
+        previewForConsent: async (n: string, args: any) => {
+          const preview = await byName.get(n)!.preview!(args, { store_id: 7 } as any);
+          if (preview.status === 'error') {
+            throw new VendixHttpException(ErrorCodes.AI_AGENT_005, preview.message);
+          }
+          return { preview };
+        },
+      };
+      const service = new WriteBatchService(
+        {
+          ai_agent_write_batches: { createMany },
+          ai_conversations: { findFirst: async (a: any) => ({ id: a.where.id }) },
+        } as any,
+        registry as any,
+        { classifySteps: () => ({ covered: [], reconfirm: [] }) } as any,
+        {
+          create: jest.fn(async () => ({ id: 'blk1' })),
+          toUiBlock: jest.fn(async (b: any) => ({ id: b.id, kind: 'write_batch' })),
+        } as any,
+      );
+      const propose = (steps: any[]) =>
+        RequestContextService.run(
+          {
+            organization_id: 3,
+            store_id: 7,
+            user_id: 11,
+            roles: ['owner'],
+            permissions: granted,
+          } as any,
+          () => service.propose({ conversationId: 9, goal: 'Tarifa Manaure a todos', steps }),
+        ) as Promise<any>;
+      return { tools: byName, propose, createMany, bulk };
+    }
+
+    const OWNER = [
+      'store:products:read',
+      'store:price-tiers:read',
+      'store:products:bulk_update',
+      'store:price-tiers:update',
+    ];
+
+    it('los batch_steps del preview entran tal cual: una tarjeta, un paso, 56 registros', async () => {
+      jest.restoreAllMocks();
+      const h = harness(OWNER);
+      const read = JSON.parse(
+        await h.tools.get('preview_product_price_tiers')!.handler!(
+          { price_tier_id: 21, all_active_products: true },
+          { store_id: 7 } as any,
+        ),
+      );
+      const res = await h.propose(read.data.batch_steps);
+      expect(res.refused).toBeUndefined();
+      expect(res.batches).toHaveLength(1);
+      const row = h.createMany.mock.calls[0][0].data[0];
+      expect(row.step_count).toBe(1);
+      expect(row.affected_records).toBe(56);
+      expect(row.steps[0]).toMatchObject({
+        tool: 'manage_product_price_tiers',
+        arguments: { action: 'assign', price_tier_id: 21, product_ids: ALL.slice(12) },
+        preview: { status: 'ok', target: 'Tarifa "Manaure" en 56 producto(s)' },
+      });
+      // Proposing never writes.
+      expect(h.bulk.apply).not.toHaveBeenCalled();
+    });
+
+    it('sin store:products:bulk_update el rol no obtiene lote', async () => {
+      jest.restoreAllMocks();
+      const h = harness(OWNER.filter((p) => p !== 'store:products:bulk_update'));
+      const res = await h.propose([
+        {
+          tool: 'manage_product_price_tiers',
+          arguments: { price_tier_id: 21, product_ids: ALL },
+          label: 'Asignar Manaure',
+        },
+      ]);
+      expect(res.refused).toBe(true);
+      expect(res.reason).toBe('permission_denied');
+      expect(h.createMany).not.toHaveBeenCalled();
+    });
+
+    it('si ya la tienen todos, el lote se rechaza (nunca un lote vacío)', async () => {
+      jest.restoreAllMocks();
+      const h = harness(OWNER);
+      const res = await h.propose([
+        {
+          tool: 'manage_product_price_tiers',
+          arguments: { price_tier_id: 21, product_ids: ALL.slice(0, 12) },
+          label: 'Asignar Manaure',
+        },
+      ]);
+      expect(res.refused).toBe(true);
+      expect(res.reason).toBe('preview_error');
+      expect(res.explanation).toContain('Ya la tienen todos');
+      expect(h.createMany).not.toHaveBeenCalled();
+    });
+
+    it('la regla del turno manda la tarifa masiva por preview + un solo lote', () => {
+      expect(WRITE_BATCH_ROUTING_RULE).toContain(
+        'llama UNA vez a preview_product_price_tiers',
+      );
+      expect(WRITE_BATCH_ROUTING_RULE).toContain(
+        'propón sus batch_steps tal cual en UNA llamada a propose_write_batch',
+      );
+      expect(WRITE_BATCH_ROUTING_RULE).toContain('Si no falta ninguno, dilo y no propongas lote.');
+    });
   });
 });
