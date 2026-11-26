@@ -94,7 +94,9 @@ export class SpeechMarkdownFilter {
     const full = this.full;
     let end = full.length;
 
-    // 1. An open fence holds everything from its opening backticks.
+    // 1. An open fence holds everything from its opening backticks. Closed
+    //    fences are remembered: no later step may cut inside one.
+    const closed: Array<{ open: number; end: number }> = [];
     let cursor = this.released;
     for (;;) {
       const open = full.indexOf('```', cursor);
@@ -105,10 +107,12 @@ export class SpeechMarkdownFilter {
         break;
       }
       cursor = close + 3;
+      closed.push({ open, end: cursor });
     }
 
-    // 2. Trailing backticks may be the start of a fence still forming.
-    while (end > this.released && full[end - 1] === '`') end--;
+    // 2. Trailing backticks may be the start of a fence still forming — but
+    //    not when they are the closing fence of a block found in step 1.
+    while (end > cursor && full[end - 1] === '`') end--;
 
     // 3. A link whose target has not closed yet.
     const bracket = full.lastIndexOf('[', end - 1);
@@ -129,6 +133,14 @@ export class SpeechMarkdownFilter {
       if (line.length < LINE_START_WINDOW || line.trimStart().startsWith('|')) {
         end = lineStart;
       }
+    }
+
+    // 5. A cut inside a closed fence (its short "```" line held by step 4, a
+    //    bracket of its JSON taken for a link by step 3) would release the
+    //    block without its closing fence and dictate the code: hold the whole
+    //    block instead.
+    for (const fence of closed) {
+      if (end > fence.open && end < fence.end) end = fence.open;
     }
 
     return Math.max(end, this.released);
