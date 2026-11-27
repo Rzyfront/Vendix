@@ -213,6 +213,15 @@ import {
                     [disabled]="isSubmitting()"
                   ></app-input>
                 }
+
+                <app-input
+                  formControlName="max_concurrency"
+                  label="Llamadas simultáneas"
+                  type="number"
+                  [placeholder]="'1'"
+                  [control]="form.get('speech.max_concurrency')"
+                  [disabled]="isSubmitting()"
+                ></app-input>
               </div>
 
               <p class="text-xs text-text-secondary">
@@ -223,6 +232,9 @@ import {
                   Volumen: 1 = sin cambio, multiplicador de {{ volRange[0] }} a
                   {{ volRange[1] }} (1.5 sube un 50%).
                 }
+                Llamadas simultáneas: cuántos fragmentos de una misma respuesta
+                se sintetizan a la vez (1 a 8, vacío = 1). Súbelo solo si el
+                proveedor de voz no limita las peticiones en paralelo.
               </p>
 
               @if (voiceSuggestions().length) {
@@ -599,6 +611,7 @@ export class AIEngineAppModalComponent implements OnChanges {
       response_format: ['mp3'],
       speed: [null as number | null],
       vol: [null as number | null],
+      max_concurrency: [null as number | null],
     }),
   });
 
@@ -667,6 +680,7 @@ export class AIEngineAppModalComponent implements OnChanges {
           response_format: speech['response_format'] ?? 'mp3',
           speed: speech['speed'] ?? null,
           vol: speech['vol'] ?? null,
+          max_concurrency: speech['max_concurrency'] ?? null,
         },
         key: a.key,
         name: a.name,
@@ -784,6 +798,20 @@ export class AIEngineAppModalComponent implements OnChanges {
     if (speed !== null) speech['speed'] = speed;
     else delete speech['speed'];
 
+    // Integer 1–8 or nothing (the server then uses 1). Anything else is not
+    // saved, so a typo can never leave one answer firing parallel requests.
+    const concurrency = this.toFiniteNumber(raw.speech?.max_concurrency);
+    if (
+      concurrency !== null &&
+      Number.isInteger(concurrency) &&
+      concurrency >= 1 &&
+      concurrency <= 8
+    ) {
+      speech['max_concurrency'] = concurrency;
+    } else {
+      delete speech['max_concurrency'];
+    }
+
     // El campo está oculto para proveedores sin ganancia, pero el valor que ya
     // estuviera guardado NO se borra: ocultar un control no es lo mismo que
     // pedir que su dato desaparezca, y el operador podría estar cambiando de
@@ -817,7 +845,13 @@ export class AIEngineAppModalComponent implements OnChanges {
       retry_max: null,
       retry_delay: null,
       is_active: true,
-      speech: { voice: '', response_format: 'mp3', speed: null, vol: null },
+      speech: {
+        voice: '',
+        response_format: 'mp3',
+        speed: null,
+        vol: null,
+        max_concurrency: null,
+      },
     });
     this.currentModelType.set('text');
     this.currentConfigId.set(null);

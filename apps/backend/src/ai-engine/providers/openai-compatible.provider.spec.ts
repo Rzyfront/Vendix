@@ -1087,6 +1087,36 @@ describe('OpenAICompatibleProvider', () => {
         const wav = Buffer.from(response.audioBase64!, 'base64');
         expect(wav.readUInt32LE(24)).toBe(24000);
       });
+
+      it('reports a 429 with its status and Retry-After, keeping the provider message', async () => {
+        fetchMock.mockResolvedValueOnce({
+          ok: false,
+          status: 429,
+          statusText: 'Too Many Requests',
+          text: async () =>
+            JSON.stringify({
+              error: { message: 'Provider returned error', code: 429 },
+            }),
+          headers: {
+            get: (name: string) =>
+              name.toLowerCase() === 'retry-after' ? '2' : null,
+          },
+        });
+
+        const response = await speechProvider(
+          'google/gemini-3.8-flash-lite-tts',
+        ).generateSpeech('Segunda frase de la respuesta.', { voice: 'Puck' });
+
+        // The body never says 429: without statusCode the caller could not
+        // know the failure is worth waiting out.
+        expect(response).toEqual({
+          success: false,
+          model: 'google/gemini-3.8-flash-lite-tts',
+          error: 'Provider returned error',
+          statusCode: 429,
+          retryAfterMs: 2000,
+        });
+      });
     });
 
     it('keeps the OpenAI contract for other speech models', async () => {

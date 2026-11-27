@@ -1437,6 +1437,10 @@ export class AIChatService {
         await voice.settle();
         for (const frame of voice.drain()) yield frame;
       }
+      // After the last audio frame: tells the client whether the audio it
+      // holds is the whole answer. A turn that lost segments must not be kept
+      // as the message's reusable audio («Escuchar» re-synthesizes instead).
+      if (typeof voice.status === 'function') yield voice.status();
       // Emitted last so the client can attach them to a turn it has fully
       // received. They are diagnostics, not content: nothing renders from them.
       for (const frame of voice.timings()) yield frame;

@@ -8,6 +8,7 @@ import { resolveKitchenMode } from '../kitchen-fire/kitchen-mode.util';
 import { Injectable, ConflictException, Logger, Optional, Inject, forwardRef, BadRequestException, NotFoundException } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { assertOrderNotInvoiceLocked } from './utils/invoice-lock.util';
+import { executeApplyOrderCoupon } from './utils/apply-order-coupon.util';
 import type { OrderItemOptionSnapshot } from '../product-options/option-pricing.service';
 import {
   CreateOrderDto,
@@ -17,6 +18,7 @@ import {
   UpdateOrderItemsDto,
   AssignShippingMethodDto,
   UpdateOrderEditorDto,
+  ApplyOrderCouponDto,
 } from './dto';
 import {
   Prisma,
@@ -1914,6 +1916,15 @@ export class OrdersService {
             },
           },
           orderBy: { created_at: 'asc' },
+        },
+        coupon: {
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            discount_type: true,
+            discount_value: true,
+          },
         },
         coupon_uses: {
           select: {
@@ -4585,6 +4596,7 @@ export class OrdersService {
     );
     const codePromotionId =
       codeTarget.kind === 'promotion' ? codeTarget.promotion_id : null;
+    const editorCategoryMap = new Map<number, number[]>();
     try {
       // Categorías reales de cada producto: sin ellas una promoción por
       // categoría cotizaba 0 al editar la orden.
@@ -4601,7 +4613,6 @@ export class OrdersService {
             select: { product_id: true, category_id: true },
           })
         : [];
-      const editorCategoryMap = new Map<number, number[]>();
       for (const row of editorCategoryRows) {
         const list = editorCategoryMap.get(row.product_id) ?? [];
         list.push(row.category_id);
@@ -4808,19 +4819,28 @@ export class OrdersService {
           .map((item) => ({
             product_id: item.product_id as number,
             category_id: null,
-            category_ids: null,
+            category_ids:
+              editorCategoryMap.get(Number(item.product_id)) ?? null,
             line_total: roundMoney(
               Number(item.final_unit_price ?? item.unit_price ?? 0) *
                 Number(item.quantity || 0),
             ),
           }));
-        const validation = await this.couponsService.validate({
-          code: requestedCode,
-          cart_subtotal: remainingSubtotal,
-          customer_id: dto.customer_id,
-          items: cartItems,
-          store_id: storeId,
-        } as any);
+        const validation = await this.couponsService.validate(
+          {
+            code: requestedCode,
+            cart_subtotal: remainingSubtotal,
+            customer_id: dto.customer_id ?? existingOrder.customer_id ?? undefined,
+            items: cartItems,
+            store_id: storeId,
+          } as any,
+          {
+            excludeOrderId: orderId,
+            orderCouponId: existingOrder.coupon_id ?? null,
+            orderState: existingOrder.state,
+            keepInactiveUsedByOrder: !couponChanged,
+          },
+        );
         couponId = validation.coupon_id;
         couponDiscount = roundMoney(
           Math.min(validation.discount_amount || 0, remainingSubtotal),
@@ -5736,24 +5756,66 @@ export class OrdersService {
               { stage: 'decrement', coupon_id: existingOrder.coupon_id },
             );
           }
-        }
-        if (couponId) {
-          const inc = await tx.coupons.updateMany({
-            where: {
-              id: couponId,
-              store_id: storeId,
-              is_active: true,
-            },
-            data: { current_uses: { increment: 1 } },
-          });
-          if (inc.count === 0) {
-            throw new VendixHttpException(
-              ErrorCodes.ORD_EDIT_COUPON_COMMIT_001,
-              undefined,
-              { stage: 'increment', coupon_id: couponId },
-            );
+          if (tx.coupon_uses?.deleteMany) {
+            await tx.coupon_uses.deleteMany({
+              where: {
+                order_id: orderId,
+                coupon_id: existingOrder.coupon_id,
+              },
+            });
           }
         }
+        if (couponId) {
+          const existingUse = tx.coupon_uses?.findFirst
+            ? await tx.coupon_uses.findFirst({
+                where: { order_id: orderId, coupon_id: couponId },
+                select: { id: true },
+              })
+            : null;
+          if (!existingUse) {
+            const inc = await tx.coupons.updateMany({
+              where: {
+                id: couponId,
+                store_id: storeId,
+                is_active: true,
+              },
+              data: { current_uses: { increment: 1 } },
+            });
+            if (inc.count === 0) {
+              throw new VendixHttpException(
+                ErrorCodes.ORD_EDIT_COUPON_COMMIT_001,
+                undefined,
+                { stage: 'increment', coupon_id: couponId },
+              );
+            }
+            if (tx.coupon_uses?.create) {
+              const resolvedCustomerId =
+                dto.customer_id != null
+                  ? dto.customer_id
+                  : dto.customer_alias != null || dto.customer_id === null
+                    ? null
+                    : (existingOrder.customer_id ?? null);
+              await tx.coupon_uses.create({
+                data: {
+                  coupon_id: couponId,
+                  order_id: orderId,
+                  customer_id: resolvedCustomerId,
+                  discount_applied: couponDiscount,
+                },
+              });
+            }
+          }
+        }
+      } else if (
+        !isDraft &&
+        !couponChanged &&
+        couponId &&
+        tx.coupon_uses?.updateMany
+      ) {
+        await tx.coupon_uses.updateMany({
+          where: { order_id: orderId, coupon_id: couponId },
+          data: { discount_applied: couponDiscount },
+        });
       }
 
       // 13g) Update orden: metadata, totales, shipping, cupón snapshot.
@@ -5931,6 +5993,15 @@ export class OrdersService {
               },
             },
             orderBy: { created_at: 'asc' },
+          },
+          coupon: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+              discount_type: true,
+              discount_value: true,
+            },
           },
           coupon_uses: {
             select: {
@@ -6112,6 +6183,31 @@ export class OrdersService {
     );
 
     return result;
+  }
+
+  async applyOrderCoupon(orderId: number, dto: ApplyOrderCouponDto) {
+    return executeApplyOrderCoupon(
+      {
+        prisma: this.prisma,
+        couponsService: this.couponsService,
+        promotionEngine: this.promotionEngine,
+        auditService: this.auditService,
+        orderSse: this.orderSse,
+        logger: this.logger,
+        plannedLinePreDiscountTax: (line) =>
+          this.plannedLinePreDiscountTax(line),
+        grossOfPlannedLines: (lines) => this.grossOfPlannedLines(lines),
+        sumPlannedOrderLines: (lines) => this.sumPlannedOrderLines(lines),
+        applyGrossDiscountToPlannedLines: (lines, gross, split) =>
+          this.applyGrossDiscountToPlannedLines(lines, gross, split),
+        computeOrderGrandTotal: (args) => this.computeOrderGrandTotal(args),
+        assertTotalNotBelowPaid: (tx, id, storeId, nextGrandTotal) =>
+          this.assertTotalNotBelowPaid(tx, id, storeId, nextGrandTotal),
+        findOne: (id) => this.findOne(id),
+      },
+      orderId,
+      dto,
+    );
   }
 
   async assignShipping(orderId: number, dto: AssignShippingMethodDto) {

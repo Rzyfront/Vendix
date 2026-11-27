@@ -11112,8 +11112,28 @@ export class OrderFlowService {
         id: true,
         coupon_id: true,
         coupon_code: true,
+        customer_id: true,
+        subtotal_amount: true,
+        tax_amount: true,
         discount_amount: true,
         store_id: true,
+        order_items: {
+          where: { cancelled_at: null },
+          select: {
+            total_price: true,
+            tax_rate: true,
+            tax_amount_item: true,
+            quantity: true,
+            weight: true,
+            order_item_taxes: {
+              select: { tax_rate: true, tax_amount: true },
+            },
+          },
+        },
+        order_promotions: {
+          where: { discount_amount: { gt: 0 } },
+          select: { discount_amount: true },
+        },
       },
     });
     if (!order?.coupon_id) return;
@@ -11189,13 +11209,63 @@ export class OrderFlowService {
     // exitoso devuelva count=0 cuando el cupo ya se agotó, evitando el
     // sobreconteo silencioso. count=0 ⇒ `ORD_EDIT_COUPON_COMMIT_001`
     // (abort, la orden NO queda pagada).
+    const promoDiscountTotal = (
+      (order as { order_promotions?: Array<{ discount_amount: unknown }> })
+        .order_promotions ?? []
+    ).reduce((sum, p) => sum + Number(p.discount_amount ?? 0), 0);
+    // `orders.discount_amount` stores BASE (pre-tax) discount while
+    // `order_promotions.discount_amount` and `coupon_uses.discount_applied`
+    // store GROSS (tax-included) amounts. Reconstruct gross total discount
+    // from active items when available so `GROSS - GROSS` is exact even when
+    // promotions and coupons stack on taxed items.
+    const activeOrderItems =
+      (
+        order as {
+          order_items?: Array<{
+            total_price?: unknown;
+            tax_rate?: unknown;
+            order_item_taxes?: Array<{ tax_rate?: unknown; tax_amount?: unknown }>;
+          }>;
+        }
+      ).order_items ?? [];
+    let totalGrossDiscount = Number(order.discount_amount ?? 0);
+    if (
+      activeOrderItems.length > 0 &&
+      (order as { subtotal_amount?: unknown }).subtotal_amount != null
+    ) {
+      const preDiscountGross = activeOrderItems.reduce((sum, item) => {
+        const base = Number(item.total_price ?? 0);
+        const taxRows = item.order_item_taxes ?? [];
+        const preTax =
+          taxRows.length > 0
+            ? taxRows.reduce((tSum, t) => {
+                const rate = Number(t.tax_rate ?? 0);
+                return tSum + (rate > 0 ? base * rate : Number(t.tax_amount ?? 0));
+              }, 0)
+            : base * Number(item.tax_rate ?? 0);
+        return sum + base + preTax;
+      }, 0);
+      const postDiscountGross =
+        Number((order as { subtotal_amount?: unknown }).subtotal_amount ?? 0) -
+        Number(order.discount_amount ?? 0) +
+        Number((order as { tax_amount?: unknown }).tax_amount ?? 0);
+      totalGrossDiscount = Math.max(
+        0,
+        Math.round((preDiscountGross - postDiscountGross) * 100) / 100,
+      );
+    }
+    const couponDiscountApplied = Math.max(
+      0,
+      Math.round((totalGrossDiscount - promoDiscountTotal) * 100) / 100,
+    );
+
     const write = async (tx: Prisma.TransactionClient) => {
       await tx.coupon_uses.create({
         data: {
           coupon_id: order.coupon_id as number,
           order_id: orderId,
-          customer_id: null,
-          discount_applied: order.discount_amount ?? 0,
+          customer_id: (order as { customer_id?: number | null }).customer_id ?? null,
+          discount_applied: couponDiscountApplied,
         },
       });
       const inc = await tx.coupons.updateMany({

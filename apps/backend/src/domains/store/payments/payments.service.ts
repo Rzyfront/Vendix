@@ -2468,43 +2468,31 @@ export class PaymentsService {
                 discount_applied: couponInfo.discount_amount,
               },
             });
-          }
-          // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 BLOCKER F17
-          // + MAJOR F22. Two fixes in one updateMany:
-          //   F17: idempotent counter — use `updateMany` with the
-          //   `state='active'` guard so a stale / inactive coupon
-          //   doesn't increment blindly. count===0 throws
-          //   `ORD_EDIT_COUPON_COMMIT_001`, the same way the editor
-          //   surfaces this race.
-          //   F22: pin the coupon to the current store via the scalar
-          //   `store_id` (the relation is `store`, singular FK — `stores:
-          //   { some }` does not exist and threw P500 on every coupon sale)
-          //   so a coupon from a DIFFERENT tenant can never sneak through
-          //   the `id` match. Same for `is_active` (`state` does not exist).
-          // We omit the `max_uses > current_uses` clause from the WHERE
-          // because Prisma's updateMany lacks row-self-referencing
-          // operators; the editor handles that quota guard with a
-          // pre-flight `validate()` call that we already trust above.
-          const inc = await tx.coupons.updateMany({
-            where: {
-              id: couponInfo.coupon_id,
-              store_id: createPosPaymentDto.store_id,
-              // QUI-650 — el cupón desactivado que la orden ya tenía aplicado
-              // se consume igual: nunca bloquea el cobro.
-              ...(couponInfo.kept_inactive ? {} : { is_active: true }),
-            },
-            data: { current_uses: { increment: 1 } },
-          });
-          if (inc.count === 0) {
-            throw new VendixHttpException(
-              ErrorCodes.ORD_EDIT_COUPON_COMMIT_001,
-              undefined,
-              {
-                stage: 'pos_increment',
-                coupon_id: couponInfo.coupon_id,
+            // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 BLOCKER F17
+            // + MAJOR F22. Keep the counter increment INSIDE `!existingUse`
+            // so retries or orders whose coupon was already committed never
+            // double-increment `coupons.current_uses`.
+            const inc = await tx.coupons.updateMany({
+              where: {
+                id: couponInfo.coupon_id,
                 store_id: createPosPaymentDto.store_id,
+                // QUI-650 — el cupón desactivado que la orden ya tenía aplicado
+                // se consume igual: nunca bloquea el cobro.
+                ...(couponInfo.kept_inactive ? {} : { is_active: true }),
               },
-            );
+              data: { current_uses: { increment: 1 } },
+            });
+            if (inc.count === 0) {
+              throw new VendixHttpException(
+                ErrorCodes.ORD_EDIT_COUPON_COMMIT_001,
+                undefined,
+                {
+                  stage: 'pos_increment',
+                  coupon_id: couponInfo.coupon_id,
+                  store_id: createPosPaymentDto.store_id,
+                },
+              );
+            }
           }
         }
 

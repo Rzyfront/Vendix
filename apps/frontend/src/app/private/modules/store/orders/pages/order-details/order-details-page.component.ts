@@ -194,6 +194,7 @@ import {
   OrderPaymentModalComponent,
   type OrderPendingPaymentPreset,
 } from '../../components/order-payment-modal/order-payment-modal.component';
+import { OrderCouponSectionComponent } from '../../components/order-coupon-section/order-coupon-section.component';
 import {
   CreditInvoiceModalComponent,
   type CreditInvoiceSubmit,
@@ -1092,6 +1093,7 @@ import { RecordDocumentsComponent } from '../../../../../../shared/components/re
     CurrencyPipe,
     ItemCancellationModalComponent,
     OrderPaymentModalComponent,
+    OrderCouponSectionComponent,
     CreditInvoiceModalComponent,
     CustomerHolderCompletionModalComponent,
     OrderItemsEditModalComponent,
@@ -1259,22 +1261,94 @@ export class OrderDetailsPageComponent {
     })),
   );
 
-  readonly appliedCoupons = computed(() =>
-    (this.order()?.coupon_uses ?? []).map((cu) => ({
-      id: cu.id,
-      coupon_id: cu.coupon_id,
-      code: cu.coupon?.code ?? `CUP-${cu.coupon_id}`,
-      name: cu.coupon?.name ?? null,
-      discount_applied: Number(cu.discount_applied || 0),
-      // QUI-650 — el porcentual se informa como tal ("Cupón 10 %"), no como
-      // un monto fijo en pesos.
-      percent:
-        cu.coupon?.discount_type === 'PERCENTAGE' &&
-        cu.coupon?.discount_value != null
-          ? Number(cu.coupon.discount_value).toLocaleString('es-CO')
-          : null,
-    })),
-  );
+  readonly appliedCoupons = computed(() => {
+    const order = this.order();
+    if (!order) return [];
+    const uses = order.coupon_uses ?? [];
+    if (uses.length > 0) {
+      return uses.map((cu) => ({
+        id: cu.id,
+        coupon_id: cu.coupon_id,
+        code: cu.coupon?.code ?? order.coupon_code ?? `CUP-${cu.coupon_id}`,
+        name: cu.coupon?.name ?? order.coupon?.name ?? null,
+        discount_applied: Number(cu.discount_applied || 0),
+        // QUI-650 — el porcentual se informa como tal ("Cupón 10 %"), no como
+        // un monto fijo en pesos.
+        percent:
+          cu.coupon?.discount_type === 'PERCENTAGE' &&
+          cu.coupon?.discount_value != null
+            ? Number(cu.coupon.discount_value).toLocaleString('es-CO')
+            : null,
+      }));
+    }
+    const pendingCode = (order.coupon?.code ?? order.coupon_code ?? '').trim();
+    if (!pendingCode && order.coupon_id == null) return [];
+    const promoSum = (order.order_promotions ?? []).reduce(
+      (sum, op) => sum + Number(op.discount_amount || 0),
+      0,
+    );
+    const activeItems = (order.order_items ?? []).filter(
+      (i) => i.cancelled_at == null,
+    );
+    let totalGrossDiscount = Number(order.discount_amount || 0);
+    if (activeItems.length > 0 && order.subtotal_amount != null) {
+      const preGross = activeItems.reduce(
+        (sum, i) => sum + Number(i.final_total_price ?? i.total_price ?? 0),
+        0,
+      );
+      const postGross =
+        Number(order.subtotal_amount || 0) -
+        Number(order.discount_amount || 0) +
+        Number(order.tax_amount || 0);
+      const computedGross = Math.round((preGross - postGross) * 100) / 100;
+      if (computedGross > 0) {
+        totalGrossDiscount = computedGross;
+      }
+    }
+    const derivedDiscount = Math.max(
+      0,
+      Math.round((totalGrossDiscount - promoSum) * 100) / 100,
+    );
+    const c = order.coupon;
+    return [
+      {
+        id: order.coupon_id ?? 0,
+        coupon_id: order.coupon_id ?? 0,
+        code: pendingCode || `CUP-${order.coupon_id}`,
+        name: c?.name ?? null,
+        discount_applied: derivedDiscount,
+        percent:
+          c?.discount_type === 'PERCENTAGE' && c?.discount_value != null
+            ? Number(c.discount_value).toLocaleString('es-CO')
+            : null,
+      },
+    ];
+  });
+
+  readonly isApplyingCoupon = signal<boolean>(false);
+  readonly couponError = signal<string | null>(null);
+
+  readonly canEditCoupon = computed<boolean>(() => {
+    const order = this.order();
+    if (!order) return false;
+    if (order.active_financial_split_id) return false;
+    if (this.invoiceLocked()) return false;
+    if (!['draft', 'created', 'pending_payment'].includes(order.state)) {
+      return false;
+    }
+    if (
+      order.payment_form === '2' &&
+      (order.order_installments?.length ?? 0) > 0
+    ) {
+      return false;
+    }
+    const settled = (order.payments ?? [])
+      .filter((p) => SETTLED_PAYMENT_STATES_FE.has(p.state))
+      .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+    const total = Number(order.grand_total) || 0;
+    if (settled > 0 && total > 0 && settled >= total - 0.009) return false;
+    return (order.order_items ?? []).some((i) => i.cancelled_at == null);
+  });
 
   readonly hasDiscountSnapshot = computed(
     () =>
@@ -3511,6 +3585,7 @@ export class OrderDetailsPageComponent {
     }
     this.preSelectedInstallment.set(null);
     this.payModalError.set(null);
+    this.couponError.set(null);
     this.showPayModal.set(true);
   }
 
@@ -3536,6 +3611,123 @@ export class OrderDetailsPageComponent {
     PAY_MULTI_TENDER_CASH_INSUFFICIENT:
       'El monto recibido en efectivo es menor que el monto del tramo.',
   };
+
+  private normalizeOrderPayload(raw: any): Order {
+    const orderData =
+      raw && typeof raw === 'object' && 'success' in raw
+        ? (raw.data ?? raw)
+        : raw;
+    return {
+      ...orderData,
+      grand_total: Number(orderData.grand_total),
+      subtotal_amount: Number(orderData.subtotal_amount),
+      tax_amount: Number(orderData.tax_amount),
+      shipping_cost: Number(orderData.shipping_cost),
+      discount_amount: Number(orderData.discount_amount),
+      tip_amount: Number(orderData.tip_amount ?? 0),
+      total_paid: Number(orderData.total_paid) || 0,
+      remaining_balance: Number(orderData.remaining_balance) || 0,
+      total_with_interest: orderData.total_with_interest
+        ? Number(orderData.total_with_interest)
+        : undefined,
+      interest_rate: orderData.interest_rate
+        ? Number(orderData.interest_rate)
+        : undefined,
+      order_installments: (orderData.order_installments || []).map(
+        (inst: any) => ({
+          ...inst,
+          amount: Number(inst.amount),
+          capital_amount: Number(inst.capital_amount),
+          interest_amount: Number(inst.interest_amount),
+          amount_paid: Number(inst.amount_paid),
+          remaining_balance: Number(inst.remaining_balance),
+        }),
+      ),
+      order_items: (orderData.order_items || []).map((item: any) => ({
+        ...item,
+        unit_price: Number(item.unit_price),
+        total_price: Number(item.total_price),
+        quantity: Number(item.quantity),
+        stock_units_consumed:
+          item.stock_units_consumed != null
+            ? Number(item.stock_units_consumed)
+            : null,
+      })),
+      order_promotions: (orderData.order_promotions || []).map((op: any) => ({
+        ...op,
+        discount_amount: Number(op.discount_amount || 0),
+      })),
+      coupon_uses: (orderData.coupon_uses || []).map((cu: any) => ({
+        ...cu,
+        discount_applied: Number(cu.discount_applied || 0),
+      })),
+    };
+  }
+
+  onApplyOrderCoupon(code: string): void {
+    const trimmed = code.trim().toUpperCase();
+    if (!trimmed || !this.orderId || this.isApplyingCoupon()) return;
+    this.isApplyingCoupon.set(true);
+    this.couponError.set(null);
+    this.ordersService
+      .applyOrderCoupon(this.orderId, trimmed)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (updatedOrder) => {
+          this.isApplyingCoupon.set(false);
+          this.couponError.set(null);
+          if (updatedOrder) {
+            this.order.set(this.normalizeOrderPayload(updatedOrder));
+          } else {
+            this.loadData();
+          }
+          this.toastService.success(`Código "${trimmed}" aplicado`);
+        },
+        error: (err: unknown) => {
+          this.isApplyingCoupon.set(false);
+          const wrapped = err as { message?: string; cause?: unknown } | null;
+          const parsed = parseApiError(wrapped?.cause ?? err);
+          const message =
+            parsed.userMessage ||
+            wrapped?.message ||
+            'No se pudo aplicar el cupón';
+          this.couponError.set(message);
+          this.toastService.error(message);
+        },
+      });
+  }
+
+  onRemoveOrderCoupon(): void {
+    if (!this.orderId || this.isApplyingCoupon()) return;
+    this.isApplyingCoupon.set(true);
+    this.couponError.set(null);
+    this.ordersService
+      .applyOrderCoupon(this.orderId, null)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (updatedOrder) => {
+          this.isApplyingCoupon.set(false);
+          this.couponError.set(null);
+          if (updatedOrder) {
+            this.order.set(this.normalizeOrderPayload(updatedOrder));
+          } else {
+            this.loadData();
+          }
+          this.toastService.success('Cupón removido');
+        },
+        error: (err: unknown) => {
+          this.isApplyingCoupon.set(false);
+          const wrapped = err as { message?: string; cause?: unknown } | null;
+          const parsed = parseApiError(wrapped?.cause ?? err);
+          const message =
+            parsed.userMessage ||
+            wrapped?.message ||
+            'No se pudo quitar el cupón';
+          this.couponError.set(message);
+          this.toastService.error(message);
+        },
+      });
+  }
 
   onPaymentSubmitted(submit: PaymentSubmit): void {
     if (this.order()?.active_financial_split_id) return;

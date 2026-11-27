@@ -443,6 +443,14 @@ export interface AISpeechResponse {
   generationId?: string;
   model?: string;
   error?: string;
+  /**
+   * HTTP status of a failed provider call, when there was one. Lets a caller
+   * tell a passing failure (429, 5xx) from a permanent one without parsing the
+   * provider's free-text message, which often omits the status.
+   */
+  statusCode?: number;
+  /** The provider's `Retry-After`, in milliseconds, when it sent one. */
+  retryAfterMs?: number;
 }
 
 export interface AITranscriptionRequestOptions {

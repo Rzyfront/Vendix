@@ -27,6 +27,7 @@ import {
   OrderQueryDto,
   UpdateOrderItemsDto,
   UpdateOrderEditorDto,
+  ApplyOrderCouponDto,
 } from './dto';
 import { AssignShippingMethodDto } from './dto';
 import { RepairShippingTaxDto } from './dto/repair-shipping-tax.dto';
@@ -485,6 +486,28 @@ export class OrdersController {
     return this.responseService.updated(
       result,
       'Orden actualizada exitosamente',
+    );
+  }
+
+  /**
+   * PATCH /api/store/orders/:id/coupon
+   *
+   * Applies, replaces, or removes a coupon (or promotion code) on an existing
+   * unpaid order without recreating items or releasing stock reservations.
+   */
+  @Patch(':id/coupon')
+  @Permissions('store:orders:update')
+  async applyOrderCoupon(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ApplyOrderCouponDto,
+  ) {
+    const result = await this.ordersService.applyOrderCoupon(id, dto);
+    const hasCode = Boolean(dto.coupon_code && dto.coupon_code.trim());
+    return this.responseService.updated(
+      result,
+      hasCode
+        ? 'Cupón aplicado exitosamente'
+        : 'Cupón removido exitosamente',
     );
   }
 

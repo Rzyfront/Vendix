@@ -140,6 +140,21 @@ describe('VexiController — acuse de voz por agente (T14)', () => {
     expect(agentQuota.consumeAgentVoice).not.toHaveBeenCalled();
   });
 
+  it('proveedor caído en el acuse: el cambio se aplica y la respuesta sale sin audio, nunca con audio vacío', async () => {
+    const { controller, speech, agentQuota } = fixture('ok');
+    speech.synthesize.mockResolvedValue({
+      lost: true,
+      reason: 'Provider returned error',
+    });
+
+    const output = await apply(controller);
+
+    expect(output.summary).toBe('Subí el precio de la Coca a $3.500');
+    expect(output).not.toHaveProperty('audio_base64');
+    expect(output).not.toHaveProperty('content_type');
+    expect(agentQuota.consumeAgentVoice).not.toHaveBeenCalled();
+  });
+
   it('decisión no disponible: el acuse habla como antes de T14', async () => {
     const { controller } = fixture('unavailable');
 

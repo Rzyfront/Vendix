@@ -1,3 +1,52 @@
+# Reporte PR #1430 (`fix/vex-voz-corta`): correcciones de la revisión (B1, B2)
+
+Revisión independiente: 62/100, dos bloqueantes reproducidos y CI de tipos en rojo. Sin push.
+
+## Historia de usuario
+
+Como dueño de tienda en el panel de Vex/Vexi (`https://vendix.com`), quiero que la voz nunca me dicte código y que el acuse hablado de un cambio llegue con audio válido o sin audio, para no oír JSON ni recibir un audio roto cuando el proveedor de voz falla.
+
+Pasos en pantalla:
+1. En Vex, pedir una respuesta que termine en un bloque de código o JSON y tocar «Escuchar».
+2. Activar el modo voz y repetir con una respuesta que tenga un bloque de código seguido de más texto.
+3. En Vexi, confirmar por voz un cambio (por ejemplo, subir un precio) mientras el proveedor de voz falla.
+
+Criterios observables:
+- En 1 y 2 se oye la prosa, nunca el código, las llaves ni la palabra «json».
+- En 3 el cambio queda aplicado y el resumen aparece en texto, sin reproductor de audio vacío.
+
+## B1 — el acuse de Vexi no maneja `SynthesisLoss`
+
+- `vexi.controller.ts`: en el acuse, `isSynthesisLoss(spoken)` se trata como «sin audio»: no se asigna a `audio` ni se mide en el cupo. La respuesta sale sin `audio_base64`/`content_type`, igual que antes del PR.
+- Consumidores de `synthesize()` (`rg "synthesize\("`): fuera del pipeline solo existe el acuse de `vexi.controller.ts`. El pipeline ya distinguía la pérdida.
+- El typecheck completo encontró otro error del PR que el informe no listaba: `vexi-speech.service.spec.ts(683)` `TS2339 'seconds' does not exist on type 'SynthesizedAudio | SynthesisLoss'`. Se corrigió estrechando el tipo con `isSynthesisLoss` en vez de `!`.
+- Spec nuevo (`vexi.controller.voice-quota.spec.ts`): proveedor caído en el acuse → el cambio se aplica, la respuesta no tiene `audio_base64` ni `content_type` y no se consume cupo. RED antes del arreglo (`Expected path: not "audio_base64"`), GREEN después.
+
+## B2 — el filtro dictaba el código cuando el trozo terminaba en el cierre del bloque
+
+- `vexi-speech.markdown.ts` (`safeEnd`):
+  - Paso 2: las comillas invertidas finales solo se retienen si quedan después del último bloque cerrado; si son el cierre de un bloque, ya no se toman por una apertura.
+  - Paso 5 (nuevo): ningún corte cae dentro de un bloque cerrado. El paso 4 retenía la línea corta «```» del cierre y así también partía el bloque; ahora se retiene el bloque entero.
+- Spec nuevo `vexi-speech.markdown.spec.ts`: el caso exacto del informe (un `push` + `flush`), el mismo bloque seguido de prosa en otro trozo, código al inicio del texto (solo, y seguido de prosa) y unas comillas finales que sí abren un bloque (siguen retenidas). Antes del arreglo, 3 de 4 en RED, por ejemplo `Received string: "Aquí va el ejemplo.\njson…"`. Después, 4/4.
+
+## Evidencia
+
+Specs (uno por invocación, config scratch `isolatedModules` + stub de `nodemailer`):
+
+```
+src/domains/store/vexi/vexi.controller.voice-quota.spec.ts   Tests: 6 passed, 6 total
+src/domains/store/vexi/vexi-speech.markdown.spec.ts          Tests: 4 passed, 4 total
+src/domains/store/vexi/vexi-speech.pipeline.spec.ts          Tests: 35 passed, 35 total
+src/domains/store/vexi/vexi-speech.service.spec.ts           Tests: 86 passed, 86 total
+```
+
+Typecheck:
+- `npm run buildcheck:types` en este worktree aborta en 10 s con un único `error TS2688: Cannot find type definition file for 'yauzl'` (la carpeta `@types/yauzl` del `node_modules` enlazado está vacía, igual que `apps/backend/node_modules/@types/node`). Con ese error global `tsc` no comprueba nada más: es un falso verde, no evidencia.
+- Mismo programa que `tsconfig.check.json` (mismo `include`, 8 GB de heap como en CI), con los `@types` implícitos de CI salvo el `yauzl` vacío y el tsbuildinfo en `/tmp`: **0 errores en Vex/Vexi**. Los `TS2322` (294) y `TS2345` (295) de `vexi.controller.ts` y el `TS2339` del spec ya no aparecen. Quedan 6 errores, ninguno en archivos de este PR, todos del `node_modules`/cliente Prisma compartido con el checkout principal: `@aws-sdk/client-sns` (2), `@aws-sdk/client-sqs`, `nodemailer` y `mailparser` no instalados, y `public_token` en `store_app_mediaWhereInput` (cliente Prisma generado desde otro schema; este PR no toca el schema).
+- Confirmación definitiva: el job «Typecheck de specs (buildcheck:types)» de CI, con instalación limpia, al publicar la rama.
+
+---
+
 # Reporte: clasificador de desempate de Vex (`vex_classifier`)
 
 Rama `feat/vex-clasificador` (base `origin/develop` @ b2f40f016), PR #1428. Spec: `odd/tasks/vex-clasificador.md`. Sin push.

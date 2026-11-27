@@ -38,8 +38,34 @@ export const SENTENCE_TOLERANCE = 1.4;
  */
 export const MIN_CUT_FRACTION = 0.5;
 
-/** How many synthesis jobs may be in flight at once for one turn. */
-export const SYNTHESIS_PREFETCH_DEPTH = 3;
+/**
+ * Default number of segments of one turn synthesizing at the same time.
+ *
+ * One: segments are read in order anyway, so a second call in flight only
+ * buys a head start while the first plays — and costs a burst of parallel
+ * requests that rate-limited providers (OpenRouter returns 429) reject, plus
+ * calls a barge-in throws away. The live value is read from
+ * `vexi_voice_tts.metadata.speech.max_concurrency` (see
+ * `resolveSynthesisConcurrency`), so raising it is a row edit, not a deploy.
+ */
+export const DEFAULT_SYNTHESIS_CONCURRENCY = 1;
+
+/** Upper bound an operator can set in `metadata.speech.max_concurrency`. */
+export const MAX_SYNTHESIS_CONCURRENCY = 8;
+
+/**
+ * Waits before each retry of a transient provider failure (429, 5xx,
+ * timeouts, empty audio). Two retries: short enough that the listener does
+ * not notice the gap behind the segment already playing.
+ */
+export const SYNTHESIS_RETRY_DELAYS_MS = [500, 1500] as const;
+
+/**
+ * Longest provider `Retry-After` honoured before a retry. Beyond it the gap
+ * would be audible; the segment is then retried at the backoff above and,
+ * if still refused, recorded as lost.
+ */
+export const MAX_RETRY_AFTER_MS = 5000;
 
 /**
  * Human filler, spoken while the real answer is still being produced.
