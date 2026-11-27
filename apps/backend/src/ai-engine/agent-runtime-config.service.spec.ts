@@ -177,6 +177,74 @@ describe('AgentRuntimeConfigService', () => {
     );
   });
 
+  describe('prompt of an app-linked agent (R1)', () => {
+    it('shows the app prompt on the sheet, since the app owns it', async () => {
+      prisma.ai_engine_applications.findUnique.mockImplementation(
+        ({ where }: any) =>
+          where.key === 'vexi_voice_tts'
+            ? { id: 2, key: 'vexi_voice_tts', metadata }
+            : {
+                id: 1,
+                key: 'vex_app',
+                name: 'Vex app',
+                config_id: 3,
+                model_type: 'text',
+                is_active: true,
+                system_prompt: 'APP PROMPT',
+              },
+      );
+      const sheet = await service.getAgentSheet('vex');
+      expect(sheet.prompt_source).toBe('application');
+      expect(sheet.application?.system_prompt).toBe('APP PROMPT');
+    });
+
+    it('Vexi sheet saves the prompt and model on vexi_storefront', async () => {
+      prisma.ai_agents.findUnique.mockResolvedValue({
+        id: 8,
+        key: 'vexi',
+        app_key: 'vexi_storefront',
+        system_prompt: null,
+        voice_profile_id: null,
+      });
+      await service.updateAgentSheet(
+        'vexi',
+        { config_id: 3, system_prompt: 'Hola, soy Vexi' },
+        99,
+      );
+      expect(prisma.ai_engine_applications.update).toHaveBeenCalledWith({
+        where: { key: 'vexi_storefront' },
+        data: expect.objectContaining({ config_id: 3 }),
+      });
+      expect(prisma.ai_engine_applications.update).toHaveBeenCalledWith({
+        where: { key: 'vexi_storefront' },
+        data: expect.objectContaining({ system_prompt: 'Hola, soy Vexi' }),
+      });
+      expect(prisma.ai_agents.update).not.toHaveBeenCalled();
+    });
+
+    it('an empty prompt never wipes the app prompt', async () => {
+      await service.updateAgentSheet('vex', { system_prompt: null }, 99);
+      expect(prisma.ai_engine_applications.update).not.toHaveBeenCalled();
+      expect(prisma.ai_agents.update).not.toHaveBeenCalled();
+    });
+
+    it('an agent without app keeps its own system_prompt', async () => {
+      prisma.ai_agents.findUnique.mockResolvedValue({
+        id: 9,
+        key: 'vex',
+        app_key: null,
+        system_prompt: null,
+        voice_profile_id: null,
+      });
+      await service.updateAgentSheet('vex', { system_prompt: 'own' }, 99);
+      expect(prisma.ai_agents.update).toHaveBeenCalledWith({
+        where: { id: 9 },
+        data: expect.objectContaining({ system_prompt: 'own' }),
+      });
+      expect(prisma.ai_engine_applications.update).not.toHaveBeenCalled();
+    });
+  });
+
   it('rejects an invalid agentKey on update without writing', async () => {
     await expect(
       service.updateAgentSheet('x', { config_id: 3 }, 1),
@@ -291,10 +359,13 @@ describe('AgentRuntimeConfigService', () => {
         99,
       );
 
-      expect(prisma.ai_agents.update).toHaveBeenCalledTimes(1);
-      expect(prisma.ai_agents.update.mock.calls[0][0].data).not.toHaveProperty(
-        'voice_profile_id',
-      );
+      // The prompt goes to the linked app (R1), and the unchanged voice is
+      // written nowhere.
+      expect(prisma.ai_agents.update).not.toHaveBeenCalled();
+      expect(prisma.ai_engine_applications.update).toHaveBeenCalledWith({
+        where: { key: 'vex_app' },
+        data: expect.objectContaining({ system_prompt: 'p' }),
+      });
     });
 
     it('clears the voice with null without validating a profile', async () => {

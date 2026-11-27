@@ -11,6 +11,7 @@ import {
   signal,
   untracked,
 } from '@angular/core';
+import { buildOrderInquiryMessage } from '../../../../../shared/utils/order-whatsapp-inquiry.util';
 import { sumGrossSubtotal } from '../../utils/gross-subtotal.util';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
@@ -2292,11 +2293,15 @@ export class GuestOrderSummaryComponent implements OnInit {
       )
       .join('\n');
     const message = encodeURIComponent(
-      `¡Hola! 👋 Quisiera consultar el estado de mi pedido en ${storeName}.\n\n` +
-        `*Pedido:* #${data.order.order_number}\n` +
-        `*Estado:* ${this.getStateLabel(data.order.state)}\n` +
-        (itemLines ? `\n*Productos:*\n${itemLines}\n` : '') +
-        `\n*Total:* ${this.currencyService.format(Number(data.order.grand_total || 0))}\n\n¡Muchas gracias!`,
+      buildOrderInquiryMessage({
+        storeName,
+        orderNumber: data.order.order_number,
+        stateLabel: this.getStateLabel(data.order.state),
+        itemLines,
+        totalLabel: this.currencyService.format(
+          Number(data.order.grand_total || 0),
+        ),
+      }),
     );
     window.open(`https://wa.me/${phone}?text=${message}`, '_blank');
   }

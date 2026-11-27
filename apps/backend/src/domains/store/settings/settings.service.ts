@@ -110,6 +110,9 @@ export const KNOWN_SECTIONS = [
   // still off — a switch that silently refuses to move, in the other
   // direction.
   'vex',
+  // Vexi público (F2) switch. Same rule: unlisted, the sanitizer drops it and
+  // the switch silently refuses to move.
+  'vexi_public',
   // Apps module switch (apps-module T8). Same rule as `vex`: unlisted, the
   // sanitizer drops it and the switch silently refuses to move.
   'apps',
@@ -527,6 +530,23 @@ export class SettingsService {
       }
     }
 
+    // Vexi público spends the store's AI tokens on anonymous visitors: same
+    // owner/admin-only rule as the other agent switches.
+    if (dto.vexi_public !== undefined) {
+      const roles = RequestContextService.getRoles();
+      const canConfigure = roles.some((role) =>
+        ['owner', 'admin', 'STORE_OWNER', 'ORG_OWNER', 'super_admin'].includes(
+          role,
+        ),
+      );
+      if (!canConfigure) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_FORBIDDEN_001,
+          'Solo el propietario o un administrador de la tienda pueden publicar a Vexi.',
+        );
+      }
+    }
+
     // Vex inherits the same owner/admin-only rule: the switch decides whether
     // the store's most expensive agent may run, so a manager with
     // `store:settings:update` must not flip it with a curl. Same role list as
@@ -775,6 +795,14 @@ export class SettingsService {
       (updatedSettings as any).vex = {
         ...((currentSettings as any).vex ?? {}),
         ...dto.vex,
+      };
+    }
+
+    // `vexi_public` se mezcla por clave, como `vex`.
+    if (dto.vexi_public !== undefined) {
+      (updatedSettings as any).vexi_public = {
+        ...((currentSettings as any).vexi_public ?? {}),
+        ...dto.vexi_public,
       };
     }
 

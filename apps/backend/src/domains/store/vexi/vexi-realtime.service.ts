@@ -36,6 +36,7 @@ import {
 } from './vexi-plan-state.service';
 import type { ToolPreview } from '../../../ai-engine/tools/interfaces/tool.interface';
 import { describeVoiceAction } from './voice-action';
+import { hasClosedToolCatalog } from '../../../ai-engine/tools/agent-tool-catalog';
 import {
   VexiVoiceConsentService,
   VoiceConsentSession,
@@ -659,12 +660,21 @@ export class VexiRealtimeService {
       try {
         // proposalOnly is a second registry-level fence: even a token smuggled
         // in arguments or an accidental future options change cannot mutate.
+        // A closed-catalog agent (Vexi) also carries its key, so the registry
+        // gate refuses anything outside its catalog on this path too.
+        const catalogGate = hasClosedToolCatalog(authority.agent_key)
+          ? { agentKey: authority.agent_key }
+          : undefined;
         const output = await this.toolRegistry.executeTool(
           name,
           args,
           tool.requiresConfirmation
-            ? { proposalOnly: true, conversationId: authority.conversation_id }
-            : undefined,
+            ? {
+                proposalOnly: true,
+                conversationId: authority.conversation_id,
+                ...catalogGate,
+              }
+            : catalogGate,
         );
         const safe = this.safeProviderOutput(output);
         await this.authority!.recordResult(

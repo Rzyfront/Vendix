@@ -1,7 +1,7 @@
-import { Injectable } from '@angular/core';
+import { Injectable, signal } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
-import { catchError, map, shareReplay } from 'rxjs/operators';
+import { catchError, map, shareReplay, tap } from 'rxjs/operators';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 import { environment } from '../../../../../environments/environment';
 
@@ -278,6 +278,14 @@ export interface GuestReceiptUploadResult {
   providedIn: 'root',
 })
 export class CheckoutService {
+  /**
+   * Vexi público F2: the last order this browser placed through `checkout()`
+   * (read-only). Vexi uses it to hand the visitor off to the store's real
+   * WhatsApp asking about that order. Request and response are unchanged.
+   */
+  private readonly last_placed_order = signal<CheckoutResponse | null>(null);
+  readonly lastPlacedOrder = this.last_placed_order.asReadonly();
+
   private api_url = `${environment.apiUrl}/ecommerce/checkout`;
   private eligibility$: Observable<CheckoutEligibility> | null = null;
 
@@ -460,11 +468,18 @@ export class CheckoutService {
     if (idempotencyKey) {
       headers = headers.set('Idempotency-Key', idempotencyKey);
     }
-    return this.http.post<{ success: boolean; data: CheckoutResponse }>(
-      this.api_url,
-      formData,
-      { headers },
-    );
+    return this.http
+      .post<{ success: boolean; data: CheckoutResponse }>(
+        this.api_url,
+        formData,
+        { headers },
+      )
+      .pipe(
+        tap((response) => {
+          if (response?.success && response.data)
+            this.last_placed_order.set(response.data);
+        }),
+      );
   }
 
   prepareWompiPayment(

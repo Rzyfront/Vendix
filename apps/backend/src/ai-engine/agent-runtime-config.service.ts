@@ -309,8 +309,12 @@ export class AgentRuntimeConfigService {
             config_id: app.config_id,
             model_type: app.model_type,
             is_active: app.is_active,
+            // With an app linked the app owns the prompt (the agent's own
+            // `system_prompt` is ignored at runtime), so the sheet edits this.
+            system_prompt: app.system_prompt,
           }
         : null,
+      prompt_source: app ? ('application' as const) : ('agent' as const),
       config: config
         ? {
             id: config.id,
@@ -382,8 +386,20 @@ export class AgentRuntimeConfigService {
     }
 
     const agentData: Prisma.ai_agentsUpdateInput = {};
-    if (dto.system_prompt !== undefined)
-      agentData.system_prompt = dto.system_prompt;
+    if (dto.system_prompt !== undefined) {
+      if (agent.app_key) {
+        // The linked app owns the prompt (Vex: `vex_assistant`; Vexi since
+        // R1: `vexi_storefront`). An empty value never wipes the app prompt.
+        if (dto.system_prompt !== null && dto.system_prompt.trim()) {
+          await this.prisma.ai_engine_applications.update({
+            where: { key: agent.app_key },
+            data: { system_prompt: dto.system_prompt, updated_at: new Date() },
+          });
+        }
+      } else {
+        agentData.system_prompt = dto.system_prompt;
+      }
+    }
     if (dto.allowed_tools !== undefined)
       agentData.allowed_tools = dto.allowed_tools;
     if (dto.denied_tools !== undefined)

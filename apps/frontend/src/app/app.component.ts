@@ -17,6 +17,7 @@ import { AppLoadingComponent } from './shared/components/app-loading/app-loading
 import { StoreUnavailableBannerComponent } from './shared/components/store-unavailable-banner/store-unavailable-banner.component';
 import { DomainResolutionErrorComponent } from './shared/components/domain-resolution-error/domain-resolution-error.component';
 import { StoreAvailabilityService } from './core/services/store-availability.service';
+import { VexiPublicWidgetComponent } from './public/vexi-public/vexi-public-widget.component';
 
 @Component({
   selector: 'app-root',
@@ -28,6 +29,7 @@ import { StoreAvailabilityService } from './core/services/store-availability.ser
     AppLoadingComponent,
     StoreUnavailableBannerComponent,
     DomainResolutionErrorComponent,
+    VexiPublicWidgetComponent,
   ],
   // Bootstrap state machine — order is intentional:
   //   1. resolutionError  → branded error view (kitten + retry). Highest priority
@@ -55,6 +57,11 @@ import { StoreAvailabilityService } from './core/services/store-availability.ser
       @if (isBrowser) {
         <app-toast-container></app-toast-container>
         <app-global-user-modals></app-global-user-modals>
+        <!-- Vexi público F2: only on public store apps with vexi_public on;
+             the widget decides, and its chunk loads after the page is idle. -->
+        @defer (on idle) {
+          <app-vexi-public-widget />
+        }
       }
       <!-- Public storefront: full-screen "store unavailable" banner. Rendered
            as an overlay ON TOP of the router-outlet so dismissing it reveals

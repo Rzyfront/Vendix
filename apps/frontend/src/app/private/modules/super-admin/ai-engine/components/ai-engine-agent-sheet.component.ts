@@ -226,6 +226,12 @@ import { AiToolPickerComponent } from './ai-tool-picker/ai-tool-picker.component
               >
                 System prompt
               </label>
+              @if (data.application) {
+                <p class="text-[11px] text-text-secondary">
+                  Prompt de la aplicación {{ data.application.key }}: aplica a
+                  todas las tiendas.
+                </p>
+              }
               <textarea
                 id="agent-sheet-prompt"
                 formControlName="system_prompt"
@@ -428,7 +434,11 @@ export class AIEngineAgentSheetComponent {
       voice: data.voice.effective.voice ?? '',
       speed: data.voice.effective.speed ?? null,
       vol: data.voice.effective.vol ?? null,
-      system_prompt: data.agent.system_prompt ?? '',
+      // With an app linked the app owns the prompt (Vex: `vex_assistant`,
+      // Vexi: `vexi_storefront`); the agent's own field is ignored at runtime.
+      system_prompt: data.application
+        ? (data.application.system_prompt ?? '')
+        : (data.agent.system_prompt ?? ''),
       allowed_tools: [...data.agent.allowed_tools],
       denied_tools: [...data.agent.denied_tools],
       max_iterations: data.agent.max_iterations,

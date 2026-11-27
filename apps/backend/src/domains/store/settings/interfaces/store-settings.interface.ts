@@ -595,6 +595,9 @@ export interface StoreSettings {
   // Vex - the whole-business agent's master switch, independent from Vexi's
   vex?: VexSettings;
 
+  // Vexi público (F2) - customer-facing chat on the public apps
+  vexi_public?: VexiPublicSettings;
+
   // Apps module switch (apps-module T8)
   apps?: AppsSettings;
 
@@ -635,6 +638,11 @@ export interface StoreSettings {
  * A store with it off gets no dock at all rather than a disabled one: an assistant
  * that appears and does not answer reads as a fault.
  */
+/** Vexi público (F2): only an explicit `true` publishes the chat. */
+export interface VexiPublicSettings {
+  enabled: boolean;
+}
+
 export interface VexiSettings {
   enabled: boolean;
 

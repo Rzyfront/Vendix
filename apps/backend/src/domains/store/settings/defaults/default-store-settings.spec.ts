@@ -57,4 +57,15 @@ describe('store settings defaults', () => {
         .product_options?.allow_online,
     ).toBe(false);
   });
+
+  // Vexi público F2: off for new stores and for existing stores that never
+  // saved the block; independent from the admin `vexi.enabled` switch.
+  it('keeps vexi_public off by default, also for stores with the admin Vexi on', () => {
+    expect(getPersistableDefaultStoreSettings().vexi_public?.enabled).toBe(false);
+    const existing = mergeStoreSettingsWithDefaults({ vexi: { enabled: true } } as any);
+    expect(existing.vexi_public?.enabled).toBe(false);
+    expect(
+      mergeStoreSettingsWithDefaults({ vexi_public: { enabled: true } } as any).vexi_public?.enabled,
+    ).toBe(true);
+  });
 });

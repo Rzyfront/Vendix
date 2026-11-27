@@ -2255,6 +2255,23 @@ export class InvoicingSettingsDto {
 }
 
 /**
+ * Vexi público (F2): the customer-facing chat on the store's public apps
+ * (ecommerce, product page, service page). Off by default; only an explicit
+ * `true` publishes it. Independent from `vexi.enabled`.
+ */
+export class VexiPublicSettingsDto {
+  @ApiProperty({
+    example: false,
+    required: false,
+    description:
+      'Publica a Vexi en las apps públicas de la tienda. Con false no hay burbuja y los endpoints públicos de Vexi responden deshabilitado.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+}
+
+/**
  * Master switch for the Vexi assistant.
  *
  * Defaults to disabled: Vexi writes into the commerce's own data, so each store

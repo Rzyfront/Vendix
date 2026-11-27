@@ -43,7 +43,11 @@ export interface AgentRuntimeSheet {
     config_id: number | null;
     model_type: string;
     is_active: boolean;
+    /** The app owns the prompt when linked; the sheet edits this one. */
+    system_prompt?: string | null;
   } | null;
+  /** Where the sheet's prompt lives: the linked app or the agent row. */
+  prompt_source?: 'application' | 'agent';
   config: {
     id: number;
     label: string;

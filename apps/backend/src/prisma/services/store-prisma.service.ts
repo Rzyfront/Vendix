@@ -122,6 +122,9 @@ export class StorePrismaService extends BasePrismaService {
     'reviews',
     'order_reviews',
     'ai_conversations',
+    // Vexi público F2: both tables carry their own `store_id`.
+    'vexi_public_sessions',
+    'vexi_public_messages',
     'ai_embeddings',
     // Ambas tienen `store_id` propio. Sin registro, el getter devolvería un
     // delegate SIN scoping y un adjunto o una tarea de otra tienda serían
@@ -1781,6 +1784,14 @@ export class StorePrismaService extends BasePrismaService {
 
   get ai_messages() {
     return this.scoped_client.ai_messages;
+  }
+
+  get vexi_public_sessions() {
+    return this.scoped_client.vexi_public_sessions;
+  }
+
+  get vexi_public_messages() {
+    return this.scoped_client.vexi_public_messages;
   }
 
   get ai_embeddings() {

@@ -2460,6 +2460,39 @@ export const ErrorCodes = {
       'Realtime voice is no longer available for new sessions; use dictation ' +
       'and spoken replies (pipeline voice) instead',
   },
+  // Vexi público F2: the customer-facing chat on the store's public apps.
+  // Each refusal has its own code because the widget shows a different state.
+  VEXI_PUBLIC_DISABLED: {
+    code: 'VEXI_PUBLIC_DISABLED',
+    httpStatus: 403,
+    devMessage: 'Vexi is not published on this store (vexi_public.enabled is not true)',
+  },
+  VEXI_PUBLIC_UNAVAILABLE: {
+    code: 'VEXI_PUBLIC_UNAVAILABLE',
+    httpStatus: 503,
+    devMessage:
+      'The public Vexi agent is missing, inactive or not allowed by the plan; never falls back to an internal agent',
+  },
+  VEXI_PUBLIC_SESSION_INVALID: {
+    code: 'VEXI_PUBLIC_SESSION_INVALID',
+    httpStatus: 404,
+    devMessage: 'Unknown, expired or foreign public chat session',
+  },
+  VEXI_PUBLIC_CONSENT_REQUIRED: {
+    code: 'VEXI_PUBLIC_CONSENT_REQUIRED',
+    httpStatus: 400,
+    devMessage: 'The visitor must accept the data-processing notice first',
+  },
+  VEXI_PUBLIC_RATE_LIMITED: {
+    code: 'VEXI_PUBLIC_RATE_LIMITED',
+    httpStatus: 429,
+    devMessage: 'Too many public chat requests from this visitor',
+  },
+  VEXI_PUBLIC_DAILY_CAP: {
+    code: 'VEXI_PUBLIC_DAILY_CAP',
+    httpStatus: 429,
+    devMessage: "The store reached today's public chat message cap",
+  },
   AI_APP_001: {
     code: 'AI_APP_001',
     httpStatus: 404,

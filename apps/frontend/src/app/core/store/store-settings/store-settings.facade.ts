@@ -142,6 +142,11 @@ export class StoreSettingsFacade {
     () => this.settings()?.vexi?.enabled === true,
   );
 
+  /** Vexi público (F2): same explicit-`true` rule as the backend endpoints. */
+  readonly vexiPublicEnabled = computed<boolean>(
+    () => this.settings()?.vexi_public?.enabled === true,
+  );
+
   /**
    * Which engine answers a voice turn.
    *

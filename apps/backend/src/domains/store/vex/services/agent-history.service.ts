@@ -52,6 +52,24 @@ export interface HistoryPage<T> {
   limit: number;
 }
 
+/** Vexi público F2: one anonymous storefront chat, listing only. */
+export interface HistoryPublicConversationRow {
+  id: string;
+  app_type: string | null;
+  /** The visitor was a logged-in customer of the store (never the id itself). */
+  is_customer: boolean;
+  message_count: number;
+  created_at: Date;
+  last_message_at: Date | null;
+}
+
+export interface HistoryPublicMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  cards: unknown;
+  created_at: Date;
+}
+
 export interface HistoryQuery {
   page?: number;
   limit?: number;
@@ -215,6 +233,81 @@ export class AgentHistoryService {
       };
     });
     return { items, total, page, limit };
+  }
+
+  /**
+   * Vexi público F2: the store's anonymous storefront chats, newest first.
+   * Read-only; the owner reads what the visitors wrote (data notice D6).
+   * Store-scoped client, plus an explicit store pin.
+   */
+  async listPublicConversations(
+    query: HistoryQuery,
+  ): Promise<HistoryPage<HistoryPublicConversationRow>> {
+    const storeId = RequestContextService.getStoreId();
+    const { page, limit } = this.paging(query);
+    if (!storeId) return { items: [], total: 0, page, limit };
+    const where = { store_id: storeId };
+    const [rows, total] = await Promise.all([
+      this.prisma.vexi_public_sessions.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+        select: {
+          public_id: true,
+          app_type: true,
+          customer_user_id: true,
+          message_count: true,
+          created_at: true,
+          last_message_at: true,
+        },
+      }),
+      this.prisma.vexi_public_sessions.count({ where }),
+    ]);
+    return {
+      items: rows.map((row) => ({
+        id: row.public_id,
+        app_type: row.app_type,
+        is_customer: row.customer_user_id != null,
+        message_count: row.message_count,
+        created_at: row.created_at,
+        last_message_at: row.last_message_at,
+      })),
+      total,
+      page,
+      limit,
+    };
+  }
+
+  /** Messages of one public chat of THIS store; another store's id is a 404. */
+  async getPublicConversation(
+    publicId: string,
+  ): Promise<{ id: string; messages: HistoryPublicMessage[] }> {
+    const storeId = RequestContextService.getStoreId();
+    const session =
+      storeId && /^[0-9a-f-]{36}$/i.test(publicId)
+        ? await this.prisma.vexi_public_sessions.findFirst({
+            where: { public_id: publicId, store_id: storeId },
+            select: { id: true, public_id: true },
+          })
+        : null;
+    if (!session)
+      throw new NotFoundException('La conversación no existe en esta tienda.');
+    const messages = await this.prisma.vexi_public_messages.findMany({
+      where: { session_id: session.id, store_id: storeId! },
+      orderBy: { created_at: 'asc' },
+      take: 200,
+      select: { role: true, content: true, cards: true, created_at: true },
+    });
+    return {
+      id: session.public_id,
+      messages: messages.map((m) => ({
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: m.content,
+        cards: m.cards ?? null,
+        created_at: m.created_at,
+      })),
+    };
   }
 
   // ── sources ────────────────────────────────────────────────────────────

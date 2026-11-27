@@ -362,4 +362,53 @@ describe('AgentHistoryService', () => {
       expect(prisma.ai_conversations.findMany).not.toHaveBeenCalled();
     });
   });
+
+  // Vexi público F2: the owner reads the storefront chats, read-only.
+  describe('public conversations (Vexi público)', () => {
+    const PID = '11111111-2222-4333-8444-555555555555';
+    function publicSetup(session: any) {
+      const prisma = {
+        vexi_public_sessions: {
+          findMany: jest.fn(async () => [
+            { public_id: PID, app_type: 'STORE_ECOMMERCE', customer_user_id: 4242, message_count: 2, created_at: d('2026-11-26T10:00:00Z'), last_message_at: null },
+          ]),
+          count: jest.fn(async () => 1),
+          findFirst: jest.fn(async () => session),
+        },
+        vexi_public_messages: {
+          findMany: jest.fn(async () => [
+            { role: 'user', content: 'hola', cards: null, created_at: d('2026-11-26T10:00:00Z') },
+            { role: 'assistant', content: 'Hola, soy Vexi', cards: [{ kind: 'request' }], created_at: d('2026-11-26T10:00:01Z') },
+          ]),
+        },
+      };
+      const service = new AgentHistoryService(prisma as any, {} as any, {} as never);
+      return { service, prisma };
+    }
+
+    it('lists only this store, without exposing the customer id', async () => {
+      const { service, prisma } = publicSetup(null);
+      const page = await service.listPublicConversations({});
+      expect(prisma.vexi_public_sessions.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { store_id: STORE_ID } }),
+      );
+      expect(page.items).toEqual([
+        expect.objectContaining({ id: PID, is_customer: true, message_count: 2 }),
+      ]);
+      expect(JSON.stringify(page.items)).not.toContain("4242");
+    });
+
+    it('reads one conversation of this store and answers 404 for another store', async () => {
+      const own = publicSetup({ id: 3, public_id: PID });
+      const conversation = await own.service.getPublicConversation(PID);
+      expect(conversation.messages.map((m) => m.role)).toEqual(['user', 'assistant']);
+      expect(own.prisma.vexi_public_sessions.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { public_id: PID, store_id: STORE_ID } }),
+      );
+      const foreign = publicSetup(null);
+      await expect(foreign.service.getPublicConversation(PID)).rejects.toThrow(
+        'La conversación no existe en esta tienda.',
+      );
+    });
+  });
 });

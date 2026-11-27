@@ -28,6 +28,13 @@ import { collectToolCatalog, inertDeps } from './tool-catalog.test-helper';
  * caller). A business-data tool must declare permissions instead.
  */
 const PUBLIC_TOOLS = [
+  // Vexi público F2: the published catalog of the store the visitor is on, and
+  // proposal cards that never write. The registry offers/executes them only
+  // for the closed-catalog public agent, never in a staff turn.
+  'storefront_search_products',
+  'storefront_propose_order',
+  'storefront_propose_booking',
+  'storefront_propose_request',
   // api-bridge: per-route permission check + the caller's own token
   'list_endpoints',
   'call_endpoint',
@@ -256,10 +263,15 @@ describe('T13 role gate — the whole tool catalog', () => {
   it('a user without permissions only sees public tools; the owner sees every tool', () => {
     const registry = new AIToolRegistry(confirmations as any);
     registry.registerMany(catalog.map((c) => c.tool));
+    // Storefront tools (F2) are public but only for the public agent: a staff
+    // catalog never lists them, whatever the permissions.
+    const staffPublic = PUBLIC_TOOLS.filter((n) => !n.startsWith('storefront_'));
     const visible = registry.getAvailableDefinitions([]).map((d) => d.function.name).sort();
-    expect(visible).toEqual(PUBLIC_TOOLS);
+    expect(visible).toEqual(staffPublic);
     const every = [...new Set(catalog.flatMap((c) => c.tool.requiredPermissions ?? []))];
-    expect(registry.getAvailableDefinitions(every)).toHaveLength(registry.getAll().length);
+    expect(registry.getAvailableDefinitions(every)).toHaveLength(
+      registry.getAll().filter((t) => t.domain !== 'storefront').length,
+    );
     expect(registry.getDeniedPermissions(every)).toEqual([]);
   });
 
