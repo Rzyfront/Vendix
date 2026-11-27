@@ -821,6 +821,7 @@ jobs:
           --include='**/public/pricing/pricing.offers.spec.ts'
           --include='**/public/sectors/sector-pages.content.spec.ts'
           --include='**/public/implementation/implementation-page.component.spec.ts'
+          --include='**/public/comparisons/comparison-page.component.spec.ts'
           --include='**/public/landing-page/landing-page.service.spec.ts'
           --include='**/core/guards/panel-ui.guard.spec.ts'
           --include='**/core/guards/store-dashboard.guard.spec.ts'

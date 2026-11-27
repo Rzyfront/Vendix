@@ -3,6 +3,10 @@ import { pricingRoutes } from '../../public/pricing/pricing.routes';
 import { ROUTED_SECTOR_GUIDES } from '../../public/landing/guides/sector-guides.config';
 import { SECTOR_PAGES_ENABLED, SECTOR_PAGE_PATHS } from '../../public/sectors/sector-pages.config';
 import { IMPLEMENTATION_PAGE_ENABLED } from '../../public/implementation/implementation-page.config';
+import {
+  COMPARISON_PAGE_ENABLED,
+  COMPARISON_PAGE_PATH,
+} from '../../public/comparisons/comparison-page.config';
 
 // SEO-OPS-36: en producción solo las guías publicadas (PUBLISHED_SECTOR_GUIDES); en
 // vista previa, las siete. /guias ya es prefijo de la app en la función de CloudFront.
@@ -40,10 +44,24 @@ const implementationRoutes: Routes = IMPLEMENTATION_PAGE_ENABLED
     ]
   : [];
 
+// SEO-OPS-30: comparativa de POS; apagada en producción hasta la revisión legal y la firma.
+const comparisonRoutes: Routes = COMPARISON_PAGE_ENABLED
+  ? [
+      {
+        path: COMPARISON_PAGE_PATH,
+        loadComponent: () =>
+          import('../../public/comparisons/comparison-page.component').then(
+            (c) => c.ComparisonPageComponent,
+          ),
+      },
+    ]
+  : [];
+
 export const vendixLandingPublicRoutes: Routes = [
   ...sectorGuideRoutes,
   ...sectorPageRoutes,
   ...implementationRoutes,
+  ...comparisonRoutes,
   {
     path: '',
     loadComponent: () =>

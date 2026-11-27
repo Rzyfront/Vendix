@@ -9,6 +9,8 @@ export const environment = {
   sectorPagesEnabled: true,
   // SEO-OPS-19: página /implementacion, encendida también en producción desde el 17-nov-2026.
   implementationPageEnabled: true,
+  // SEO-OPS-30: comparativa de POS en vista previa (noindex).
+  comparisonPageEnabled: true,
 
   // Configuración para desarrollo
   debugDomainDetection: true,

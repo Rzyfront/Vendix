@@ -10,6 +10,8 @@ export const environment = {
   sectorPagesEnabled: true,
   // SEO-OPS-19: página /implementacion, aprobada por Adel (Producto y Ventas) el 17-nov-2026.
   implementationPageEnabled: true,
+  // SEO-OPS-30: comparativa de POS. Apagada hasta la revisión legal y la firma de Adel.
+  comparisonPageEnabled: false,
 
   // Configuración para producción
   debugDomainDetection: false,
