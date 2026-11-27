@@ -84,10 +84,13 @@ describe('VexChatStore voice mode, mic input and on-demand listen', () => {
     api.createStreamIntent.and.returnValue(of('stream-1'));
     api.streamConversation.and.returnValue(stream$.asObservable());
     api.synthesizeSpeech.and.returnValue(
-      of([
-        { index: 0, audio_base64: 'AAA', content_type: 'audio/mpeg' },
-        { index: 1, audio_base64: 'BBB', content_type: 'audio/mpeg' },
-      ]),
+      of({
+        segments: [
+          { index: 0, audio_base64: 'AAA', content_type: 'audio/mpeg' },
+          { index: 1, audio_base64: 'BBB', content_type: 'audio/mpeg' },
+        ],
+        complete: true,
+      }),
     );
 
     const activeTurnId = signal<string | null>(null);
@@ -210,6 +213,7 @@ describe('VexChatStore voice mode, mic input and on-demand listen', () => {
     expect(voice.finishTurn).not.toHaveBeenCalled();
     expect(voice.enqueue).toHaveBeenCalledTimes(3);
 
+    stream$.next({ type: 'voice_status', complete: true, lost_segments: 0 });
     stream$.next({ type: 'done' });
     stream$.complete();
     expect(voice.finishTurn).toHaveBeenCalledTimes(1);
@@ -250,5 +254,86 @@ describe('VexChatStore voice mode, mic input and on-demand listen', () => {
     store.toggleListenMessage(msg);
     expect(api.synthesizeSpeech).toHaveBeenCalledTimes(1);
     expect(voice.enqueue).toHaveBeenCalledTimes(2);
+  });
+
+  it('a streamed turn that lost segments is not reused: «Escuchar» synthesizes the full text again', async () => {
+    store.toggleVoiceMode();
+    store.sendMessage('Resumen del día');
+    await settle();
+
+    stream$.next({
+      type: 'text',
+      content: 'Primera parte. Segunda parte. Tercera parte.',
+    });
+    stream$.next({
+      type: 'audio',
+      index: 1,
+      audio_base64: 'SEG1',
+      content_type: 'audio/mpeg',
+    });
+    // Segments 2 and 3 never arrived: the provider rejected them.
+    stream$.next({ type: 'voice_status', complete: false, lost_segments: 2 });
+    stream$.next({ type: 'done' });
+    stream$.complete();
+
+    voice.activeTurnId.set(null);
+    voice.enqueue.calls.reset();
+    const reply = store.active_conversation()!.messages.at(-1)!;
+    store.toggleListenMessage(reply);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Not the one phrase that arrived: a fresh synthesis of the whole message.
+    expect(api.synthesizeSpeech).toHaveBeenCalledTimes(1);
+    expect(api.synthesizeSpeech).toHaveBeenCalledWith(reply.content);
+    expect(voice.enqueue).toHaveBeenCalledTimes(2);
+  });
+
+  it('a streamed turn without a completeness report is not cached either', async () => {
+    store.toggleVoiceMode();
+    store.sendMessage('Resumen del día');
+    await settle();
+
+    stream$.next({ type: 'text', content: 'Primera parte.' });
+    stream$.next({
+      type: 'audio',
+      index: 1,
+      audio_base64: 'SEG1',
+      content_type: 'audio/mpeg',
+    });
+    stream$.next({ type: 'done' });
+    stream$.complete();
+
+    voice.activeTurnId.set(null);
+    const reply = store.active_conversation()!.messages.at(-1)!;
+    store.toggleListenMessage(reply);
+    await Promise.resolve();
+    expect(api.synthesizeSpeech).toHaveBeenCalledTimes(1);
+  });
+
+  it('«Escuchar» plays an incomplete synthesis once but never caches it', async () => {
+    api.synthesizeSpeech.and.returnValue(
+      of({
+        segments: [{ index: 0, audio_base64: 'AAA', content_type: 'audio/mpeg' }],
+        complete: false,
+      }),
+    );
+    const toast = TestBed.inject(ToastService) as unknown as {
+      warning: jasmine.Spy;
+    };
+    const msg: VexMessage = store.active_conversation()!.messages[0];
+
+    store.toggleListenMessage(msg);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(voice.enqueue).toHaveBeenCalledTimes(1);
+    expect(toast.warning).toHaveBeenCalled();
+
+    // Stop, then click again: goes back to the server instead of the fragment.
+    store.toggleListenMessage(msg);
+    store.toggleListenMessage(msg);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(api.synthesizeSpeech).toHaveBeenCalledTimes(2);
   });
 });

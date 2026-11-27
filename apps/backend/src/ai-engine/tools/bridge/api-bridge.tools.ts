@@ -72,7 +72,7 @@ function requestPath(rawPath: unknown): string {
 }
 
 const ARCHIVE_CONSEQUENCE =
-  'Dejará de aparecer en listados y no se puede reintegrar después. La información histórica se conserva.';
+  'Dejará de aparecer en listados. Esta acción no se puede deshacer. La información histórica se conserva.';
 
 /**
  * Makes a Swagger summary safe to show to a shopkeeper.
@@ -178,7 +178,7 @@ function describeWrite(
       return { summary: `Modificar ${subject}${named}` };
     case 'DELETE':
       return {
-        summary: `Archivar ${subject}${named}`,
+        summary: `Eliminar ${subject}${named}`,
         consequence: ARCHIVE_CONSEQUENCE,
       };
   }
@@ -775,7 +775,7 @@ export function createApiBridgeTools({
       // propose/confirm plumbing is needed here.
       requiresConfirmation: true,
       description:
-        'Crea, modifica o archiva datos en cualquier dominio de la aplicación, usando una ruta de list_endpoints. Con esto puedes hacer prácticamente cualquier operación del sistema: registrar un gasto, crear un usuario y asignarle un rol, configurar mesas, cartas o recetas, gestionar membresías, rutas y remisiones, categorías, promociones, clientes, la tienda en línea y la configuración de la tienda. Si la ruta necesita un documento (una factura, un comprobante, una planilla), pásale `attachment_id`: el archivo queda guardado junto al registro que se cree, igual que si la persona lo hubiera subido desde el módulo. Se ejecuta con los permisos del usuario, y NUNCA se aplica sin que la persona apruebe: al llamarla recibirás la propuesta para que se la resumas y le pidas confirmación. Antes de llamarla, VERIFICA con una consulta que el registro exista (o que no exista ya, si vas a crearlo). DELETE archiva, no borra de verdad.',
+        'Crea, modifica o elimina datos en cualquier dominio de la aplicación, usando una ruta de list_endpoints. Con esto puedes hacer prácticamente cualquier operación del sistema: registrar un gasto, crear un usuario y asignarle un rol, configurar mesas, cartas o recetas, gestionar membresías, rutas y remisiones, categorías, promociones, clientes, la tienda en línea y la configuración de la tienda. Si la ruta necesita un documento (una factura, un comprobante, una planilla), pásale `attachment_id`: el archivo queda guardado junto al registro que se cree, igual que si la persona lo hubiera subido desde el módulo. Se ejecuta con los permisos del usuario, y NUNCA se aplica sin que la persona apruebe: al llamarla recibirás la propuesta para que se la resumas y le pidas confirmación. Antes de llamarla, VERIFICA con una consulta que el registro exista (o que no exista ya, si vas a crearlo). DELETE elimina y no se puede deshacer; no existe forma de recuperar lo eliminado.',
       parameters: {
         type: 'object',
         properties: {
@@ -788,7 +788,7 @@ export function createApiBridgeTools({
             type: 'string',
             enum: ['POST', 'PATCH', 'PUT', 'DELETE'],
             description:
-              'POST para crear, PATCH o PUT para modificar, DELETE para archivar.',
+              'POST para crear, PATCH o PUT para modificar, DELETE para eliminar.',
           },
           body: {
             type: 'object',
@@ -1090,7 +1090,7 @@ export function createApiBridgeTools({
             method === 'POST'
               ? 'creé'
               : method === 'DELETE'
-                ? 'archivé'
+                ? 'eliminé'
                 : 'actualicé';
 
           return JSON.stringify({

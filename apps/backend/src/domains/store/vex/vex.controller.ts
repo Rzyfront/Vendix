@@ -747,11 +747,16 @@ export class VexController {
     }
     const storeId = RequestContextService.getContext()?.store_id;
     await this.assertVexVoiceAllowed(storeId);
-    const segments = await this.speech.synthesizeText(dto.text, {
-      agentKey: 'vex',
-      meter: this.speechMeter(storeId),
-    });
-    return this.responseService.success({ segments }, 'Audio generado');
+    const { frames: segments, complete } = await this.speech.synthesizeText(
+      dto.text,
+      { agentKey: 'vex', meter: this.speechMeter(storeId) },
+    );
+    // `complete: false` = some segment was lost after the retries; the client
+    // plays what came but must not keep it as this message's audio.
+    return this.responseService.success(
+      { segments, complete },
+      'Audio generado',
+    );
   }
 
   /**

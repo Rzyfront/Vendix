@@ -85,6 +85,71 @@ const RESUME_REQUIRED_STATUSES = [
   'blocked',
   'awaiting_approval',
 ];
+/**
+ * F4 (conversation 314): the closed list of replies that mean «go ahead» to a
+ * card that is still waiting. Normalized form: lowercase, no accents, no
+ * punctuation. A message made only of these (e.g. «hazlo, hazlo», «dale dale»)
+ * keeps the live card instead of withdrawing it. No model call classifies it.
+ */
+export const AFFIRMATIVE_REPLIES: readonly string[] = [
+  'hazlo',
+  'haz',
+  'hagale',
+  'hagamoslo',
+  'hagamoslo asi',
+  'si',
+  'si hazlo',
+  'si dale',
+  'si por favor',
+  'dale',
+  'aprueba',
+  'apruebalo',
+  'apruebo',
+  'aprobado',
+  'adelante',
+  'continua',
+  'continuar',
+  'sigue',
+  'ok',
+  'okay',
+  'okey',
+  'listo',
+  'aplicalo',
+  'aplica',
+  'procede',
+  'confirmo',
+  'de una',
+];
+
+function normalizeReply(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9,;.\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** True when the whole message is an affirmative reply from the closed list. */
+export function isAffirmativeReply(text: string): boolean {
+  const normalized = normalizeReply(text ?? '');
+  if (!normalized || normalized.length > 60) return false;
+  const phrases = new Set(AFFIRMATIVE_REPLIES);
+  const segments = normalized
+    .split(/[,;.]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (segments.length === 0) return false;
+  if (segments.every((s) => phrases.has(s))) return true;
+  // «dale dale», «si hazlo hazlo»: every word must itself be a one-word reply.
+  return normalized
+    .replace(/[,;.]/g, ' ')
+    .split(' ')
+    .filter(Boolean)
+    .every((word) => phrases.has(word));
+}
+
 /** Projection of TTL expiry; terminal/uncertain rows keep their own status. */
 function projectExpiry(row: AgentObjective): AgentObjective {
   return new Date(row.expires_at).getTime() <= Date.now() &&
@@ -120,6 +185,8 @@ export class AgentDurableSession {
   private accountedRuntime = 0;
   private excludedRuntime = 0;
   private closed = false;
+  /** Set once proposeWrite registered a real effect in this session. */
+  private proposedEffect = false;
   readonly context: string;
   constructor(
     public objective: AgentObjective,
@@ -201,7 +268,14 @@ export class AgentDurableSession {
       throw new ConflictException('AI_OBJECTIVE_STALE_EXECUTOR');
     this.accept(saved.objective);
   }
-  async assertCurrent(): Promise<void> {
+  /**
+   * `skipResumeGate` is only for the turn's own closing inference: it keeps
+   * the lease fence but must not die on the `awaiting_approval` (or other
+   * resume) status the same turn just wrote (conversation 314).
+   */
+  async assertCurrent(
+    options: { skipResumeGate?: boolean } = {},
+  ): Promise<void> {
     const row = await this.repo.get(this.objective_id);
     if (
       row.lease_generation !== this.lease.lease_generation ||
@@ -211,6 +285,7 @@ export class AgentDurableSession {
     )
       throw new ConflictException('AI_OBJECTIVE_STALE_EXECUTOR');
     if (
+      !options.skipResumeGate &&
       [
         'expired',
         'paused',
@@ -243,8 +318,10 @@ export class AgentDurableSession {
       this.accountedRuntime = active;
     }
   }
-  async assertBudget(): Promise<void> {
-    await this.assertCurrent();
+  async assertBudget(
+    options: { skipResumeGate?: boolean } = {},
+  ): Promise<void> {
+    await this.assertCurrent(options);
     await this.accountRuntime();
     const b = this.objective.budget;
     // Finite across automatic plan_continue; does not widen ANY turn budget.
@@ -255,8 +332,16 @@ export class AgentDurableSession {
     )
       throw new ConflictException('AI_OBJECTIVE_BUDGET_EXHAUSTED');
   }
-  async runProvider(callback: () => Promise<AIResponse>): Promise<AIResponse> {
-    await this.assertBudget();
+  /**
+   * `closing: true` is the turn's closing inference: same budget, lease and
+   * metering, but it skips the resume gate so a turn that ended waiting for
+   * approval can still write its own closing text.
+   */
+  async runProvider(
+    callback: () => Promise<AIResponse>,
+    options: { closing?: boolean } = {},
+  ): Promise<AIResponse> {
+    await this.assertBudget({ skipResumeGate: options.closing === true });
     await this.addBudget({ provider_attempts: 1 }); // durable intent before first dispatch
     return this.withMeter(callback, true);
   }
@@ -334,6 +419,20 @@ export class AgentDurableSession {
       throw new ConflictException(
         'Este cambio fue rechazado, enviado o es incierto. Revisa la propuesta antes de continuar.',
       );
+    this.proposedEffect = true;
+  }
+  /**
+   * A pending receipt is a card only when a real effect backs it: proposeWrite
+   * ran in this session or the objective already holds a proposed/approved
+   * effect. Otherwise `awaiting_approval` would wait on nothing and fence the
+   * turn's own closing (conversation 314).
+   */
+  private async hasProposedEffect(): Promise<boolean> {
+    if (this.proposedEffect) return true;
+    const effects = await this.repo.listEffects(this.objective_id, 100);
+    return effects.some((effect) =>
+      ['proposed', 'approved'].includes(effect.status),
+    );
   }
   /** Late/non-cooperative reads are auditable, never current-generation evidence. */
   async auditTool(
@@ -368,7 +467,9 @@ export class AgentDurableSession {
   ): Promise<string> {
     const status =
       result.status === 'pending_confirmation'
-        ? 'awaiting_approval'
+        ? (await this.hasProposedEffect())
+          ? 'awaiting_approval'
+          : 'active'
         : result.status === 'needs_user_input'
           ? 'awaiting_input'
           : result.status === 'unknown_effect'
@@ -522,6 +623,37 @@ export class AgentDurableSessionService {
       if (error instanceof ConflictException) return current;
       throw error;
     }
+  }
+  /**
+   * F4 (conversation 314): «hazlo»/«sí» to a card that is still waiting is
+   * not a new goal. True only when the message is an affirmative reply from
+   * the closed list AND this conversation's objective awaits approval on a
+   * real `proposed` effect. The caller then shows the same card again instead
+   * of opening a session, so nothing is withdrawn and nothing is invented.
+   * Read-only: never changes the objective or its effects.
+   */
+  async keepsLiveCard(
+    conversationId: number,
+    agentKey: string,
+    message: string,
+  ): Promise<boolean> {
+    if (!isAffirmativeReply(message)) return false;
+    let row = await this.repo.getForConversation(conversationId);
+    if (
+      !row ||
+      row.conversation_id !== conversationId ||
+      (row.agent_id && row.agent_id !== agentKey) ||
+      row.semantic_status !== 'awaiting_approval'
+    )
+      return false;
+    row = await this.repo.recoverAppliedReceipt(row.id, row.version);
+    if (
+      row.semantic_status !== 'awaiting_approval' ||
+      new Date(row.expires_at).getTime() <= Date.now()
+    )
+      return false;
+    const effects = await this.repo.listEffects(row.id, 100);
+    return effects.some((effect) => effect.status === 'proposed');
   }
   async canContinue(conversationId: number): Promise<boolean> {
     let row = await this.repo.getForConversation(conversationId);

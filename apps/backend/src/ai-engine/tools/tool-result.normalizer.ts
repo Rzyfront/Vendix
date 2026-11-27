@@ -209,8 +209,13 @@ export function normalizeToolResult(
     typeof candidate?.error_code === 'string' ? candidate.error_code : null;
   if (candidate?.result_unknown === true) status = 'unknown_effect';
   else if (
-    candidate?.requires_confirmation === true ||
-    candidate?.pending_confirmation === true ||
+    // The boolean flags are the write-proposal protocol only when a write tool
+    // produced them; a read (e.g. preview_archive_product) may carry the same
+    // key as business data and must never halt a turn as a phantom card
+    // (conversation 314). An explicit protocol status stays authoritative.
+    (context.write === true &&
+      (candidate?.requires_confirmation === true ||
+        candidate?.pending_confirmation === true)) ||
     candidate?.status === 'pending_confirmation'
   )
     status = 'pending_confirmation';

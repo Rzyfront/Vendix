@@ -7,6 +7,20 @@
   size="lg"
   [dialog]="true"
 >
+  @if (canEditCoupon() && !isCreditOrder()) {
+    <div class="mb-3">
+      <app-order-coupon-section
+        [order]="order()"
+        [compact]="true"
+        [disabled]="isProcessing()"
+        [isLoading]="isApplyingCoupon()"
+        [errorMessage]="couponError()"
+        (applyCoupon)="applyCoupon.emit($event)"
+        (removeCoupon)="removeCoupon.emit()"
+      />
+    </div>
+  }
+
   <app-payment-collector
     #collector
     context="order"
@@ -16,7 +30,7 @@
     [autoLoad]="false"
     [installments]="installments()"
     [preSelectedInstallment]="preSelectedInstallment()"
-    [isProcessing]="isProcessing()"
+    [isProcessing]="isProcessing() || isApplyingCoupon()"
     [allowAmountOverride]="isCreditOrder() || manualPaymentPending()"
     [allowTip]="!isCreditOrder()"
     [tipPolicy]="tipPolicy()"
@@ -72,7 +86,7 @@
       variant="primary"
       [fullWidth]="true"
       [loading]="isProcessing()"
-      [disabled]="isProcessing() || !collector.canSubmit() || creditAmountExceedsBalance(collector.effectiveTotal()) || manualAmountExceedsBalance(collector.effectiveBase()) || (isCreditOrder() && remainingBalance() <= 0)"
+      [disabled]="isProcessing() || isApplyingCoupon() || !collector.canSubmit() || creditAmountExceedsBalance(collector.effectiveTotal()) || manualAmountExceedsBalance(collector.effectiveBase()) || (isCreditOrder() && remainingBalance() <= 0)"
       (clicked)="collector.triggerSubmit()"
     >
       <app-icon slot="icon" name="check-circle" [size]="18" />

@@ -5,4 +5,5 @@ export * from './order-stats.dto';
 export * from './update-order-items.dto';
 export * from './update-order-editor.dto';
 export * from './assign-shipping-method.dto';
+export * from './apply-order-coupon.dto';
 export * from './bulk-orders.dto';

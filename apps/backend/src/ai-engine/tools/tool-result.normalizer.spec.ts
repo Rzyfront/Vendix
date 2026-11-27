@@ -73,6 +73,30 @@ describe('D0 tool execution normalization', () => {
       ).status,
     ).toBe('pending_confirmation');
   });
+  it.each([
+    ['requires_confirmation', { write: false }],
+    ['pending_confirmation', { write: false }],
+    ['requires_confirmation', {}],
+  ])(
+    'a read carrying %s is ok, never a pending proposal (conv. 314)',
+    (flag, readContext) => {
+      const previewArchive = JSON.stringify({
+        product: { product_id: 1 },
+        [flag]: true,
+        confirmed_total_units: 5,
+        archivable: true,
+      });
+      const result = normalizeToolResult(previewArchive, readContext);
+      expect(result.status).toBe('ok');
+      expect(result.effect_status).toBe('not_applicable');
+    },
+  );
+  it('an explicit pending_confirmation status stays pending without write context', () => {
+    expect(
+      normalizeToolResult({ status: 'pending_confirmation', applied: false })
+        .status,
+    ).toBe('pending_confirmation');
+  });
   it('unknown UI result and redirected UI never become success', () => {
     expect(
       normalizeToolResult({ result_unknown: true }, { clientSide: true })

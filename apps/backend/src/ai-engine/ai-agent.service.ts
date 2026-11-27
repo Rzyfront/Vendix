@@ -163,6 +163,35 @@ const MAX_PLAN_NUDGES = 2;
 const LEAKED_TOOL_MARKUP = /<\uFF5CDSML\uFF5C|<\uFF5Ctool[\u2581_]call/;
 
 /**
+ * Rafael (conversation 314): «No debe existir una herramienta ni función para
+ * deseliminar o revertir una eliminación». Server-side defense: any call whose
+ * tool name, `action` or route segment (write_endpoint) asks to
+ * restore/unarchive/undelete/undo is denied before it runs, even if a future
+ * catalog entry offered it.
+ */
+const REVERSAL_CALL = /(^|[_\-.])(restore|unarchive|undelete|undo)([_\-.]|$)/i;
+export function isReversalToolCall(name: string, rawArgs?: string): boolean {
+  if (REVERSAL_CALL.test(name)) return true;
+  if (!rawArgs) return false;
+  try {
+    const args = JSON.parse(rawArgs) as { action?: unknown; path?: unknown };
+    if (typeof args?.action === 'string' && REVERSAL_CALL.test(args.action))
+      return true;
+    // write_endpoint: a route such as `store/recipes/9/restore`.
+    return (
+      typeof args?.path === 'string' &&
+      args.path
+        .split(/[/?#]/)
+        .some((segment) => REVERSAL_CALL.test(segment))
+    );
+  } catch {
+    return false;
+  }
+}
+const REVERSAL_DENIED_MESSAGE =
+  'Lo eliminado no se puede recuperar ni restaurar: no existe esa acción. No la ofrezcas; dile a la persona que la eliminación es definitiva.';
+
+/**
  * Vex's own budgets (`ai_agents.key='vex'`).
  *
  * A whole-business turn with the full catalog does not fit the one-shot
@@ -191,8 +220,20 @@ const AGENT_TIMEOUT_CEILING_MS = 600_000;
  */
 const SUPERADMIN_MAX_ITERATIONS = 60;
 
+/** F4: the line that goes with a card shown again after «hazlo»/«sí». */
+export const LIVE_CARD_NOTICE =
+  'Aquí está tu tarjeta; apruébala para aplicar el cambio. Todavía no apliqué nada.';
+
 export interface AgentRunParams {
   goal: string;
+  /**
+   * F4 (conversation 314): the person answered «hazlo»/«sí» while this card is
+   * still waiting. The turn shows the SAME card again (its `plan_approval`
+   * frame) with a short line, without calling the model or touching the
+   * objective. Set by the chat only after `keepsLiveCard` confirmed a real
+   * `proposed` effect.
+   */
+  reshow_plan?: NonNullable<AgentResult['pending_plan']>;
   /**
    * `image_url` parts of the CURRENT turn (vision-capable configs only; the
    * caller gates on `settings.supports_vision`). Absent = text-only turn,
@@ -563,6 +604,34 @@ export function deferredWriteMessage(batchOffered: boolean): string {
   return batchOffered
     ? 'No se propuso ni se ejecutó: un turno solo admite una escritura suelta. Cuando la persona apruebe la anterior, junta TODAS las escrituras que falten en UNA sola llamada a propose_write_batch (una sola aprobación); no las propongas una por una.'
     : 'Pendiente: esta escritura se propondrá tras la aprobación de la anterior. No se ejecutó; vuelve a proponerla en el siguiente turno.';
+}
+
+/**
+ * The stable code of a closing failure, for the span: the object response of a
+ * Nest exception (`AI_OBJECTIVE_REQUIRES_RESUME`), a Vendix error code, or a
+ * code-shaped message (`AI_OBJECTIVE_BUDGET_EXHAUSTED`). Never free text.
+ */
+function closingFailureCode(error: unknown): string | undefined {
+  const candidate = error as {
+    getResponse?: () => unknown;
+    errorCode?: unknown;
+    code?: unknown;
+    message?: unknown;
+  } | null;
+  const response =
+    typeof candidate?.getResponse === 'function'
+      ? (candidate.getResponse() as { error_code?: unknown } | string | null)
+      : null;
+  const codes = [
+    response && typeof response === 'object' ? response.error_code : undefined,
+    candidate?.errorCode,
+    candidate?.code,
+    candidate?.message,
+  ];
+  return codes.find(
+    (code): code is string =>
+      typeof code === 'string' && /^[A-Z][A-Z0-9_]{0,99}$/.test(code),
+  );
 }
 
 /**
@@ -1025,6 +1094,44 @@ export class AIAgentService {
   }
 
   /**
+   * F4: re-emits a card that is still waiting for approval. Same frame shape
+   * as `finalizeVexPlan`, no provider call, no new proposal, no new hashes:
+   * approving it goes through the plan the server already holds.
+   */
+  private async *reshowLiveCard(
+    params: AgentRunParams,
+  ): AsyncGenerator<AIStreamChunk, AgentResult> {
+    const plan = params.reshow_plan!;
+    yield {
+      type: 'plan_approval',
+      plan_approval: {
+        plan_id: plan.plan_id,
+        steps: plan.steps,
+        covered_steps: plan.steps
+          .filter((s) => !s.irreversible)
+          .map((s) => s.order),
+        reconfirm_steps: plan.steps
+          .filter((s) => s.irreversible)
+          .map((s) => s.order),
+      },
+    };
+    const narration = LIVE_CARD_NOTICE;
+    yield { type: 'text', content: narration };
+    yield {
+      type: 'done',
+      usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+    };
+    return {
+      content: narration,
+      iterations: 0,
+      tools_used: [],
+      total_tokens: 0,
+      success: true,
+      pending_plan: plan,
+    };
+  }
+
+  /**
    * Closes a Vex turn that recorded write proposals with the ONE plan frame.
    * Emits `plan_approval` (plan + steps + coverage), then the narration as a
    * single text chunk, then `done`.
@@ -1414,6 +1521,7 @@ export class AIAgentService {
   async *runAgentStream(
     params: AgentRunParams,
   ): AsyncGenerator<AIStreamChunk, AgentResult> {
+    if (params.reshow_plan) return yield* this.reshowLiveCard(params);
     // Never adopt RequestContextService's legacy static tenant fallback for
     // telemetry. A worker must restore its authenticated ALS snapshot itself.
     const context = RequestContextService.asyncLocalStorage.getStore();
@@ -1436,7 +1544,10 @@ export class AIAgentService {
     const runLoop = (observe?: (outcome: AgentOutcome) => void) => {
       const loop = this.runAgentLoop(params, observe);
 
-      const source = withExecutionContract(loop);
+      const source = withExecutionContract(loop, {
+        isWriteTool: (name) =>
+          this.toolRegistry.get(name)?.requiresConfirmation === true,
+      });
       return params.durable
         ? this.withDurableSession(source, params.durable)
         : source;
@@ -2556,7 +2667,10 @@ export class AIAgentService {
       const callClosing = () =>
         withinDeadline(() =>
           params.durable
-            ? params.durable.runProvider(dispatchClosing)
+            ? // Closing keeps budget, lease and metering but skips the resume
+              // gate: this turn may have just left the objective awaiting
+              // approval, and its own closing must not die on that (conv. 314).
+              params.durable.runProvider(dispatchClosing, { closing: true })
             : dispatchClosing(),
         );
       try {
@@ -2578,12 +2692,16 @@ export class AIAgentService {
           ? text
           : '';
       } catch (closingError: any) {
+        const causeErrorCode = closingFailureCode(closingError);
         activeTrace?.endSpan(closingSpan, {
           status: 'error',
           error_code: 'AI_CLOSING_FAILED',
+          ...(causeErrorCode
+            ? { attributes: { cause_error_code: causeErrorCode } }
+            : {}),
         });
         this.logger.warn(
-          `Agent closing turn failed: ${closingError?.code ?? closingError?.message ?? 'unknown'}`,
+          `Agent closing turn failed: ${causeErrorCode ?? closingError?.code ?? closingError?.message ?? 'unknown'}`,
         );
         return '';
       }
@@ -3490,6 +3608,37 @@ export class AIAgentService {
             (pendingConfirmation || vexProposals.length > 0)
           )
             break;
+          if (isReversalToolCall(toolName, toolCall.function.arguments)) {
+            const deniedSpan = activeTrace?.startSpan('tool_denied', {
+              round: iteration,
+              tool_name_hash: activeTrace?.hash(toolName),
+              tool_call_id: toolCall.id,
+            });
+            activeTrace?.endSpan(deniedSpan, {
+              status: 'error',
+              error_code: 'AI_TOOL_REVERSAL_DENIED',
+            });
+            this.logger.warn(`Denied reversal tool call: ${toolName}`);
+            const denied = JSON.stringify({
+              error: REVERSAL_DENIED_MESSAGE,
+              error_code: 'AI_TOOL_REVERSAL_DENIED',
+            });
+            messages.push({
+              role: 'tool',
+              content: denied,
+              tool_call_id: toolCall.id,
+            });
+            toolsUsed.push({ name: toolName, args: {}, result: denied });
+            yield {
+              type: 'tool_result',
+              tool: {
+                id: toolCall.id,
+                name: toolName,
+                summary: 'Acción no disponible: lo eliminado no se recupera.',
+              },
+            };
+            continue;
+          }
           let toolArgs: Record<string, any>;
           const toolSpan = activeTrace?.startSpan('tool', {
             round: iteration,
@@ -5011,9 +5160,12 @@ export class AIAgentService {
         };
       }
 
-      const content = timedOut
-        ? 'No alcancé a completar tu solicitud en este turno. Puedes pedirme que continúe; no voy a dar por terminado lo que aún no he verificado.'
-        : USER_NOTICES.exhausted;
+      // A real card left in this turn is described, never the «no alcancé».
+      const content = pendingConfirmation
+        ? this.describePendingWrite(pendingConfirmation)
+        : timedOut
+          ? 'No alcancé a completar tu solicitud en este turno. Puedes pedirme que continúe; no voy a dar por terminado lo que aún no he verificado.'
+          : USER_NOTICES.exhausted;
 
       yield { type: 'text', content };
 

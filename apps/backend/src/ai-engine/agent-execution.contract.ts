@@ -35,6 +35,10 @@ export const USER_NOTICES = {
     'No pude consultar toda la información que necesitaba en este momento. Pídemelo de nuevo y lo intento otra vez.',
   exhausted:
     'No alcancé a terminar en este turno. Si quieres, sigo desde donde quedé.',
+  // Exhausted with a change on the way but no card to approve: say so and
+  // what to do, never «Revisa y aprueba» a proposal that does not exist.
+  exhausted_unprepared:
+    'Revisé la información, pero no alcancé a dejar el cambio listo para aprobar. Dime "continúa" y lo preparo.',
   pending_confirmation:
     'Revisa y aprueba la propuesta; todavía no se aplicó ese cambio.',
   needs_user_input: 'Indícame el dato que falta para continuar.',
@@ -311,6 +315,14 @@ function terminalNextAction(
 /** Decorates the ONE shared sync/SSE loop. No extra inference, verifier or engine. */
 export async function* withExecutionContract(
   source: AsyncGenerator<AIStreamChunk, AgentResult>,
+  options: {
+    /**
+     * Whether a tool is a write. A pending receipt from a read is never a
+     * proposal (conversation 314). Without it every pending receipt counts as
+     * a write, the legacy behavior.
+     */
+    isWriteTool?: (name: string) => boolean;
+  } = {},
 ): AsyncGenerator<AIStreamChunk, AgentResult> {
   const receipts = new Map<string, ToolExecutionReceipt>();
   const all: ToolExecutionReceipt[] = [];
@@ -373,6 +385,16 @@ export async function* withExecutionContract(
       outstanding.find((r) => r.status === 'unknown_effect') ??
       outstanding.find((r) => r.status === 'blocked') ??
       outstanding[0];
+    const criticalName = [...receipts.entries()].find(
+      ([, r]) => r === critical,
+    )?.[0];
+    const card = !!(result.pending_confirmation || result.pending_plan);
+    const pendingWithoutCard =
+      critical?.status === 'pending_confirmation' && !card;
+    const pendingFromWrite =
+      pendingWithoutCard &&
+      (!options.isWriteTool ||
+        (criticalName !== undefined && options.isWriteTool(criticalName)));
     const outcome = terminalOutcome(result, critical);
     const nextAction = terminalNextAction(result, outcome, critical);
     const execution: AgentExecutionSummary = {
@@ -420,21 +442,22 @@ export async function* withExecutionContract(
             : USER_NOTICES.failed;
     // Exhaustion text is ours (the model never closed), so it may be rebuilt.
     else if (result.exhausted)
-      content = describeIncompleteExecution(
-        all,
-        question ?? USER_NOTICES.exhausted,
-      );
+      content =
+        pendingWithoutCard && !question
+          ? USER_NOTICES.exhausted_unprepared
+          : describeIncompleteExecution(
+              all,
+              question ?? USER_NOTICES.exhausted,
+            );
     else if (question) content = appendNotice(content, question);
     else if (!content && critical) content = USER_NOTICES.read_failed;
     if (critical?.status === 'unknown_effect')
       content = appendNotice(content, USER_NOTICES.unknown_effect);
     else if (critical?.status === 'blocked' && !answered)
       content = appendNotice(content, USER_NOTICES.blocked);
-    else if (
-      critical?.status === 'pending_confirmation' &&
-      !result.pending_confirmation &&
-      !result.pending_plan
-    )
+    // Only a write's pending receipt is something to approve; an exhausted
+    // turn already said honestly that no card was left.
+    else if (pendingFromWrite && !result.exhausted)
       content = appendNotice(content, USER_NOTICES.pending_confirmation);
     // A write applied in THIS turn has no server verifier at this layer: the
     // model's text stays and a short human line is appended. The durable

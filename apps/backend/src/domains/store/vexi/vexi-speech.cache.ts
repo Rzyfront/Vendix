@@ -33,6 +33,12 @@ export interface SpeechCacheParams {
    * to the key, so entries created before the catalog existed stay valid.
    */
   configId?: number;
+  /**
+   * Provider name of the config that synthesizes (`ai_engine_configs.provider`).
+   * Diagnostics only — never part of the cache key: `configId` already
+   * identifies the provider, and the key must not move when a name is edited.
+   */
+  provider?: string;
 }
 
 interface CacheEntry {

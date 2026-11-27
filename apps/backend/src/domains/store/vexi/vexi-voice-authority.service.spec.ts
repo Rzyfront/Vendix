@@ -410,7 +410,9 @@ describe('VexiVoiceAuthorityService scoped execution authority', () => {
         { ...current, objective_id: null },
         'change_product',
         { id: 7 },
-        '{"requires_confirmation":true}',
+        // The realtime proposal shape (vexi-realtime.service.ts): an explicit
+        // protocol status, not a business flag a read could also carry.
+        '{"status":"pending_confirmation","applied":false}',
         'call-proposal',
       );
       expect(consumeAIQuota).toHaveBeenCalledTimes(1);

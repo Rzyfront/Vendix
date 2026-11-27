@@ -124,7 +124,7 @@ describe('pricing.tools · contrato canónico T4', () => {
     it('cada write exige los permisos de sus verbos HTTP', () => {
       const { tools } = buildTools();
       // Unión de los verbos que cubre (precedente manage_purchase_orders):
-      // create→create, update/restore→update, deactivate→delete.
+      // create→create, update→update, deactivate→delete.
       expect(
         getTool(tools, 'manage_price_tiers').requiredPermissions,
       ).toEqual([
@@ -156,7 +156,7 @@ describe('pricing.tools · contrato canónico T4', () => {
       ).toEqual(['action']);
       expect(
         getTool(tools, 'manage_price_tiers').parameters.properties.action.enum,
-      ).toEqual(['create', 'update', 'deactivate', 'restore']);
+      ).toEqual(['create', 'update', 'deactivate']);
       expect(
         getTool(tools, 'manage_price_tiers').parameters.properties.kind.enum,
       ).toEqual(['customer_tier', 'sale_unit']);
@@ -287,7 +287,7 @@ describe('pricing.tools · contrato canónico T4', () => {
       expect(deps.priceTiersService.update).not.toHaveBeenCalled();
     });
 
-    it('(b) happy deactivate + restore: delegan en softDelete/restore', async () => {
+    it('(b) happy deactivate delega en softDelete; restore ya no existe para Vex', async () => {
       const deps = baseDeps();
       deps.priceTiersService.findOne.mockResolvedValue(TIER_ROW);
       deps.priceTiersService.softDelete.mockResolvedValue({
@@ -311,17 +311,27 @@ describe('pricing.tools · contrato canónico T4', () => {
         ...TIER_ROW,
         is_active: false,
       });
-      deps.priceTiersService.restore.mockResolvedValue(TIER_ROW);
       const on = await run(tools, 'manage_price_tiers', {
         action: 'restore',
         price_tier_id: 11,
       });
 
-      expect(deps.priceTiersService.restore).toHaveBeenCalledWith(11);
-      expect(on).toEqual({
-        summary: 'Tarifa "Bulto x50": reactivada.',
-        data: { price_tier_id: 11, is_active: true },
+      // (conv-314) Sin reversión: el agente no revive lo eliminado.
+      expect(deps.priceTiersService.restore).not.toHaveBeenCalled();
+      expect(on.error).toBe(
+        'action "restore" inválida. Usa create, update o deactivate.',
+      );
+
+      // Tampoco por update con is_active: true.
+      const viaUpdate = await run(tools, 'manage_price_tiers', {
+        action: 'update',
+        price_tier_id: 11,
+        is_active: true,
       });
+      expect(viaUpdate.error).toBe(
+        'La tarifa está desactivada y esa acción no se puede deshacer.',
+      );
+      expect(deps.priceTiersService.update).not.toHaveBeenCalled();
     });
 
     it('(a) sad: sin tienda → error y cero llamadas', async () => {
@@ -351,7 +361,7 @@ describe('pricing.tools · contrato canónico T4', () => {
 
       expect(answer).toEqual({
         error:
-          'action "archive" inválida. Usa create, update, deactivate o restore.',
+          'action "archive" inválida. Usa create, update o deactivate.',
       });
       expect(deps.priceTiersService.create).not.toHaveBeenCalled();
       expect(deps.priceTiersService.findOne).not.toHaveBeenCalled();
@@ -992,7 +1002,8 @@ describe('pricing.tools · contrato canónico T4', () => {
       });
       expect(out).toEqual({
         error: 'La tarifa "Manaure" está desactivada y no se puede asignar.',
-        next_step: 'Reactívala primero con manage_price_tiers (action restore).',
+        next_step:
+          'Elige una tarifa activa o crea una nueva con manage_price_tiers.',
       });
       expect(deps.productsBulkEditService.preview).not.toHaveBeenCalled();
       expect(deps.productsBulkEditService.apply).not.toHaveBeenCalled();

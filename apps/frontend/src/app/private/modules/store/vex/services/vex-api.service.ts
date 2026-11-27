@@ -224,7 +224,15 @@ export interface VexStreamChunk {
     | 'followup_suggestion'
     | 'context_compacted'
     // T14: this answer is not read aloud; `message` says why.
-    | 'voice_notice';
+    | 'voice_notice'
+    // After the last audio frame: whether the turn's audio is the whole answer.
+    | 'voice_status';
+  /**
+   * `voice_status` frame: false when a segment could not be synthesized, so
+   * the audio received is a fragment and must not be reused by «Escuchar».
+   */
+  complete?: boolean;
+  lost_segments?: number;
   /** `voice_notice`: `voice_quota_exhausted` or `voice_not_in_plan`. */
   code?: string;
   message?: string;
@@ -279,6 +287,13 @@ export interface VexSpeechSegment {
   index: number;
   audio_base64: string;
   content_type: string;
+}
+
+/** `POST /store/vex/speech` response. */
+export interface VexSpeechResult {
+  segments: VexSpeechSegment[];
+  /** False when the server lost a segment: play it, never keep it as the message audio. */
+  complete: boolean;
 }
 
 /** `POST /store/vex/plans/:id/approve` response (`ApprovePlanResult`). */
@@ -658,12 +673,19 @@ export class VexApiService {
    * Synthesizes a Vex message on demand when the user clicks «Escuchar».
    * Server-side `VexiSpeechCache` serves cached segments without provider calls.
    */
-  synthesizeSpeech(text: string): Observable<VexSpeechSegment[]> {
+  synthesizeSpeech(text: string): Observable<VexSpeechResult> {
     return this.http
-      .post<{ data: { segments: VexSpeechSegment[] } }>(`${this.vexBase}/speech`, {
-        text,
-      })
-      .pipe(map((res) => (Array.isArray(res.data?.segments) ? res.data.segments : [])));
+      .post<{ data: { segments: VexSpeechSegment[]; complete?: boolean } }>(
+        `${this.vexBase}/speech`,
+        { text },
+      )
+      .pipe(
+        map((res) => ({
+          segments: Array.isArray(res.data?.segments) ? res.data.segments : [],
+          // Only an explicit `true` makes the audio reusable.
+          complete: res.data?.complete === true,
+        })),
+      );
   }
 
   /**
