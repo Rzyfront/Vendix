@@ -120,6 +120,8 @@ export class AgentDurableSession {
   private accountedRuntime = 0;
   private excludedRuntime = 0;
   private closed = false;
+  /** Set once proposeWrite registered a real effect in this session. */
+  private proposedEffect = false;
   readonly context: string;
   constructor(
     public objective: AgentObjective,
@@ -201,7 +203,14 @@ export class AgentDurableSession {
       throw new ConflictException('AI_OBJECTIVE_STALE_EXECUTOR');
     this.accept(saved.objective);
   }
-  async assertCurrent(): Promise<void> {
+  /**
+   * `skipResumeGate` is only for the turn's own closing inference: it keeps
+   * the lease fence but must not die on the `awaiting_approval` (or other
+   * resume) status the same turn just wrote (conversation 314).
+   */
+  async assertCurrent(
+    options: { skipResumeGate?: boolean } = {},
+  ): Promise<void> {
     const row = await this.repo.get(this.objective_id);
     if (
       row.lease_generation !== this.lease.lease_generation ||
@@ -211,6 +220,7 @@ export class AgentDurableSession {
     )
       throw new ConflictException('AI_OBJECTIVE_STALE_EXECUTOR');
     if (
+      !options.skipResumeGate &&
       [
         'expired',
         'paused',
@@ -243,8 +253,10 @@ export class AgentDurableSession {
       this.accountedRuntime = active;
     }
   }
-  async assertBudget(): Promise<void> {
-    await this.assertCurrent();
+  async assertBudget(
+    options: { skipResumeGate?: boolean } = {},
+  ): Promise<void> {
+    await this.assertCurrent(options);
     await this.accountRuntime();
     const b = this.objective.budget;
     // Finite across automatic plan_continue; does not widen ANY turn budget.
@@ -255,8 +267,16 @@ export class AgentDurableSession {
     )
       throw new ConflictException('AI_OBJECTIVE_BUDGET_EXHAUSTED');
   }
-  async runProvider(callback: () => Promise<AIResponse>): Promise<AIResponse> {
-    await this.assertBudget();
+  /**
+   * `closing: true` is the turn's closing inference: same budget, lease and
+   * metering, but it skips the resume gate so a turn that ended waiting for
+   * approval can still write its own closing text.
+   */
+  async runProvider(
+    callback: () => Promise<AIResponse>,
+    options: { closing?: boolean } = {},
+  ): Promise<AIResponse> {
+    await this.assertBudget({ skipResumeGate: options.closing === true });
     await this.addBudget({ provider_attempts: 1 }); // durable intent before first dispatch
     return this.withMeter(callback, true);
   }
@@ -334,6 +354,20 @@ export class AgentDurableSession {
       throw new ConflictException(
         'Este cambio fue rechazado, enviado o es incierto. Revisa la propuesta antes de continuar.',
       );
+    this.proposedEffect = true;
+  }
+  /**
+   * A pending receipt is a card only when a real effect backs it: proposeWrite
+   * ran in this session or the objective already holds a proposed/approved
+   * effect. Otherwise `awaiting_approval` would wait on nothing and fence the
+   * turn's own closing (conversation 314).
+   */
+  private async hasProposedEffect(): Promise<boolean> {
+    if (this.proposedEffect) return true;
+    const effects = await this.repo.listEffects(this.objective_id, 100);
+    return effects.some((effect) =>
+      ['proposed', 'approved'].includes(effect.status),
+    );
   }
   /** Late/non-cooperative reads are auditable, never current-generation evidence. */
   async auditTool(
@@ -368,7 +402,9 @@ export class AgentDurableSession {
   ): Promise<string> {
     const status =
       result.status === 'pending_confirmation'
-        ? 'awaiting_approval'
+        ? (await this.hasProposedEffect())
+          ? 'awaiting_approval'
+          : 'active'
         : result.status === 'needs_user_input'
           ? 'awaiting_input'
           : result.status === 'unknown_effect'

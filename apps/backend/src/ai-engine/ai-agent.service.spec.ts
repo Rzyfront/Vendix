@@ -9,6 +9,7 @@ import { RequestContextService } from '../common/context/request-context.service
 import { AgentPlan, AgentPlanHook } from './interfaces/agent-plan.interface';
 import { AIStreamChunk } from './interfaces/ai-provider.interface';
 import { ErrorCodes, VendixHttpException } from '../common/errors';
+import { ConflictException } from '@nestjs/common';
 import {
   INTERNAL_JARGON,
   USER_NOTICES,
@@ -1724,6 +1725,102 @@ describe('AIAgentService.runAgentStream', () => {
       );
       expect(byKind('root')[0].outcome).toBe('partial');
       expect([...rows.values()].every((row) => row.ended_at)).toBe(true);
+    });
+
+    // Durable double whose provider gate behaves like AgentDurableSession:
+    // once a checkpoint left the objective awaiting approval, every provider
+    // call answers the resume 409 unless it is the turn's own closing.
+    const gatedDurable = (closingFailure?: Error) => {
+      let awaiting = false;
+      return {
+        objective_id: 'obj-314',
+        objective: {
+          authority_snapshot: ['p'],
+          budget: { active_runtime_ms: 0 },
+          expires_at: new Date(Date.now() + 60000),
+        },
+        recoveryState: jest.fn().mockResolvedValue({
+          schema_version: '1',
+          replans: 0,
+          expansions: 0,
+          corrections: 0,
+          transient_retries: 0,
+          failures: [],
+          unknown_effect: false,
+          exhausted: false,
+        }),
+        checkpointRecovery: jest.fn(),
+        assertBudget: jest.fn(),
+        assertCurrent: jest.fn(),
+        excludeWait: jest.fn(),
+        runProvider: jest.fn(async (fn: any, options?: { closing?: boolean }) => {
+          if (options?.closing && closingFailure) throw closingFailure;
+          if (awaiting && !options?.closing)
+            throw new ConflictException({
+              error_code: 'AI_OBJECTIVE_REQUIRES_RESUME',
+              message:
+                'Tienes una propuesta pendiente en esta conversación. Apruébala o recházala antes de pedir otra cosa.',
+            });
+          return fn();
+        }),
+        runTool: jest.fn(async (fn: any) => fn()),
+        addBudget: jest.fn(),
+        checkpointTool: jest.fn(async () => {
+          awaiting = true;
+          return 'result1';
+        }),
+        proposeWrite: jest.fn(),
+        finish: jest.fn(async () => ({
+          id: 'obj-314',
+          version: 2,
+          semantic_status: 'awaiting_approval',
+        })),
+        close: jest.fn(),
+      };
+    };
+
+    it('(conv-314) durable closing on an objective awaiting approval produces text and an ok span', async () => {
+      chat
+        .mockResolvedValueOnce(
+          ok({ tool_calls: [call('c1', 'list_things')] }),
+        )
+        .mockResolvedValueOnce(ok({ content: 'Revisé los productos.' }));
+      agentScopeRegistry();
+      const durable = gatedDurable();
+      const { result } = await traced({ max_iterations: 1, durable });
+      await trace.flush();
+      expect(durable.runProvider).toHaveBeenLastCalledWith(
+        expect.any(Function),
+        { closing: true },
+      );
+      expect(result.content).toBe('Revisé los productos.');
+      expect(result.content).not.toContain(USER_NOTICES.exhausted);
+      const closing = byKind('closing_inference');
+      expect(closing).toHaveLength(1);
+      expect(closing[0].status).toBe('ok');
+      expect(closing[0].error_code).toBeNull();
+    });
+
+    it('(conv-314) a failed closing records the real cause code next to AI_CLOSING_FAILED', async () => {
+      chat.mockResolvedValueOnce(
+        ok({ tool_calls: [call('c1', 'list_things')] }),
+      );
+      agentScopeRegistry();
+      const durable = gatedDurable(
+        new ConflictException('AI_OBJECTIVE_BUDGET_EXHAUSTED'),
+      );
+      const { result } = await traced({ max_iterations: 1, durable });
+      await trace.flush();
+      expect(result.exhausted).toBe(true);
+      const closing = byKind('closing_inference');
+      expect(closing).toHaveLength(1);
+      expect(closing[0]).toMatchObject({
+        status: 'error',
+        error_code: 'AI_CLOSING_FAILED',
+      });
+      expect(closing[0].attributes).toMatchObject({
+        cause_error_code: 'AI_OBJECTIVE_BUDGET_EXHAUSTED',
+      });
     });
 
     it('a write proposal is awaiting approval, never completed_verified', async () => {

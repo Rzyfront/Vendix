@@ -377,6 +377,17 @@ describe('AgentTraceService (bounded explicit-scope observability)', () => {
     ).toEqual({});
   });
 
+  it('keeps a stable cause_error_code and drops a free-text message in its place', () => {
+    expect(
+      redactTraceAttributes({ cause_error_code: 'AI_OBJECTIVE_REQUIRES_RESUME' }),
+    ).toEqual({ cause_error_code: 'AI_OBJECTIVE_REQUIRES_RESUME' });
+    expect(
+      redactTraceAttributes({
+        cause_error_code: 'Tienes una propuesta pendiente en esta conversación.',
+      }),
+    ).toEqual({});
+  });
+
   it('drops unknown keys, free text and invalid numbers from metadata allowlist', () => {
     expect(
       redactTraceAttributes({

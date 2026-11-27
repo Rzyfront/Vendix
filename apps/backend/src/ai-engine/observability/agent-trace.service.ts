@@ -301,6 +301,7 @@ export function redactTraceAttributes(
     ...Object.keys(ENUM_KEYS),
     'catalog_version',
     'classifier_model',
+    'cause_error_code',
   ]) {
     const value = input[key];
     if (HASH_KEYS.has(key) && typeof value === 'string' && HASH.test(value))
@@ -334,6 +335,14 @@ export function redactTraceAttributes(
       typeof value === 'string' &&
       /^v?\d+(?:\.\d+){0,3}$/.test(value)
     )
+      safe[key] = value;
+    else if (
+      key === 'cause_error_code' &&
+      typeof value === 'string' &&
+      /^[A-Z][A-Z0-9_]{0,99}$/.test(value)
+    )
+      // The stable code under a wrapper code (e.g. AI_CLOSING_FAILED), never
+      // the exception message.
       safe[key] = value;
     else if (
       key === 'classifier_model' &&

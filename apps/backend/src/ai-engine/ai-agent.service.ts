@@ -565,6 +565,34 @@ export function deferredWriteMessage(batchOffered: boolean): string {
 }
 
 /**
+ * The stable code of a closing failure, for the span: the object response of a
+ * Nest exception (`AI_OBJECTIVE_REQUIRES_RESUME`), a Vendix error code, or a
+ * code-shaped message (`AI_OBJECTIVE_BUDGET_EXHAUSTED`). Never free text.
+ */
+function closingFailureCode(error: unknown): string | undefined {
+  const candidate = error as {
+    getResponse?: () => unknown;
+    errorCode?: unknown;
+    code?: unknown;
+    message?: unknown;
+  } | null;
+  const response =
+    typeof candidate?.getResponse === 'function'
+      ? (candidate.getResponse() as { error_code?: unknown } | string | null)
+      : null;
+  const codes = [
+    response && typeof response === 'object' ? response.error_code : undefined,
+    candidate?.errorCode,
+    candidate?.code,
+    candidate?.message,
+  ];
+  return codes.find(
+    (code): code is string =>
+      typeof code === 'string' && /^[A-Z][A-Z0-9_]{0,99}$/.test(code),
+  );
+}
+
+/**
  * Removes the rendered `data.block` from a show-in-chat tool result, keeping
  * the reference (`block_id`, `kind`, `version`) and the instruction the model
  * reads. Non-JSON or block-less results pass through untouched.
@@ -2529,7 +2557,10 @@ export class AIAgentService {
       const callClosing = () =>
         withinDeadline(() =>
           params.durable
-            ? params.durable.runProvider(dispatchClosing)
+            ? // Closing keeps budget, lease and metering but skips the resume
+              // gate: this turn may have just left the objective awaiting
+              // approval, and its own closing must not die on that (conv. 314).
+              params.durable.runProvider(dispatchClosing, { closing: true })
             : dispatchClosing(),
         );
       try {
@@ -2551,12 +2582,16 @@ export class AIAgentService {
           ? text
           : '';
       } catch (closingError: any) {
+        const causeErrorCode = closingFailureCode(closingError);
         activeTrace?.endSpan(closingSpan, {
           status: 'error',
           error_code: 'AI_CLOSING_FAILED',
+          ...(causeErrorCode
+            ? { attributes: { cause_error_code: causeErrorCode } }
+            : {}),
         });
         this.logger.warn(
-          `Agent closing turn failed: ${closingError?.code ?? closingError?.message ?? 'unknown'}`,
+          `Agent closing turn failed: ${causeErrorCode ?? closingError?.code ?? closingError?.message ?? 'unknown'}`,
         );
         return '';
       }

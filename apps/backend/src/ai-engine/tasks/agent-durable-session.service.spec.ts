@@ -57,6 +57,8 @@ function setup() {
     getForConversation: jest.fn(async () => state),
     createOrReplace: jest.fn(async () => state),
     hasPendingEffects: jest.fn(async () => false),
+    listEffects: jest.fn(async () => []),
+    proposeEffect: jest.fn(async () => ({ status: 'proposed' })),
     acquireLease: jest.fn(async () => state),
     addBudget: jest.fn(update),
     auditBudget: jest.fn(async (_id, _generation, delta) => {
@@ -242,6 +244,71 @@ it('requests clearing requires_revalidation only for an observed successful read
   expect(
     s.repo.appendToolResult.mock.calls[1][2].checkpoint,
   ).not.toHaveProperty('requires_revalidation');
+});
+describe('(conv-314) a pending receipt only waits for approval when a real effect exists', () => {
+  const pending = () =>
+    normalizeToolResult({ requires_confirmation: true }, { write: true });
+  it('a pending receipt WITHOUT a proposed effect keeps the objective active', async () => {
+    const s = setup();
+    await s.session.checkpointTool('c1', 'archive_product', {}, pending());
+    expect(s.repo.listEffects).toHaveBeenCalledWith(s.state.id, 100);
+    expect(
+      s.repo.appendToolResult.mock.calls[0][2].checkpoint.semantic_status,
+    ).toBe('active');
+    expect(s.state.semantic_status).toBe('active');
+  });
+  it('after proposeWrite the pending receipt moves to awaiting_approval', async () => {
+    const s = setup();
+    await s.session.proposeWrite('archive_product', { product_id: 1 });
+    await s.session.checkpointTool('c1', 'archive_product', {}, pending());
+    expect(s.state.semantic_status).toBe('awaiting_approval');
+  });
+  it('an existing proposed effect row also counts as a real proposal', async () => {
+    const s = setup();
+    s.repo.listEffects.mockResolvedValue([{ status: 'proposed' }]);
+    await s.session.checkpointTool('c1', 'archive_product', {}, pending());
+    expect(s.state.semantic_status).toBe('awaiting_approval');
+  });
+});
+describe('(conv-314) closing inference skips only the resume gate', () => {
+  it('a closing call runs on an objective awaiting approval and is metered', async () => {
+    const s = setup();
+    s.state.semantic_status = 'awaiting_approval';
+    const call = jest.fn(async () => ({ success: true, content: 'cierre' }));
+    const response = await s.session.runProvider(call, { closing: true });
+    expect(response).toMatchObject({ content: 'cierre' });
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(s.state.budget.provider_attempts).toBe(1);
+  });
+  it('a normal provider call on that objective still answers the resume 409', async () => {
+    const s = setup();
+    s.state.semantic_status = 'awaiting_approval';
+    const call = jest.fn();
+    await expect(s.session.runProvider(call)).rejects.toThrow(
+      'propuesta pendiente',
+    );
+    expect(call).not.toHaveBeenCalled();
+  });
+  it('a closing call still honours the cumulative budget', async () => {
+    const s = setup();
+    s.state.semantic_status = 'awaiting_approval';
+    s.state.budget.provider_attempts = 240;
+    const call = jest.fn();
+    await expect(
+      s.session.runProvider(call, { closing: true }),
+    ).rejects.toThrow('BUDGET_EXHAUSTED');
+    expect(call).not.toHaveBeenCalled();
+  });
+  it('a closing call still honours the lease', async () => {
+    const s = setup();
+    s.state.semantic_status = 'awaiting_approval';
+    s.state.lease_until = new Date(Date.now() - 1000);
+    const call = jest.fn();
+    await expect(
+      s.session.runProvider(call, { closing: true }),
+    ).rejects.toThrow('STALE_EXECUTOR');
+    expect(call).not.toHaveBeenCalled();
+  });
 });
 it('persists full results with canonical args hash and advances shared lease', async () => {
   const s = setup();
