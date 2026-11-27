@@ -1,9 +1,16 @@
 import { PrismaClient } from '@prisma/client';
 import { getPrismaClient } from './shared/client';
+import {
+  VEXI_AGENT_KEY,
+  VEXI_INTERNAL_DENIED_TOOLS,
+  VEXI_PUBLIC_TOOL_CATALOG,
+} from '../../src/ai-engine/tools/agent-tool-catalog';
 
 export interface SeedAIAgentsResult {
   agentsCreated: number;
   agentsSkipped: number;
+  /** Existing rows whose code-owned tool scope was reconciled (Vexi). */
+  agentsReconciled: number;
 }
 
 /**
@@ -11,10 +18,13 @@ export interface SeedAIAgentsResult {
  *
  * Seeds the configurable agent catalog. `key = 'vexi'` is Vexi itself as one
  * more row: `app_key = 'chat_assistant'`, no own `system_prompt` (the prompt
- * lives in the `chat_assistant` application row), no extra tool filter and no
- * custom iteration budget — exactly the turn behavior of today. Conversations
- * without `agent_key` keep that behavior through the fallback path, so this
- * seed documents the default rather than changing it.
+ * lives in the `chat_assistant` application row) and no custom iteration
+ * budget. Since Vexi público F1 its tool scope is CLOSED (see
+ * `src/ai-engine/tools/agent-tool-catalog.ts`): `allowed_tools` is its public
+ * catalog (order, booking, request proposals) and `denied_tools` every
+ * internal tool/domain. Those two columns are code-owned for Vexi, so they are
+ * the only fields reconciled on an existing row (idempotent: written only when
+ * they differ). Any other operator edit is preserved.
  *
  * `key = 'vex'` is Vex, the whole-business manager: `app_key =
  * 'vex_assistant'` (prompt v1 versioned in migration
@@ -39,10 +49,11 @@ export async function seedAIAgents(
       key: 'vexi',
       name: 'Vexi',
       description:
-        'Asistente empresarial de Vendix: agente conversacional por defecto con herramientas de negocio y comandos de interfaz',
+        'Asistente público de Vendix: ayuda al cliente final a armar pedidos, agendar citas y registrar peticiones. Sin acceso a herramientas internas del negocio',
       app_key: 'chat_assistant',
       system_prompt: null,
-      allowed_tools: [],
+      allowed_tools: [...VEXI_PUBLIC_TOOL_CATALOG],
+      denied_tools: [...VEXI_INTERNAL_DENIED_TOOLS],
       max_iterations: null,
       requires_confirmation_default: false,
       is_active: true,
@@ -93,6 +104,7 @@ export async function seedAIAgents(
 
   let agentsCreated = 0;
   let agentsSkipped = 0;
+  let agentsReconciled = 0;
 
   for (const agent of agents) {
     const existing = await client.ai_agents.findUnique({
@@ -100,6 +112,22 @@ export async function seedAIAgents(
     });
 
     if (existing) {
+      if (
+        agent.key === VEXI_AGENT_KEY &&
+        (!sameList(existing.allowed_tools, agent.allowed_tools) ||
+          !sameList(existing.denied_tools, agent.denied_tools))
+      ) {
+        await client.ai_agents.update({
+          where: { key: VEXI_AGENT_KEY },
+          data: {
+            allowed_tools: agent.allowed_tools,
+            denied_tools: agent.denied_tools,
+            updated_at: new Date(),
+          },
+        });
+        agentsReconciled++;
+        continue;
+      }
       agentsSkipped++;
       continue;
     }
@@ -123,7 +151,14 @@ export async function seedAIAgents(
   }
 
   console.log(
-    `    AI agents: ${agentsCreated} created, ${agentsSkipped} skipped`,
+    `    AI agents: ${agentsCreated} created, ${agentsReconciled} reconciled, ${agentsSkipped} skipped`,
   );
-  return { agentsCreated, agentsSkipped };
+  return { agentsCreated, agentsSkipped, agentsReconciled };
+}
+
+/** Order-insensitive equality: the seed must not rewrite an equal list. */
+function sameList(current: readonly string[] | null, wanted: readonly string[]) {
+  const a = [...(current ?? [])].sort();
+  const b = [...wanted].sort();
+  return a.length === b.length && a.every((value, i) => value === b[i]);
 }

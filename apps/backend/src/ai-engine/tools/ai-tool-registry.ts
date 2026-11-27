@@ -1,6 +1,7 @@
 import { publicSandboxArgs } from '../sandbox/sandbox-invocation.context';
 import { agentDeadlineContext } from '../tasks/agent-deadline';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AIToolDefinition } from '../interfaces/ai-provider.interface';
 import {
   DEFAULT_TOOL_VERSION,
@@ -20,6 +21,11 @@ import { VexiConfirmationService } from '../../domains/store/vexi/vexi-confirmat
 import { validateToolArgs } from './tool-args.validator';
 import { createHash } from 'node:crypto';
 import { canonicalJson } from '../../domains/store/vexi/vexi-confirmation.service';
+import {
+  AGENT_TOOL_DENIED_EVENT,
+  AgentToolDeniedEvent,
+  closedToolCatalog,
+} from './agent-tool-catalog';
 
 /**
  * T13 (N4): why a tool's access rule is invalid, or `null` when it is valid.
@@ -51,6 +57,12 @@ export interface ToolExecutionOptions {
   proposalOnly?: boolean;
   /** Checked against a fresh preview immediately before redeeming the token. */
   expectedPreviewHash?: string;
+  /**
+   * Agent running the turn. For a closed-catalog agent (`agent-tool-catalog.ts`)
+   * any tool outside its catalog is refused before lookup or execution.
+   * Absent or an open agent: unchanged behavior.
+   */
+  agentKey?: string;
 }
 
 export const toolPreviewHash = (preview: unknown): string =>
@@ -88,7 +100,10 @@ export class AIToolRegistry {
    */
   private aliases = new Map<string, string>();
 
-  constructor(private readonly confirmations: VexiConfirmationService) {}
+  constructor(
+    private readonly confirmations: VexiConfirmationService,
+    @Optional() private readonly events?: EventEmitter2,
+  ) {}
 
   register(tool: RegisteredTool): void {
     const accessProblem = toolAccessProblem(tool);
@@ -212,11 +227,22 @@ export class AIToolRegistry {
    * intersects first, `denied_tools` subtracts LAST, so a deny always wins
    * over an allow. Both lists accept bare tool names and domain names; names
    * resolve through aliases so a renamed tool keeps its agent scope.
+   *
+   * A closed-catalog agent (`agent_key` in `agent-tool-catalog.ts`) inverts
+   * the empty-allowlist default: only its code-owned catalog can appear, by
+   * exact name, intersected with `allowed_tools`; empty `allowed_tools` → no
+   * tools at all.
    */
   getAgentDefinitions(
     userPermissions?: string[],
-    agentScope?: { allowed_tools?: string[]; denied_tools?: string[] },
+    agentScope?: {
+      allowed_tools?: string[];
+      denied_tools?: string[];
+      agent_key?: string | null;
+    },
   ): AIToolDefinition[] {
+    const closed = closedToolCatalog(agentScope?.agent_key);
+    if (closed && !agentScope?.allowed_tools?.length) return [];
     const allowed = agentScope?.allowed_tools?.length
       ? new Set(agentScope.allowed_tools.map((n) => this.canonicalName(n)))
       : null;
@@ -225,6 +251,7 @@ export class AIToolRegistry {
     );
     return Array.from(this.tools.values())
       .filter((t) => {
+        if (closed && !closed.has(t.name)) return false;
         if (!this.isPermitted(t, userPermissions)) return false;
         if (allowed && !this.matchesScope(t.name, allowed)) {
           return false;
@@ -327,6 +354,43 @@ export class AIToolRegistry {
       }
     }
     return [...denied].sort();
+  }
+
+  /**
+   * Server gate of a closed-catalog agent: whatever the model asks for, only
+   * an exact (or provider-namespaced) catalog name passes. Aliases do not
+   * widen it — a catalog lists canonical names. Every refusal leaves a trace:
+   * a warn log line and an {@link AGENT_TOOL_DENIED_EVENT} event.
+   */
+  private assertInAgentCatalog(name: string, agentKey?: string): void {
+    const closed = closedToolCatalog(agentKey);
+    if (!closed) return;
+    const resolved = this.resolveToolName(name);
+    if (resolved && closed.has(resolved)) return;
+    const context = RequestContextService.asyncLocalStorage.getStore();
+    const event: AgentToolDeniedEvent = {
+      agent_key: agentKey!,
+      tool: name,
+      stage: 'execute',
+      store_id: context?.store_id,
+      organization_id: context?.organization_id,
+      user_id: context?.user_id,
+      occurred_at: new Date().toISOString(),
+    };
+    this.logger.warn(
+      `Closed-catalog agent "${agentKey}" denied tool "${name}" ${JSON.stringify(event)}`,
+    );
+    try {
+      this.events?.emit(AGENT_TOOL_DENIED_EVENT, event);
+    } catch (error) {
+      this.logger.warn(
+        `Could not emit ${AGENT_TOOL_DENIED_EVENT}: ${(error as Error).message}`,
+      );
+    }
+    throw new VendixHttpException(
+      ErrorCodes.AI_AGENT_004,
+      `La herramienta "${name}" no está disponible para este asistente.`,
+    );
   }
 
   /**
@@ -524,6 +588,10 @@ export class AIToolRegistry {
     options?: ToolExecutionOptions,
     onHandlerStart?: () => void,
   ): Promise<string> {
+    // Closed-catalog gate (Vexi público F1): runs before name resolution so an
+    // internal tool is never looked up, previewed or executed, and an unknown
+    // name never earns suggestions that would reveal the internal catalog.
+    this.assertInAgentCatalog(name, options?.agentKey);
     const resolvedName = this.resolveToolName(name);
     const tool = resolvedName ? this.tools.get(resolvedName) : undefined;
     if (!tool) {

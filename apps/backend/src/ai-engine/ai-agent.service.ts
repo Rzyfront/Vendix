@@ -101,6 +101,7 @@ import { ErrorCodes, VendixHttpException } from '../common/errors';
 import { VexiUiChannelService } from '../domains/store/vexi/vexi-ui-channel.service';
 import { PROPOSE_PLAN_TOOL } from './tools/domains/planning.tools';
 import { FINISH_TURN_TOOL } from './tools/domains/turn.tools';
+import { hasClosedToolCatalog } from './tools/agent-tool-catalog';
 import { DISCREPANCY_GUIDANCE_BLOCK } from './tools/discrepancy-signal';
 import {
   isForeignSurfaceTool,
@@ -1738,6 +1739,11 @@ export class AIAgentService {
     const permissionTools = this.toolRegistry.getAgentDefinitions(auth, {
       allowed_tools: params.agent_allowed_tools,
       denied_tools: params.agent_denied_tools,
+      // Only a closed-catalog agent carries its key: open agents keep the
+      // exact previous call shape.
+      ...(hasClosedToolCatalog(params.agent_key)
+        ? { agent_key: params.agent_key }
+        : {}),
     });
     const gateOpen = await this.isAgentGateOpen(
       context?.store_id,
@@ -1906,8 +1912,12 @@ export class AIAgentService {
     // Agent scope narrows the permission catalog: user perms ∩ agent
     // allowed_tools (when non-empty) − agent denied_tools, deny applied last.
     // Without agent scope this is exactly
-    // `getAvailableDefinitions` and Vexi behaves as before.
+    // `getAvailableDefinitions`.
+    // A closed-catalog agent (Vexi) always goes through the agent filter, even
+    // with empty lists: there "empty" means no tools, never the whole catalog.
+    const closedCatalog = hasClosedToolCatalog(params.agent_key);
     const hasAgentScope =
+      closedCatalog ||
       (params.agent_allowed_tools?.length ?? 0) > 0 ||
       (params.agent_denied_tools?.length ?? 0) > 0;
     const contextSpan = activeTrace?.startSpan('context');
@@ -1917,8 +1927,11 @@ export class AIAgentService {
         ? this.toolRegistry.getAgentDefinitions(authScopes, {
             allowed_tools: params.agent_allowed_tools,
             denied_tools: params.agent_denied_tools,
+            ...(closedCatalog ? { agent_key: params.agent_key } : {}),
           })
-        : this.toolRegistry.getAvailableDefinitions(authScopes);
+        : closedCatalog
+          ? []
+          : this.toolRegistry.getAvailableDefinitions(authScopes);
 
     // N4 — the plan does not restrict tools: the catalog is the caller's role
     // permissions (+ agent scope). The plan only decides whether the agent may
@@ -3327,7 +3340,12 @@ export class AIAgentService {
                     await this.toolRegistry.executeToolResult(
                       call.tool_name,
                       call.arguments,
-                      { evidenceRef: `tool_call:${call.call_id}` },
+                      {
+                        evidenceRef: `tool_call:${call.call_id}`,
+                        ...(hasClosedToolCatalog(params.agent_key)
+                          ? { agentKey: params.agent_key }
+                          : {}),
+                      },
                     ),
                   );
                 },
@@ -4219,6 +4237,9 @@ export class AIAgentService {
                         ...(params.conversation_id
                           ? { conversationId: params.conversation_id }
                           : {}),
+                        ...(hasClosedToolCatalog(params.agent_key)
+                          ? { agentKey: params.agent_key }
+                          : {}),
                       },
                     ),
                   );
@@ -4539,6 +4560,9 @@ export class AIAgentService {
                           {
                             confirmationToken: singleUse,
                             evidenceRef: `tool_call:${toolCall.id}`,
+                            ...(hasClosedToolCatalog(params.agent_key)
+                              ? { agentKey: params.agent_key }
+                              : {}),
                           },
                         ),
                       );
