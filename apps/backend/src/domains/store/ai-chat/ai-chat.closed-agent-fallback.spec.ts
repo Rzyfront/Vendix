@@ -46,3 +46,34 @@ describe('resolveChatAgent closed-catalog fallback (Vexi público F2)', () => {
     expect(findUnique).not.toHaveBeenCalled();
   });
 });
+
+describe('resolveChatAgent staff app (R1: vexi row -> vexi_storefront)', () => {
+  const row = (key: string, app_key: string | null) => ({
+    key,
+    is_active: true,
+    app_key,
+    system_prompt: null,
+    allowed_tools: [],
+    denied_tools: [],
+    max_iterations: null,
+    timeout_seconds: null,
+  });
+
+  it('the admin dock (vexi staff turn) keeps chat_assistant and its business metrics', async () => {
+    const svc = service(
+      jest.fn().mockResolvedValue(row('vexi', 'vexi_storefront')),
+    );
+    await expect(svc.resolveChatAgent('vexi')).resolves.toMatchObject({
+      key: 'vexi',
+      app_key: 'chat_assistant',
+    });
+  });
+
+  it('Vex keeps exactly the app its row says', async () => {
+    const svc = service(jest.fn().mockResolvedValue(row('vex', 'vex_assistant')));
+    await expect(svc.resolveChatAgent('vex')).resolves.toMatchObject({
+      key: 'vex',
+      app_key: 'vex_assistant',
+    });
+  });
+});

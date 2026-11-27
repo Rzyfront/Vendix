@@ -30,6 +30,35 @@
 export const VEXI_AGENT_KEY = 'vexi';
 
 /**
+ * App of the customer-facing Vexi prompt. Since R1 (Rafael, 2026-11-27) the
+ * `vexi` row of `ai_agents` points here, so the superadmin agent sheet edits
+ * the public chat's model and prompt, like Vex's sheet edits `vex_assistant`.
+ */
+export const VEXI_STOREFRONT_APP_KEY = 'vexi_storefront';
+
+/**
+ * Staff surfaces that still run an agent whose row belongs to a public app.
+ * The admin dock (Vexi staff turns, chat and queue) keeps its own app,
+ * `chat_assistant`, with `{{business_metrics}}`; it must never run on the
+ * public storefront prompt, whatever the row's `app_key` says.
+ */
+const STAFF_APP_KEY_BY_AGENT: Readonly<Record<string, string>> = {
+  [VEXI_AGENT_KEY]: 'chat_assistant',
+};
+
+/**
+ * `app_key` a staff turn of `agentKey` runs on: the pinned staff app when the
+ * agent has one, else the row's own `app_key` (Vex and any other agent keep
+ * exactly what the row says).
+ */
+export function staffTurnAppKey(
+  agentKey: string,
+  rowAppKey: string | null,
+): string | null {
+  return STAFF_APP_KEY_BY_AGENT[agentKey] ?? rowAppKey;
+}
+
+/**
  * Domain of the public storefront tools (F2). Absent from
  * {@link VEXI_INTERNAL_DENIED_TOOLS} on purpose, and fenced the other way in
  * the registry: a tool of this domain is only offered to or executed by a

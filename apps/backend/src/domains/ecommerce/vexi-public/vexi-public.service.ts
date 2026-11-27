@@ -15,6 +15,7 @@ import type { AIMessage } from '../../../ai-engine/interfaces/ai-provider.interf
 import {
   VEXI_AGENT_KEY,
   VEXI_PUBLIC_TOOL_CATALOG,
+  VEXI_STOREFRONT_APP_KEY,
 } from '../../../ai-engine/tools/agent-tool-catalog';
 import {
   StorefrontCard,
@@ -29,7 +30,7 @@ import {
 } from './dto/vexi-public.dto';
 
 /** App key of the customer-facing prompt (migration `20270106120000_vexi_public_sessions`). */
-export const VEXI_STOREFRONT_APP_KEY = 'vexi_storefront';
+export { VEXI_STOREFRONT_APP_KEY };
 
 /**
  * Limits of the public chat. Every number here is a cost or abuse bound on an

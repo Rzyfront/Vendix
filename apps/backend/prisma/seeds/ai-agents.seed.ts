@@ -17,8 +17,9 @@ export interface SeedAIAgentsResult {
  * AI Agents Seed (F4)
  *
  * Seeds the configurable agent catalog. `key = 'vexi'` is Vexi itself as one
- * more row: `app_key = 'chat_assistant'`, no own `system_prompt` (the prompt
- * lives in the `chat_assistant` application row) and no custom iteration
+ * more row: `app_key = 'vexi_storefront'` since R1 (migration
+ * `20270107120000_vexi_agent_storefront_app`), no own `system_prompt` (the
+ * prompt lives in the application row; the admin dock keeps `chat_assistant`) and no custom iteration
  * budget. Since Vexi público F1 its tool scope is CLOSED (see
  * `src/ai-engine/tools/agent-tool-catalog.ts`): `allowed_tools` is its public
  * catalog (order, booking, request proposals) and `denied_tools` every
@@ -34,7 +35,7 @@ export interface SeedAIAgentsResult {
  *
  * Create-only: never overwrites operator edits (same contract as
  * `ai-engine-apps.seed.ts`). Depends on `seedAIEngineApps` having created
- * `chat_assistant` — the vexi row is skipped with a log line when the app is
+ * `vexi_storefront` — the vexi row is skipped with a log line when the app is
  * missing instead of inserting a dangling reference. The vex row likewise
  * requires `vex_assistant` (inserted by its migration in every environment).
  */
@@ -50,7 +51,9 @@ export async function seedAIAgents(
       name: 'Vexi',
       description:
         'Asistente público de Vendix: ayuda al cliente final a armar pedidos, agendar citas y registrar peticiones. Sin acceso a herramientas internas del negocio',
-      app_key: 'chat_assistant',
+      // R1: the row configures the public chat; the admin dock pins its own
+      // `chat_assistant` app in code (`staffTurnAppKey`).
+      app_key: 'vexi_storefront',
       system_prompt: null,
       allowed_tools: [...VEXI_PUBLIC_TOOL_CATALOG],
       denied_tools: [...VEXI_INTERNAL_DENIED_TOOLS],

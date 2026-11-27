@@ -8,7 +8,10 @@ import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
-import { hasClosedToolCatalog } from '../../../ai-engine/tools/agent-tool-catalog';
+import {
+  hasClosedToolCatalog,
+  staffTurnAppKey,
+} from '../../../ai-engine/tools/agent-tool-catalog';
 import { AILoggingService } from '../../../ai-engine/ai-logging.service';
 import { AIAgentService } from '../../../ai-engine/ai-agent.service';
 import {
@@ -2167,14 +2170,18 @@ export class AIChatService {
       );
       return closedAgentFallback(agentKey);
     }
-    if (row.app_key && row.system_prompt) {
+    // R1: the `vexi` row points at the public `vexi_storefront` app (so the
+    // superadmin sheet configures the public chat). Staff turns (the admin
+    // dock) keep their own `chat_assistant` app and its `{{business_metrics}}`.
+    const appKey = staffTurnAppKey(row.key, row.app_key);
+    if (appKey && row.system_prompt) {
       this.logger.warn(
         `AI agent '${agentKey}' defines both app_key and system_prompt — the app owns the prompt and system_prompt is ignored`,
       );
     }
     return {
       key: row.key,
-      app_key: row.app_key,
+      app_key: appKey,
       system_prompt: row.system_prompt,
       allowed_tools: row.allowed_tools ?? [],
       denied_tools: row.denied_tools ?? [],
