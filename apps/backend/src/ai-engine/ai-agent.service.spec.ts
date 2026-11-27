@@ -9,6 +9,7 @@ import { RequestContextService } from '../common/context/request-context.service
 import { AgentPlan, AgentPlanHook } from './interfaces/agent-plan.interface';
 import { AIStreamChunk } from './interfaces/ai-provider.interface';
 import { ErrorCodes, VendixHttpException } from '../common/errors';
+import { ConflictException } from '@nestjs/common';
 import {
   INTERNAL_JARGON,
   USER_NOTICES,
@@ -91,6 +92,8 @@ describe('AIAgentService.runAgentStream', () => {
       def('vex_render_table'),
       def('vex_show_help_article'),
       def('remember'),
+      def('preview_archive_product'),
+      def('archive_product'),
       {
         type: 'function' as const,
         function: {
@@ -121,6 +124,8 @@ describe('AIAgentService.runAgentStream', () => {
       vex_show_help_article: 'vex',
       remember: 'memory',
       run_analysis: 'sandbox',
+      preview_archive_product: 'products',
+      archive_product: 'products',
     };
     registry = {
       getAvailableDefinitions: jest.fn((scopes: string[]) =>
@@ -144,7 +149,15 @@ describe('AIAgentService.runAgentStream', () => {
       matchesScope: (n: string, scopes: Set<string>) =>
         !!domains[n] && (scopes.has(n) || scopes.has(domains[n])),
       get: (n: string) =>
-        domains[n] ? { name: n, domain: domains[n] } : undefined,
+        domains[n]
+          ? {
+              name: n,
+              domain: domains[n],
+              ...(n === 'archive_product'
+                ? { requiresConfirmation: true }
+                : {}),
+            }
+          : undefined,
       getDeprecation: () => undefined,
       isClientSide: (n: string) => n.startsWith('ui_'),
       isReadOnly: (n: string) => n === 'run_analysis' || n.startsWith('list_'),
@@ -228,6 +241,39 @@ describe('AIAgentService.runAgentStream', () => {
       (tool: any) => tool.function.name,
     );
   }
+
+  it('(conv-314 F4) a live card answered with «hazlo» is shown again without calling the model', async () => {
+    configureStorePlan(['*']);
+    const plan = {
+      plan_id: 'plan-1',
+      steps: [
+        {
+          step_id: 's1',
+          order: 1,
+          tool: 'archive_product',
+          arguments: { product_id: 9 },
+          preview: { target: 'Gorra' },
+          irreversible: true,
+        },
+      ],
+    };
+    const { chunks, result } = await drain({
+      goal: 'hazlo',
+      agent_key: 'vex',
+      reshow_plan: plan,
+    });
+    expect(chat).not.toHaveBeenCalled();
+    expect(executeTool).not.toHaveBeenCalled();
+    expect(chunks.map((c) => c.type)).toEqual(['plan_approval', 'text', 'done']);
+    expect(chunks[0].plan_approval).toMatchObject({
+      plan_id: 'plan-1',
+      steps: plan.steps,
+      reconfirm_steps: [1],
+      covered_steps: [],
+    });
+    expect(chunks[1].content).toContain('Aquí está tu tarjeta');
+    expect(result.pending_plan).toEqual(plan);
+  });
 
   it('offers orders and UI tools when the plan allows the wildcard', async () => {
     configureStorePlan(['*']);
@@ -1055,6 +1101,152 @@ describe('AIAgentService.runAgentStream', () => {
     });
   });
 
+  it('(conv-314) vex: preview_archive_product with stock does not halt the turn; archive_product ends in a plan_approval frame', async () => {
+    executeTool
+      .mockResolvedValueOnce(
+        JSON.stringify({
+          product: { product_id: 101, name: 'MUESTRA gorra', state: 'active' },
+          stock_write_off_required: true,
+          // Defensive: even the legacy key on a read is not a proposal.
+          requires_confirmation: true,
+          confirmed_total_units: 5,
+          confirmed_total_value: 1000,
+          archivable: true,
+        }),
+      )
+      .mockRejectedValueOnce(
+        new VendixHttpException(
+          ErrorCodes.AI_AGENT_005,
+          'requiere confirmación',
+          {
+            tool: 'archive_product',
+            arguments: {
+              product_id: 101,
+              confirmed_total_units: 5,
+              confirmed_total_value: 1000,
+            },
+            preview: { target: 'MUESTRA gorra' },
+            confirmation_token: 'tok-arch',
+          } as any,
+        ),
+      );
+    chat
+      .mockResolvedValueOnce(
+        ok({
+          tool_calls: [
+            call('c1', 'preview_archive_product', { product_id: 101 }),
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        ok({
+          tool_calls: [
+            call('c2', 'archive_product', {
+              product_id: 101,
+              confirmed_total_units: 5,
+              confirmed_total_value: 1000,
+            }),
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(ok({ content: 'Te dejé la tarjeta.' }));
+    const plan: AgentPlanHook = {
+      execute: jest.fn(),
+      snapshot: jest.fn().mockResolvedValue(makePlan({ id: 'plan-314' })),
+    };
+
+    const { chunks, result } = await drain({
+      agent_key: 'vex',
+      plan,
+      plan_approval: {
+        redeem: jest.fn(),
+        issueSingleUse: jest.fn(),
+        classifyProposedSteps: jest.fn((steps: any[]) => ({
+          covered: [],
+          reconfirm: steps,
+        })),
+        saveProposedSteps: jest.fn().mockResolvedValue(undefined),
+      },
+    });
+
+    // The read did not stop the loop: the model got a second iteration and
+    // the write it proposed reached the approval card.
+    expect(executeTool).toHaveBeenCalledTimes(2);
+    expect(executeTool.mock.calls[1][0]).toBe('archive_product');
+    const approvals = chunks.filter((c) => c.type === 'plan_approval');
+    expect(approvals).toHaveLength(1);
+    expect(approvals[0].plan_approval!.steps!.map((s) => s.tool)).toEqual([
+      'archive_product',
+    ]);
+    const previewResult = chunks.find(
+      (c) => c.type === 'tool_result' && c.tool?.name === 'preview_archive_product',
+    );
+    expect(previewResult?.tool?.execution?.status).toBe('ok');
+    expect(result.content).not.toContain(USER_NOTICES.exhausted);
+  });
+
+  it('(conv-314 F5) archive_product with 14 items leaves ONE plan_approval frame with one step carrying 14 rows', async () => {
+    const items = Array.from({ length: 14 }, (_, i) => ({
+      product_id: 201 + i,
+      confirmed_total_units: 1,
+      confirmed_total_value: 1000,
+    }));
+    const preview = {
+      status: 'warning',
+      label: 'Eliminar 14 productos',
+      target: 'Eliminar 14 productos',
+      changes: [
+        ...items.map((it) => ({
+          field: `product_${it.product_id}`,
+          label: `Prueba ${it.product_id}`,
+          from: '1 unidades · 1000',
+          to: 'Eliminado',
+        })),
+        { field: 'total', label: 'Total (14 productos)', from: '14 unidades · 14000', to: 'Eliminado' },
+      ],
+      message: 'Se eliminan 14 productos. Esta acción no se puede deshacer.',
+    };
+    executeTool.mockRejectedValueOnce(
+      new VendixHttpException(ErrorCodes.AI_AGENT_005, 'requiere confirmación', {
+        tool: 'archive_product',
+        arguments: { items },
+        preview,
+        confirmation_token: 'tok-batch',
+      } as any),
+    );
+    chat
+      .mockResolvedValueOnce(
+        ok({ tool_calls: [call('c1', 'archive_product', { items })] }),
+      )
+      .mockResolvedValueOnce(ok({ content: 'Te dejé la tarjeta.' }));
+    const plan: AgentPlanHook = {
+      execute: jest.fn(),
+      snapshot: jest.fn().mockResolvedValue(makePlan({ id: 'plan-f5' })),
+    };
+    const { chunks, result } = await drain({
+      agent_key: 'vex',
+      plan,
+      plan_approval: {
+        redeem: jest.fn(),
+        issueSingleUse: jest.fn(),
+        classifyProposedSteps: jest.fn((steps: any[]) => ({
+          covered: [],
+          reconfirm: steps,
+        })),
+        saveProposedSteps: jest.fn().mockResolvedValue(undefined),
+      },
+    });
+    expect(executeTool).toHaveBeenCalledTimes(1);
+    const approvals = chunks.filter((c) => c.type === 'plan_approval');
+    expect(approvals).toHaveLength(1);
+    const steps = approvals[0].plan_approval!.steps!;
+    expect(steps).toHaveLength(1);
+    expect(steps[0].arguments).toEqual({ items });
+    expect((steps[0].preview as any).changes).toHaveLength(15);
+    expect(result.pending_plan?.steps).toHaveLength(1);
+    expect(result.content).toContain('eliminar 14 productos');
+  });
+
   it('(vex-vii) an approved plan step executes in the same stream', async () => {
     executeTool
       .mockRejectedValueOnce(
@@ -1629,6 +1821,130 @@ describe('AIAgentService.runAgentStream', () => {
       expect(byKind('root')[0].outcome).toBe('partial');
       expect([...rows.values()].every((row) => row.ended_at)).toBe(true);
     });
+
+    // Durable double whose provider gate behaves like AgentDurableSession:
+    // once a checkpoint left the objective awaiting approval, every provider
+    // call answers the resume 409 unless it is the turn's own closing.
+    const gatedDurable = (closingFailure?: Error) => {
+      let awaiting = false;
+      return {
+        objective_id: 'obj-314',
+        objective: {
+          authority_snapshot: ['p'],
+          budget: { active_runtime_ms: 0 },
+          expires_at: new Date(Date.now() + 60000),
+        },
+        recoveryState: jest.fn().mockResolvedValue({
+          schema_version: '1',
+          replans: 0,
+          expansions: 0,
+          corrections: 0,
+          transient_retries: 0,
+          failures: [],
+          unknown_effect: false,
+          exhausted: false,
+        }),
+        checkpointRecovery: jest.fn(),
+        assertBudget: jest.fn(),
+        assertCurrent: jest.fn(),
+        excludeWait: jest.fn(),
+        runProvider: jest.fn(async (fn: any, options?: { closing?: boolean }) => {
+          if (options?.closing && closingFailure) throw closingFailure;
+          if (awaiting && !options?.closing)
+            throw new ConflictException({
+              error_code: 'AI_OBJECTIVE_REQUIRES_RESUME',
+              message:
+                'Tienes una propuesta pendiente en esta conversación. Apruébala o recházala antes de pedir otra cosa.',
+            });
+          return fn();
+        }),
+        runTool: jest.fn(async (fn: any) => fn()),
+        addBudget: jest.fn(),
+        checkpointTool: jest.fn(async () => {
+          awaiting = true;
+          return 'result1';
+        }),
+        proposeWrite: jest.fn(),
+        finish: jest.fn(async () => ({
+          id: 'obj-314',
+          version: 2,
+          semantic_status: 'awaiting_approval',
+        })),
+        close: jest.fn(),
+      };
+    };
+
+    it('(conv-314) durable closing on an objective awaiting approval produces text and an ok span', async () => {
+      chat
+        .mockResolvedValueOnce(
+          ok({ tool_calls: [call('c1', 'list_things')] }),
+        )
+        .mockResolvedValueOnce(ok({ content: 'Revisé los productos.' }));
+      agentScopeRegistry();
+      const durable = gatedDurable();
+      const { result } = await traced({ max_iterations: 1, durable });
+      await trace.flush();
+      expect(durable.runProvider).toHaveBeenLastCalledWith(
+        expect.any(Function),
+        { closing: true },
+      );
+      expect(result.content).toBe('Revisé los productos.');
+      expect(result.content).not.toContain(USER_NOTICES.exhausted);
+      const closing = byKind('closing_inference');
+      expect(closing).toHaveLength(1);
+      expect(closing[0].status).toBe('ok');
+      expect(closing[0].error_code).toBeNull();
+    });
+
+    it('(conv-314) a failed closing records the real cause code next to AI_CLOSING_FAILED', async () => {
+      chat.mockResolvedValueOnce(
+        ok({ tool_calls: [call('c1', 'list_things')] }),
+      );
+      agentScopeRegistry();
+      const durable = gatedDurable(
+        new ConflictException('AI_OBJECTIVE_BUDGET_EXHAUSTED'),
+      );
+      const { result } = await traced({ max_iterations: 1, durable });
+      await trace.flush();
+      expect(result.exhausted).toBe(true);
+      const closing = byKind('closing_inference');
+      expect(closing).toHaveLength(1);
+      expect(closing[0]).toMatchObject({
+        status: 'error',
+        error_code: 'AI_CLOSING_FAILED',
+      });
+      expect(closing[0].attributes).toMatchObject({
+        cause_error_code: 'AI_OBJECTIVE_BUDGET_EXHAUSTED',
+      });
+    });
+
+    it.each([
+      ['restore_product', { product_id: 9 }],
+      ['manage_recipe', { action: 'restore', recipe_id: 3 }],
+      ['write_endpoint', { path: 'store/price-tiers/4/restore', method: 'POST' }],
+    ])(
+      '(conv-314) a reversal call (%s) is denied, runs nothing and records tool_denied',
+      async (name, args) => {
+        chat
+          .mockResolvedValueOnce(ok({ tool_calls: [call('rev-1', name, args)] }))
+          .mockResolvedValueOnce(ok({ content: 'Lo eliminado no se recupera.' }));
+        const { chunks, result } = await traced({ max_iterations: 2 });
+        await trace.flush();
+        expect(executeTool).not.toHaveBeenCalled();
+        const denied = byKind('tool_denied');
+        expect(denied).toHaveLength(1);
+        expect(denied[0]).toMatchObject({
+          status: 'error',
+          error_code: 'AI_TOOL_REVERSAL_DENIED',
+        });
+        expect(byKind('tool')).toHaveLength(0);
+        const frame = chunks.find(
+          (c) => c.type === 'tool_result' && c.tool?.id === 'rev-1',
+        );
+        expect(frame?.tool?.summary).toContain('no se recupera');
+        expect(result.tools_used[0].result).toContain('AI_TOOL_REVERSAL_DENIED');
+      },
+    );
 
     it('a write proposal is awaiting approval, never completed_verified', async () => {
       chat.mockResolvedValueOnce(

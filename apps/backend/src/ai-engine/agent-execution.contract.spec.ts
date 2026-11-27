@@ -34,6 +34,7 @@ async function runContract(
   tools: Array<{ name: string; execution?: ToolExecutionReceipt; summary?: string }>,
   text: string,
   over: Partial<AgentResult> = {},
+  options: Parameters<typeof withExecutionContract>[1] = {},
 ) {
   async function* source(): AsyncGenerator<AIStreamChunk, AgentResult> {
     for (const [i, t] of tools.entries()) {
@@ -63,7 +64,7 @@ async function runContract(
     };
   }
   const chunks: AIStreamChunk[] = [];
-  const gen = withExecutionContract(source());
+  const gen = withExecutionContract(source(), options);
   let step = await gen.next();
   while (!step.done) {
     chunks.push(step.value);
@@ -471,5 +472,84 @@ describe('agent-execution.contract (P2-6): the store never sees costs', () => {
     });
     expect(objective.budget).toBeUndefined();
     expect(objective.next_step).toBeNull();
+  });
+});
+
+describe('agent-execution.contract (conv-314): no card, no «Revisa y aprueba»', () => {
+  const pendingReceipt = receipt({
+    status: 'pending_confirmation',
+    effect_status: 'pending',
+    resource_ids: {},
+  });
+  const isWriteTool = (name: string) => name === 'archive_product';
+
+  it('exhausted + pending receipt without a proposal: honest notice, no «Revisa y aprueba»', async () => {
+    const { result, chunks } = await runContract(
+      [
+        { name: 'find_product', execution: receipt({ resource_ids: {} }) },
+        { name: 'preview_archive_product', execution: pendingReceipt },
+      ],
+      '',
+      { content: USER_NOTICES.exhausted, exhausted: true },
+      { isWriteTool },
+    );
+    expect(result.content).toBe(USER_NOTICES.exhausted_unprepared);
+    expect(result.content).not.toContain(USER_NOTICES.pending_confirmation);
+    expect(result.content).not.toContain('Revisa y aprueba');
+    expect(
+      chunks.filter((c) => c.type === 'text').map((c) => c.content),
+    ).toEqual([USER_NOTICES.exhausted_unprepared]);
+  });
+
+  it('exhausted + pending_plan: the card text, not the «no alcancé» notice', async () => {
+    const cardText =
+      'Te dejé 1 cambio listo para aprobar: archivar MUESTRA gorra. Revísalo en la tarjeta.';
+    const { result } = await runContract(
+      [{ name: 'archive_product', execution: pendingReceipt }],
+      '',
+      {
+        content: cardText,
+        exhausted: true,
+        pending_plan: { plan_id: 'plan-314', steps: [] } as any,
+      },
+      { isWriteTool },
+    );
+    expect(result.content).toBe(cardText);
+    expect(result.content).not.toContain(USER_NOTICES.exhausted);
+    expect(result.content).not.toContain('Alcancé a consultar');
+  });
+
+  it('a pending receipt from a READ never appends «Revisa y aprueba» to the answer', async () => {
+    const { result } = await runContract(
+      [{ name: 'preview_archive_product', execution: pendingReceipt }],
+      MODEL_TEXT,
+      {},
+      { isWriteTool },
+    );
+    expect(result.content).toBe(MODEL_TEXT);
+  });
+
+  it('a pending receipt from a WRITE without a card still appends «Revisa y aprueba»', async () => {
+    const { result } = await runContract(
+      [{ name: 'archive_product', execution: pendingReceipt }],
+      MODEL_TEXT,
+      {},
+      { isWriteTool },
+    );
+    expect(result.content).toBe(
+      `${MODEL_TEXT}\n\n${USER_NOTICES.pending_confirmation}`,
+    );
+  });
+
+  it('exhausted without any pending receipt keeps the existing notice', async () => {
+    const { result } = await runContract(
+      [{ name: 'find_product', execution: receipt({ resource_ids: {} }) }],
+      '',
+      { content: USER_NOTICES.exhausted, exhausted: true },
+      { isWriteTool },
+    );
+    expect(result.content).toBe(
+      `Alcancé a consultar parte de la información. ${USER_NOTICES.exhausted}`,
+    );
   });
 });

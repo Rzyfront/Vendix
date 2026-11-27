@@ -1,6 +1,7 @@
 import {
   AgentDurableSession,
   AgentDurableSessionService,
+  isAffirmativeReply,
   objectiveArgsHash,
 } from './agent-durable-session.service';
 import { emptyObjectiveBudget } from './interfaces/agent-objective.interface';
@@ -57,6 +58,8 @@ function setup() {
     getForConversation: jest.fn(async () => state),
     createOrReplace: jest.fn(async () => state),
     hasPendingEffects: jest.fn(async () => false),
+    listEffects: jest.fn(async () => []),
+    proposeEffect: jest.fn(async () => ({ status: 'proposed' })),
     acquireLease: jest.fn(async () => state),
     addBudget: jest.fn(update),
     auditBudget: jest.fn(async (_id, _generation, delta) => {
@@ -242,6 +245,71 @@ it('requests clearing requires_revalidation only for an observed successful read
   expect(
     s.repo.appendToolResult.mock.calls[1][2].checkpoint,
   ).not.toHaveProperty('requires_revalidation');
+});
+describe('(conv-314) a pending receipt only waits for approval when a real effect exists', () => {
+  const pending = () =>
+    normalizeToolResult({ requires_confirmation: true }, { write: true });
+  it('a pending receipt WITHOUT a proposed effect keeps the objective active', async () => {
+    const s = setup();
+    await s.session.checkpointTool('c1', 'archive_product', {}, pending());
+    expect(s.repo.listEffects).toHaveBeenCalledWith(s.state.id, 100);
+    expect(
+      s.repo.appendToolResult.mock.calls[0][2].checkpoint.semantic_status,
+    ).toBe('active');
+    expect(s.state.semantic_status).toBe('active');
+  });
+  it('after proposeWrite the pending receipt moves to awaiting_approval', async () => {
+    const s = setup();
+    await s.session.proposeWrite('archive_product', { product_id: 1 });
+    await s.session.checkpointTool('c1', 'archive_product', {}, pending());
+    expect(s.state.semantic_status).toBe('awaiting_approval');
+  });
+  it('an existing proposed effect row also counts as a real proposal', async () => {
+    const s = setup();
+    s.repo.listEffects.mockResolvedValue([{ status: 'proposed' }]);
+    await s.session.checkpointTool('c1', 'archive_product', {}, pending());
+    expect(s.state.semantic_status).toBe('awaiting_approval');
+  });
+});
+describe('(conv-314) closing inference skips only the resume gate', () => {
+  it('a closing call runs on an objective awaiting approval and is metered', async () => {
+    const s = setup();
+    s.state.semantic_status = 'awaiting_approval';
+    const call = jest.fn(async () => ({ success: true, content: 'cierre' }));
+    const response = await s.session.runProvider(call, { closing: true });
+    expect(response).toMatchObject({ content: 'cierre' });
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(s.state.budget.provider_attempts).toBe(1);
+  });
+  it('a normal provider call on that objective still answers the resume 409', async () => {
+    const s = setup();
+    s.state.semantic_status = 'awaiting_approval';
+    const call = jest.fn();
+    await expect(s.session.runProvider(call)).rejects.toThrow(
+      'propuesta pendiente',
+    );
+    expect(call).not.toHaveBeenCalled();
+  });
+  it('a closing call still honours the cumulative budget', async () => {
+    const s = setup();
+    s.state.semantic_status = 'awaiting_approval';
+    s.state.budget.provider_attempts = 240;
+    const call = jest.fn();
+    await expect(
+      s.session.runProvider(call, { closing: true }),
+    ).rejects.toThrow('BUDGET_EXHAUSTED');
+    expect(call).not.toHaveBeenCalled();
+  });
+  it('a closing call still honours the lease', async () => {
+    const s = setup();
+    s.state.semantic_status = 'awaiting_approval';
+    s.state.lease_until = new Date(Date.now() - 1000);
+    const call = jest.fn();
+    await expect(
+      s.session.runProvider(call, { closing: true }),
+    ).rejects.toThrow('STALE_EXECUTOR');
+    expect(call).not.toHaveBeenCalled();
+  });
 });
 it('persists full results with canonical args hash and advances shared lease', async () => {
   const s = setup();
@@ -592,4 +660,75 @@ describe('clean objective per human question', () => {
       });
       await running!.close();
     }));
+});
+
+describe('(conv-314 F4) «hazlo» with a live card keeps the card', () => {
+  const awaiting = (s: ReturnType<typeof setup>) => {
+    s.state = {
+      ...s.state,
+      agent_id: 'vex',
+      semantic_status: 'awaiting_approval',
+      lease_until: null,
+    };
+    s.repo.rejectProposal = jest.fn();
+  };
+  it.each(['hazlo', 'Sí', '¡Dale, dale!', 'hazlo, hazlo', 'aplícalo', 'OK.', 'adelante', 'continúa', 'aprueba'])(
+    '%s is an affirmative reply',
+    (text) => expect(isAffirmativeReply(text)).toBe(true),
+  );
+  it.each(['mejor cambia el precio', 'sí, pero cambia el precio', 'no', 'borra otro', ''])(
+    '%s is not an affirmative reply',
+    (text) => expect(isAffirmativeReply(text)).toBe(false),
+  );
+  it('(a) proposed effect + «hazlo»: keeps the card, withdraws nothing', async () => {
+    const s = setup();
+    awaiting(s);
+    s.repo.listEffects.mockResolvedValue([{ status: 'proposed' }]);
+    const keeps = await RequestContextService.runIsolated(ctx, () =>
+      s.service.keepsLiveCard(7, 'vex', 'hazlo'),
+    );
+    expect(keeps).toBe(true);
+    expect(s.repo.rejectProposal).not.toHaveBeenCalled();
+    expect(s.repo.createOrReplace).not.toHaveBeenCalled();
+    expect(s.repo.acquireLease).not.toHaveBeenCalled();
+    expect(s.state.semantic_status).toBe('awaiting_approval');
+  });
+  it('(b) proposed effect + «mejor cambia el precio»: no card, open() withdraws as today', async () => {
+    const s = setup();
+    awaiting(s);
+    s.repo.listEffects.mockResolvedValue([{ status: 'proposed' }]);
+    s.repo.rejectProposal = jest.fn(async () => {
+      s.state = { ...s.state, semantic_status: 'active', version: s.state.version + 1 };
+      return s.state;
+    });
+    const keeps = await RequestContextService.runIsolated(ctx, () =>
+      s.service.keepsLiveCard(7, 'vex', 'mejor cambia el precio'),
+    );
+    expect(keeps).toBe(false);
+    await RequestContextService.runIsolated(ctx, () =>
+      s.service.open(7, 'vex', 'mejor cambia el precio'),
+    );
+    expect(s.repo.rejectProposal).toHaveBeenCalledWith(
+      s.state.id,
+      1,
+      'superseded_by_message',
+    );
+  });
+  it('(c) «hazlo» without a proposed effect never invents a card', async () => {
+    const s = setup();
+    awaiting(s);
+    s.repo.listEffects.mockResolvedValue([{ status: 'failed' }]);
+    await expect(
+      RequestContextService.runIsolated(ctx, () =>
+        s.service.keepsLiveCard(7, 'vex', 'hazlo'),
+      ),
+    ).resolves.toBe(false);
+    const active = setup();
+    await expect(
+      RequestContextService.runIsolated(ctx, () =>
+        active.service.keepsLiveCard(7, 'vexi', 'hazlo'),
+      ),
+    ).resolves.toBe(false);
+    expect(active.repo.listEffects).not.toHaveBeenCalled();
+  });
 });
