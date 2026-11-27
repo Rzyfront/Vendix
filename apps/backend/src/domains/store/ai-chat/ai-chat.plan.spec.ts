@@ -595,27 +595,31 @@ describe('AIChatService — agente configurable del chat por defecto', () => {
     expect(b.run.mock.calls[0][0]).not.toHaveProperty('tools');
   });
 
+  // Vexi público F2: before, a missing/inactive vexi row fell back to "no
+  // agent" (the caller's whole permission catalog). Vexi has a closed
+  // catalog, so it now resolves to itself with no tools; the app prompt and
+  // the rest of the turn keep the previous fallback.
   it.each([null, { ...vexi, is_active: false }])(
-    'fila vexi ausente o inactiva conserva el fallback del chat',
+    'fila vexi ausente o inactiva: Vexi sin herramientas, nunca el catálogo completo',
     async (agentRow) => {
       const b = build({ agentRow });
       await b.service.sendMessage(7, { content: 'hola' });
-      expect(b.runSync.mock.calls[0][0]).toMatchObject({
+      const closed = {
         app_key: 'chat_assistant',
-      });
-      expect(b.runSync.mock.calls[0][0]).not.toHaveProperty('tools');
-      expect(b.runSync.mock.calls[0][0]).not.toHaveProperty('max_iterations');
+        agent_key: 'vexi',
+        agent_allowed_tools: undefined,
+        tools: undefined,
+      };
+      expect(b.runSync.mock.calls[0][0]).toMatchObject(closed);
+      expect(b.runSync.mock.calls[0][0].max_iterations).toBeUndefined();
       b.streamIntents.consume.mockResolvedValue({
         conversation_id: 7,
         user_id: 9,
         content: 'hola',
       });
       await collect(b.service, null);
-      expect(b.run.mock.calls[0][0]).toMatchObject({
-        app_key: 'chat_assistant',
-      });
-      expect(b.run.mock.calls[0][0]).not.toHaveProperty('tools');
-      expect(b.run.mock.calls[0][0]).not.toHaveProperty('max_iterations');
+      expect(b.run.mock.calls[0][0]).toMatchObject(closed);
+      expect(b.run.mock.calls[0][0].max_iterations).toBeUndefined();
     },
   );
 });
@@ -1590,6 +1594,10 @@ describe('D1 chat durable real wiring', () => {
       access,
     );
     const b = build({
+      // Generic agent-enabled app with no configurable agent: this suite
+      // exercises durable mechanics with a real read tool, not Vexi (whose
+      // closed catalog has no staff tools since Vexi público F1/F2).
+      conversation: { app_key: 'durable_test_app' },
       messages: Array.from({ length: 25 }, (_, id) => ({
         id,
         role: 'assistant',

@@ -25,6 +25,7 @@ import {
   AGENT_TOOL_DENIED_EVENT,
   AgentToolDeniedEvent,
   closedToolCatalog,
+  isStorefrontTool,
 } from './agent-tool-catalog';
 
 /**
@@ -208,7 +209,9 @@ export class AIToolRegistry {
 
   getAvailableDefinitions(userPermissions?: string[]): AIToolDefinition[] {
     return Array.from(this.tools.values())
-      .filter((t) => this.isPermitted(t, userPermissions))
+      .filter(
+        (t) => !isStorefrontTool(t) && this.isPermitted(t, userPermissions),
+      )
       .map((t) => this.toDefinition(t));
   }
 
@@ -252,6 +255,9 @@ export class AIToolRegistry {
     return Array.from(this.tools.values())
       .filter((t) => {
         if (closed && !closed.has(t.name)) return false;
+        // Vexi público F2: storefront tools exist only for a closed-catalog
+        // agent; a staff turn (Vex, no agent) never sees them.
+        if (!closed && isStorefrontTool(t)) return false;
         if (!this.isPermitted(t, userPermissions)) return false;
         if (allowed && !this.matchesScope(t.name, allowed)) {
           return false;
@@ -271,7 +277,10 @@ export class AIToolRegistry {
   getReadOnlyDefinitions(userPermissions?: string[]): AIToolDefinition[] {
     return Array.from(this.tools.values())
       .filter(
-        (t) => t.readOnly === true && this.isPermitted(t, userPermissions),
+        (t) =>
+          t.readOnly === true &&
+          !isStorefrontTool(t) &&
+          this.isPermitted(t, userPermissions),
       )
       .map((t) => this.toDefinition(t));
   }
@@ -364,7 +373,18 @@ export class AIToolRegistry {
    */
   private assertInAgentCatalog(name: string, agentKey?: string): void {
     const closed = closedToolCatalog(agentKey);
-    if (!closed) return;
+    if (!closed) {
+      // Vexi público F2, inverse fence: a storefront tool never runs outside
+      // a closed-catalog (public) turn.
+      const resolved = this.resolveToolName(name);
+      const tool = resolved ? this.tools.get(resolved) : undefined;
+      if (tool && isStorefrontTool(tool))
+        throw new VendixHttpException(
+          ErrorCodes.AI_AGENT_004,
+          `La herramienta "${name}" no está disponible para este asistente.`,
+        );
+      return;
+    }
     const resolved = this.resolveToolName(name);
     if (resolved && closed.has(resolved)) return;
     this.recordAgentToolDenial(name, agentKey!, 'execute');

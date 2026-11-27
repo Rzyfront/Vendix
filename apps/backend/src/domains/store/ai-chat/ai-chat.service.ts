@@ -8,6 +8,7 @@ import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
+import { hasClosedToolCatalog } from '../../../ai-engine/tools/agent-tool-catalog';
 import { AILoggingService } from '../../../ai-engine/ai-logging.service';
 import { AIAgentService } from '../../../ai-engine/ai-agent.service';
 import {
@@ -217,7 +218,29 @@ export interface FollowupSuggestionFrame {
  * conversación o `'chat_assistant'`, rama por `metadata.agent_enabled` de la
  * app. La fila activa `vexi` configura los turnos del chat por defecto.
  */
-interface ResolvedChatAgent {
+/**
+ * Vexi público F2 (closes the F1 open fallback): a closed-catalog agent
+ * (`vexi`) whose row is missing, inactive or unreadable must not degrade to
+ * "no agent", because a turn without agent scope gets the caller's whole
+ * permission catalog. It resolves to itself with no tools instead (closed
+ * catalog + empty `allowed_tools` = nothing). Open agents keep `null`.
+ */
+export function closedAgentFallback(
+  agentKey: string,
+): ResolvedChatAgent | null {
+  if (!hasClosedToolCatalog(agentKey)) return null;
+  return {
+    key: agentKey,
+    app_key: null,
+    system_prompt: null,
+    allowed_tools: [],
+    denied_tools: [],
+    max_iterations: null,
+    timeout_seconds: null,
+  };
+}
+
+export interface ResolvedChatAgent {
   key: string;
   app_key: string | null;
   system_prompt: string | null;
@@ -2091,13 +2114,13 @@ export class AIChatService {
       this.logger.warn(
         `AI agent lookup failed for '${agentKey}' — falling back to default turn behavior: ${(err as Error).message}`,
       );
-      return null;
+      return closedAgentFallback(agentKey);
     }
     if (!row || !row.is_active) {
       this.logger.warn(
         `AI agent '${agentKey}' not found or inactive — falling back to default turn behavior`,
       );
-      return null;
+      return closedAgentFallback(agentKey);
     }
     if (row.app_key && row.system_prompt) {
       this.logger.warn(

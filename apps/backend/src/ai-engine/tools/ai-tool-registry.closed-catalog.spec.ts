@@ -50,8 +50,10 @@ function build() {
   const events = { emit: jest.fn() };
   const registry = new AIToolRegistry({} as any, events as any);
   registry.registerMany(catalog);
+  // F2 registers the real storefront tools (collected above); a stand-in
+  // only fills a catalog name that has no real tool yet.
   for (const name of VEXI_PUBLIC_TOOL_CATALOG)
-    registry.register(storefrontTool(name));
+    if (!registry.get(name)) registry.register(storefrontTool(name));
   return { registry, events, allPermissions: ALL_PERMISSIONS, catalog };
 }
 
@@ -86,7 +88,7 @@ describe('Vexi closed tool catalog (F1)', () => {
   });
 
   describe('catalog (what the model is offered)', () => {
-    it('(c) Vexi sees exactly the three public capabilities, even with every permission', () => {
+    it('(c) Vexi sees exactly its public capabilities, even with every permission', () => {
       const { registry, allPermissions } = build();
       expect(
         names(registry.getAgentDefinitions(allPermissions, VEXI_SCOPE)),
@@ -159,8 +161,9 @@ describe('Vexi closed tool catalog (F1)', () => {
     it('the seed denied list fences every domain of the real staff catalog', () => {
       const { catalog } = build();
       const denied = new Set(VEXI_INTERNAL_DENIED_TOOLS);
+      // `storefront` (F2) is Vexi's own public domain: never denied to it.
       const uncovered = [...new Set(catalog.map((t) => t.domain))]
-        .filter((d) => !denied.has(d))
+        .filter((d) => !denied.has(d) && d !== 'storefront')
         .sort();
       expect(uncovered).toEqual([]);
       expect(denied.has('storefront')).toBe(false);
@@ -245,12 +248,27 @@ describe('Vexi closed tool catalog (F1)', () => {
       expect(error.response.message).not.toMatch(/list_payroll_runs[^_]/);
     });
 
-    it('(c) the three public capabilities execute for Vexi', async () => {
+    it('(c) the public capabilities execute for Vexi', async () => {
       const { registry, events } = build();
+      // Minimal valid args of the real storefront tools (F2).
+      const args: Record<string, Record<string, unknown>> = {
+        storefront_search_products: { query: 'camiseta' },
+        storefront_propose_order: { items: [{ product_id: 1, quantity: 1 }] },
+        storefront_propose_booking: { product_id: 1 },
+        storefront_propose_request: {
+          pqr_type: 'PETITION',
+          subject: 'Consulta',
+          description: 'Quiero saber el horario de atención.',
+        },
+      };
       for (const name of VEXI_PUBLIC_TOOL_CATALOG) {
         await expect(
-          run(() => registry.executeTool(name, {}, { agentKey: VEXI_AGENT_KEY })),
-        ).resolves.toBe('{"proposal":true}');
+          run(() =>
+            registry.executeTool(name, args[name] ?? {}, {
+              agentKey: VEXI_AGENT_KEY,
+            }),
+          ),
+        ).resolves.toMatch(/"(ran|proposal)":true/);
         expect(registry.get(name)!.handler).toHaveBeenCalledTimes(1);
       }
       expect(events.emit).not.toHaveBeenCalled();

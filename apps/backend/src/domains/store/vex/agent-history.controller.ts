@@ -67,6 +67,27 @@ export class AgentHistoryController {
     );
   }
 
+  /** Vexi público F2: the store's anonymous storefront chats (read-only). */
+  @Get('public-conversations')
+  async publicConversations(@Query() query: AgentHistoryQueryDto) {
+    const page = await this.history.listPublicConversations(query);
+    return this.responseService.paginated(
+      page.items,
+      page.total,
+      page.page,
+      page.limit,
+      'Conversaciones de tus clientes con Vexi',
+    );
+  }
+
+  @Get('public-conversations/:id')
+  async publicConversation(@Param('id') id: string) {
+    return this.responseService.success(
+      await this.history.getPublicConversation(id),
+      'Conversación de un cliente con Vexi',
+    );
+  }
+
   /** «Ver cómo lo calculé»: one Code Mode run of THIS store (source only for its owner). */
   @Get('script-runs/:id')
   async scriptRun(@Param('id') id: string) {

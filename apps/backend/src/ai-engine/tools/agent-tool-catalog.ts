@@ -29,8 +29,24 @@
  */
 export const VEXI_AGENT_KEY = 'vexi';
 
-/** Public capabilities of Vexi: propose only; the visitor's browser writes. */
+/**
+ * Domain of the public storefront tools (F2). Absent from
+ * {@link VEXI_INTERNAL_DENIED_TOOLS} on purpose, and fenced the other way in
+ * the registry: a tool of this domain is only offered to or executed by a
+ * closed-catalog agent, never by a staff turn.
+ */
+export const STOREFRONT_TOOL_DOMAIN = 'storefront';
+
+export function isStorefrontTool(tool: { domain?: string }): boolean {
+  return tool.domain === STOREFRONT_TOOL_DOMAIN;
+}
+
+/**
+ * Public capabilities of Vexi: read the published catalog and propose; the
+ * visitor's browser writes through the existing public endpoints.
+ */
 export const VEXI_PUBLIC_TOOL_CATALOG: readonly string[] = Object.freeze([
+  'storefront_search_products',
   'storefront_propose_order',
   'storefront_propose_booking',
   'storefront_propose_request',
