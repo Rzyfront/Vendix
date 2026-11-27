@@ -827,6 +827,26 @@ export class StoreOrdersService {
     );
   }
 
+  /**
+   * PATCH /api/store/orders/:id/coupon
+   *
+   * Applies, replaces, or removes a coupon (or promotion code) on an existing
+   * unpaid order without recreating items or releasing stock reservations.
+   */
+  applyOrderCoupon(
+    orderId: string | number,
+    couponCode: string | null,
+  ): Observable<Order> {
+    const url = `${this.apiUrl}/store/orders/${orderId}/coupon`;
+    return this.http.patch<any>(url, { coupon_code: couponCode }).pipe(
+      map((r) => this.unwrapOrThrow<Order>(r)),
+      catchError((error) => {
+        console.error('Error applying/removing order coupon:', error);
+        return throwError(() => this.asApiError(error));
+      }),
+    );
+  }
+
   flowCancelOrder(orderId: string, dto: FlowCancelOrderDto): Observable<FlowCancelOrderResult> {
     const url = `${this.apiUrl}/store/orders/${orderId}/flow/cancel`;
     return this.http.post<any>(url, dto).pipe(

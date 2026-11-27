@@ -24,6 +24,7 @@ import {
   type PaymentMethod,
 } from '../../../../../../shared/models/payment-method.model';
 import { Order } from '../../interfaces/order.interface';
+import { OrderCouponSectionComponent } from '../order-coupon-section/order-coupon-section.component';
 import { SETTLED_PAYMENT_STATES_FE } from '../../utils/order-settlement.util';
 import { StorePaymentMethod } from '../../../settings/payments/interfaces/payment-methods.interface';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
@@ -66,7 +67,14 @@ const CASH_SESSION_REQUIRED_MESSAGE = 'Abre tu caja para registrar pagos.';
 @Component({
   selector: 'app-order-payment-modal',
   standalone: true,
-  imports: [ModalComponent, PaymentCollectorComponent, ButtonComponent, IconComponent, CurrencyPipe],
+  imports: [
+    ModalComponent,
+    PaymentCollectorComponent,
+    ButtonComponent,
+    IconComponent,
+    CurrencyPipe,
+    OrderCouponSectionComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './order-payment-modal.component.html',
   styleUrl: './order-payment-modal.component.css',
@@ -103,12 +111,17 @@ export class OrderPaymentModalComponent {
    * un fallo, así el cajero lee el motivo sin perder el cobro.
    */
   readonly paymentError = input<unknown>(null);
+  readonly canEditCoupon = input<boolean>(false);
+  readonly isApplyingCoupon = input<boolean>(false);
+  readonly couponError = input<string | null>(null);
 
   // ── Signal Outputs ──────────────────────────────────────────
   readonly isOpenChange = output<boolean>();
   readonly closed = output<void>();
   /** Normalized submit forwarded up; the page maps it to `PayOrderDto`. */
   readonly paymentSubmitted = output<PaymentSubmit>();
+  readonly applyCoupon = output<string>();
+  readonly removeCoupon = output<void>();
 
   private readonly collector = viewChild<PaymentCollectorComponent>('collector');
 

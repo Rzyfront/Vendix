@@ -213,6 +213,15 @@ export interface Order {
   order_review?: OrderReview | null;
   users?: OrderCustomer;
   // Persisted discount snapshots — read-only from backend, never recalculated.
+  coupon_id?: number | null;
+  coupon_code?: string | null;
+  coupon?: {
+    id: number;
+    code: string;
+    name?: string | null;
+    discount_type?: string;
+    discount_value?: number | string;
+  } | null;
   order_promotions?: OrderPromotionSnapshot[];
   coupon_uses?: CouponUseSnapshot[];
   /**
