@@ -321,6 +321,17 @@ describe('pricing.tools · contrato canónico T4', () => {
       expect(on.error).toBe(
         'action "restore" inválida. Usa create, update o deactivate.',
       );
+
+      // Tampoco por update con is_active: true.
+      const viaUpdate = await run(tools, 'manage_price_tiers', {
+        action: 'update',
+        price_tier_id: 11,
+        is_active: true,
+      });
+      expect(viaUpdate.error).toBe(
+        'La tarifa está desactivada y esa acción no se puede deshacer.',
+      );
+      expect(deps.priceTiersService.update).not.toHaveBeenCalled();
     });
 
     it('(a) sad: sin tienda → error y cero llamadas', async () => {

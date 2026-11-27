@@ -370,6 +370,15 @@ export function createPricingTools(deps: PricingToolDeps): RegisteredTool[] {
     if (description !== undefined) dto.description = description;
     if (toWriteNumber(args.discount_percentage) !== null)
       dto.discount_percentage = toWriteNumber(args.discount_percentage);
+    if (args.is_active === true && tier.is_active === false) {
+      // Same rule as the removed `restore`: Vex never revives what was
+      // removed (conversation 314), not even through update.
+      return writeFailure(
+        targetLabel,
+        'La tarifa está desactivada y esa acción no se puede deshacer.',
+        'Crea una tarifa nueva con manage_price_tiers (action create) si la necesitas.',
+      );
+    }
     if (typeof args.is_active === 'boolean') dto.is_active = args.is_active;
     if (typeof args.is_default === 'boolean')
       dto.is_default = args.is_default;
