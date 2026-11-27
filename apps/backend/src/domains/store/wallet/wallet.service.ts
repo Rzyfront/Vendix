@@ -23,6 +23,11 @@ export class WalletService {
   /**
    * Get or create a wallet for a customer.
    * If the customer doesn't have a wallet yet, one is created with zero balance.
+   *
+   * Concurrency: the customer profile loads balance and history in parallel, so
+   * two requests can both miss the wallet and race to create it. The loser hits
+   * the (store_id, customer_id) unique constraint (P2002); in that case the
+   * wallet already exists, so we return the winner's row instead of failing.
    */
   async getOrCreateWallet(customerId: number) {
     const existing = await this.prisma.wallets.findFirst({
@@ -33,15 +38,28 @@ export class WalletService {
 
     const context = RequestContextService.getContext();
 
-    return this.prisma.wallets.create({
-      data: {
-        customer_id: customerId,
-        organization_id: context?.organization_id!,
-        balance: 0,
-        held_balance: 0,
-        is_active: true,
-      },
-    });
+    try {
+      return await this.prisma.wallets.create({
+        data: {
+          customer_id: customerId,
+          organization_id: context?.organization_id!,
+          balance: 0,
+          held_balance: 0,
+          is_active: true,
+        },
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const winner = await this.prisma.wallets.findFirst({
+          where: { customer_id: customerId },
+        });
+        if (winner) return winner;
+      }
+      throw error;
+    }
   }
 
   /**
