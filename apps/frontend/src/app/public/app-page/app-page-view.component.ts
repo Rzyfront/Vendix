@@ -1,4 +1,5 @@
 import { DOCUMENT, NgTemplateOutlet } from '@angular/common';
+import { VexiPublicPresenceService } from '../vexi-public/vexi-public-presence.service';
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import {
   APP_HIGHLIGHTS_ICON_OPTIONS,
@@ -969,6 +970,7 @@ const HIGHLIGHTS_ICON_SET = new Set<string>(APP_HIGHLIGHTS_ICON_OPTIONS.map((o) 
   `,
 })
 export class AppPageViewComponent {
+  private readonly vexiPresence = inject(VexiPublicPresenceService);
   private readonly document = inject(DOCUMENT);
 
   readonly kind = input.required<PageAppKind>();
@@ -1026,6 +1028,9 @@ export class AppPageViewComponent {
   readonly whatsappUrl = computed(() => {
     const brand = this.page()?.brand;
     if (!brand?.whatsapp_floating) return null;
+    // Vexi público F2 (D5): where Vexi shows, it IS the WhatsApp-style button
+    // (and hands off to the real WhatsApp after an order): never two bubbles.
+    if (this.vexiPresence.active()) return null;
     return whatsappHref(brand.whatsapp_number, brand.whatsapp_message);
   });
 

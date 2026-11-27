@@ -2,14 +2,19 @@ import { Component, signal } from '@angular/core';
 
 import { AgentHistoryChangesComponent } from './agent-history-changes.component';
 import { AgentHistoryConversationsComponent } from './agent-history-conversations.component';
+import { AgentHistoryPublicConversationsComponent } from './agent-history-public-conversations.component';
 
-type HistoryTab = 'changes' | 'conversations';
+type HistoryTab = 'changes' | 'conversations' | 'public';
 
-/** «Historial» tab of Agentes IA: two read-only sub-tabs. Nothing is editable. */
+/** «Historial» tab of Agentes IA: read-only sub-tabs (incl. customer chats with Vexi público). Nothing is editable. */
 @Component({
   selector: 'app-agent-history',
   standalone: true,
-  imports: [AgentHistoryChangesComponent, AgentHistoryConversationsComponent],
+  imports: [
+    AgentHistoryChangesComponent,
+    AgentHistoryConversationsComponent,
+    AgentHistoryPublicConversationsComponent,
+  ],
   template: `
     <div
       class="bg-surface rounded-lg shadow-sm border border-[var(--color-border)] p-4 sm:p-6"
@@ -48,8 +53,10 @@ type HistoryTab = 'changes' | 'conversations';
       >
         @if (active() === 'changes') {
           <app-agent-history-changes />
-        } @else {
+        } @else if (active() === 'conversations') {
           <app-agent-history-conversations />
+        } @else {
+          <app-agent-history-public-conversations />
         }
       </div>
     </div>
@@ -60,6 +67,7 @@ export class AgentHistoryComponent {
   readonly tabs: ReadonlyArray<{ id: HistoryTab; label: string }> = [
     { id: 'changes', label: 'Cambios' },
     { id: 'conversations', label: 'Conversaciones' },
+    { id: 'public', label: 'Clientes (Vexi)' },
   ];
   readonly active = signal<HistoryTab>('changes');
 

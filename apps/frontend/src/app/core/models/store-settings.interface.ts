@@ -78,6 +78,13 @@ export interface StoreSettings {
   vexi?: VexiSettings;
 
   /**
+   * Vexi público (F2): the customer-facing chat on the store's public apps.
+   * Mirrors backend `VexiPublicSettings`. Absent means off; read it through
+   * `StoreSettingsFacade.vexiPublicEnabled()`.
+   */
+  vexi_public?: VexiPublicSettings;
+
+  /**
    * Master switch for the Vex agent. Mirrors backend `VexSettings`.
    *
    * Optional because a store only carries this block once somebody turned Vex
@@ -124,6 +131,11 @@ export interface PromotionsSettings {
  * Master switch for the Vexi assistant. Mirrors backend `VexiSettings` in
  * `apps/backend/src/domains/store/settings/interfaces/store-settings.interface.ts`.
  */
+/** Vexi público (F2). Optional like the backend DTO; only `true` publishes it. */
+export interface VexiPublicSettings {
+  enabled?: boolean;
+}
+
 export interface VexiSettings {
   /**
    * Opcional, igual que en el DTO del backend (`VexiSettingsDto.enabled?`).
