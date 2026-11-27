@@ -1463,7 +1463,10 @@ export class AIAgentService {
     const runLoop = (observe?: (outcome: AgentOutcome) => void) => {
       const loop = this.runAgentLoop(params, observe);
 
-      const source = withExecutionContract(loop);
+      const source = withExecutionContract(loop, {
+        isWriteTool: (name) =>
+          this.toolRegistry.get(name)?.requiresConfirmation === true,
+      });
       return params.durable
         ? this.withDurableSession(source, params.durable)
         : source;
@@ -5005,9 +5008,12 @@ export class AIAgentService {
         };
       }
 
-      const content = timedOut
-        ? 'No alcancé a completar tu solicitud en este turno. Puedes pedirme que continúe; no voy a dar por terminado lo que aún no he verificado.'
-        : USER_NOTICES.exhausted;
+      // A real card left in this turn is described, never the «no alcancé».
+      const content = pendingConfirmation
+        ? this.describePendingWrite(pendingConfirmation)
+        : timedOut
+          ? 'No alcancé a completar tu solicitud en este turno. Puedes pedirme que continúe; no voy a dar por terminado lo que aún no he verificado.'
+          : USER_NOTICES.exhausted;
 
       yield { type: 'text', content };
 
