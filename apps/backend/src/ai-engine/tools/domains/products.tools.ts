@@ -2177,7 +2177,10 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
         const blocked = hasActiveReservations || plan.out_of_scope_units > 0;
         return JSON.stringify({
           product: { product_id: productId, name: label, state },
-          requires_confirmation: plan.requires_confirmation,
+          // Not `requires_confirmation`: this is a read. That key is the
+          // write-proposal protocol flag, and on a read it made the agent loop
+          // halt as if a card existed when none did (conversation 314).
+          stock_write_off_required: plan.requires_confirmation,
           confirmed_total_units: plan.total_units,
           confirmed_total_value: round2(plan.total_value),
           total_units: plan.total_units,
@@ -2201,7 +2204,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
             ? hasActiveReservations
               ? 'El archivado está bloqueado por reservas activas: despacha o cancela esos pedidos antes de proponer archive_product.'
               : 'El archivado está bloqueado por existencias fuera de la tienda: transfiérelas o ajústalas desde Inventario antes de proponer archive_product.'
-            : 'Pasa confirmed_total_units y confirmed_total_value tal cual a archive_product. Si el inventario se mueve, repite este preview.',
+            : 'Esta vista previa no es la propuesta y no requiere aprobación: llama ahora archive_product con confirmed_total_units y confirmed_total_value tal cual; esa llamada deja la tarjeta para que la persona apruebe la baja. Si el inventario se mueve, repite este preview.',
         });
       },
     },

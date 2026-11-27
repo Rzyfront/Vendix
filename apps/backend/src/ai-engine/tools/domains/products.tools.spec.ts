@@ -1263,7 +1263,7 @@ describe('products.tools · contrato canónico T4', () => {
           name: 'Coca Cola 1L (COCA-1L)',
           state: 'active',
         },
-        requires_confirmation: true,
+        stock_write_off_required: true,
         confirmed_total_units: 42,
         confirmed_total_value: 126000,
         total_units: 42,
@@ -1286,7 +1286,7 @@ describe('products.tools · contrato canónico T4', () => {
         has_active_reservations: false,
         archivable: true,
         next_step:
-          'Pasa confirmed_total_units y confirmed_total_value tal cual a archive_product. Si el inventario se mueve, repite este preview.',
+          'Esta vista previa no es la propuesta y no requiere aprobación: llama ahora archive_product con confirmed_total_units y confirmed_total_value tal cual; esa llamada deja la tarjeta para que la persona apruebe la baja. Si el inventario se mueve, repite este preview.',
       });
     });
 

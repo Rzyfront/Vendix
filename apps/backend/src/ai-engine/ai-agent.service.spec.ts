@@ -91,6 +91,8 @@ describe('AIAgentService.runAgentStream', () => {
       def('vex_render_table'),
       def('vex_show_help_article'),
       def('remember'),
+      def('preview_archive_product'),
+      def('archive_product'),
       {
         type: 'function' as const,
         function: {
@@ -121,6 +123,8 @@ describe('AIAgentService.runAgentStream', () => {
       vex_show_help_article: 'vex',
       remember: 'memory',
       run_analysis: 'sandbox',
+      preview_archive_product: 'products',
+      archive_product: 'products',
     };
     registry = {
       getAvailableDefinitions: jest.fn((scopes: string[]) =>
@@ -144,7 +148,15 @@ describe('AIAgentService.runAgentStream', () => {
       matchesScope: (n: string, scopes: Set<string>) =>
         !!domains[n] && (scopes.has(n) || scopes.has(domains[n])),
       get: (n: string) =>
-        domains[n] ? { name: n, domain: domains[n] } : undefined,
+        domains[n]
+          ? {
+              name: n,
+              domain: domains[n],
+              ...(n === 'archive_product'
+                ? { requiresConfirmation: true }
+                : {}),
+            }
+          : undefined,
       getDeprecation: () => undefined,
       isClientSide: (n: string) => n.startsWith('ui_'),
       isReadOnly: (n: string) => n === 'run_analysis' || n.startsWith('list_'),
@@ -1053,6 +1065,90 @@ describe('AIAgentService.runAgentStream', () => {
       tool: 'create_expense',
       confirmation_token: 'tok-1',
     });
+  });
+
+  it('(conv-314) vex: preview_archive_product with stock does not halt the turn; archive_product ends in a plan_approval frame', async () => {
+    executeTool
+      .mockResolvedValueOnce(
+        JSON.stringify({
+          product: { product_id: 101, name: 'MUESTRA gorra', state: 'active' },
+          stock_write_off_required: true,
+          // Defensive: even the legacy key on a read is not a proposal.
+          requires_confirmation: true,
+          confirmed_total_units: 5,
+          confirmed_total_value: 1000,
+          archivable: true,
+        }),
+      )
+      .mockRejectedValueOnce(
+        new VendixHttpException(
+          ErrorCodes.AI_AGENT_005,
+          'requiere confirmación',
+          {
+            tool: 'archive_product',
+            arguments: {
+              product_id: 101,
+              confirmed_total_units: 5,
+              confirmed_total_value: 1000,
+            },
+            preview: { target: 'MUESTRA gorra' },
+            confirmation_token: 'tok-arch',
+          } as any,
+        ),
+      );
+    chat
+      .mockResolvedValueOnce(
+        ok({
+          tool_calls: [
+            call('c1', 'preview_archive_product', { product_id: 101 }),
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        ok({
+          tool_calls: [
+            call('c2', 'archive_product', {
+              product_id: 101,
+              confirmed_total_units: 5,
+              confirmed_total_value: 1000,
+            }),
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(ok({ content: 'Te dejé la tarjeta.' }));
+    const plan: AgentPlanHook = {
+      execute: jest.fn(),
+      snapshot: jest.fn().mockResolvedValue(makePlan({ id: 'plan-314' })),
+    };
+
+    const { chunks, result } = await drain({
+      agent_key: 'vex',
+      plan,
+      plan_approval: {
+        redeem: jest.fn(),
+        issueSingleUse: jest.fn(),
+        classifyProposedSteps: jest.fn((steps: any[]) => ({
+          covered: [],
+          reconfirm: steps,
+        })),
+        saveProposedSteps: jest.fn().mockResolvedValue(undefined),
+      },
+    });
+
+    // The read did not stop the loop: the model got a second iteration and
+    // the write it proposed reached the approval card.
+    expect(executeTool).toHaveBeenCalledTimes(2);
+    expect(executeTool.mock.calls[1][0]).toBe('archive_product');
+    const approvals = chunks.filter((c) => c.type === 'plan_approval');
+    expect(approvals).toHaveLength(1);
+    expect(approvals[0].plan_approval!.steps!.map((s) => s.tool)).toEqual([
+      'archive_product',
+    ]);
+    const previewResult = chunks.find(
+      (c) => c.type === 'tool_result' && c.tool?.name === 'preview_archive_product',
+    );
+    expect(previewResult?.tool?.execution?.status).toBe('ok');
+    expect(result.content).not.toContain(USER_NOTICES.exhausted);
   });
 
   it('(vex-vii) an approved plan step executes in the same stream', async () => {
