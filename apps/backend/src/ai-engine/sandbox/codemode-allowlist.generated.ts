@@ -127,7 +127,7 @@ export const CODEMODE_ALLOWLIST: readonly CodeModeAllowlistEntry[] = Object.free
   { name: 'list_tax_categories', domain: 'withholding', version: '1', permissions: ['store:taxes:read'], parameters_hash: '26964a91972c5f72fbd5ab0e4c56934436227c6601e9d8fd1b8352e6cee408f8' },
   { name: 'list_withholding_calculations', domain: 'withholding', version: '1', permissions: ['withholding:read'], parameters_hash: '4ceab119ca60e6301c68a1b8e2b4db6068b7de9445a68ccbe6a21bf539aa29ed' },
   { name: 'lookup_customer', domain: 'customers', version: '1', permissions: ['store:customers:read'], parameters_hash: '0716027863fe439fc953590dc6783b33548749e8406c385d9fa3b48dda8fdfd7' },
-  { name: 'preview_archive_product', domain: 'products', version: '1', permissions: ['store:products:admin_delete'], parameters_hash: '30ff8bcd175c58b6075a7003545c41c1a480102f1defb11d80b5b14ecf652e13' },
+  { name: 'preview_archive_product', domain: 'products', version: '1', permissions: ['store:products:admin_delete'], parameters_hash: 'fdee18eb093797fe178254b3de86fd4b0057b84ee7506b7fb5968bd389188834' },
   { name: 'preview_kitchen_fire', domain: 'kitchen', version: '1', permissions: ['store:kitchen_fire:read'], parameters_hash: 'c7af97ca782f44f0bf2016feafe643bf582c09308ac2707afd8c000625ad2dbd' },
   { name: 'preview_product_price_tiers', domain: 'pricing', version: '1', permissions: ['store:price-tiers:read', 'store:products:read'], parameters_hash: '2591b25c596f036c83985c901390867bc30c3390b0fbd851a2de1e7883be574b' },
   { name: 'preview_refund', domain: 'orders', version: '1', permissions: ['store:orders:order_flow:read'], parameters_hash: '89fc9e23c482c04afca57d4c49705a730eb2cd44148171b00eb70021df646a6e' },

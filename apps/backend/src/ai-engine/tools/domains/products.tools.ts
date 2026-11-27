@@ -67,6 +67,19 @@ function round2(value: number): number {
 }
 
 const PRODUCT_STATES = ['active', 'inactive', 'archived'] as const;
+
+/**
+ * F5 (conversation 314): one card deletes up to this many products. More is
+ * split into batches and the person is told so.
+ */
+export const MAX_PRODUCTS_PER_DELETION = 100;
+/** Shown on every product-deletion card (Rafael: deletions are final). */
+export const DELETION_IS_FINAL = 'Esta acción no se puede deshacer.';
+const PRODUCT_STATE_LABELS: Record<string, string> = {
+  active: 'Activo',
+  inactive: 'Inactivo',
+  archived: 'Eliminado',
+};
 const PRODUCT_TYPES = ['physical', 'service', 'prepared'] as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -625,12 +638,12 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
     args: Record<string, any>,
     storeId: number | undefined,
   ): Promise<WriteResolution<ArchiveContext>> {
-    const label = 'Archivado de producto';
+    const label = 'Eliminación de producto';
 
     if (!storeId) {
       return writeFailure(
         label,
-        'Sin tienda en contexto: los productos se archivan siempre dentro de una tienda.',
+        'Sin tienda en contexto: los productos se eliminan siempre dentro de una tienda.',
       );
     }
 
@@ -639,7 +652,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
       return writeFailure(
         label,
         'product_id inválido.',
-        'Usa find_product para obtener el product_id antes de archivar.',
+        'Usa find_product para obtener el product_id antes de eliminar.',
       );
     }
 
@@ -648,7 +661,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
     if (!context?.product || !context?.plan) {
       return writeFailure(
         label,
-        `No existe un producto archivable con id ${productId} en esta tienda (inexistente o ya archivado).`,
+        `No existe un producto que se pueda eliminar con id ${productId} en esta tienda (inexistente o ya eliminado).`,
         'Usa find_product con el nombre o el SKU para obtener el product_id correcto.',
       );
     }
@@ -688,8 +701,8 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
     const confirmedValue = toWriteNumber(args.confirmed_total_value);
     if (confirmedUnits === null || confirmedValue === null) {
       return writeFailure(
-        'Archivado de producto',
-        'Todo archivado exige preview_archive_product primero: llama a esa lectura y pasa sus confirmed_total_units y confirmed_total_value tal cual.',
+        'Eliminación de producto',
+        'Toda eliminación exige preview_archive_product primero: llama a esa lectura y pasa sus confirmed_total_units y confirmed_total_value tal cual.',
         'Llama preview_archive_product con el product_id y reintenta con las cifras que devuelva.',
       );
     }
@@ -701,7 +714,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
     if (context.hasActiveReservations) {
       return writeFailure(
         context.label,
-        'El producto tiene reservas de stock activas (pedidos en curso apartando unidades). Libéralas antes de archivarlo: el archivado nunca destruye existencia comprometida.',
+        'El producto tiene reservas de stock activas (pedidos en curso apartando unidades). Libéralas antes de eliminarlo: la eliminación nunca destruye existencia comprometida.',
         'Despacha o cancela esos pedidos y repite preview_archive_product.',
       );
     }
@@ -712,7 +725,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
         .join(', ');
       return writeFailure(
         context.label,
-        `El producto tiene ${context.plan.out_of_scope_units} unidades en ubicaciones fuera de esta tienda (${where}). Transfiérelas o ajústalas desde Inventario antes de archivarlo.`,
+        `El producto tiene ${context.plan.out_of_scope_units} unidades en ubicaciones fuera de esta tienda (${where}). Transfiérelas o ajústalas desde Inventario antes de eliminarlo.`,
       );
     }
 
@@ -731,6 +744,112 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
       ok: true,
       value: { ...context, confirmedUnits, confirmedValue },
     };
+  }
+
+  /** One product of a deletion preview list (F5). */
+  interface ArchivePreviewRow {
+    product_id: number;
+    name: string | null;
+    total_units: number;
+    total_value: number;
+    archivable: boolean;
+    blocked_reason: string | null;
+  }
+
+  /** Validates a 1..100 list of positive ids; duplicates collapse. */
+  function deletionIdList(
+    raw: unknown,
+    field: string,
+  ): WriteResolution<number[]> {
+    const label = 'Eliminación de productos';
+    if (!Array.isArray(raw) || raw.length === 0)
+      return writeFailure(label, `${field} debe ser una lista con al menos un producto.`);
+    if (raw.length > MAX_PRODUCTS_PER_DELETION)
+      return writeFailure(
+        label,
+        `Una tarjeta elimina como máximo ${MAX_PRODUCTS_PER_DELETION} productos y llegaron ${raw.length}.`,
+        `Parte la lista en tandas de hasta ${MAX_PRODUCTS_PER_DELETION}, propón la primera y dile a la persona que el resto irá en otra tarjeta.`,
+      );
+    const ids: number[] = [];
+    for (const value of raw) {
+      const id = toWritePositiveInt(
+        value && typeof value === 'object'
+          ? (value as Record<string, unknown>).product_id
+          : value,
+      );
+      if (!id)
+        return writeFailure(
+          label,
+          `${field} trae un product_id inválido.`,
+          'Usa find_product para obtener los product_id antes de eliminar.',
+        );
+      ids.push(id);
+    }
+    return { ok: true, value: ids };
+  }
+
+  async function previewArchiveRow(
+    productId: number,
+    storeId: number | undefined,
+  ): Promise<ArchivePreviewRow> {
+    const resolved = await resolveArchiveContext(
+      { product_id: productId },
+      storeId,
+    );
+    if (!resolved.ok)
+      return {
+        product_id: productId,
+        name: null,
+        total_units: 0,
+        total_value: 0,
+        archivable: false,
+        blocked_reason: resolved.message,
+      };
+    const { label, plan, hasActiveReservations } = resolved.value;
+    const blocked_reason = hasActiveReservations
+      ? 'Tiene reservas de stock activas (pedidos en curso): despáchalos o cancélalos antes de eliminarlo.'
+      : plan.out_of_scope_units > 0
+        ? `Tiene ${plan.out_of_scope_units} unidades fuera de esta tienda: transfiérelas o ajústalas desde Inventario antes de eliminarlo.`
+        : null;
+    return {
+      product_id: productId,
+      name: label,
+      total_units: plan.total_units,
+      total_value: round2(plan.total_value),
+      archivable: blocked_reason === null,
+      blocked_reason,
+    };
+  }
+
+  /**
+   * F5: the N products of ONE deletion card. Every item is re-verified
+   * against the current plan; if any fails, the whole batch fails and nothing
+   * is deleted (no half batches).
+   */
+  async function resolveProductArchiveBatch(
+    args: Record<string, any>,
+    storeId: number | undefined,
+  ): Promise<WriteResolution<ProductArchive[]>> {
+    const ids = deletionIdList(args.items, 'items');
+    if (!ids.ok) return ids;
+    if (new Set(ids.value).size !== ids.value.length)
+      return writeFailure(
+        'Eliminación de productos',
+        'items repite un mismo producto.',
+        'Deja cada product_id una sola vez y vuelve a proponer el lote.',
+      );
+    const archives: ProductArchive[] = [];
+    for (const item of args.items as Array<Record<string, any>>) {
+      const resolved = await resolveProductArchive(item, storeId);
+      if (!resolved.ok)
+        return writeFailure(
+          'Eliminación de productos',
+          `No se eliminó ninguno de los ${ids.value.length} productos: ${resolved.label}: ${resolved.message}`,
+          'Repite preview_archive_product con product_ids de todo el lote y vuelve a proponer archive_product con las cifras nuevas.',
+        );
+      archives.push(resolved.value);
+    }
+    return { ok: true, value: archives };
   }
 
   // ─── O-5 manage_product_images ─────────────────────────────────────────
@@ -2148,7 +2267,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
       domain: 'products',
       readOnly: true,
       description:
-        'Calcula, SIN ESCRIBIR NADA, qué existencias se darían de baja si se archiva el producto: unidades y valor por ubicación y variante, unidades sin costo conocido, y existencias fuera de la tienda que bloquearían el archivado. Es el paso OBLIGATORIO antes de archive_product: ese write exige las cifras confirmed_total_units y confirmed_total_value que esta lectura devuelve. Requiere product_id: obtenlo con find_product.',
+        'Calcula, SIN ESCRIBIR NADA, qué existencias salen del inventario si se elimina el producto: unidades y valor por ubicación y variante, unidades sin costo conocido, y existencias fuera de la tienda que bloquearían la eliminación. Es el paso OBLIGATORIO antes de archive_product: ese write exige las cifras confirmed_total_units y confirmed_total_value que esta lectura devuelve. Un producto: product_id. Varios (hasta 100): product_ids en UNA sola llamada; devuelve cada producto con sus cifras, los bloqueados y los items listos para archive_product. Obtén los ids con find_product.',
       parameters: {
         type: 'object',
         properties: {
@@ -2156,14 +2275,60 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
             type: 'number',
             description: 'ID del producto, obtenido con find_product.',
           },
+          product_ids: {
+            type: 'array',
+            items: { type: 'number' },
+            minItems: 1,
+            maxItems: MAX_PRODUCTS_PER_DELETION,
+            description:
+              'Para eliminar varios productos (1 a 100): sus IDs, en lugar de product_id. Una sola llamada para todo el lote.',
+          },
         },
-        required: ['product_id'],
+        required: [],
       },
       // `admin_delete` y no `read`, igual que el endpoint: es el ensayo de
       // una operación irreversible y enumera existencias con su valoración.
       // Quien no puede archivar no necesita saber cuánto se destruiría.
       requiredPermissions: ['store:products:admin_delete'],
       handler: async (args, context) => {
+        if (args.product_ids !== undefined && args.product_ids !== null) {
+          const ids = deletionIdList(args.product_ids, 'product_ids');
+          if (!ids.ok) return writeToolError(ids.message, ids.nextStep);
+          const products: ArchivePreviewRow[] = [];
+          for (const id of [...new Set(ids.value)])
+            products.push(await previewArchiveRow(id, context.store_id));
+          const archivable = products.filter((p) => p.archivable);
+          const blocked = products
+            .filter((p) => !p.archivable)
+            .map((p) => ({
+              product_id: p.product_id,
+              name: p.name,
+              reason: p.blocked_reason,
+            }));
+          return JSON.stringify({
+            products,
+            confirmed_total_units: archivable.reduce(
+              (sum, p) => sum + p.total_units,
+              0,
+            ),
+            confirmed_total_value: round2(
+              archivable.reduce((sum, p) => sum + p.total_value, 0),
+            ),
+            blocked,
+            items: archivable.map((p) => ({
+              product_id: p.product_id,
+              confirmed_total_units: p.total_units,
+              confirmed_total_value: p.total_value,
+            })),
+            next_step:
+              archivable.length === 0
+                ? 'Ningún producto de la lista se puede eliminar: explica a la persona por qué (blocked) y no propongas archive_product.'
+                : 'Esta vista previa no es la propuesta y no requiere aprobación: llama ahora UNA sola vez archive_product con items tal cual (todos los eliminables); esa llamada deja UNA tarjeta con todos los productos para una sola aprobación.' +
+                  (blocked.length > 0
+                    ? ' Los bloqueados no van en items: dile a la persona cuáles quedan fuera y por qué.'
+                    : ''),
+          });
+        }
         const resolved = await resolveArchiveContext(args, context.store_id);
         if (!resolved.ok) {
           return JSON.stringify({
@@ -2202,14 +2367,17 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
           archivable: !blocked,
           next_step: blocked
             ? hasActiveReservations
-              ? 'El archivado está bloqueado por reservas activas: despacha o cancela esos pedidos antes de proponer archive_product.'
-              : 'El archivado está bloqueado por existencias fuera de la tienda: transfiérelas o ajústalas desde Inventario antes de proponer archive_product.'
-            : 'Esta vista previa no es la propuesta y no requiere aprobación: llama ahora archive_product con confirmed_total_units y confirmed_total_value tal cual; esa llamada deja la tarjeta para que la persona apruebe la baja. Si el inventario se mueve, repite este preview.',
+              ? 'La eliminación está bloqueada por reservas activas: despacha o cancela esos pedidos antes de proponer archive_product.'
+              : 'La eliminación está bloqueada por existencias fuera de la tienda: transfiérelas o ajústalas desde Inventario antes de proponer archive_product.'
+            : 'Esta vista previa no es la propuesta y no requiere aprobación: llama ahora archive_product con confirmed_total_units y confirmed_total_value tal cual; esa llamada deja la tarjeta para que la persona apruebe la eliminación. Si el inventario se mueve, repite este preview.',
         });
       },
     },
 
     // ─── Tool 8: archive_product (O-4, write) ────────────────────────────
+    // Internal name stays `archive_product`; everything the person reads says
+    // «eliminar» (Rafael, conversation 314). F5: `items` deletes up to 100
+    // products in ONE proposal → one card, one approval, N deletions.
     {
       name: 'archive_product',
       version: '1',
@@ -2217,7 +2385,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
       requiresConfirmation: true,
       irreversible: true,
       description:
-        'Archiva un producto DEFINITIVAMENTE (DELETE irreversible, da de baja sus existencias con un ajuste de tipo pérdida y deja auditoría). EXIGE haber llamado preview_archive_product primero: pasa sus confirmed_total_units y confirmed_total_value tal cual y el handler los re-verifica contra el plan vigente (si se movió, te pide repetir el preview). Se bloquea con reservas activas o con existencias fuera de la tienda. Requiere product_id: obtenlo con find_product.',
+        'Elimina productos DEFINITIVAMENTE (irreversible: saca sus existencias del inventario con un ajuste de tipo pérdida y deja auditoría). EXIGE haber llamado preview_archive_product primero. Un producto: product_id + confirmed_total_units + confirmed_total_value tal cual. Varios (hasta 100): items = [{product_id, confirmed_total_units, confirmed_total_value}] en UNA sola llamada, que deja UNA tarjeta con todos para una sola aprobación; nunca una llamada por producto. Antes de ejecutar se re-verifica cada producto contra el estado vigente: si alguno cambió, no se elimina ninguno y hay que repetir el preview. Se bloquea con reservas activas o con existencias fuera de la tienda.',
       parameters: {
         type: 'object',
         properties: {
@@ -2228,22 +2396,81 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
           confirmed_total_units: {
             type: 'number',
             description:
-              'Las unidades que devolvió preview_archive_product para este producto. Sin haber llamado ese preview, el archivado no procede.',
+              'Las unidades que devolvió preview_archive_product para este producto. Sin haber llamado ese preview, la eliminación no procede.',
           },
           confirmed_total_value: {
             type: 'number',
             description:
-              'El valor que devolvió preview_archive_product para este producto. Sin haber llamado ese preview, el archivado no procede.',
+              'El valor que devolvió preview_archive_product para este producto. Sin haber llamado ese preview, la eliminación no procede.',
+          },
+          items: {
+            type: 'array',
+            minItems: 1,
+            maxItems: MAX_PRODUCTS_PER_DELETION,
+            description:
+              'Para eliminar varios productos (1 a 100) en una sola tarjeta, en lugar de product_id: los items que devolvió preview_archive_product con product_ids, tal cual.',
+            items: {
+              type: 'object',
+              properties: {
+                product_id: { type: 'number' },
+                confirmed_total_units: { type: 'number' },
+                confirmed_total_value: { type: 'number' },
+              },
+              required: [
+                'product_id',
+                'confirmed_total_units',
+                'confirmed_total_value',
+              ],
+            },
           },
         },
-        required: [
-          'product_id',
-          'confirmed_total_units',
-          'confirmed_total_value',
-        ],
+        required: [],
       },
       requiredPermissions: ['store:products:admin_delete'],
       preview: async (args, context) => {
+        if (args.items !== undefined && args.items !== null) {
+          const batch = await resolveProductArchiveBatch(
+            args,
+            context.store_id,
+          );
+          if (!batch.ok) {
+            return writePreviewError(
+              batch.label,
+              [batch.message, batch.nextStep].filter(Boolean).join(' '),
+              'products',
+            );
+          }
+          const archives = batch.value;
+          const units = archives.reduce((sum, a) => sum + a.plan.total_units, 0);
+          const value = round2(
+            archives.reduce((sum, a) => sum + a.plan.total_value, 0),
+          );
+          const count = archives.length;
+          const noun = count === 1 ? 'producto' : 'productos';
+          return {
+            status: 'warning',
+            label: `Eliminar ${count} ${noun}`,
+            target: `Eliminar ${count} ${noun}`,
+            changes: [
+              ...archives.map((a) => ({
+                field: `product_${a.productId}`,
+                label: a.label,
+                from: `${a.plan.total_units} unidades · ${round2(a.plan.total_value)}`,
+                to: 'Eliminado',
+              })),
+              {
+                field: 'total',
+                label: `Total (${count} ${noun})`,
+                from: `${units} unidades · ${value}`,
+                to: 'Eliminado',
+              },
+            ],
+            message:
+              `Se eliminan ${count} ${noun} y salen del inventario ${units} ` +
+              `unidades por ${value}. ${DELETION_IS_FINAL}`,
+            domain: 'products',
+          };
+        }
         const resolved = await resolveProductArchive(args, context.store_id);
         if (!resolved.ok) {
           return writePreviewError(
@@ -2256,39 +2483,93 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
 
         return {
           status: 'warning',
+          label: `Eliminar ${archive.label}`,
           target: archive.label,
           changes: [
             {
               field: 'state',
               label: 'Estado',
-              from: archive.state,
-              to: 'archived',
+              from: PRODUCT_STATE_LABELS[archive.state] ?? archive.state,
+              to: 'Eliminado',
             },
             {
               field: 'stock_write_off_units',
-              label: 'Unidades dadas de baja',
+              label: 'Unidades que salen del inventario',
               from: archive.plan.total_units,
               to: 0,
             },
             {
               field: 'stock_write_off_value',
-              label: 'Valor dado de baja',
+              label: 'Valor que sale del inventario',
               from: round2(archive.plan.total_value),
               to: 0,
             },
           ],
           message:
-            `Archivado IRREVERSIBLE: da de baja ${archive.plan.total_units} ` +
+            `Eliminación: salen del inventario ${archive.plan.total_units} ` +
             `unidades por ${round2(archive.plan.total_value)} en ` +
             `${archive.plan.lines.length} ubicación(es)` +
             (archive.plan.zero_cost_units > 0
               ? ` (${archive.plan.zero_cost_units} sin costo conocido, no producen asiento)`
               : '') +
-            '.',
+            `. ${DELETION_IS_FINAL}`,
           domain: 'products',
         };
       },
       handler: async (args, context) => {
+        if (args.items !== undefined && args.items !== null) {
+          // Re-verify EVERY item before deleting any: one moved figure aborts
+          // the whole batch (no half batches).
+          const batch = await resolveProductArchiveBatch(
+            args,
+            context.store_id,
+          );
+          if (!batch.ok) return writeToolError(batch.message, batch.nextStep);
+          const deleted: Array<{
+            product_id: number;
+            name: string;
+            write_off_units: number;
+            write_off_value: number;
+          }> = [];
+          for (const archive of batch.value) {
+            try {
+              await productsService.remove(archive.productId, {
+                confirm_stock_write_off: true,
+              });
+            } catch (error) {
+              const { code, message } = describeWriteError(error);
+              const pending = batch.value.length - deleted.length - 1;
+              return JSON.stringify({
+                error:
+                  `Se eliminaron ${deleted.length} de ${batch.value.length} productos; ` +
+                  `falló ${archive.label}${code ? ` (${code})` : ''}: ${message}. ` +
+                  `Los ${pending} restantes no se tocaron.`,
+                next_step:
+                  'Cuéntale a la persona exactamente cuáles se eliminaron y cuál falló; para los restantes repite preview_archive_product con product_ids.',
+                data: { deleted },
+              });
+            }
+            deleted.push({
+              product_id: archive.productId,
+              name: archive.label,
+              write_off_units: archive.plan.total_units,
+              write_off_value: round2(archive.plan.total_value),
+            });
+          }
+          const units = deleted.reduce((sum, d) => sum + d.write_off_units, 0);
+          const value = round2(
+            deleted.reduce((sum, d) => sum + d.write_off_value, 0),
+          );
+          return JSON.stringify({
+            summary: `Se eliminaron ${deleted.length} productos; salieron del inventario ${units} unidades por ${value}.`,
+            data: {
+              deleted,
+              state: 'archived',
+              write_off_units: units,
+              write_off_value: value,
+            },
+          });
+        }
         try {
           // Re-verificación completa: el plan pudo moverse (o aparecer
           // reservas) entre la propuesta y la confirmación. El token de
@@ -2305,7 +2586,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
 
           return JSON.stringify({
             summary:
-              `${resolved.value.label}: archivado con baja de ` +
+              `${resolved.value.label}: eliminado; salieron del inventario ` +
               `${resolved.value.plan.total_units} unidades por ` +
               `${round2(resolved.value.plan.total_value)}.`,
             data: {
@@ -2318,7 +2599,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
         } catch (error) {
           const { code, message } = describeWriteError(error);
           return writeToolError(
-            `No se pudo archivar el producto${code ? ` (${code})` : ''}: ${message}`,
+            `No se pudo eliminar el producto${code ? ` (${code})` : ''}: ${message}`,
           );
         }
       },

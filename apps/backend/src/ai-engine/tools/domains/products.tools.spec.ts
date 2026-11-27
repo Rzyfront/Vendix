@@ -365,12 +365,16 @@ describe('products.tools · contrato canónico T4', () => {
       expect(byName.get('deactivate_product')!.parameters.required).toEqual([
         'product_id',
       ]);
+      // F5: product_id O product_ids / items; la cadena O-3→O-4 la exige
+      // el handler (cifras del preview), no el schema.
       expect(
         byName.get('preview_archive_product')!.parameters.required,
-      ).toEqual(['product_id']);
-      // O-4 exige la cadena O-3→O-4: las cifras del preview viajan como
-      // parámetros requeridos.
-      expect(byName.get('archive_product')!.parameters.required).toEqual([
+      ).toEqual([]);
+      expect(byName.get('archive_product')!.parameters.required).toEqual([]);
+      expect(
+        byName.get('archive_product')!.parameters.properties.items.items
+          .required,
+      ).toEqual([
         'product_id',
         'confirmed_total_units',
         'confirmed_total_value',
@@ -1286,7 +1290,7 @@ describe('products.tools · contrato canónico T4', () => {
         has_active_reservations: false,
         archivable: true,
         next_step:
-          'Esta vista previa no es la propuesta y no requiere aprobación: llama ahora archive_product con confirmed_total_units y confirmed_total_value tal cual; esa llamada deja la tarjeta para que la persona apruebe la baja. Si el inventario se mueve, repite este preview.',
+          'Esta vista previa no es la propuesta y no requiere aprobación: llama ahora archive_product con confirmed_total_units y confirmed_total_value tal cual; esa llamada deja la tarjeta para que la persona apruebe la eliminación. Si el inventario se mueve, repite este preview.',
       });
     });
 
@@ -1300,7 +1304,7 @@ describe('products.tools · contrato canónico T4', () => {
       expect(answer).toEqual({
         error: 'product_id inválido.',
         next_step:
-          'Usa find_product para obtener el product_id antes de archivar.',
+          'Usa find_product para obtener el product_id antes de eliminar.',
       });
       expect(
         deps.productsService.findProductArchivePreviewForAgent,
@@ -1320,7 +1324,7 @@ describe('products.tools · contrato canónico T4', () => {
 
       expect(answer).toEqual({
         error:
-          'No existe un producto archivable con id 999 en esta tienda (inexistente o ya archivado).',
+          'No existe un producto que se pueda eliminar con id 999 en esta tienda (inexistente o ya eliminado).',
         next_step:
           'Usa find_product con el nombre o el SKU para obtener el product_id correcto.',
       });
@@ -1375,7 +1379,7 @@ describe('products.tools · contrato canónico T4', () => {
       });
       expect(answer).toEqual({
         summary:
-          'Coca Cola 1L (COCA-1L): archivado con baja de 42 unidades por 126000.',
+          'Coca Cola 1L (COCA-1L): eliminado; salieron del inventario 42 unidades por 126000.',
         data: {
           product_id: 101,
           state: 'archived',
@@ -1395,26 +1399,29 @@ describe('products.tools · contrato canónico T4', () => {
       // verificación del paso 10 exige el write-off detallado acá.
       expect(result).toEqual({
         status: 'warning',
+        label: 'Eliminar Coca Cola 1L (COCA-1L)',
         target: 'Coca Cola 1L (COCA-1L)',
         changes: [
-          { field: 'state', label: 'Estado', from: 'active', to: 'archived' },
+          { field: 'state', label: 'Estado', from: 'Activo', to: 'Eliminado' },
           {
             field: 'stock_write_off_units',
-            label: 'Unidades dadas de baja',
+            label: 'Unidades que salen del inventario',
             from: 42,
             to: 0,
           },
           {
             field: 'stock_write_off_value',
-            label: 'Valor dado de baja',
+            label: 'Valor que sale del inventario',
             from: 126000,
             to: 0,
           },
         ],
         message:
-          'Archivado IRREVERSIBLE: da de baja 42 unidades por 126000 en 1 ubicación(es).',
+          'Eliminación: salen del inventario 42 unidades por 126000 en 1 ubicación(es). Esta acción no se puede deshacer.',
         domain: 'products',
       });
+      // Lenguaje humano: «eliminar», jamás «archivar» ni «dar de baja».
+      expect(JSON.stringify(result)).not.toMatch(/archiv|de baja/i);
       expect(deps.productsService.remove).not.toHaveBeenCalled();
     });
 
@@ -1425,7 +1432,7 @@ describe('products.tools · contrato canónico T4', () => {
 
       expect(answer).toEqual({
         error:
-          'Todo archivado exige preview_archive_product primero: llama a esa lectura y pasa sus confirmed_total_units y confirmed_total_value tal cual.',
+          'Toda eliminación exige preview_archive_product primero: llama a esa lectura y pasa sus confirmed_total_units y confirmed_total_value tal cual.',
         next_step:
           'Llama preview_archive_product con el product_id y reintenta con las cifras que devuelva.',
       });
@@ -1491,7 +1498,7 @@ describe('products.tools · contrato canónico T4', () => {
 
       expect(answer).toEqual({
         error:
-          'El producto tiene 7 unidades en ubicaciones fuera de esta tienda (Bodega central). Transfiérelas o ajústalas desde Inventario antes de archivarlo.',
+          'El producto tiene 7 unidades en ubicaciones fuera de esta tienda (Bodega central). Transfiérelas o ajústalas desde Inventario antes de eliminarlo.',
       });
       expect(deps.productsService.remove).not.toHaveBeenCalled();
     });
@@ -1506,8 +1513,157 @@ describe('products.tools · contrato canónico T4', () => {
       const answer = await run(tools, 'archive_product', CHAIN_ARGS);
 
       expect(answer).toEqual({
-        error: 'No se pudo archivar el producto: transacción abortada',
+        error: 'No se pudo eliminar el producto: transacción abortada',
       });
+    });
+  });
+
+  // ─── F5: eliminar N productos en UNA tarjeta ───────────────────────────
+  describe('(conv-314 F5) eliminación en lote', () => {
+    const IDS = Array.from({ length: 14 }, (_, i) => 201 + i);
+    function contextFor(id: number, units = id - 200) {
+      return {
+        ...ARCHIVE_CONTEXT,
+        product: { ...ARCHIVE_CONTEXT.product, id, name: `Prueba ${id}`, sku: null },
+        plan: {
+          ...ARCHIVE_CONTEXT.plan,
+          total_units: units,
+          total_value: units * 1000,
+          lines: [{ ...ARCHIVE_CONTEXT.plan.lines[0], quantity_on_hand: units, value: units * 1000 }],
+        },
+      };
+    }
+    function batchDeps(override: (id: number) => any = contextFor) {
+      const deps = baseDeps();
+      deps.productsService.findProductArchivePreviewForAgent.mockImplementation(
+        async (id: number) => override(id),
+      );
+      deps.productsService.remove.mockResolvedValue({ state: 'archived' });
+      return deps;
+    }
+    const ITEMS = IDS.map((id) => ({
+      product_id: id,
+      confirmed_total_units: id - 200,
+      confirmed_total_value: (id - 200) * 1000,
+    }));
+
+    it('preview con product_ids devuelve agregados, bloqueados e items en una sola llamada', async () => {
+      const deps = batchDeps((id) =>
+        id === 214
+          ? { ...contextFor(id), hasActiveReservations: true }
+          : contextFor(id),
+      );
+      const { tools } = buildTools(deps);
+      const answer = await run(tools, 'preview_archive_product', {
+        product_ids: IDS,
+      });
+      expect(answer.products).toHaveLength(14);
+      expect(answer.products[0]).toEqual({
+        product_id: 201,
+        name: expect.stringContaining('Prueba 201'),
+        total_units: 1,
+        total_value: 1000,
+        archivable: true,
+        blocked_reason: null,
+      });
+      // 1..13 eliminables: Σ = 91 unidades, 91000 de valor.
+      expect(answer.confirmed_total_units).toBe(91);
+      expect(answer.confirmed_total_value).toBe(91000);
+      expect(answer.blocked).toEqual([
+        {
+          product_id: 214,
+          name: expect.stringContaining('Prueba 214'),
+          reason: expect.stringContaining('reservas'),
+        },
+      ]);
+      expect(answer.items).toHaveLength(13);
+      expect(answer.next_step).toContain('UNA sola vez archive_product');
+    });
+
+    it('preview con más de 100 ids se rechaza y pide tandas', async () => {
+      const { deps, tools } = buildTools(batchDeps());
+      const answer = await run(tools, 'preview_archive_product', {
+        product_ids: Array.from({ length: 101 }, (_, i) => i + 1),
+      });
+      expect(answer.error).toContain('como máximo 100');
+      expect(answer.next_step).toContain('tandas');
+      expect(
+        deps.productsService.findProductArchivePreviewForAgent,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('archive con items deja UNA propuesta con 14 filas + total y «no se puede deshacer»', async () => {
+      const deps = batchDeps();
+      const { tools } = buildTools(deps);
+      const result = await previewTool(tools, 'archive_product', {
+        items: ITEMS,
+      });
+      expect(result.status).toBe('warning');
+      expect(result.label).toBe('Eliminar 14 productos');
+      expect(result.changes).toHaveLength(15);
+      expect(result.changes[0]).toEqual({
+        field: 'product_201',
+        label: expect.stringContaining('Prueba 201'),
+        from: '1 unidades · 1000',
+        to: 'Eliminado',
+      });
+      expect(result.changes[14]).toEqual({
+        field: 'total',
+        label: 'Total (14 productos)',
+        from: '105 unidades · 105000',
+        to: 'Eliminado',
+      });
+      expect(result.message).toContain('Esta acción no se puede deshacer.');
+      expect(JSON.stringify(result)).not.toMatch(/archiv|de baja/i);
+      expect(deps.productsService.remove).not.toHaveBeenCalled();
+    });
+
+    it('si un item cambió de cifras, no se elimina ninguno', async () => {
+      const deps = batchDeps((id) =>
+        id === 210 ? contextFor(id, 99) : contextFor(id),
+      );
+      const { tools } = buildTools(deps);
+      const answer = await run(tools, 'archive_product', { items: ITEMS });
+      expect(answer.error).toContain('No se eliminó ninguno de los 14 productos');
+      expect(answer.next_step).toContain('product_ids');
+      expect(deps.productsService.remove).not.toHaveBeenCalled();
+      const preview = await previewTool(tools, 'archive_product', {
+        items: ITEMS,
+      });
+      expect(preview.status).toBe('error');
+    });
+
+    it('aprobar ejecuta los 14', async () => {
+      const deps = batchDeps();
+      const { tools } = buildTools(deps);
+      const answer = await run(tools, 'archive_product', { items: ITEMS });
+      expect(deps.productsService.remove).toHaveBeenCalledTimes(14);
+      for (const id of IDS)
+        expect(deps.productsService.remove).toHaveBeenCalledWith(id, {
+          confirm_stock_write_off: true,
+        });
+      expect(answer.summary).toBe(
+        'Se eliminaron 14 productos; salieron del inventario 105 unidades por 105000.',
+      );
+      expect(answer.data.deleted).toHaveLength(14);
+    });
+
+    it('items con más de 100 o repetidos se rechazan sin tocar nada', async () => {
+      const deps = batchDeps();
+      const { tools } = buildTools(deps);
+      const many = await run(tools, 'archive_product', {
+        items: Array.from({ length: 101 }, (_, i) => ({
+          product_id: i + 1,
+          confirmed_total_units: 1,
+          confirmed_total_value: 1,
+        })),
+      });
+      expect(many.error).toContain('como máximo 100');
+      const dup = await run(tools, 'archive_product', {
+        items: [ITEMS[0], ITEMS[0]],
+      });
+      expect(dup.error).toContain('repite');
+      expect(deps.productsService.remove).not.toHaveBeenCalled();
     });
   });
 

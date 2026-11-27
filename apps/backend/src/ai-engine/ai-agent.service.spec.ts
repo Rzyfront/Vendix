@@ -1185,6 +1185,68 @@ describe('AIAgentService.runAgentStream', () => {
     expect(result.content).not.toContain(USER_NOTICES.exhausted);
   });
 
+  it('(conv-314 F5) archive_product with 14 items leaves ONE plan_approval frame with one step carrying 14 rows', async () => {
+    const items = Array.from({ length: 14 }, (_, i) => ({
+      product_id: 201 + i,
+      confirmed_total_units: 1,
+      confirmed_total_value: 1000,
+    }));
+    const preview = {
+      status: 'warning',
+      label: 'Eliminar 14 productos',
+      target: 'Eliminar 14 productos',
+      changes: [
+        ...items.map((it) => ({
+          field: `product_${it.product_id}`,
+          label: `Prueba ${it.product_id}`,
+          from: '1 unidades · 1000',
+          to: 'Eliminado',
+        })),
+        { field: 'total', label: 'Total (14 productos)', from: '14 unidades · 14000', to: 'Eliminado' },
+      ],
+      message: 'Se eliminan 14 productos. Esta acción no se puede deshacer.',
+    };
+    executeTool.mockRejectedValueOnce(
+      new VendixHttpException(ErrorCodes.AI_AGENT_005, 'requiere confirmación', {
+        tool: 'archive_product',
+        arguments: { items },
+        preview,
+        confirmation_token: 'tok-batch',
+      } as any),
+    );
+    chat
+      .mockResolvedValueOnce(
+        ok({ tool_calls: [call('c1', 'archive_product', { items })] }),
+      )
+      .mockResolvedValueOnce(ok({ content: 'Te dejé la tarjeta.' }));
+    const plan: AgentPlanHook = {
+      execute: jest.fn(),
+      snapshot: jest.fn().mockResolvedValue(makePlan({ id: 'plan-f5' })),
+    };
+    const { chunks, result } = await drain({
+      agent_key: 'vex',
+      plan,
+      plan_approval: {
+        redeem: jest.fn(),
+        issueSingleUse: jest.fn(),
+        classifyProposedSteps: jest.fn((steps: any[]) => ({
+          covered: [],
+          reconfirm: steps,
+        })),
+        saveProposedSteps: jest.fn().mockResolvedValue(undefined),
+      },
+    });
+    expect(executeTool).toHaveBeenCalledTimes(1);
+    const approvals = chunks.filter((c) => c.type === 'plan_approval');
+    expect(approvals).toHaveLength(1);
+    const steps = approvals[0].plan_approval!.steps!;
+    expect(steps).toHaveLength(1);
+    expect(steps[0].arguments).toEqual({ items });
+    expect((steps[0].preview as any).changes).toHaveLength(15);
+    expect(result.pending_plan?.steps).toHaveLength(1);
+    expect(result.content).toContain('eliminar 14 productos');
+  });
+
   it('(vex-vii) an approved plan step executes in the same stream', async () => {
     executeTool
       .mockRejectedValueOnce(
