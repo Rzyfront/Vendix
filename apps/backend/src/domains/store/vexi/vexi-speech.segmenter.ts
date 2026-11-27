@@ -103,9 +103,10 @@ export function hasWordCharacter(text: string): boolean {
  * already been emitted: the first is sized to *start* sound as early as
  * possible, later ones to sound like sentences. See `SEGMENT_TARGETS`.
  *
- * Emits raw text, markers and all. Cleaning for the synthesizer happens
- * downstream and per segment, so captions and history keep the formatting the
- * chat produced while only the audio branch gets stripped prose.
+ * Does not clean markdown itself: `VexiSpeechTurn` runs the answer through
+ * `SpeechMarkdownFilter` before it reaches the segmenter, so a code block or a
+ * JSON payload is removed whole instead of being split across two segments.
+ * Captions and history never pass through here and keep their formatting.
  */
 export class VexiSpeechSegmenter {
   private buffer = '';

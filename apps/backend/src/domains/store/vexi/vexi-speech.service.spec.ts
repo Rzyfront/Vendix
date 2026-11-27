@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import {
   VexiSpeechSegmenter,
   firstSentenceEnd,
@@ -5,11 +6,13 @@ import {
   hasWordCharacter,
 } from './vexi-speech.segmenter';
 import {
+  isTransientSpeechError,
   localizeNumbersForSpeech,
   stripMarkdownForSpeech,
   VexiSpeechService,
 } from './vexi-speech.service';
 import { VexiSpeechCache } from './vexi-speech.cache';
+import { isSynthesisLoss } from './vexi-speech.pipeline';
 import { SEGMENT_TARGETS, VOICE_FILLERS } from './vexi-speech.constants';
 
 describe('firstSentenceEnd', () => {
@@ -163,7 +166,8 @@ describe('VexiSpeechSegmenter', () => {
 
     const segments = segmenter.push('El **total** es 1.500 pesos. ');
 
-    // Stripping happens downstream, per segment, on the audio branch only.
+    // The segmenter never cleans: the turn strips markdown over the whole
+    // answer before cutting (SpeechMarkdownFilter), on the audio branch only.
     expect(segments[0]).toBe('El **total** es 1.500 pesos.');
   });
 });
@@ -410,6 +414,8 @@ describe('VexiSpeechService', () => {
       cache,
       settings as any,
     );
+    // Retries wait real milliseconds in production; specs record them instead.
+    jest.spyOn(service as any, 'wait').mockResolvedValue(undefined);
   });
 
   describe('resolveParams', () => {
@@ -642,15 +648,19 @@ describe('VexiSpeechService', () => {
       expect(aiEngine.runSpeech).not.toHaveBeenCalled();
     });
 
-    it('degrades to text-only instead of throwing when the provider fails', async () => {
+    it('reports a lost segment, with its reason, instead of throwing when the provider fails', async () => {
       aiEngine.runSpeech.mockResolvedValueOnce({
         success: false,
         error: 'AI_PROVIDER_002',
       });
 
       // A failed synthesis is a worse voice experience; a thrown error would
-      // take the captions down with it.
-      await expect(service.synthesize('Hola.', params)).resolves.toBeNull();
+      // take the captions down with it. Not transient: no retry.
+      await expect(service.synthesize('Hola.', params)).resolves.toEqual({
+        lost: true,
+        reason: 'AI_PROVIDER_002',
+      });
+      expect(aiEngine.runSpeech).toHaveBeenCalledTimes(1);
     });
 
     it('does not cache a failed synthesis', async () => {
@@ -671,10 +681,402 @@ describe('VexiSpeechService', () => {
       expect(first).toEqual(
         expect.objectContaining({ generated: true, audioBase64: 'AAAA' }),
       );
-      expect(first!.seconds).toBeCloseTo(text.length / 15, 5);
+      if (!first || isSynthesisLoss(first)) throw new Error('expected audio');
+      expect(first.seconds).toBeCloseTo(text.length / 15, 5);
       expect(second).toEqual(
         expect.objectContaining({ generated: false, seconds: 0 }),
       );
+    });
+  });
+
+  describe('transient provider failures', () => {
+    // OpenRouter's 429 body for Gemini TTS: the message never says "429".
+    const RATE_LIMITED = {
+      success: false,
+      error: 'Provider returned error',
+      statusCode: 429,
+    };
+
+    it('classifies by HTTP status when there is one, by message otherwise', () => {
+      expect(isTransientSpeechError('Provider returned error', 429)).toBe(true);
+      expect(isTransientSpeechError('Bad gateway', 502)).toBe(true);
+      expect(isTransientSpeechError('Request timeout', 408)).toBe(true);
+      expect(isTransientSpeechError('Invalid voice', 400)).toBe(false);
+      expect(isTransientSpeechError('Unauthorized', 401)).toBe(false);
+      expect(isTransientSpeechError('fetch failed')).toBe(true);
+      expect(isTransientSpeechError('ETIMEDOUT')).toBe(true);
+      expect(isTransientSpeechError('Speech model returned no audio')).toBe(true);
+      expect(isTransientSpeechError('Invalid voice id')).toBe(false);
+    });
+
+    it('retries a 429 with backoff, then succeeds', async () => {
+      aiEngine.runSpeech
+        .mockResolvedValueOnce(RATE_LIMITED)
+        .mockResolvedValueOnce(RATE_LIMITED);
+
+      const audio = await service.synthesize('Tienes 47 ventas hoy.', params);
+
+      expect(audio).toEqual(
+        expect.objectContaining({ audioBase64: 'AAAA', generated: true }),
+      );
+      expect(aiEngine.runSpeech).toHaveBeenCalledTimes(3);
+      expect((service as any).wait.mock.calls).toEqual([[500], [1500]]);
+    });
+
+    it('honours the provider Retry-After, capped so the gap stays short', async () => {
+      aiEngine.runSpeech
+        .mockResolvedValueOnce({ ...RATE_LIMITED, retryAfterMs: 2000 })
+        .mockResolvedValueOnce({ ...RATE_LIMITED, retryAfterMs: 60_000 });
+
+      await service.synthesize('Hola, ¿cómo vas?', params);
+
+      expect((service as any).wait.mock.calls).toEqual([[2000], [5000]]);
+    });
+
+    it('retries a thrown network timeout and a 200 without audio', async () => {
+      aiEngine.runSpeech
+        .mockRejectedValueOnce(new Error('ETIMEDOUT'))
+        .mockResolvedValueOnce({
+          success: false,
+          error: 'Speech model returned no audio',
+        });
+
+      const audio = await service.synthesize('Hola, ¿cómo vas?', params);
+
+      expect(audio).toEqual(expect.objectContaining({ audioBase64: 'AAAA' }));
+      expect(aiEngine.runSpeech).toHaveBeenCalledTimes(3);
+    });
+
+    it('does not retry a permanent failure (bad voice, 400)', async () => {
+      aiEngine.runSpeech.mockResolvedValueOnce({
+        success: false,
+        error: 'Invalid voice',
+        statusCode: 400,
+      });
+
+      await expect(service.synthesize('Hola.', params)).resolves.toEqual({
+        lost: true,
+        reason: '400: Invalid voice',
+      });
+      expect(aiEngine.runSpeech).toHaveBeenCalledTimes(1);
+    });
+
+    it('gives up after the retries and reports the segment as lost with status and reason', async () => {
+      aiEngine.runSpeech.mockResolvedValue(RATE_LIMITED);
+
+      const result = await service.synthesize('Tienes 47 ventas hoy.', params);
+
+      expect(result).toEqual({
+        lost: true,
+        reason: '429: Provider returned error',
+      });
+      expect(aiEngine.runSpeech).toHaveBeenCalledTimes(3);
+    });
+
+    it('a lost segment does not break the rest of the turn, and the turn is reported incomplete', async () => {
+      prisma.ai_engine_applications.findUnique.mockResolvedValue(null);
+      aiEngine.runSpeech.mockImplementation(
+        async (_key: string, vars: { text: string }) =>
+          vars.text.startsWith('Dos')
+            ? RATE_LIMITED
+            : {
+                success: true,
+                audioBase64: `b64:${vars.text}`,
+                contentType: 'audio/wav',
+              },
+      );
+
+      const result = await service.synthesizeText(
+        'Uno, la primera frase. Dos, la segunda frase. Tres, la tercera frase.',
+      );
+
+      expect(result.frames.map((f) => f.audio_base64)).toEqual([
+        'b64:Uno, la primera frase.',
+        'b64:Tres, la tercera frase.',
+      ]);
+      expect(result.complete).toBe(false);
+      expect(result.lost).toEqual([
+        { index: 1, reason: '429: Provider returned error' },
+      ]);
+    });
+  });
+
+  describe('synthesis concurrency', () => {
+    /** A provider whose calls stay open until the test releases them. */
+    function holdProvider() {
+      const pending: Array<() => void> = [];
+      let inFlight = 0;
+      let maxInFlight = 0;
+      aiEngine.runSpeech.mockImplementation(
+        async (_key: string, vars: { text: string }) => {
+          inFlight++;
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          await new Promise<void>((resolve) => pending.push(resolve));
+          inFlight--;
+          return {
+            success: true,
+            audioBase64: `b64:${vars.text}`,
+            contentType: 'audio/wav',
+          };
+        },
+      );
+      return {
+        get maxInFlight() {
+          return maxInFlight;
+        },
+        async drain() {
+          while (pending.length) {
+            pending.splice(0).forEach((resolve) => resolve());
+            await new Promise<void>((resolve) => setImmediate(resolve));
+          }
+        },
+      };
+    }
+
+    async function settleWhileReleasing(
+      turn: { settle(): Promise<void> },
+      provider: ReturnType<typeof holdProvider>,
+    ) {
+      let done = false;
+      const settled = turn.settle().then(() => {
+        done = true;
+      });
+      while (!done) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        await provider.drain();
+      }
+      await settled;
+    }
+
+    const FOUR = 'Uno, primera. Dos, segunda. Tres, tercera. Cuatro, cuarta. ';
+
+    it('reads the concurrency from configuration and defaults to 1', async () => {
+      prisma.ai_engine_applications.findUnique.mockResolvedValueOnce(null);
+      await expect(service.resolveSynthesisConcurrency()).resolves.toBe(1);
+
+      prisma.ai_engine_applications.findUnique.mockResolvedValueOnce({
+        metadata: { speech: { max_concurrency: 3 } },
+      });
+      await expect(service.resolveSynthesisConcurrency()).resolves.toBe(3);
+
+      prisma.ai_engine_applications.findUnique.mockResolvedValueOnce({
+        metadata: { speech: { max_concurrency: 'muchas' } },
+      });
+      await expect(service.resolveSynthesisConcurrency()).resolves.toBe(1);
+
+      prisma.ai_engine_applications.findUnique.mockResolvedValueOnce({
+        metadata: { speech: { max_concurrency: 50 } },
+      });
+      await expect(service.resolveSynthesisConcurrency()).resolves.toBe(8);
+
+      prisma.ai_engine_applications.findUnique.mockRejectedValueOnce(
+        new Error('db down'),
+      );
+      await expect(service.resolveSynthesisConcurrency()).resolves.toBe(1);
+    });
+
+    it('a whole turn synthesizes one segment at a time with the default', async () => {
+      prisma.ai_engine_applications.findUnique.mockResolvedValue(null);
+      const provider = holdProvider();
+
+      const turn = await service.openTurn(Date.now());
+      turn.push(FOUR);
+      turn.flush();
+      await settleWhileReleasing(turn, provider);
+
+      expect(aiEngine.runSpeech.mock.calls.length).toBeGreaterThanOrEqual(4);
+      expect(provider.maxInFlight).toBe(1);
+      expect(turn.isComplete()).toBe(true);
+    });
+
+    it('lets two segments through at once when an operator sets 2', async () => {
+      prisma.ai_engine_applications.findUnique.mockResolvedValue({
+        metadata: { speech: { max_concurrency: 2 } },
+      });
+      const provider = holdProvider();
+
+      const turn = await service.openTurn(Date.now());
+      turn.push(FOUR);
+      turn.flush();
+      await settleWhileReleasing(turn, provider);
+
+      expect(provider.maxInFlight).toBe(2);
+    });
+
+    it('two stores speaking at once are not serialized behind each other', async () => {
+      prisma.ai_engine_applications.findUnique.mockResolvedValue(null);
+      const provider = holdProvider();
+
+      const a = service.synthesize('Primera tienda, primera frase.', params);
+      const b = service.synthesize('Segunda tienda, otra frase.', params);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      // The limit is per turn: a store does not wait on another store's audio.
+      expect(provider.maxInFlight).toBe(2);
+      await provider.drain();
+      await Promise.all([a, b]);
+    });
+  });
+
+  describe('multi-paragraph answer read with a catalog voice (voz corta)', () => {
+    const ANSWER = [
+      '## Resumen de hoy\n\n',
+      'Hoy llevas **47 ventas** por un total de 1.500.000 pesos. ',
+      'Es un buen día comparado con la semana pasada.\n\n',
+      'Los productos que más se movieron fueron:\n',
+      '1. Café de origen, con 12 unidades.\n',
+      '2. Pan artesanal, con 9 unidades.\n\n',
+      'Te recomiendo reponer el café antes del viernes, ',
+      'porque al ritmo actual se agota en dos días. ',
+      '¿Quieres que prepare la orden de compra al proveedor?',
+    ];
+
+    beforeEach(() => {
+      (prisma as any).ai_agents = {
+        findUnique: jest.fn().mockResolvedValue({
+          voice_profile: {
+            voice_id: 'Puck',
+            speed: null,
+            vol: null,
+            is_active: true,
+            config: {
+              id: 20,
+              model_id: 'google/gemini-3.8-flash-lite-tts',
+              is_active: true,
+              provider: 'Custom',
+            },
+          },
+        }),
+      };
+      prisma.ai_engine_applications.findUnique.mockResolvedValue(null);
+    });
+
+    async function speak(): Promise<{
+      frames: Array<{ index: number; audio_base64: string }>;
+      complete: boolean;
+    }> {
+      const turn = await service.openTurn(Date.now(), { agentKey: 'vex' });
+      // Streamed the way the chat produces it: chunk by chunk.
+      for (const chunk of ANSWER) turn.push(chunk);
+      turn.flush();
+      const frames: Array<{ index: number; audio_base64: string }> = [];
+      for await (const frame of turn.settleOrdered()) frames.push(frame);
+      return { frames, complete: turn.isComplete() };
+    }
+
+    it('queues and returns every segment, in order, with the whole text', async () => {
+      aiEngine.runSpeech.mockImplementation(
+        async (_key: string, vars: { text: string }) => ({
+          success: true,
+          audioBase64: Buffer.from(vars.text).toString('base64'),
+          contentType: 'audio/wav',
+        }),
+      );
+
+      const { frames, complete } = await speak();
+
+      expect(frames.length).toBeGreaterThan(3);
+      expect(frames.map((f) => f.index)).toEqual(frames.map((_, i) => i));
+      const spoken = frames.map((f) =>
+        Buffer.from(f.audio_base64, 'base64').toString(),
+      );
+      const sent = aiEngine.runSpeech.mock.calls.map(
+        ([, vars]: [string, { text: string }]) => vars.text,
+      );
+      expect(spoken).toEqual(sent);
+      // Nothing after the first paragraph went missing.
+      expect(spoken.join(' ')).toContain('Resumen de hoy');
+      expect(spoken.join(' ')).toContain('Pan artesanal');
+      expect(spoken.join(' ')).toContain('orden de compra al proveedor?');
+      expect(spoken.join(' ')).not.toMatch(/[#*]/);
+      expect(complete).toBe(true);
+      // Every call went to the profile's provider config, never the app's.
+      for (const call of aiEngine.runSpeech.mock.calls) {
+        expect(call[3]).toEqual({ configId: 20 });
+        expect(call[2]).toEqual(
+          expect.objectContaining({
+            voice: 'Puck',
+            model: 'google/gemini-3.8-flash-lite-tts',
+          }),
+        );
+      }
+    });
+
+    it('still reads every segment when the provider rate-limits some calls (429)', async () => {
+      let call = 0;
+      aiEngine.runSpeech.mockImplementation(
+        async (_key: string, vars: { text: string }) =>
+          // Every second call is refused once, as OpenRouter does under load.
+          ++call % 2 === 0
+            ? { success: false, error: 'Provider returned error', statusCode: 429 }
+            : {
+                success: true,
+                audioBase64: Buffer.from(vars.text).toString('base64'),
+                contentType: 'audio/wav',
+              },
+      );
+
+      const { frames, complete } = await speak();
+
+      const spoken = frames.map((f) =>
+        Buffer.from(f.audio_base64, 'base64').toString(),
+      );
+      expect(spoken.join(' ')).toContain('orden de compra al proveedor?');
+      expect(frames.map((f) => f.index)).toEqual(frames.map((_, i) => i));
+      expect(complete).toBe(true);
+    });
+  });
+
+  describe('turn diagnostics', () => {
+    it('logs one line per turn with provider, model and segment counts, never the text', async () => {
+      const agents = {
+        findUnique: jest.fn().mockResolvedValue({
+          voice_profile: {
+            voice_id: 'Puck',
+            speed: null,
+            vol: null,
+            is_active: true,
+            config: {
+              id: 20,
+              model_id: 'google/gemini-3.8-flash-lite-tts',
+              is_active: true,
+              provider: 'Custom',
+            },
+          },
+        }),
+      };
+      (prisma as any).ai_agents = agents;
+      prisma.ai_engine_applications.findUnique.mockResolvedValue(null);
+      aiEngine.runSpeech.mockImplementation(
+        async (_key: string, vars: { text: string }) =>
+          vars.text.startsWith('Dos')
+            ? { success: false, error: 'Provider returned error', statusCode: 429 }
+            : { success: true, audioBase64: 'UklG', contentType: 'audio/wav' },
+      );
+      const log = jest
+        .spyOn(Logger.prototype, 'log')
+        .mockImplementation(() => undefined);
+
+      await service.synthesizeText(
+        'Uno, la primera frase secreta. Dos, la segunda frase secreta. Tres, la tercera frase secreta.',
+        { agentKey: 'vex' },
+      );
+
+      const lines = log.mock.calls
+        .map(([message]) => String(message))
+        .filter((message) => message.startsWith('Speech turn'));
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatch(
+        /^Speech turn provider=Custom model_id=google\/gemini-3\.8-flash-lite-tts segments_total=3 segments_ok=2 segments_failed=1 ms_total=\d+ complete=false$/,
+      );
+      expect(lines[0]).not.toContain('secreta');
+      log.mockRestore();
+    });
+
+    it('keeps the provider name out of the cache key', async () => {
+      const withProvider = { ...params, configId: 20, provider: 'Custom' };
+      const without = { ...params, configId: 20 };
+      expect(cache.key('Hola.', withProvider)).toBe(cache.key('Hola.', without));
     });
   });
 
@@ -692,14 +1094,16 @@ describe('VexiSpeechService', () => {
       const text =
         'Tienes 47 ventas hoy por $1.500.000. El producto más vendido fue Café Sello Rojo y el margen promedio subió 12%.';
 
-      const first = await service.synthesizeText(text);
+      const firstResult = await service.synthesizeText(text);
+      expect(firstResult.complete).toBe(true);
+      const first = firstResult.frames;
       expect(first.length).toBeGreaterThanOrEqual(2);
       expect(first.map((f) => f.index)).toEqual(first.map((_, idx) => idx));
       const callsAfterFirst = aiEngine.runSpeech.mock.calls.length;
       expect(callsAfterFirst).toBe(first.length);
 
       // Second click on the same message hits VexiSpeechCache for every segment.
-      const second = await service.synthesizeText(text);
+      const second = (await service.synthesizeText(text)).frames;
       expect(second).toEqual(first);
       expect(aiEngine.runSpeech).toHaveBeenCalledTimes(callsAfterFirst);
     });
@@ -738,7 +1142,7 @@ describe('VexiSpeechService', () => {
         agentKey: 'vex',
         meter: cachedMeter,
       });
-      expect(replay.length).toBe(streamed);
+      expect(replay.frames.length).toBe(streamed);
       expect(aiEngine.runSpeech).toHaveBeenCalledTimes(streamed);
       expect(cachedMeter).not.toHaveBeenCalled();
 
@@ -752,8 +1156,40 @@ describe('VexiSpeechService', () => {
       for (const [seconds] of meter.mock.calls) expect(seconds).toBeGreaterThan(0);
     });
 
-    it('returns an empty array for blank text without calling the provider', async () => {
-      await expect(service.synthesizeText('   ')).resolves.toEqual([]);
+    it('strips markdown over the whole message before cutting it', async () => {
+      prisma.ai_engine_applications.findUnique.mockResolvedValue(null);
+      aiEngine.runSpeech.mockImplementation(
+        async (_key: string, vars: { text: string }) => ({
+          success: true,
+          audioBase64: `b64:${vars.text}`,
+          contentType: 'audio/mpeg',
+        }),
+      );
+      const payload = JSON.stringify(
+        Array.from({ length: 8 }, (_, i) => ({ sku: `SKU-${i}`, stock: i })),
+        null,
+        2,
+      );
+
+      const result = await service.synthesizeText(
+        `Estos son los productos con poco stock.\n\n\`\`\`json\n${payload}\n\`\`\`\n\nRevísalos hoy, por favor.`,
+      );
+
+      const spoken = aiEngine.runSpeech.mock.calls
+        .map(([, vars]) => vars.text)
+        .join(' | ');
+      expect(spoken).not.toMatch(/sku|SKU|stock"|[{}\[\]"`]/);
+      expect(spoken).toContain('Estos son los productos con poco stock.');
+      expect(spoken).toContain('Revísalos hoy, por favor.');
+      expect(result.complete).toBe(true);
+    });
+
+    it('returns no frames for blank text without calling the provider', async () => {
+      await expect(service.synthesizeText('   ')).resolves.toEqual({
+        frames: [],
+        complete: true,
+        lost: [],
+      });
       expect(aiEngine.runSpeech).not.toHaveBeenCalled();
     });
   });

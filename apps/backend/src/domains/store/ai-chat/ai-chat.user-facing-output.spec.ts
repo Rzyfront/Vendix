@@ -276,6 +276,7 @@ function build(scenario: Scenario) {
     flush: jest.fn(),
     settle: jest.fn().mockResolvedValue(undefined),
     timings: () => [],
+    status: () => ({ type: 'voice_status', complete: false, lost_segments: 1 }),
   };
   const speech = {
     openTurn: jest.fn().mockResolvedValue(turn),
@@ -446,6 +447,18 @@ describe('Salidas visibles de Vexi: solo prosa del modelo o catálogo humano', (
       // The model already asked in prose: no generic notice is appended.
       expect(channel).not.toContain(USER_NOTICES.needs_user_input);
     }
+  });
+
+  it('tells the client whether the turn audio is complete, before done', async () => {
+    const out = await runTurn(SCENARIOS[0]);
+    const types = out.frames.map((f) => f.type);
+    const status = out.frames.find((f) => f.type === 'voice_status');
+    expect(status).toEqual({
+      type: 'voice_status',
+      complete: false,
+      lost_segments: 1,
+    });
+    expect(types.indexOf('voice_status')).toBeLessThan(types.indexOf('done'));
   });
 
   it('M2: a provider failure after an applied write does not invite a repeat', async () => {

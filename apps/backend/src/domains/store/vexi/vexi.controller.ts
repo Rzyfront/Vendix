@@ -46,6 +46,7 @@ import { VexiUiChannelService } from './vexi-ui-channel.service';
 import { VexiTaskService } from './vexi-task.service';
 import { VexiActivityService } from './vexi-activity.service';
 import { VexiSpeechService } from './vexi-speech.service';
+import { isSynthesisLoss } from './vexi-speech.pipeline';
 import { VexiPlanStateService } from './vexi-plan-state.service';
 import {
   clientSafeReceipt,
@@ -265,10 +266,11 @@ export class VexiController {
     // person waiting for a reply they were never going to hear, which is exactly
     // how an applied change ends up looking like a hung one.
     //
-    // A failed synthesis degrades to text: `synthesize()` returns null instead of
-    // throwing, and losing the audio of an acknowledgement must never lose the
-    // acknowledgement — much less suggest the write did not happen. It already
-    // happened, above.
+    // A failed synthesis degrades to text: `synthesize()` returns null or a
+    // `SynthesisLoss` instead of throwing, and both mean "no audio" here — never
+    // an audio field with nothing in it. Losing the audio of an acknowledgement
+    // must never lose the acknowledgement — much less suggest the write did not
+    // happen. It already happened, above.
     let audio: { audioBase64: string; contentType: string } | null = null;
     let voiceNotice: { code: string; message: string } | null = null;
     if (dto.speak && summary) {
@@ -291,8 +293,10 @@ export class VexiController {
             params,
             currency,
           );
-          audio = spoken;
-          this.meterAckVoice(ackAgent, spoken, dto.conversation_id);
+          if (!isSynthesisLoss(spoken)) {
+            audio = spoken;
+            this.meterAckVoice(ackAgent, spoken, dto.conversation_id);
+          }
         }
       } catch {
         this.logger.warn(

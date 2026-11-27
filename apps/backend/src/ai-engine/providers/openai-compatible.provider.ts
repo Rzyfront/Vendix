@@ -491,7 +491,19 @@ export class OpenAICompatibleProvider implements AIProvider {
       });
 
       if (!response.ok) {
-        throw new Error(await this.readProviderError(response));
+        // Same message as before, plus the status: OpenRouter's body for a
+        // 429 often reads "Provider returned error" with no number in it, and
+        // the voice pipeline needs the status to know the failure will pass.
+        const retryAfterMs = this.parseRetryAfterMs(
+          response.headers.get('retry-after'),
+        );
+        return {
+          success: false,
+          model,
+          error: await this.readProviderError(response),
+          statusCode: response.status,
+          ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+        };
       }
 
       const buffer = Buffer.from(await response.arrayBuffer());
@@ -2001,6 +2013,16 @@ export class OpenAICompatibleProvider implements AIProvider {
     }
 
     return 'https://api.openai.com/v1';
+  }
+
+  /** `Retry-After` as seconds or an HTTP date, in ms; undefined if absent or unreadable. */
+  private parseRetryAfterMs(header: string | null): number | undefined {
+    if (!header) return undefined;
+    const seconds = Number(header);
+    if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+    const date = Date.parse(header);
+    if (Number.isNaN(date)) return undefined;
+    return Math.max(0, date - Date.now());
   }
 
   private async readProviderError(response: Response): Promise<string> {
