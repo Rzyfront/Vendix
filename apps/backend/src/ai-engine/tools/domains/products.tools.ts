@@ -387,7 +387,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
     } catch {
       return writeFailure(
         label,
-        `No existe un producto activo con id ${productId} en esta tienda (los archivados no se editan).`,
+        `No existe un producto activo con id ${productId} en esta tienda (los eliminados no se editan).`,
         'Usa find_product con el nombre o el SKU para obtener el product_id correcto.',
       );
     }
@@ -577,7 +577,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
     } catch {
       return writeFailure(
         label,
-        `No existe un producto con id ${productId} en esta tienda (los archivados no se desactivan: ya están fuera del catálogo).`,
+        `No existe un producto con id ${productId} en esta tienda (los eliminados no se desactivan: ya están fuera del catálogo).`,
         'Usa find_product con el nombre o el SKU para obtener el product_id correcto.',
       );
     }
@@ -1235,7 +1235,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
           include_archived: {
             type: 'boolean',
             description:
-              'Incluir productos archivados. Por defecto false; úsalo solo si el usuario pregunta expresamente por uno dado de baja.',
+              'Incluir productos eliminados. Por defecto false; úsalo solo si el usuario pregunta expresamente por uno eliminado.',
           },
         },
         required: ['query'],
@@ -1463,7 +1463,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
           product = await productsService.findOne(productId);
         } catch {
           return JSON.stringify({
-            error: `No existe un producto activo con id ${productId} en esta tienda (los archivados no se devuelven).`,
+            error: `No existe un producto activo con id ${productId} en esta tienda (los eliminados no se devuelven).`,
             next_step:
               'Usa find_product con el nombre o el SKU para obtener el product_id correcto.',
           });
@@ -1643,7 +1643,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
             type: 'string',
             enum: PRODUCT_STATES,
             description:
-              'Por defecto se excluyen los archivados y se muestran activos e inactivos.',
+              'Por defecto se excluyen los eliminados y se muestran activos e inactivos.',
           },
           track_inventory: {
             type: 'boolean',

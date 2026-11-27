@@ -1918,6 +1918,34 @@ describe('AIAgentService.runAgentStream', () => {
       });
     });
 
+    it.each([
+      ['restore_product', { product_id: 9 }],
+      ['manage_recipe', { action: 'restore', recipe_id: 3 }],
+      ['write_endpoint', { path: 'store/price-tiers/4/restore', method: 'POST' }],
+    ])(
+      '(conv-314) a reversal call (%s) is denied, runs nothing and records tool_denied',
+      async (name, args) => {
+        chat
+          .mockResolvedValueOnce(ok({ tool_calls: [call('rev-1', name, args)] }))
+          .mockResolvedValueOnce(ok({ content: 'Lo eliminado no se recupera.' }));
+        const { chunks, result } = await traced({ max_iterations: 2 });
+        await trace.flush();
+        expect(executeTool).not.toHaveBeenCalled();
+        const denied = byKind('tool_denied');
+        expect(denied).toHaveLength(1);
+        expect(denied[0]).toMatchObject({
+          status: 'error',
+          error_code: 'AI_TOOL_REVERSAL_DENIED',
+        });
+        expect(byKind('tool')).toHaveLength(0);
+        const frame = chunks.find(
+          (c) => c.type === 'tool_result' && c.tool?.id === 'rev-1',
+        );
+        expect(frame?.tool?.summary).toContain('no se recupera');
+        expect(result.tools_used[0].result).toContain('AI_TOOL_REVERSAL_DENIED');
+      },
+    );
+
     it('a write proposal is awaiting approval, never completed_verified', async () => {
       chat.mockResolvedValueOnce(
         ok({ tool_calls: [call('proposal-1', 'create_expense')] }),

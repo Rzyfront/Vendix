@@ -28,7 +28,9 @@ export type AgentSpanKind =
   | 'ui_wait'
   | 'UI_wait'
   | 'approval_wait'
-  | 'verifier';
+  | 'verifier'
+  /** A call refused before running (e.g. a reversal of a deletion). */
+  | 'tool_denied';
 
 interface TraceIdentity {
   readonly request_id?: string;
@@ -126,6 +128,7 @@ const KINDS = new Set<AgentSpanKind>([
   'UI_wait',
   'approval_wait',
   'verifier',
+  'tool_denied',
 ]);
 const HASH_KEYS = new Set([
   'catalog_hash',

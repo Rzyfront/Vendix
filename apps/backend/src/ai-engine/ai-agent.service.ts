@@ -162,6 +162,35 @@ const MAX_PLAN_NUDGES = 2;
 const LEAKED_TOOL_MARKUP = /<\uFF5CDSML\uFF5C|<\uFF5Ctool[\u2581_]call/;
 
 /**
+ * Rafael (conversation 314): «No debe existir una herramienta ni función para
+ * deseliminar o revertir una eliminación». Server-side defense: any call whose
+ * tool name, `action` or route segment (write_endpoint) asks to
+ * restore/unarchive/undelete/undo is denied before it runs, even if a future
+ * catalog entry offered it.
+ */
+const REVERSAL_CALL = /(^|[_\-.])(restore|unarchive|undelete|undo)([_\-.]|$)/i;
+export function isReversalToolCall(name: string, rawArgs?: string): boolean {
+  if (REVERSAL_CALL.test(name)) return true;
+  if (!rawArgs) return false;
+  try {
+    const args = JSON.parse(rawArgs) as { action?: unknown; path?: unknown };
+    if (typeof args?.action === 'string' && REVERSAL_CALL.test(args.action))
+      return true;
+    // write_endpoint: a route such as `store/recipes/9/restore`.
+    return (
+      typeof args?.path === 'string' &&
+      args.path
+        .split(/[/?#]/)
+        .some((segment) => REVERSAL_CALL.test(segment))
+    );
+  } catch {
+    return false;
+  }
+}
+const REVERSAL_DENIED_MESSAGE =
+  'Lo eliminado no se puede recuperar ni restaurar: no existe esa acción. No la ofrezcas; dile a la persona que la eliminación es definitiva.';
+
+/**
  * Vex's own budgets (`ai_agents.key='vex'`).
  *
  * A whole-business turn with the full catalog does not fit the one-shot
@@ -3546,6 +3575,37 @@ export class AIAgentService {
             (pendingConfirmation || vexProposals.length > 0)
           )
             break;
+          if (isReversalToolCall(toolName, toolCall.function.arguments)) {
+            const deniedSpan = activeTrace?.startSpan('tool_denied', {
+              round: iteration,
+              tool_name_hash: activeTrace?.hash(toolName),
+              tool_call_id: toolCall.id,
+            });
+            activeTrace?.endSpan(deniedSpan, {
+              status: 'error',
+              error_code: 'AI_TOOL_REVERSAL_DENIED',
+            });
+            this.logger.warn(`Denied reversal tool call: ${toolName}`);
+            const denied = JSON.stringify({
+              error: REVERSAL_DENIED_MESSAGE,
+              error_code: 'AI_TOOL_REVERSAL_DENIED',
+            });
+            messages.push({
+              role: 'tool',
+              content: denied,
+              tool_call_id: toolCall.id,
+            });
+            toolsUsed.push({ name: toolName, args: {}, result: denied });
+            yield {
+              type: 'tool_result',
+              tool: {
+                id: toolCall.id,
+                name: toolName,
+                summary: 'Acción no disponible: lo eliminado no se recupera.',
+              },
+            };
+            continue;
+          }
           let toolArgs: Record<string, any>;
           const toolSpan = activeTrace?.startSpan('tool', {
             round: iteration,

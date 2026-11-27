@@ -719,7 +719,7 @@ describe('products.tools · contrato canónico T4', () => {
 
       expect(answer).toEqual({
         error:
-          'No existe un producto activo con id 999 en esta tienda (los archivados no se devuelven).',
+          'No existe un producto activo con id 999 en esta tienda (los eliminados no se devuelven).',
         next_step:
           'Usa find_product con el nombre o el SKU para obtener el product_id correcto.',
       });
@@ -1039,7 +1039,7 @@ describe('products.tools · contrato canónico T4', () => {
 
       expect(answer).toEqual({
         error:
-          'No existe un producto activo con id 999 en esta tienda (los archivados no se editan).',
+          'No existe un producto activo con id 999 en esta tienda (los eliminados no se editan).',
         next_step:
           'Usa find_product con el nombre o el SKU para obtener el product_id correcto.',
       });
@@ -1237,7 +1237,7 @@ describe('products.tools · contrato canónico T4', () => {
 
       expect(answer).toEqual({
         error:
-          'No existe un producto con id 999 en esta tienda (los archivados no se desactivan: ya están fuera del catálogo).',
+          'No existe un producto con id 999 en esta tienda (los eliminados no se desactivan: ya están fuera del catálogo).',
         next_step:
           'Usa find_product con el nombre o el SKU para obtener el product_id correcto.',
       });
