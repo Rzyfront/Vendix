@@ -67,6 +67,9 @@ describe('WalletService.getOrCreateWallet', () => {
     prisma.wallets.create.mockRejectedValue(uniqueViolation());
     await expect(service.getOrCreateWallet(3667)).resolves.toBe(WALLET);
     expect(prisma.wallets.findFirst).toHaveBeenCalledTimes(2);
+    expect(prisma.wallets.findFirst).toHaveBeenNthCalledWith(2, {
+      where: { customer_id: 3667 },
+    });
   });
 
   it('dos peticiones simultáneas resuelven la misma billetera', async () => {
