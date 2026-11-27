@@ -1545,7 +1545,8 @@ describe('AIAgentService.runAgentStream', () => {
     expect(stored.data.block_id).toBe('block-7');
   });
 
-  it('(vexi-f1) Vexi asking for an internal tool gets AI_AGENT_TOOL_NOT_ALLOWED and nothing executes', async () => {
+  it('(vexi-f1) Vexi asking for an internal tool gets AI_AGENT_TOOL_NOT_ALLOWED, nothing executes and the denial is traced', async () => {
+    registry.recordAgentToolDenial = jest.fn();
     chat
       .mockResolvedValueOnce(ok({ tool_calls: [call('c1', 'list_things')] }))
       .mockResolvedValueOnce(ok({ content: 'Solo puedo ayudarte con compras.' }));
@@ -1557,6 +1558,23 @@ describe('AIAgentService.runAgentStream', () => {
     expect(
       JSON.stringify([chunks, chat.mock.calls[1]?.[0] ?? null]),
     ).toContain('AI_AGENT_TOOL_NOT_ALLOWED');
+    expect(registry.recordAgentToolDenial).toHaveBeenCalledTimes(1);
+    expect(registry.recordAgentToolDenial).toHaveBeenCalledWith(
+      'list_things',
+      'vexi',
+      'turn',
+    );
+  });
+
+  it('(vexi-f1) an open agent refusal is not traced as a closed-catalog denial', async () => {
+    registry.recordAgentToolDenial = jest.fn();
+    chat
+      .mockResolvedValueOnce(ok({ tool_calls: [call('c1', 'ghost_tool')] }))
+      .mockResolvedValueOnce(ok({ content: 'listo' }));
+
+    await drain({ agent_key: 'vex' });
+
+    expect(registry.recordAgentToolDenial).not.toHaveBeenCalled();
   });
 
   it.each([[undefined]])(

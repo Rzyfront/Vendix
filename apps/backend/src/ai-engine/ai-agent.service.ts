@@ -1718,6 +1718,20 @@ export class AIAgentService {
   }
 
   /** B authority is rebuilt per inference AND execution; relevance never grants it. */
+  /**
+   * Vexi público F1: the loop refuses unoffered names before they reach the
+   * registry gate, so a closed-catalog agent's refusal is traced here too
+   * (warn + `ai.agent.tool_denied`). Open agents (Vex) are untouched.
+   */
+  private traceClosedCatalogDenial(params: AgentRunParams, name: string) {
+    if (
+      !hasClosedToolCatalog(params.agent_key) ||
+      typeof this.toolRegistry.recordAgentToolDenial !== 'function'
+    )
+      return;
+    this.toolRegistry.recordAgentToolDenial(name, params.agent_key!, 'turn');
+  }
+
   async resolveToolAuthority(
     params: AgentRunParams,
   ): Promise<AIToolDefinition[]> {
@@ -3135,6 +3149,7 @@ export class AIAgentService {
             // runs in this same round. Only a name outside the turn's
             // authority (hallucinated or denied to this agent) stops the batch.
             if (!liveNames.has(call.tool_name)) {
+              this.traceClosedCatalogDenial(params, call.tool_name);
               batchError = {
                 code: 'AI_AGENT_TOOL_NOT_ALLOWED',
                 next: TOOL_NOT_AVAILABLE_NEXT_STEP,
@@ -3602,6 +3617,7 @@ export class AIAgentService {
                 // Outside the turn's authority: a hallucinated name or a tool
                 // denied to this agent. Not a user/plan permission problem:
                 // the model gets real alternatives (D4) and corrects itself.
+                this.traceClosedCatalogDenial(params, toolName);
                 const result = normalizeToolResult({
                   error: `La herramienta "${toolName}" no existe en este asistente.`,
                   error_code: 'AI_AGENT_TOOL_NOT_ALLOWED',
@@ -3867,6 +3883,7 @@ export class AIAgentService {
             // screen even though execution was rejected afterwards. A rejected
             // call now produces only the error `tool_result`, never a `tool_call`.
             if (!offeredNames.has(toolName)) {
+              this.traceClosedCatalogDenial(params, toolName);
               toolOutcome = 'failed';
               toolErrorCode = 'AI_AGENT_TOOL_NOT_ALLOWED';
               const denied = normalizeToolResult({

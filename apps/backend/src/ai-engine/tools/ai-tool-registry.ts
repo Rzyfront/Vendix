@@ -367,11 +367,30 @@ export class AIToolRegistry {
     if (!closed) return;
     const resolved = this.resolveToolName(name);
     if (resolved && closed.has(resolved)) return;
+    this.recordAgentToolDenial(name, agentKey!, 'execute');
+    throw new VendixHttpException(
+      ErrorCodes.AI_AGENT_004,
+      `La herramienta "${name}" no está disponible para este asistente.`,
+    );
+  }
+
+  /**
+   * Trace of a closed-catalog agent asking for a tool outside its catalog:
+   * one warn log line plus an {@link AGENT_TOOL_DENIED_EVENT} event. Used by
+   * the registry gate and by the agent loop, which refuses unoffered names
+   * before they ever reach `executeTool`. Open agents are never traced here.
+   */
+  recordAgentToolDenial(
+    name: string,
+    agentKey: string,
+    stage: AgentToolDeniedEvent['stage'],
+  ): void {
+    if (!closedToolCatalog(agentKey)) return;
     const context = RequestContextService.asyncLocalStorage.getStore();
     const event: AgentToolDeniedEvent = {
-      agent_key: agentKey!,
+      agent_key: agentKey,
       tool: name,
-      stage: 'execute',
+      stage,
       store_id: context?.store_id,
       organization_id: context?.organization_id,
       user_id: context?.user_id,
@@ -387,10 +406,6 @@ export class AIToolRegistry {
         `Could not emit ${AGENT_TOOL_DENIED_EVENT}: ${(error as Error).message}`,
       );
     }
-    throw new VendixHttpException(
-      ErrorCodes.AI_AGENT_004,
-      `La herramienta "${name}" no está disponible para este asistente.`,
-    );
   }
 
   /**

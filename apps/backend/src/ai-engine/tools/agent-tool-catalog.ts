@@ -130,7 +130,11 @@ export interface AgentToolDeniedEvent {
   agent_key: string;
   /** The name exactly as the model sent it. */
   tool: string;
-  stage: 'execute';
+  /**
+   * `turn`: the agent loop refused it (not in the turn's authority/offer).
+   * `execute`: the registry gate refused it (direct or out-of-loop call).
+   */
+  stage: 'turn' | 'execute';
   store_id?: number;
   organization_id?: number;
   user_id?: number;

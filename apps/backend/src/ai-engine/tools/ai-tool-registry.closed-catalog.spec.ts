@@ -257,6 +257,28 @@ describe('Vexi closed tool catalog (F1)', () => {
     });
   });
 
+  it('(e) recordAgentToolDenial traces a loop-level refusal for Vexi and ignores open agents', () => {
+    const { registry, events } = build();
+    const warn = jest
+      .spyOn((registry as any).logger, 'warn')
+      .mockImplementation(() => undefined);
+    RequestContextService.asyncLocalStorage.run(OWNER_CTX as any, () =>
+      registry.recordAgentToolDenial('call_endpoint', VEXI_AGENT_KEY, 'turn'),
+    );
+    registry.recordAgentToolDenial('call_endpoint', 'vex', 'turn');
+    expect(events.emit).toHaveBeenCalledTimes(1);
+    expect(events.emit).toHaveBeenCalledWith(
+      AGENT_TOOL_DENIED_EVENT,
+      expect.objectContaining({
+        agent_key: 'vexi',
+        tool: 'call_endpoint',
+        stage: 'turn',
+        store_id: 10,
+      }),
+    );
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
   describe('(d) Vex keeps its current behavior', () => {
     it('Vex catalog = every permitted tool minus its denied ui_*, identical with or without agent_key', () => {
       const { registry, allPermissions } = build();
