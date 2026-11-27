@@ -580,6 +580,83 @@ describe('AIChatService — agente configurable del chat por defecto', () => {
       expect(message).not.toHaveProperty('tool_calls');
   });
 
+  describe('(conv-314 F4) «hazlo» con una tarjeta viva', () => {
+    const card = {
+      plan_id: 'plan-9',
+      status: 'proposed',
+      steps: [
+        {
+          step_id: 's1',
+          order: 1,
+          tool: 'archive_product',
+          arguments: { product_id: 9 },
+          preview: { target: 'Gorra' },
+          irreversible: true,
+          status: 'pending',
+        },
+      ],
+    };
+    const stored = () =>
+      [
+        { id: 1, role: 'user', content: 'elimina la gorra' },
+        { id: 2, role: 'assistant', content: 'Necesito tu aprobación', metadata: { plan: card } },
+      ].map((m) => ({ metadata: null, created_at: new Date(), ...m }));
+    function arrange(keeps: boolean) {
+      const b = build({ plan: null, messages: stored() });
+      const service = b.service as any;
+      service.durableTurnArgs.mockRestore();
+      b.planState.createHook.mockReturnValue({ snapshot: async () => null });
+      service.durableSessions = {
+        keepsLiveCard: jest.fn().mockResolvedValue(keeps),
+        open: jest.fn().mockResolvedValue({
+          objective: { plan: null },
+          objective_id: 'o1',
+          turn_id: 't1',
+          lease: { version: 1 },
+          context: null,
+          close: jest.fn(),
+        }),
+      };
+      return service;
+    }
+    it('vuelve a mostrar la misma tarjeta sin abrir el objetivo', async () => {
+      const service = arrange(true);
+      const args = await service.durableTurnArgs(
+        conversation(stored()),
+        'vex',
+        'hazlo',
+        { plan_approval: {} },
+      );
+      expect(service.durableSessions.keepsLiveCard).toHaveBeenCalledWith(7, 'vex', 'hazlo');
+      expect(service.durableSessions.open).not.toHaveBeenCalled();
+      expect(args.durable).toBeUndefined();
+      expect(args.reshow_plan).toEqual({
+        plan_id: 'plan-9',
+        steps: [
+          {
+            step_id: 's1',
+            order: 1,
+            tool: 'archive_product',
+            arguments: { product_id: 9 },
+            preview: { target: 'Gorra' },
+            irreversible: true,
+          },
+        ],
+      });
+    });
+    it('sin efecto propuesto, «hazlo» es un turno normal (no inventa tarjeta)', async () => {
+      const service = arrange(false);
+      const args = await service.durableTurnArgs(
+        conversation(stored()),
+        'vex',
+        'hazlo',
+        { plan_approval: {} },
+      );
+      expect(service.durableSessions.open).toHaveBeenCalled();
+      expect(args.reshow_plan).toBeUndefined();
+    });
+  });
+
   it('no usa vexi para una app distinta sin agente explícito', async () => {
     const b = build({ conversation: { app_key: 'otra_app' } });
     await b.service.sendMessage(7, { content: 'hola' });

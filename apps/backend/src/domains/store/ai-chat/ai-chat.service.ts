@@ -271,6 +271,43 @@ const VEX_PLAN_STATUSES = [
 type VexPlanStatus = (typeof VEX_PLAN_STATUSES)[number];
 
 /**
+ * F4: the card the LAST Vex answer left waiting (`metadata.plan.status`
+ * `proposed`), rebuilt in the shape of the `plan_approval` frame. A later
+ * answer without a card means the person already moved on: no live card.
+ */
+export function liveProposedPlan(
+  messages: Array<{ role: string; metadata?: unknown }>,
+): NonNullable<AgentResult['pending_plan']> | null {
+  const last = [...messages].reverse().find((m) => m.role === 'assistant');
+  const plan = (last?.metadata as Record<string, any> | null | undefined)
+    ?.plan;
+  if (
+    !plan ||
+    plan.status !== 'proposed' ||
+    typeof plan.plan_id !== 'string' ||
+    !Array.isArray(plan.steps) ||
+    plan.steps.length === 0
+  )
+    return null;
+  const steps = (plan.steps as Array<Record<string, any>>).map(
+    (step, index) => ({
+      step_id:
+        typeof step.step_id === 'string' ? step.step_id : `s${index + 1}`,
+      order: typeof step.order === 'number' ? step.order : index + 1,
+      tool: String(step.tool ?? ''),
+      arguments:
+        step.arguments && typeof step.arguments === 'object'
+          ? (step.arguments as Record<string, any>)
+          : {},
+      ...(step.preview !== undefined ? { preview: step.preview } : {}),
+      irreversible: step.irreversible === true,
+    }),
+  );
+  if (steps.some((step) => !step.tool)) return null;
+  return { plan_id: plan.plan_id, steps };
+}
+
+/**
  * Lo que un turno Vex produjo y el cierre del turno persiste. Se llena por
  * tres caminos que se fusionan al final: el sink envuelve cada `save` de
  * compactación, el stream captura los frames `ui_block`/`plan_approval`, y
@@ -2249,6 +2286,26 @@ export class AIChatService {
       throw new BadRequestException(
         'No está disponible el circuito de aprobación de este agente.',
       );
+    // F4 (conversation 314): «hazlo»/«sí» while the card still waits shows
+    // that card again. The objective is not opened, so its proposal is not
+    // withdrawn; without a real `proposed` effect it is a normal turn.
+    if (agentKey === VEX_AGENT_KEY && !options.continuation) {
+      const livePlan = liveProposedPlan(conversation.messages);
+      if (
+        livePlan &&
+        (await this.durableSessions.keepsLiveCard(
+          conversation.id,
+          agentKey,
+          goal,
+        ))
+      )
+        return {
+          durable: undefined,
+          conversation_id: conversation.id,
+          messages: [] as AIMessage[],
+          reshow_plan: livePlan,
+        };
+    }
     const session = await this.durableSessions.open(
       conversation.id,
       agentKey,

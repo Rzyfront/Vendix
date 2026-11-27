@@ -85,6 +85,71 @@ const RESUME_REQUIRED_STATUSES = [
   'blocked',
   'awaiting_approval',
 ];
+/**
+ * F4 (conversation 314): the closed list of replies that mean «go ahead» to a
+ * card that is still waiting. Normalized form: lowercase, no accents, no
+ * punctuation. A message made only of these (e.g. «hazlo, hazlo», «dale dale»)
+ * keeps the live card instead of withdrawing it. No model call classifies it.
+ */
+export const AFFIRMATIVE_REPLIES: readonly string[] = [
+  'hazlo',
+  'haz',
+  'hagale',
+  'hagamoslo',
+  'hagamoslo asi',
+  'si',
+  'si hazlo',
+  'si dale',
+  'si por favor',
+  'dale',
+  'aprueba',
+  'apruebalo',
+  'apruebo',
+  'aprobado',
+  'adelante',
+  'continua',
+  'continuar',
+  'sigue',
+  'ok',
+  'okay',
+  'okey',
+  'listo',
+  'aplicalo',
+  'aplica',
+  'procede',
+  'confirmo',
+  'de una',
+];
+
+function normalizeReply(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9,;.\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** True when the whole message is an affirmative reply from the closed list. */
+export function isAffirmativeReply(text: string): boolean {
+  const normalized = normalizeReply(text ?? '');
+  if (!normalized || normalized.length > 60) return false;
+  const phrases = new Set(AFFIRMATIVE_REPLIES);
+  const segments = normalized
+    .split(/[,;.]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (segments.length === 0) return false;
+  if (segments.every((s) => phrases.has(s))) return true;
+  // «dale dale», «si hazlo hazlo»: every word must itself be a one-word reply.
+  return normalized
+    .replace(/[,;.]/g, ' ')
+    .split(' ')
+    .filter(Boolean)
+    .every((word) => phrases.has(word));
+}
+
 /** Projection of TTL expiry; terminal/uncertain rows keep their own status. */
 function projectExpiry(row: AgentObjective): AgentObjective {
   return new Date(row.expires_at).getTime() <= Date.now() &&
@@ -558,6 +623,37 @@ export class AgentDurableSessionService {
       if (error instanceof ConflictException) return current;
       throw error;
     }
+  }
+  /**
+   * F4 (conversation 314): «hazlo»/«sí» to a card that is still waiting is
+   * not a new goal. True only when the message is an affirmative reply from
+   * the closed list AND this conversation's objective awaits approval on a
+   * real `proposed` effect. The caller then shows the same card again instead
+   * of opening a session, so nothing is withdrawn and nothing is invented.
+   * Read-only: never changes the objective or its effects.
+   */
+  async keepsLiveCard(
+    conversationId: number,
+    agentKey: string,
+    message: string,
+  ): Promise<boolean> {
+    if (!isAffirmativeReply(message)) return false;
+    let row = await this.repo.getForConversation(conversationId);
+    if (
+      !row ||
+      row.conversation_id !== conversationId ||
+      (row.agent_id && row.agent_id !== agentKey) ||
+      row.semantic_status !== 'awaiting_approval'
+    )
+      return false;
+    row = await this.repo.recoverAppliedReceipt(row.id, row.version);
+    if (
+      row.semantic_status !== 'awaiting_approval' ||
+      new Date(row.expires_at).getTime() <= Date.now()
+    )
+      return false;
+    const effects = await this.repo.listEffects(row.id, 100);
+    return effects.some((effect) => effect.status === 'proposed');
   }
   async canContinue(conversationId: number): Promise<boolean> {
     let row = await this.repo.getForConversation(conversationId);

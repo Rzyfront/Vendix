@@ -1,6 +1,7 @@
 import {
   AgentDurableSession,
   AgentDurableSessionService,
+  isAffirmativeReply,
   objectiveArgsHash,
 } from './agent-durable-session.service';
 import { emptyObjectiveBudget } from './interfaces/agent-objective.interface';
@@ -659,4 +660,75 @@ describe('clean objective per human question', () => {
       });
       await running!.close();
     }));
+});
+
+describe('(conv-314 F4) «hazlo» with a live card keeps the card', () => {
+  const awaiting = (s: ReturnType<typeof setup>) => {
+    s.state = {
+      ...s.state,
+      agent_id: 'vex',
+      semantic_status: 'awaiting_approval',
+      lease_until: null,
+    };
+    s.repo.rejectProposal = jest.fn();
+  };
+  it.each(['hazlo', 'Sí', '¡Dale, dale!', 'hazlo, hazlo', 'aplícalo', 'OK.', 'adelante', 'continúa', 'aprueba'])(
+    '%s is an affirmative reply',
+    (text) => expect(isAffirmativeReply(text)).toBe(true),
+  );
+  it.each(['mejor cambia el precio', 'sí, pero cambia el precio', 'no', 'borra otro', ''])(
+    '%s is not an affirmative reply',
+    (text) => expect(isAffirmativeReply(text)).toBe(false),
+  );
+  it('(a) proposed effect + «hazlo»: keeps the card, withdraws nothing', async () => {
+    const s = setup();
+    awaiting(s);
+    s.repo.listEffects.mockResolvedValue([{ status: 'proposed' }]);
+    const keeps = await RequestContextService.runIsolated(ctx, () =>
+      s.service.keepsLiveCard(7, 'vex', 'hazlo'),
+    );
+    expect(keeps).toBe(true);
+    expect(s.repo.rejectProposal).not.toHaveBeenCalled();
+    expect(s.repo.createOrReplace).not.toHaveBeenCalled();
+    expect(s.repo.acquireLease).not.toHaveBeenCalled();
+    expect(s.state.semantic_status).toBe('awaiting_approval');
+  });
+  it('(b) proposed effect + «mejor cambia el precio»: no card, open() withdraws as today', async () => {
+    const s = setup();
+    awaiting(s);
+    s.repo.listEffects.mockResolvedValue([{ status: 'proposed' }]);
+    s.repo.rejectProposal = jest.fn(async () => {
+      s.state = { ...s.state, semantic_status: 'active', version: s.state.version + 1 };
+      return s.state;
+    });
+    const keeps = await RequestContextService.runIsolated(ctx, () =>
+      s.service.keepsLiveCard(7, 'vex', 'mejor cambia el precio'),
+    );
+    expect(keeps).toBe(false);
+    await RequestContextService.runIsolated(ctx, () =>
+      s.service.open(7, 'vex', 'mejor cambia el precio'),
+    );
+    expect(s.repo.rejectProposal).toHaveBeenCalledWith(
+      s.state.id,
+      1,
+      'superseded_by_message',
+    );
+  });
+  it('(c) «hazlo» without a proposed effect never invents a card', async () => {
+    const s = setup();
+    awaiting(s);
+    s.repo.listEffects.mockResolvedValue([{ status: 'failed' }]);
+    await expect(
+      RequestContextService.runIsolated(ctx, () =>
+        s.service.keepsLiveCard(7, 'vex', 'hazlo'),
+      ),
+    ).resolves.toBe(false);
+    const active = setup();
+    await expect(
+      RequestContextService.runIsolated(ctx, () =>
+        active.service.keepsLiveCard(7, 'vexi', 'hazlo'),
+      ),
+    ).resolves.toBe(false);
+    expect(active.repo.listEffects).not.toHaveBeenCalled();
+  });
 });

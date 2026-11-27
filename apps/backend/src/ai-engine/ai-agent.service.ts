@@ -190,8 +190,20 @@ const AGENT_TIMEOUT_CEILING_MS = 600_000;
  */
 const SUPERADMIN_MAX_ITERATIONS = 60;
 
+/** F4: the line that goes with a card shown again after «hazlo»/«sí». */
+export const LIVE_CARD_NOTICE =
+  'Aquí está tu tarjeta; apruébala para aplicar el cambio. Todavía no apliqué nada.';
+
 export interface AgentRunParams {
   goal: string;
+  /**
+   * F4 (conversation 314): the person answered «hazlo»/«sí» while this card is
+   * still waiting. The turn shows the SAME card again (its `plan_approval`
+   * frame) with a short line, without calling the model or touching the
+   * objective. Set by the chat only after `keepsLiveCard` confirmed a real
+   * `proposed` effect.
+   */
+  reshow_plan?: NonNullable<AgentResult['pending_plan']>;
   /**
    * `image_url` parts of the CURRENT turn (vision-capable configs only; the
    * caller gates on `settings.supports_vision`). Absent = text-only turn,
@@ -1052,6 +1064,44 @@ export class AIAgentService {
   }
 
   /**
+   * F4: re-emits a card that is still waiting for approval. Same frame shape
+   * as `finalizeVexPlan`, no provider call, no new proposal, no new hashes:
+   * approving it goes through the plan the server already holds.
+   */
+  private async *reshowLiveCard(
+    params: AgentRunParams,
+  ): AsyncGenerator<AIStreamChunk, AgentResult> {
+    const plan = params.reshow_plan!;
+    yield {
+      type: 'plan_approval',
+      plan_approval: {
+        plan_id: plan.plan_id,
+        steps: plan.steps,
+        covered_steps: plan.steps
+          .filter((s) => !s.irreversible)
+          .map((s) => s.order),
+        reconfirm_steps: plan.steps
+          .filter((s) => s.irreversible)
+          .map((s) => s.order),
+      },
+    };
+    const narration = LIVE_CARD_NOTICE;
+    yield { type: 'text', content: narration };
+    yield {
+      type: 'done',
+      usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+    };
+    return {
+      content: narration,
+      iterations: 0,
+      tools_used: [],
+      total_tokens: 0,
+      success: true,
+      pending_plan: plan,
+    };
+  }
+
+  /**
    * Closes a Vex turn that recorded write proposals with the ONE plan frame.
    * Emits `plan_approval` (plan + steps + coverage), then the narration as a
    * single text chunk, then `done`.
@@ -1441,6 +1491,7 @@ export class AIAgentService {
   async *runAgentStream(
     params: AgentRunParams,
   ): AsyncGenerator<AIStreamChunk, AgentResult> {
+    if (params.reshow_plan) return yield* this.reshowLiveCard(params);
     // Never adopt RequestContextService's legacy static tenant fallback for
     // telemetry. A worker must restore its authenticated ALS snapshot itself.
     const context = RequestContextService.asyncLocalStorage.getStore();

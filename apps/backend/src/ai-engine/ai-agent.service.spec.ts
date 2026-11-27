@@ -242,6 +242,39 @@ describe('AIAgentService.runAgentStream', () => {
     );
   }
 
+  it('(conv-314 F4) a live card answered with «hazlo» is shown again without calling the model', async () => {
+    configureStorePlan(['*']);
+    const plan = {
+      plan_id: 'plan-1',
+      steps: [
+        {
+          step_id: 's1',
+          order: 1,
+          tool: 'archive_product',
+          arguments: { product_id: 9 },
+          preview: { target: 'Gorra' },
+          irreversible: true,
+        },
+      ],
+    };
+    const { chunks, result } = await drain({
+      goal: 'hazlo',
+      agent_key: 'vex',
+      reshow_plan: plan,
+    });
+    expect(chat).not.toHaveBeenCalled();
+    expect(executeTool).not.toHaveBeenCalled();
+    expect(chunks.map((c) => c.type)).toEqual(['plan_approval', 'text', 'done']);
+    expect(chunks[0].plan_approval).toMatchObject({
+      plan_id: 'plan-1',
+      steps: plan.steps,
+      reconfirm_steps: [1],
+      covered_steps: [],
+    });
+    expect(chunks[1].content).toContain('Aquí está tu tarjeta');
+    expect(result.pending_plan).toEqual(plan);
+  });
+
   it('offers orders and UI tools when the plan allows the wildcard', async () => {
     configureStorePlan(['*']);
 
