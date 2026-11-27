@@ -16,6 +16,7 @@ import {
 } from '../../tasks/agent-objective.repository';
 
 import { AgentDurableSessionService } from '../../tasks/agent-durable-session.service';
+import { staffTurnAppKey } from '../../tools/agent-tool-catalog';
 import type { RequestContext } from '../../../common/context/request-context.service';
 
 /**
@@ -355,10 +356,13 @@ export class AIAgentProcessor extends WorkerHost {
     const max = row.max_iterations ?? undefined;
     const timeoutMs =
       row.timeout_seconds == null ? undefined : row.timeout_seconds * 1000;
+    // R1: queued Vexi staff work keeps `chat_assistant` even though the
+    // `vexi` row now points at the public `vexi_storefront` app.
+    const appKey = staffTurnAppKey(row.key, row.app_key);
     return {
       agent_key: row.key,
-      ...(row.app_key
-        ? { app_key: row.app_key }
+      ...(appKey
+        ? { app_key: appKey }
         : row.system_prompt
           ? { app_key: undefined, system_prompt: row.system_prompt }
           : {}),

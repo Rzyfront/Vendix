@@ -583,7 +583,9 @@ describe('AIAgentService.runAgentStream', () => {
     expect(chat).not.toHaveBeenCalled();
   });
 
-  it.each(['vexi', 'vex'])(
+  // Vexi público F1: Vexi has a closed catalog and no longer runs internal
+  // tools such as `list_things`; the open-agent paths keep this contract.
+  it.each([undefined, 'vex'])(
     'does not infer a closing response after %s uses its last clock budget',
     async (agentKey) => {
       let now = 0;
@@ -1735,7 +1737,39 @@ describe('AIAgentService.runAgentStream', () => {
     expect(stored.data.block_id).toBe('block-7');
   });
 
-  it.each([[undefined], ['vexi']])(
+  it('(vexi-f1) Vexi asking for an internal tool gets AI_AGENT_TOOL_NOT_ALLOWED, nothing executes and the denial is traced', async () => {
+    registry.recordAgentToolDenial = jest.fn();
+    chat
+      .mockResolvedValueOnce(ok({ tool_calls: [call('c1', 'list_things')] }))
+      .mockResolvedValueOnce(ok({ content: 'Solo puedo ayudarte con compras.' }));
+
+    const { chunks } = await drain({ agent_key: 'vexi' });
+
+    expect(executeTool).not.toHaveBeenCalled();
+    expect(chat.mock.calls[0][1].tools ?? []).toEqual([]);
+    expect(
+      JSON.stringify([chunks, chat.mock.calls[1]?.[0] ?? null]),
+    ).toContain('AI_AGENT_TOOL_NOT_ALLOWED');
+    expect(registry.recordAgentToolDenial).toHaveBeenCalledTimes(1);
+    expect(registry.recordAgentToolDenial).toHaveBeenCalledWith(
+      'list_things',
+      'vexi',
+      'turn',
+    );
+  });
+
+  it('(vexi-f1) an open agent refusal is not traced as a closed-catalog denial', async () => {
+    registry.recordAgentToolDenial = jest.fn();
+    chat
+      .mockResolvedValueOnce(ok({ tool_calls: [call('c1', 'ghost_tool')] }))
+      .mockResolvedValueOnce(ok({ content: 'listo' }));
+
+    await drain({ agent_key: 'vex' });
+
+    expect(registry.recordAgentToolDenial).not.toHaveBeenCalled();
+  });
+
+  it.each([[undefined]])(
     'all surfaces compact only after persistence (agent_key=%s)',
     async (agentKey) => {
       const save = jest.fn().mockResolvedValue('block-x');

@@ -3,6 +3,26 @@ import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { ToolRouterService } from '../../../ai-engine/tools/tool-router.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
 
+/**
+ * Vexi público F1 closed Vexi's catalog. The G-session tests below pin the
+ * legacy staff-voice mechanics with `agent_key: 'vexi'` and staff tools; that
+ * surface is retired in F4/F6. They run with closed catalogs switched off;
+ * the `(vexi-f1)` test switches them on and pins the server-side refusal.
+ */
+const closedCatalogs = { enabled: false };
+jest.mock('../../../ai-engine/tools/agent-tool-catalog', () => {
+  const actual = jest.requireActual(
+    '../../../ai-engine/tools/agent-tool-catalog',
+  );
+  return {
+    ...actual,
+    closedToolCatalog: (key?: string | null) =>
+      closedCatalogs.enabled ? actual.closedToolCatalog(key) : null,
+    hasClosedToolCatalog: (key?: string | null) =>
+      closedCatalogs.enabled ? actual.hasClosedToolCatalog(key) : false,
+  };
+});
+
 describe('VexiRealtimeService', () => {
   let service: VexiRealtimeService;
   let prisma: {
@@ -583,6 +603,7 @@ describe('VexiRealtimeService G session authority', () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
+    closedCatalogs.enabled = false;
   });
 
   it('rejects arbitrary legacy calls ON before any registry dispatch', async () => {
@@ -673,6 +694,18 @@ describe('VexiRealtimeService G session authority', () => {
       service.createSession({ conversation_id: 9, agent_key: 'vex' }),
     );
     expect(result.tools.map((tool) => tool.name)).not.toContain('ui_navigate');
+  });
+
+  it('(vexi-f1) the registry refuses a staff tool to Vexi by voice even if its authority listed it', async () => {
+    closedCatalogs.enabled = true;
+    await expect(
+      run(() =>
+        service.executeSessionToolCall(sessionId, 'read_product', { id: 7 }),
+      ),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({ error_code: 'AI_AGENT_004' }),
+    });
+    expect(read).not.toHaveBeenCalled();
   });
 
   // Hard rule («el mecánico»): an AUTHORIZED tool the model calls without it

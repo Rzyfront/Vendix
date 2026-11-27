@@ -20,6 +20,9 @@ export class EcommercePrismaService extends BasePrismaService {
     'service_plan_departures',
     'service_plan_pax_prices',
     'service_plan_activities',
+    // Vexi público F2: sesiones y mensajes del chat público (store_id propio).
+    'vexi_public_sessions',
+    'vexi_public_messages',
   ];
 
   // Modelos que filtran por store_id Y user_id (si hay auth)
@@ -257,6 +260,12 @@ export class EcommercePrismaService extends BasePrismaService {
   }
   get reviews() {
     return this.scoped_client.reviews;
+  }
+  get vexi_public_sessions() {
+    return this.scoped_client.vexi_public_sessions;
+  }
+  get vexi_public_messages() {
+    return this.scoped_client.vexi_public_messages;
   }
   get order_reviews() {
     return this.scoped_client.order_reviews;

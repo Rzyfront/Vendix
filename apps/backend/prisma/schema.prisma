@@ -7420,6 +7420,52 @@ model ai_conversations {
   @@index([status])
 }
 
+/// Vexi público F2: anonymous storefront chat session (no internal user). The
+/// visitor holds an opaque bearer token; only its SHA-256 is stored. Separate
+/// from `ai_conversations` on purpose: that table requires a staff `user_id`
+/// and feeds staff listings, history and quotas.
+model vexi_public_sessions {
+  id               Int       @id @default(autoincrement())
+  public_id        String    @unique @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  token_hash       String    @db.VarChar(64)
+  store_id         Int
+  organization_id  Int
+  /// Logged-in customer (role customer) when the visitor had a session; null for guests.
+  customer_user_id Int?
+  /// SHA-256 of client IP + user agent; never the raw IP.
+  visitor_hash     String    @db.VarChar(64)
+  app_type         String?   @db.VarChar(40)
+  /// When the visitor accepted the data-processing notice (habeas data).
+  consent_at       DateTime  @db.Timestamp(6)
+  message_count    Int       @default(0)
+  last_message_at  DateTime? @db.Timestamp(6)
+  expires_at       DateTime  @db.Timestamp(6)
+  created_at       DateTime  @default(now()) @db.Timestamp(6)
+
+  messages vexi_public_messages[]
+
+  @@index([store_id, created_at])
+}
+
+/// Vexi público F2: one turn line of a public session (text only, no audio).
+model vexi_public_messages {
+  id          Int      @id @default(autoincrement())
+  session_id  Int
+  store_id    Int
+  /// 'user' | 'assistant'
+  role        String   @db.VarChar(16)
+  content     String   @db.Text
+  /// Proposal cards (order/booking/request) shown with an assistant message.
+  cards       Json?
+  tokens_used Int      @default(0)
+  created_at  DateTime @default(now()) @db.Timestamp(6)
+
+  session vexi_public_sessions @relation(fields: [session_id], references: [id], onDelete: Cascade)
+
+  @@index([session_id, created_at])
+  @@index([store_id])
+}
+
 model ai_messages {
   id              Int                  @id @default(autoincrement())
   conversation_id Int

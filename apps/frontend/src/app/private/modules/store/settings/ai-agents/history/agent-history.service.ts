@@ -26,6 +26,23 @@ export interface HistoryConversation {
   is_own: boolean;
 }
 
+/** Vexi público F2: one anonymous storefront chat (listing). */
+export interface HistoryPublicConversation {
+  id: string;
+  app_type: string | null;
+  is_customer: boolean;
+  message_count: number;
+  created_at: string;
+  last_message_at: string | null;
+}
+
+export interface HistoryPublicMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  cards: unknown;
+  created_at: string;
+}
+
 export interface HistoryPage<T> {
   items: T[];
   total: number;
@@ -58,6 +75,29 @@ export class AgentHistoryApiService {
     agent: HistoryAgentFilter,
   ): Observable<HistoryPage<HistoryConversation>> {
     return this.get<HistoryConversation>('conversations', page, limit, agent);
+  }
+
+  /** Vexi público F2: the store's customer chats with Vexi (read-only). */
+  publicConversations(
+    page: number,
+    limit: number,
+  ): Observable<HistoryPage<HistoryPublicConversation>> {
+    return this.get<HistoryPublicConversation>(
+      'public-conversations',
+      page,
+      limit,
+      'all',
+    );
+  }
+
+  publicConversation(
+    id: string,
+  ): Observable<{ id: string; messages: HistoryPublicMessage[] }> {
+    return this.http
+      .get<{ data: { id: string; messages: HistoryPublicMessage[] } }>(
+        `${this.base}/public-conversations/${encodeURIComponent(id)}`,
+      )
+      .pipe(map((res) => res.data));
   }
 
   private get<T>(

@@ -18,6 +18,7 @@ import { RoutingModule } from './routing/routing.module';
 import { ServiceSessionAccessModule } from './service-sessions/service-session-access.module';
 import { EcommerceHospitalityModule } from './hospitality/ecommerce-hospitality.module';
 import { PaymentRequestsPublicModule } from './payment-requests/payment-requests-public.module';
+import { VexiPublicModule } from './vexi-public/vexi-public.module';
 
 /**
  * 🛒 Ecommerce Domain Module
@@ -52,6 +53,8 @@ import { PaymentRequestsPublicModule } from './payment-requests/payment-requests
     ServiceSessionAccessModule,
     EcommerceHospitalityModule,
     PaymentRequestsPublicModule,
+    // Vexi público F2: chat de cara al cliente en las apps públicas.
+    VexiPublicModule,
   ],
 })
 export class EcommerceDomainModule {}

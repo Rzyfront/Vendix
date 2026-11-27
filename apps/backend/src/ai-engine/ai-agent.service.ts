@@ -101,6 +101,7 @@ import { ErrorCodes, VendixHttpException } from '../common/errors';
 import { VexiUiChannelService } from '../domains/store/vexi/vexi-ui-channel.service';
 import { PROPOSE_PLAN_TOOL } from './tools/domains/planning.tools';
 import { FINISH_TURN_TOOL } from './tools/domains/turn.tools';
+import { hasClosedToolCatalog } from './tools/agent-tool-catalog';
 import { DISCREPANCY_GUIDANCE_BLOCK } from './tools/discrepancy-signal';
 import {
   isForeignSurfaceTool,
@@ -1828,6 +1829,20 @@ export class AIAgentService {
   }
 
   /** B authority is rebuilt per inference AND execution; relevance never grants it. */
+  /**
+   * Vexi público F1: the loop refuses unoffered names before they reach the
+   * registry gate, so a closed-catalog agent's refusal is traced here too
+   * (warn + `ai.agent.tool_denied`). Open agents (Vex) are untouched.
+   */
+  private traceClosedCatalogDenial(params: AgentRunParams, name: string) {
+    if (
+      !hasClosedToolCatalog(params.agent_key) ||
+      typeof this.toolRegistry.recordAgentToolDenial !== 'function'
+    )
+      return;
+    this.toolRegistry.recordAgentToolDenial(name, params.agent_key!, 'turn');
+  }
+
   async resolveToolAuthority(
     params: AgentRunParams,
   ): Promise<AIToolDefinition[]> {
@@ -1849,6 +1864,11 @@ export class AIAgentService {
     const permissionTools = this.toolRegistry.getAgentDefinitions(auth, {
       allowed_tools: params.agent_allowed_tools,
       denied_tools: params.agent_denied_tools,
+      // Only a closed-catalog agent carries its key: open agents keep the
+      // exact previous call shape.
+      ...(hasClosedToolCatalog(params.agent_key)
+        ? { agent_key: params.agent_key }
+        : {}),
     });
     const gateOpen = await this.isAgentGateOpen(
       context?.store_id,
@@ -2017,8 +2037,12 @@ export class AIAgentService {
     // Agent scope narrows the permission catalog: user perms ∩ agent
     // allowed_tools (when non-empty) − agent denied_tools, deny applied last.
     // Without agent scope this is exactly
-    // `getAvailableDefinitions` and Vexi behaves as before.
+    // `getAvailableDefinitions`.
+    // A closed-catalog agent (Vexi) always goes through the agent filter, even
+    // with empty lists: there "empty" means no tools, never the whole catalog.
+    const closedCatalog = hasClosedToolCatalog(params.agent_key);
     const hasAgentScope =
+      closedCatalog ||
       (params.agent_allowed_tools?.length ?? 0) > 0 ||
       (params.agent_denied_tools?.length ?? 0) > 0;
     const contextSpan = activeTrace?.startSpan('context');
@@ -2028,8 +2052,11 @@ export class AIAgentService {
         ? this.toolRegistry.getAgentDefinitions(authScopes, {
             allowed_tools: params.agent_allowed_tools,
             denied_tools: params.agent_denied_tools,
+            ...(closedCatalog ? { agent_key: params.agent_key } : {}),
           })
-        : this.toolRegistry.getAvailableDefinitions(authScopes);
+        : closedCatalog
+          ? []
+          : this.toolRegistry.getAvailableDefinitions(authScopes);
 
     // N4 — the plan does not restrict tools: the catalog is the caller's role
     // permissions (+ agent scope). The plan only decides whether the agent may
@@ -3240,6 +3267,7 @@ export class AIAgentService {
             // runs in this same round. Only a name outside the turn's
             // authority (hallucinated or denied to this agent) stops the batch.
             if (!liveNames.has(call.tool_name)) {
+              this.traceClosedCatalogDenial(params, call.tool_name);
               batchError = {
                 code: 'AI_AGENT_TOOL_NOT_ALLOWED',
                 next: TOOL_NOT_AVAILABLE_NEXT_STEP,
@@ -3445,7 +3473,12 @@ export class AIAgentService {
                     await this.toolRegistry.executeToolResult(
                       call.tool_name,
                       call.arguments,
-                      { evidenceRef: `tool_call:${call.call_id}` },
+                      {
+                        evidenceRef: `tool_call:${call.call_id}`,
+                        ...(hasClosedToolCatalog(params.agent_key)
+                          ? { agentKey: params.agent_key }
+                          : {}),
+                      },
                     ),
                   );
                 },
@@ -3733,6 +3766,7 @@ export class AIAgentService {
                 // Outside the turn's authority: a hallucinated name or a tool
                 // denied to this agent. Not a user/plan permission problem:
                 // the model gets real alternatives (D4) and corrects itself.
+                this.traceClosedCatalogDenial(params, toolName);
                 const result = normalizeToolResult({
                   error: `La herramienta "${toolName}" no existe en este asistente.`,
                   error_code: 'AI_AGENT_TOOL_NOT_ALLOWED',
@@ -3998,6 +4032,7 @@ export class AIAgentService {
             // screen even though execution was rejected afterwards. A rejected
             // call now produces only the error `tool_result`, never a `tool_call`.
             if (!offeredNames.has(toolName)) {
+              this.traceClosedCatalogDenial(params, toolName);
               toolOutcome = 'failed';
               toolErrorCode = 'AI_AGENT_TOOL_NOT_ALLOWED';
               const denied = normalizeToolResult({
@@ -4368,6 +4403,9 @@ export class AIAgentService {
                         ...(params.conversation_id
                           ? { conversationId: params.conversation_id }
                           : {}),
+                        ...(hasClosedToolCatalog(params.agent_key)
+                          ? { agentKey: params.agent_key }
+                          : {}),
                       },
                     ),
                   );
@@ -4688,6 +4726,9 @@ export class AIAgentService {
                           {
                             confirmationToken: singleUse,
                             evidenceRef: `tool_call:${toolCall.id}`,
+                            ...(hasClosedToolCatalog(params.agent_key)
+                              ? { agentKey: params.agent_key }
+                              : {}),
                           },
                         ),
                       );

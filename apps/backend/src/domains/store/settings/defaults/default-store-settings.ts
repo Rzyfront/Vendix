@@ -633,6 +633,14 @@ export function getDefaultStoreSettings(): StoreSettings {
       enabled: false,
     },
 
+    // Vexi público (F2) — the customer-facing chat on the store's public apps.
+    // Independent from `vexi.enabled` (the retired admin dock): reusing that key
+    // would publish Vexi on every store that has the dock on today. Off by
+    // default for new and existing stores; only an explicit `true` turns it on.
+    vexi_public: {
+      enabled: false,
+    },
+
     // Módulo Apps (apps-module D3/T8; apps-vistas-f1 S1) — estándar, encendido
     // por defecto. El interruptor se conserva: con `false` el menú lateral queda
     // exactamente como antes del módulo (garantía de rollback).

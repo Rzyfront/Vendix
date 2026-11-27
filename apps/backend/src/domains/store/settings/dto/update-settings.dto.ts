@@ -24,6 +24,7 @@ import {
   HospitalitySettingsDto,
   MembershipSettingsDto,
   VexiSettingsDto,
+  VexiPublicSettingsDto,
   InvoicingSettingsDto,
   PanelUISettingsDto,
   AccountingFlowsSettingsDto,
@@ -182,6 +183,12 @@ export class UpdateSettingsDto {
   @ValidateNested()
   @Type(() => VexiSettingsDto)
   vexi?: VexiSettingsDto;
+
+  @ApiProperty({ type: VexiPublicSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => VexiPublicSettingsDto)
+  vexi_public?: VexiPublicSettingsDto;
 
   @ApiProperty({ type: VexSettingsDto, required: false })
   @IsOptional()

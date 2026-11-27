@@ -166,12 +166,14 @@ describe('Vex T8: presupuesto de exploración por turno', () => {
     expect(finalText(chunks)).toBe('Revisa la tarjeta.');
   });
 
-  it('Vexi no tiene este presupuesto (alcance: Vex)', async () => {
+  // Vexi público F1: Vexi ya no tiene tools internas (catálogo cerrado), así
+  // que el alcance «solo Vex» se fija con un turno sin agente.
+  it('un turno sin agente no tiene este presupuesto (alcance: Vex)', async () => {
     const f = build();
     f.executeTool.mockResolvedValue('{"data":[]}');
     for (let n = 1; n <= 12; n++) f.chat.mockResolvedValueOnce(page(n));
     f.chat.mockResolvedValueOnce(ok({ content: 'Listo.' }));
-    await f.drain({ agent_key: 'vexi', max_iterations: 40 });
+    await f.drain({ max_iterations: 40 });
     expect(f.executeTool).toHaveBeenCalledTimes(12);
   });
 });

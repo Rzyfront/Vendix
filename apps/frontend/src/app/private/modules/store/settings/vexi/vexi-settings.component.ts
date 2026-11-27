@@ -59,6 +59,21 @@ import { AgentUsageMetersComponent } from '../ai-agents/agent-usage-meters.compo
         }
       </div>
 
+      <div
+        class="bg-surface rounded-lg shadow-sm border border-[var(--color-border)] p-4 sm:p-6 mt-4"
+        role="group"
+        aria-label="Vexi en tus apps públicas"
+        data-testid="vexi-public-setting"
+      >
+        <app-setting-toggle
+          label="Vexi en tus apps públicas"
+          [description]="publicDescription()"
+          [disabled]="savingPublic() || publicLocked()"
+          [ngModel]="publicEnabled()"
+          (ngModelChange)="onPublicToggle($event)"
+        />
+      </div>
+
       <app-agent-usage-meters agent="vexi" />
     </div>
   `,
@@ -103,6 +118,55 @@ export class VexiSettingsComponent {
       ? 'Vexi aparece para todos los usuarios de la tienda.'
       : 'El asistente no se carga y sus endpoints responden módulo deshabilitado.',
   );
+
+  // ── Vexi público (F2) ──────────────────────────────────────────────────
+
+  private readonly publicOverride = signal<boolean | null>(null);
+  readonly savingPublic = signal(false);
+  readonly publicEnabled = computed(
+    () => this.publicOverride() ?? this.settingsFacade.vexiPublicEnabled(),
+  );
+  /** Same plan rule: blocked only for turning it on. */
+  readonly publicLocked = computed(
+    () => this.blockedByPlan() && !this.publicEnabled(),
+  );
+  readonly publicDescription = computed(() =>
+    this.publicEnabled()
+      ? 'Tus clientes ven a Vexi en la tienda en línea, la página de producto y la de servicios: arma pedidos, agenda citas y registra peticiones. Solo responde por escrito y usa los tokens de IA de tu plan.'
+      : 'Vexi no aparece en tus apps públicas.',
+  );
+
+  async onPublicToggle(next: boolean): Promise<void> {
+    if (
+      this.savingPublic() ||
+      next === this.publicEnabled() ||
+      (next && this.blockedByPlan())
+    ) {
+      return;
+    }
+    const previous = this.publicEnabled();
+    this.publicOverride.set(next);
+    this.savingPublic.set(true);
+    try {
+      await firstValueFrom(
+        this.settingsService.saveSettingsNow({ vexi_public: { enabled: next } }),
+      );
+      this.publicOverride.set(null);
+      this.toast.success(
+        next
+          ? 'Vexi quedó publicado en tus apps públicas.'
+          : 'Vexi ya no aparece en tus apps públicas.',
+      );
+    } catch (error) {
+      this.publicOverride.set(previous);
+      this.toast.error(
+        parseApiError(error).userMessage ??
+          'No se pudo guardar la configuración de Vexi.',
+      );
+    } finally {
+      this.savingPublic.set(false);
+    }
+  }
 
   async onToggle(next: boolean): Promise<void> {
     if (

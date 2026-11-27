@@ -396,6 +396,28 @@ describe('D1 worker authority and isolated durable reference', () => {
     expect(params.plan_approval).toBeUndefined();
     expect(params.block_sink).toBeUndefined();
   });
+  it('R1: queued Vexi staff work keeps chat_assistant when the vexi row points at vexi_storefront', async () => {
+    prisma.ai_agents.findUnique.mockResolvedValue({
+      key: 'vexi',
+      is_active: true,
+      app_key: 'vexi_storefront',
+      allowed_tools: ['products'],
+      denied_tools: ['ui_*'],
+      max_iterations: 8,
+      timeout_seconds: 30,
+    });
+    objectives.get.mockResolvedValue({
+      id: 'objective',
+      conversation_id: 22,
+      agent_id: 'vexi',
+      authority_snapshot: data.permissions,
+    });
+    await processor.process(job({ objective_id: 'objective' }));
+    expect(runAgent.mock.calls[0][0]).toMatchObject({
+      agent_key: 'vexi',
+      app_key: 'chat_assistant',
+    });
+  });
   it('does not treat a role permission marked granted=false as current authority', async () => {
     prisma.user_roles.findMany.mockResolvedValue([
       {
