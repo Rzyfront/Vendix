@@ -4,7 +4,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { Router, provideRouter } from '@angular/router';
 import { of, throwError } from 'rxjs';
 
-import { VexiPublicWidgetComponent } from './vexi-public-widget.component';
+import { INTRO_KEY, VexiPublicWidgetComponent } from './vexi-public-widget.component';
 import { VexiPublicApi, VexiPublicConfig } from './vexi-public.api';
 import { VexiPublicPresenceService } from './vexi-public-presence.service';
 import { TenantFacade } from '../../core/store/tenant/tenant.facade';
@@ -34,8 +34,13 @@ describe('VexiPublicWidgetComponent', () => {
     store_name: 'Tienda Demo',
   };
 
-  async function setup(appType: AppType, config: VexiPublicConfig | null) {
+  async function setup(
+    appType: AppType,
+    config: VexiPublicConfig | null,
+    storage: Record<string, string> = {},
+  ) {
     sessionStorage.clear();
+    for (const [key, value] of Object.entries(storage)) sessionStorage.setItem(key, value);
     domainConfig.set({ environment: appType, store_id: 10, customConfig: { ecommerce: { checkout: {} } } });
     lastPlacedOrder.set(null);
     api = jasmine.createSpyObj<VexiPublicApi>('VexiPublicApi', [
@@ -226,4 +231,65 @@ describe('VexiPublicWidgetComponent', () => {
     fixture.detectChanges();
     expect(q('vexi-public-handoff')).toBeNull();
   });
+
+  describe('F3 entrance (Vexi → chameleon → bubble)', () => {
+    const motion = (reduce: boolean) =>
+      spyOn(window, 'matchMedia').and.returnValue({ matches: reduce } as MediaQueryList);
+
+    it('plays the first time in the tab and is remembered in sessionStorage', async () => {
+      motion(false);
+      await setup(AppType.STORE_ECOMMERCE, ENABLED);
+      const bubble = q('vexi-public-bubble')!;
+      expect(bubble.classList).toContain('vx-intro');
+      expect(q('vexi-public-intro')).not.toBeNull();
+      expect(q('vexi-public-intro')!.getAttribute('aria-hidden')).toBe('true');
+      expect(bubble.getAttribute('aria-label')).toBe('Abrir chat con la tienda');
+      expect(sessionStorage.getItem(INTRO_KEY)).toBe('true');
+    });
+
+    it('does not play the second time in the same tab', async () => {
+      motion(false);
+      await setup(AppType.STORE_ECOMMERCE, ENABLED, { [INTRO_KEY]: 'true' });
+      const bubble = q('vexi-public-bubble')!;
+      expect(bubble.classList).not.toContain('vx-intro');
+      expect(bubble.classList).toContain('vx-appear');
+      expect(q('vexi-public-intro')).toBeNull();
+    });
+
+    it('with prefers-reduced-motion the bubble just fades in', async () => {
+      motion(true);
+      await setup(AppType.STORE_ECOMMERCE, ENABLED);
+      const bubble = q('vexi-public-bubble')!;
+      expect(bubble.classList).not.toContain('vx-intro');
+      expect(bubble.classList).toContain('vx-appear');
+      expect(q('vexi-public-intro')).toBeNull();
+    });
+
+    it('a click during the entrance jumps to the final bubble and opens the chat', async () => {
+      motion(false);
+      await setup(AppType.STORE_ECOMMERCE, ENABLED);
+      expect(q('vexi-public-intro')).not.toBeNull();
+      q('vexi-public-bubble')!.click();
+      fixture.detectChanges();
+      expect(q('vexi-public-intro')).toBeNull();
+      expect(q('vexi-public-bubble')!.classList).not.toContain('vx-intro');
+      expect(q('vexi-public-panel')).not.toBeNull();
+    });
+
+    it('ends by itself after the timeline', async () => {
+      motion(false);
+      jasmine.clock().install();
+      try {
+        await setup(AppType.STORE_ECOMMERCE, ENABLED);
+        expect(q('vexi-public-intro')).not.toBeNull();
+        jasmine.clock().tick(3500);
+        fixture.detectChanges();
+        expect(q('vexi-public-intro')).toBeNull();
+        expect(q('vexi-public-bubble')!.classList).not.toContain('vx-intro');
+      } finally {
+        jasmine.clock().uninstall();
+      }
+    });
+  });
 });
+

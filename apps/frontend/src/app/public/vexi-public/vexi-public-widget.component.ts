@@ -54,6 +54,18 @@ const HIDDEN_ROUTES = [/^\/pagar(\/|$)/, /^\/checkout(\/|\?|$)/];
 const CONSENT_KEY = 'vexi_public_consent';
 const SESSION_KEY = 'vexi_public_session';
 const HANDOFF_KEY = 'vexi_public_handoff';
+/** F3: the entrance plays once per visitor session (tab). */
+export const INTRO_KEY = 'vexi_public_intro_seen';
+/** F3: length of the entrance; matches the CSS timeline (ends after the pulse). */
+export const VEXI_INTRO_MS = 3500;
+
+function prefersReducedMotion(): boolean {
+  try {
+    return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+  } catch {
+    return false;
+  }
+}
 
 type ChatLine = {
   id: number;
@@ -115,11 +127,12 @@ function writeStorage(key: string, value: unknown): void {
   standalone: true,
   imports: [IconComponent, CurrencyPipe],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  styleUrl: './vexi-public-widget.component.css',
   template: `
     @if (visible()) {
       @if (open()) {
         <section
-          class="fixed bottom-24 right-4 z-[60] flex h-[min(560px,calc(100vh-8rem))] w-[min(380px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/10"
+          class="vx-panel-anchor fixed z-[60] flex h-[min(560px,calc(100vh-8rem))] w-[min(380px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/10"
           role="dialog"
           aria-label="Chat con Vexi"
           data-testid="vexi-public-panel"
@@ -325,16 +338,97 @@ function writeStorage(key: string, value: unknown): void {
 
       <button
         type="button"
-        class="fixed bottom-5 right-5 z-[60] flex items-center gap-2 rounded-full bg-[#25D366] px-4 py-3 text-sm font-semibold text-white shadow-lg hover:bg-[#1ebe5a]"
+        class="vx-anchor fixed z-[60] flex items-center gap-2 rounded-full bg-[#25D366] px-4 py-3 text-sm font-semibold text-white shadow-lg hover:bg-[#1ebe5a]"
         data-testid="vexi-public-bubble"
+        [class.vx-intro]="intro()"
+        [class.vx-appear]="!introPlayed()"
         [attr.aria-label]="open() ? 'Cerrar chat' : 'Abrir chat con la tienda'"
         (click)="toggle()"
       >
         <app-icon [name]="open() ? 'x' : 'message-circle'" [size]="20" />
         @if (!open()) {
-          <span>¿Dudas? Escríbenos</span>
+          <span class="vx-label">¿Dudas? Escríbenos</span>
         }
       </button>
+      <!-- vx-stage:start -->
+      @if (intro()) {
+        <div class="vx-stage" aria-hidden="true" data-testid="vexi-public-intro">
+          <div class="vx-char" (click)="toggle()">
+            <svg class="vx-svg" viewBox="0 0 100 110" focusable="false">
+              <defs>
+                <radialGradient id="vx-body-g" cx="38%" cy="30%" r="75%">
+                  <stop offset="0" stop-color="#b6ffe6" />
+                  <stop offset="0.45" stop-color="#4fe0b0" />
+                  <stop offset="1" stop-color="#18a77c" />
+                </radialGradient>
+                <linearGradient id="vx-band-g" x1="0" x2="1" y1="0" y2="0">
+                  <stop offset="0" stop-color="#ffd23f" stop-opacity="0" />
+                  <stop offset="0.3" stop-color="#ffd23f" />
+                  <stop offset="0.55" stop-color="#ff7a59" />
+                  <stop offset="0.8" stop-color="#4cc9f0" />
+                  <stop offset="1" stop-color="#4cc9f0" stop-opacity="0" />
+                </linearGradient>
+                <clipPath id="vx-clip"><circle cx="50" cy="62" r="34" /></clipPath>
+              </defs>
+              <g class="vx-tail">
+                <path d="M26 84 C 10 94, 2 76, 13 71 C 21 68, 24 78, 17 79" fill="none" stroke="#2bc493" stroke-width="7" stroke-linecap="round" />
+              </g>
+              <g class="vx-antenna">
+                <rect x="48.5" y="16" width="3" height="14" rx="1.5" fill="#5f7772" />
+                <circle cx="50" cy="13" r="5.5" fill="url(#vx-body-g)" />
+              </g>
+              <circle cx="50" cy="62" r="34" fill="url(#vx-body-g)" />
+              <g clip-path="url(#vx-clip)">
+                <circle class="vx-spot" cx="28" cy="78" r="5" fill="#ffd23f" />
+                <circle class="vx-spot" cx="72" cy="80" r="4" fill="#ff7a59" />
+                <circle class="vx-spot" cx="66" cy="36" r="3.5" fill="#4cc9f0" />
+                <circle class="vx-spot" cx="34" cy="38" r="3" fill="#b28dff" />
+                <g transform="rotate(-25 50 62)">
+                  <rect class="vx-band" x="22" y="0" width="30" height="124" fill="url(#vx-band-g)" />
+                </g>
+                <g transform="rotate(-25 50 62)">
+                  <rect class="vx-band vx-band-2" x="22" y="0" width="30" height="124" fill="url(#vx-band-g)" />
+                </g>
+              </g>
+              <ellipse cx="38" cy="38" rx="9" ry="5" fill="#ffffff" opacity="0.45" transform="rotate(-25 38 38)" />
+              <ellipse cx="50" cy="61" rx="25" ry="18" fill="#0d1b1a" />
+              <g class="vx-face">
+                <ellipse class="vx-eye" cx="41" cy="58" rx="3.6" ry="4.8" fill="#6ff7d8" />
+                <ellipse class="vx-eye" cx="59" cy="58" rx="3.6" ry="4.8" fill="#6ff7d8" />
+                <path d="M44 67 Q50 72 56 67" stroke="#6ff7d8" stroke-width="2.6" fill="none" stroke-linecap="round" />
+              </g>
+              <g class="vx-ceye">
+                <circle cx="39" cy="58" r="8.5" fill="#4fe0b0" stroke="#18a77c" stroke-width="2" />
+                <g class="vx-pupil vx-pupil-l">
+                  <circle cx="39" cy="58" r="8.5" fill="none" />
+                  <circle cx="42.5" cy="56" r="3.3" fill="#0d1b1a" />
+                </g>
+              </g>
+              <g class="vx-ceye">
+                <circle cx="61" cy="58" r="8.5" fill="#4fe0b0" stroke="#18a77c" stroke-width="2" />
+                <g class="vx-pupil vx-pupil-r">
+                  <circle cx="61" cy="58" r="8.5" fill="none" />
+                  <circle cx="58" cy="60.5" r="3.3" fill="#0d1b1a" />
+                </g>
+              </g>
+              <g class="vx-arm">
+                <path d="M81 67 Q90 61 92 51" stroke="#2bc493" stroke-width="6" stroke-linecap="round" fill="none" />
+                <circle cx="92" cy="47" r="5.5" fill="url(#vx-body-g)" />
+              </g>
+            </svg>
+          </div>
+          <div class="vx-burst">
+            <i style="--a: 0deg"></i><i style="--a: 60deg"></i><i style="--a: 120deg"></i>
+            <i style="--a: 180deg"></i><i style="--a: 240deg"></i><i style="--a: 300deg"></i>
+          </div>
+          <div class="vx-orb">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+              <path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719" />
+            </svg>
+          </div>
+        </div>
+      }
+      <!-- vx-stage:end -->
     }
   `,
 })
@@ -360,6 +454,12 @@ export class VexiPublicWidgetComponent {
   readonly errorState = signal<VexiPublicErrorState | null>(null);
   readonly avatarFailed = signal(false);
   private readonly requestForms = signal<Record<number, RequestFormState>>({});
+  /** F3: the entrance (Vexi → chameleon → bubble) is playing. */
+  readonly intro = signal(false);
+  /** F3: the entrance played in this page; the bubble then skips its fade. */
+  readonly introPlayed = signal(false);
+  private introTimer: ReturnType<typeof setTimeout> | null = null;
+  private introDecided = false;
   private nextId = 1;
   private lastHandoffOrderId: number | null = null;
 
@@ -426,6 +526,14 @@ export class VexiPublicWidgetComponent {
       untracked(() => this.handOff(order));
     });
 
+    // F3: the first time the bubble shows in this tab, Vexi makes his entrance.
+    effect(() => {
+      if (!this.visible() || this.introDecided) return;
+      this.introDecided = true;
+      untracked(() => this.startIntro());
+    });
+    this.destroyRef.onDestroy(() => this.clearIntroTimer());
+
     effect(() => {
       if (this.consented() && this.config()?.enabled && this.lines().length === 0)
         untracked(() => this.push('assistant', this.config()!.greeting));
@@ -433,7 +541,38 @@ export class VexiPublicWidgetComponent {
   }
 
   toggle(): void {
+    // A click during the entrance never waits for it: jump to the final
+    // bubble and open the chat.
+    if (this.intro()) {
+      this.endIntro();
+      this.open.set(true);
+      return;
+    }
     this.open.update((v) => !v);
+  }
+
+  /** Ends the entrance on the bubble's final state (also on click). */
+  endIntro(): void {
+    this.clearIntroTimer();
+    this.intro.set(false);
+  }
+
+  /**
+   * Once per tab (sessionStorage) and never with `prefers-reduced-motion`:
+   * then the bubble just fades in. Decorative only: the button is in place
+   * and clickable from the first frame.
+   */
+  private startIntro(): void {
+    if (readStorage<boolean>(INTRO_KEY) === true || prefersReducedMotion()) return;
+    writeStorage(INTRO_KEY, true);
+    this.introPlayed.set(true);
+    this.intro.set(true);
+    this.introTimer = setTimeout(() => this.endIntro(), VEXI_INTRO_MS);
+  }
+
+  private clearIntroTimer(): void {
+    if (this.introTimer !== null) clearTimeout(this.introTimer);
+    this.introTimer = null;
   }
 
   acceptConsent(): void {
@@ -582,6 +721,7 @@ export class VexiPublicWidgetComponent {
   private handOff(order: { order_id: number; order_number: string; public_order_token?: string | null }): void {
     this.lastHandoffOrderId = order.order_id;
     writeStorage(HANDOFF_KEY, null);
+    this.endIntro();
     const url = vexiOrderHandoffUrl(
       this.config()?.whatsapp_number,
       this.config()?.store_name || 'la tienda',
