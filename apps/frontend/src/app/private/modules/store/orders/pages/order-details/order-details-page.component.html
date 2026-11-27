@@ -2704,8 +2704,8 @@
                 </div>
               }
 
-              <!-- Applied coupons (persisted snapshot) -->
-              @if (appliedCoupons().length > 0) {
+              <!-- Applied coupons (persisted snapshot; editable orders use the interactive block below) -->
+              @if (appliedCoupons().length > 0 && !canEditCoupon()) {
                 <div class="pt-1 space-y-1.5">
                   @for (cp of appliedCoupons(); track cp.id) {
                     <div
@@ -2739,6 +2739,20 @@
                       >
                     </div>
                   }
+                </div>
+              }
+
+              <!-- Coupon apply / replace / remove for editable unpaid orders -->
+              @if (canEditCoupon()) {
+                <div class="pt-2">
+                  <app-order-coupon-section
+                    [order]="orderData"
+                    [disabled]="isProcessingAction()"
+                    [isLoading]="isApplyingCoupon()"
+                    [errorMessage]="couponError()"
+                    (applyCoupon)="onApplyOrderCoupon($event)"
+                    (removeCoupon)="onRemoveOrderCoupon()"
+                  />
                 </div>
               }
 
@@ -3164,8 +3178,13 @@
           [preSelectedInstallment]="preSelectedInstallment()"
           [isProcessing]="isProcessingAction()"
           [paymentError]="payModalError()"
-          (isOpenChange)="showPayModal.set($event)"
-          (closed)="showPayModal.set(false)"
+          [canEditCoupon]="canEditCoupon()"
+          [isApplyingCoupon]="isApplyingCoupon()"
+          [couponError]="couponError()"
+          (isOpenChange)="showPayModal.set($event); couponError.set(null)"
+          (closed)="showPayModal.set(false); couponError.set(null)"
+          (applyCoupon)="onApplyOrderCoupon($event)"
+          (removeCoupon)="onRemoveOrderCoupon()"
           (paymentSubmitted)="onPaymentSubmitted($event)"
         />
       }

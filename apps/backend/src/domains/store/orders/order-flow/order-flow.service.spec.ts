@@ -9319,6 +9319,41 @@ describe('OrderFlowService.commitCouponUseForOrder — cupón desactivado (QUI-6
     });
     expect(tx.coupon_uses.create).not.toHaveBeenCalled();
   });
+
+  it('persiste customer_id, descuenta promociones apiladas en BRUTO (sin restar bruto de base) y es idempotente', async () => {
+    const { tx, service } = buildCommit({ max_uses: 1, current_uses: 0 });
+    // Ítem base 1000 + IVA 19% (190, bruto 1190): promo 50% (595 bruto) +
+    // cupón 10% sobre restante (59.50 bruto) ⇒ baseDiscount = 550, tax = 85.50.
+    tx.orders.findFirst.mockResolvedValue({
+      id: 70,
+      coupon_id: 9,
+      coupon_code: 'DIEZ',
+      customer_id: 55,
+      subtotal_amount: 1000,
+      tax_amount: 85.5,
+      discount_amount: 550,
+      store_id: 4,
+      order_items: [
+        {
+          total_price: 1000,
+          tax_rate: 0.19,
+          order_item_taxes: [{ tax_rate: 0.19, tax_amount: 85.5 }],
+        },
+      ],
+      order_promotions: [{ discount_amount: 595 }],
+    });
+    await expect((service as any).commitCouponUseForOrder(70, tx, [])).resolves.toBeUndefined();
+    expect(tx.coupon_uses.create).toHaveBeenCalledWith({
+      data: { coupon_id: 9, order_id: 70, customer_id: 55, discount_applied: 59.5 },
+    });
+    expect(tx.coupons.updateMany).toHaveBeenCalledTimes(1);
+
+    // Segundo intento: ya existe coupon_uses → no duplica ni incrementa otra vez.
+    tx.coupon_uses.findFirst.mockResolvedValueOnce({ id: 1 });
+    await expect((service as any).commitCouponUseForOrder(70, tx, [])).resolves.toBeUndefined();
+    expect(tx.coupon_uses.create).toHaveBeenCalledTimes(1);
+    expect(tx.coupons.updateMany).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('OrderFlowService.recordPayOrderCashMovement — shared cash movement policy (B08/B26)', () => {
