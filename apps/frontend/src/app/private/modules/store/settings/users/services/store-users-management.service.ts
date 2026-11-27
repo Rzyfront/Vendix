@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, catchError, throwError, map } from 'rxjs';
 import { environment } from '../../../../../../../environments/environment';
+import type { UsernameAvailability } from '../../../../../../../app/shared/utils/username-availability.validator';
 import {
   StoreUser,
   StoreUserDetail,
@@ -200,5 +201,19 @@ export class StoreUsersManagementService {
         map((response) => response.data),
         catchError((error) => throwError(() => error)),
       );
+  }
+
+  /** Live username availability check. `excludeUserId` skips the user being edited. */
+  checkUsernameAvailability(
+    username: string,
+    excludeUserId?: number,
+  ): Observable<UsernameAvailability> {
+    let params = new HttpParams().set('username', username);
+    if (excludeUserId !== undefined) {
+      params = params.set('exclude_user_id', String(excludeUserId));
+    }
+    return this.http
+      .get<{ data: UsernameAvailability }>(`${this.baseUrl}/username-availability`, { params })
+      .pipe(map((res) => res.data));
   }
 }

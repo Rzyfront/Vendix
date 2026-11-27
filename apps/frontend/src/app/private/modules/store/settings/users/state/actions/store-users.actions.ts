@@ -56,7 +56,7 @@ export const createUserSuccess = createAction(
 );
 export const createUserFailure = createAction(
   '[StoreUsers] Create User Failure',
-  props<{ error: string }>(),
+  props<{ error: string; error_code?: string | null }>(),
 );
 
 // ── Update User ──────────────────────────────────────────────────
@@ -70,7 +70,7 @@ export const updateUserSuccess = createAction(
 );
 export const updateUserFailure = createAction(
   '[StoreUsers] Update User Failure',
-  props<{ error: string }>(),
+  props<{ error: string; error_code?: string | null }>(),
 );
 
 // ── Deactivate / Reactivate ──────────────────────────────────────

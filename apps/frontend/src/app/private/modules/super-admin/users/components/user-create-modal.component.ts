@@ -19,6 +19,11 @@ import {
   ModalComponent,
   PasswordRequirementsComponent} from '../../../../../shared/components/index';
 import { passwordPolicyValidator } from '../../../../../core/utils/password-policy';
+import { parseApiError } from '../../../../../core/utils/parse-api-error';
+import {
+  createUsernameFieldState,
+  usernameAvailabilityValidator,
+} from '../../../../../shared/utils/username-availability.validator';
 import { UsersService } from '../services/users.service';
 import { CreateUserDto, User, UserState } from '../interfaces/user.interface';
 
@@ -60,14 +65,22 @@ import { CreateUserDto, User, UserState } from '../interfaces/user.interface';
             [disabled]="isCreating()"
           ></app-input>
 
-          <app-input
-            formControlName="username"
-            label="Nombre de Usuario"
-            placeholder="juanperez"
-            [required]="true"
-            [control]="userForm.get('username')"
-            [disabled]="isCreating()"
-          ></app-input>
+          <div>
+            <app-input
+              formControlName="username"
+              label="Nombre de Usuario"
+              placeholder="juanperez"
+              [required]="true"
+              [control]="userForm.get('username')"
+              [disabled]="isCreating()"
+              [error]="usernameState.error() ?? undefined"
+            ></app-input>
+            @if (usernameState.pending()) {
+              <p class="mt-1 text-sm text-[var(--color-text-secondary)]" aria-live="polite">Verificando…</p>
+            } @else if (usernameState.available()) {
+              <p class="mt-1 text-sm text-[var(--color-success)]" aria-live="polite">Disponible</p>
+            }
+          </div>
 
           <app-input
             formControlName="email"
@@ -155,7 +168,7 @@ import { CreateUserDto, User, UserState } from '../interfaces/user.interface';
         <app-button
           variant="primary"
           (clicked)="onSubmit()"
-          [disabled]="userForm.invalid || isCreating()"
+          [disabled]="userForm.invalid || usernameState.pending() || isCreating()"
           [loading]="isCreating()"
         >
           Crear Usuario
@@ -189,6 +202,12 @@ export class UserCreateModalComponent implements OnInit {
         Validators.minLength(3),
         Validators.maxLength(50),
       ],
+      // Default `updateOn: 'change'` on purpose: live feedback while typing.
+      [
+        usernameAvailabilityValidator((username, excludeId) =>
+          this.usersService.checkUsernameAvailability(username, excludeId),
+        ),
+      ],
     ],
     email: [
       '',
@@ -199,11 +218,19 @@ export class UserCreateModalComponent implements OnInit {
     app: [''],
     state: [UserState.PENDING_VERIFICATION]});
 
+  readonly usernameState = createUsernameFieldState(
+    this.userForm.get('username')!,
+  );
+
   readonly isCreating = signal(false);
   UserState = UserState;
 ngOnInit(): void { }
 onSubmit(): void {
-    if (this.userForm.invalid || this.isCreating()) {
+    if (
+      this.userForm.invalid ||
+      this.userForm.pending ||
+      this.isCreating()
+    ) {
       return;
     }
 
@@ -222,6 +249,12 @@ onSubmit(): void {
           this.onCancel();
         },
         error: (error: any) => {
+          if (parseApiError(error).errorCode === 'USER_USERNAME_TAKEN') {
+            const control = this.userForm.get('username');
+            control?.setErrors({ usernameTaken: true });
+            control?.markAsTouched();
+            return;
+          }
           console.error('Error creating user:', error);
         }});
   }

@@ -25,6 +25,11 @@ import * as StoreUsersActions from '../state/actions/store-users.actions';
 import { selectUserSaving } from '../state/selectors/store-users.selectors';
 import { CreateStoreUserDto } from '../interfaces/store-user.interface';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import { StoreUsersManagementService } from '../services/store-users-management.service';
+import {
+  createUsernameFieldState,
+  usernameAvailabilityValidator,
+} from '../../../../../../shared/utils/username-availability.validator';
 
 /**
  * QUI-581 — Roles asignables al crear, espejo de `ASSIGNABLE_SYSTEM_ROLES.store`
@@ -90,14 +95,22 @@ const HOSPITALITY_ROLE_OPTIONS: readonly SelectorOption[] = [
             [disabled]="isCreating()"
           ></app-input>
 
-          <app-input
-            formControlName="username"
-            label="Nombre de Usuario"
-            placeholder="juanperez"
-            [control]="userForm.get('username')"
-            [disabled]="isCreating()"
-            helpText="Opcional. Solo letras, numeros y guiones bajos"
-          ></app-input>
+          <div>
+            <app-input
+              formControlName="username"
+              label="Nombre de Usuario"
+              placeholder="juanperez"
+              [control]="userForm.get('username')"
+              [disabled]="isCreating()"
+              [error]="usernameState.error() ?? undefined"
+              helpText="Opcional. Solo letras, numeros y guiones bajos"
+            ></app-input>
+            @if (usernameState.pending()) {
+              <p class="mt-1 text-sm text-[var(--color-text-secondary)]" aria-live="polite">Verificando…</p>
+            } @else if (usernameState.available()) {
+              <p class="mt-1 text-sm text-[var(--color-success)]" aria-live="polite">Disponible</p>
+            }
+          </div>
 
           <app-input
             formControlName="email"
@@ -144,7 +157,7 @@ const HOSPITALITY_ROLE_OPTIONS: readonly SelectorOption[] = [
         <app-button
           variant="primary"
           (clicked)="onSubmit()"
-          [disabled]="userForm.invalid || isCreating()"
+          [disabled]="userForm.invalid || usernameState.pending() || isCreating()"
           [loading]="isCreating()"
         >
           Crear Usuario
@@ -184,6 +197,8 @@ export class StoreUserCreateModalComponent {
   readonly onUserCreated = output<void>();
 
   userForm: FormGroup;
+  readonly usernameState: ReturnType<typeof createUsernameFieldState>;
+  private readonly usersService = inject(StoreUsersManagementService);
   private readonly authFacade = inject(AuthFacade);
   /** Los roles de hotelería se suman sólo si la tienda es un hotel. */
   readonly roleOptions = computed<SelectorOption[]>(() =>
@@ -207,6 +222,13 @@ export class StoreUserCreateModalComponent {
           Validators.maxLength(50),
           Validators.pattern(/^[a-zA-Z0-9_]+$/),
         ],
+        // Default `updateOn: 'change'` on purpose: live feedback while typing.
+        // Empty stays valid (the backend autogenerates the username).
+        [
+          usernameAvailabilityValidator((username, excludeId) =>
+            this.usersService.checkUsernameAvailability(username, excludeId),
+          ),
+        ],
       ],
       email: [
         '',
@@ -219,6 +241,10 @@ export class StoreUserCreateModalComponent {
       // QUI-581 — `employee` por defecto: preserva el comportamiento anterior al
       // ticket para quien no toque el campo.
       role: ['employee', [Validators.required]]});
+
+    this.usernameState = createUsernameFieldState(
+      this.userForm.controls['username'],
+    );
 
     // Éxito: limpiar, cerrar y avisar al padre. El toast y la recarga de lista
     // + stats los hacen `createUser$` y `mutationSuccess$` respectivamente.
@@ -233,13 +259,30 @@ export class StoreUserCreateModalComponent {
         this.onUserCreated.emit();
       });
 
-    // Fallo: deliberadamente NO se escucha. El modal debe quedarse abierto con
-    // lo tecleado intacto, el toast de error lo emite `createUser$` y el botón
-    // se reactiva solo porque el reducer devuelve `user_saving` a false.
+    // Fallo: el modal se queda abierto con lo tecleado intacto; el toast de
+    // error lo emite `createUser$` y el botón se reactiva solo porque el
+    // reducer devuelve `user_saving` a false. Única excepción: un username
+    // tomado (409 USER_USERNAME_TAKEN) se marca en el campo, sin toast.
+    this.actions$
+      .pipe(
+        ofType(StoreUsersActions.createUserFailure),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe(({ error_code }) => {
+        if (error_code === 'USER_USERNAME_TAKEN') {
+          const control = this.userForm.controls['username'];
+          control.setErrors({ usernameTaken: true });
+          control.markAsTouched();
+        }
+      });
   }
 
   onSubmit(): void {
-    if (this.userForm.invalid || this.isCreating()) {
+    if (
+      this.userForm.invalid ||
+      this.userForm.pending ||
+      this.isCreating()
+    ) {
       Object.keys(this.userForm.controls).forEach((key) => {
         this.userForm.get(key)?.markAsTouched();
       });
