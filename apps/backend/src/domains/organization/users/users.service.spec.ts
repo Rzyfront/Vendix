@@ -8,6 +8,7 @@ import {
 import { S3Service } from '@common/services/s3.service';
 import { DefaultPanelUIService } from '@common/services/default-panel-ui.service';
 import { StaffProvisioningService } from '@common/services/staff-provisioning.service';
+import { UsernameService } from '@common/services/username.service';
 import { UserRoleAssignmentService } from '@common/services/user-role-assignment.service';
 import { EmailService } from '../../../email/email.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -100,6 +101,16 @@ describe('UsersService', () => {
           // misma regla la aplican el panel de organización y el de tienda.
           provide: StaffProvisioningService,
           useValue: mockStaffProvisioning,
+        },
+        {
+          provide: UsernameService,
+          useValue: {
+            assertAvailable: jest.fn(),
+            generateUnique: jest.fn().mockResolvedValue('generated_user'),
+            rethrowAsConflict: jest.fn((error: unknown) => {
+              throw error;
+            }),
+          },
         },
         {
           // La asignación de roles también se centralizó: es la que respeta el

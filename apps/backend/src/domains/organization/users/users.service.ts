@@ -33,6 +33,8 @@ import { RoleActor, HIDDEN_ROLE_NAMES } from '@common/utils/role-scope.util';
 import { toTitleCase } from '@common/utils/format.util';
 import { normalizeEmail } from '@common/utils/email.util';
 import { SAFE_USER_SELECT } from '@common/utils/safe-user-select.util';
+import { UsernameService } from '@common/services/username.service';
+import { normalizeUsername } from '@common/utils/username.util';
 
 @Injectable()
 export class UsersService {
@@ -44,6 +46,7 @@ export class UsersService {
     private defaultPanelUIService: DefaultPanelUIService,
     private staffProvisioning: StaffProvisioningService,
     private userRoleAssignment: UserRoleAssignmentService,
+    private usernames: UsernameService,
   ) {}
 
   /**
@@ -160,6 +163,10 @@ export class UsersService {
       );
     }
 
+    // `users.username` es único en todo Vendix: 409 legible si ya existe.
+    const username = normalizeUsername(rest.username);
+    await this.usernames.assertAvailable(username);
+
     const hashed_password = await bcrypt.hash(password, 10);
 
     // Convertir nombres a Title Case
@@ -173,13 +180,14 @@ export class UsersService {
     // Todo dentro de una sola transacción (usuario + membresía + rol +
     // user_settings + main_store + token) para que la invariante CD7 se
     // cumpla atómicamente: no existe un usuario a medio provisionar.
-    const user = await this.prisma.withoutScope().$transaction(async (tx) => {
+    const creation = this.prisma.withoutScope().$transaction(async (tx) => {
       // `db: any` para las operaciones crudas (convención del repo); `tx`
       // tipado se pasa al helper que exige `Prisma.TransactionClient`.
       const db: any = tx;
       const created = await db.users.create({
         data: {
           ...rest,
+          username,
           first_name: formatted_first_name,
           last_name: formatted_last_name,
           email,
@@ -263,6 +271,10 @@ export class UsersService {
 
       return created;
     });
+    // Carrera: un create concurrente aún puede chocar con users_username_key.
+    const user = await creation.catch((error: unknown) =>
+      this.usernames.rethrowAsConflict(error),
+    );
 
     // Obtener el slug de la organización para el vLink
     let organization_slug: string | undefined;
@@ -419,14 +431,28 @@ export class UsersService {
         );
       }
     }
+    if (typeof updateUserDto.username === 'string') {
+      updateData.username = normalizeUsername(updateUserDto.username);
+      await this.usernames.assertAvailable(updateData.username, {
+        excludeUserId: id,
+      });
+    }
     if (updateUserDto.password) {
       updateData.password = await bcrypt.hash(updateUserDto.password, 10);
     }
-    return this.prisma.users.update({
+    const update = this.prisma.users.update({
       where: { id },
       data: { ...updateData, updated_at: new Date() },
       select: SAFE_USER_SELECT,
     });
+    return update.catch((error: unknown) =>
+      this.usernames.rethrowAsConflict(error),
+    );
+  }
+
+  /** Disponibilidad en vivo para los modales crear/editar de organización. */
+  checkUsernameAvailability(username: string, excludeUserId?: number) {
+    return this.usernames.checkAvailability(username, { excludeUserId });
   }
 
   async remove(id: number) {
@@ -892,8 +918,9 @@ export class UsersService {
       data: {
         first_name: formatted_first_name,
         last_name: formatted_last_name,
-        username:
-          email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '_') + '_' + Date.now(),
+        username: await this.usernames.generateUnique(
+          email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '_'),
+        ),
         email,
         password: hashed_password,
         state: 'pending_verification',

@@ -29,6 +29,8 @@ import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
 import { ResponseService } from '@common/responses/response.service';
+import { ErrorCodes } from '@common/errors/error-codes';
+import { UsernameAvailabilityQueryDto } from '@common/dto/username-availability-query.dto';
 
 @Controller('organization/users')
 @UseGuards(PermissionsGuard)
@@ -48,6 +50,9 @@ export class UsersController {
       const user = await this.usersService.create(createUserDto);
       return this.responseService.created(user, 'Usuario creado exitosamente');
     } catch (error) {
+      // A taken username must reach the form as a real 409 with its code so
+      // the username field can be flagged (instead of a 2xx error envelope).
+      if (error?.errorCode === ErrorCodes.USER_USERNAME_TAKEN.code) throw error;
       return this.responseService.error(
         error.message || 'Error al crear el usuario',
         error.response?.message || error.message,
@@ -102,6 +107,17 @@ export class UsersController {
         error.status || 400,
       );
     }
+  }
+
+  // Declared before `:id` so the literal segment wins the route.
+  @Get('username-availability')
+  @Permissions('organization:users:create', 'organization:users:update')
+  async usernameAvailability(@Query() query: UsernameAvailabilityQueryDto) {
+    const result = await this.usersService.checkUsernameAvailability(
+      query.username,
+      query.exclude_user_id,
+    );
+    return this.responseService.success(result);
   }
 
   @Get('stats')
@@ -170,6 +186,9 @@ export class UsersController {
         'Usuario actualizado exitosamente',
       );
     } catch (error) {
+      // A taken username must reach the form as a real 409 with its code so
+      // the username field can be flagged (instead of a 2xx error envelope).
+      if (error?.errorCode === ErrorCodes.USER_USERNAME_TAKEN.code) throw error;
       return this.responseService.error(
         error.message || 'Error al actualizar el usuario',
         error.response?.message || error.message,

@@ -50,6 +50,14 @@ describe('StoreUserManagementService email normalization', () => {
       } as never,
       staff as never,
       {} as never,
+      // UsernameService stub: username always free, P2002 rethrown untouched.
+      {
+        assertAvailable: jest.fn(),
+        generateUnique: jest.fn().mockResolvedValue('generated_user'),
+        rethrowAsConflict: jest.fn((error: unknown) => {
+          throw error;
+        }),
+      } as never,
     );
   });
 

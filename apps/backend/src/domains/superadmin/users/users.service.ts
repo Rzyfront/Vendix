@@ -18,6 +18,8 @@ import { toTitleCase } from '@common/utils/format.util';
 import { emailEquals, normalizeEmail } from '@common/utils/email.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { SyncPanelUiDto } from './dto/sync-panel-ui.dto';
+import { UsernameService } from '../../../common/services/username.service';
+import { normalizeUsername } from '@common/utils/username.util';
 import { PRIVILEGED_ROLE_NAMES } from '../../../common/utils/privileged-roles.util';
 import { omitUserCredentials } from '@common/utils/safe-user-select.util';
 import { SuperadminRoleAssignmentService } from '../roles/superadmin-role-assignment.service';
@@ -38,6 +40,7 @@ export class UsersService {
     private readonly defaultPanelUIService: DefaultPanelUIService,
     private readonly staffProvisioning: StaffProvisioningService,
     private readonly roleAssignments: SuperadminRoleAssignmentService,
+    private readonly usernames: UsernameService,
   ) {}
 
   async create(createUserDto: CreateUserDto) {
@@ -55,6 +58,10 @@ export class UsersService {
     const organizationId = createUserDto.organization_id;
     const mainStoreId = createUserDto.main_store_id;
 
+    // `users.username` es único en todo Vendix: 409 legible si ya existe.
+    const username = normalizeUsername(createUserDto.username);
+    await this.usernames.assertAvailable(username);
+
     // Hash password
     const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
 
@@ -62,57 +69,68 @@ export class UsersService {
     const formatted_first_name = toTitleCase(createUserDto.first_name || '');
     const formatted_last_name = toTitleCase(createUserDto.last_name || '');
 
-    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      const user = await tx.users.create({
-        data: {
-          email,
-          first_name: formatted_first_name,
-          last_name: formatted_last_name,
-          username: createUserDto.username,
-          password: hashedPassword,
-          organization_id: organizationId,
-          state: createUserDto.state,
-        },
-        include: {
-          organizations: true,
-          user_roles: {
-            include: {
-              roles: true,
+    const creation = this.prisma.$transaction(
+      async (tx: Prisma.TransactionClient) => {
+        const user = await tx.users.create({
+          data: {
+            email,
+            first_name: formatted_first_name,
+            last_name: formatted_last_name,
+            username,
+            password: hashedPassword,
+            organization_id: organizationId,
+            state: createUserDto.state,
+          },
+          include: {
+            organizations: true,
+            user_roles: {
+              include: {
+                roles: true,
+              },
             },
           },
-        },
-      });
-
-      if (mainStoreId) {
-        // CASO A: usuario CON tienda — provisión atómica de la membresía.
-        // El helper crea store_users + user_settings (panel_ui default) +
-        // users.main_store_id. NO pasamos roleName: el rol se asigna aparte
-        // vía assignRole (que a su vez re-provisiona el vínculo de tienda).
-        await this.staffProvisioning.provisionStaffMembership(tx, {
-          userId: user.id,
-          storeId: mainStoreId,
-          organizationId,
-          appType: createUserDto.app ?? 'STORE_ADMIN',
-          setMainStore: true,
         });
-      } else {
-        // CD7: usuario sin tienda (p.ej. super_admin) — requiere segundo paso
-        // (assignRole + vínculo de tienda). No forzamos store_users.
-        const adminConfig = await this.defaultPanelUIService.generatePanelUI(
-          createUserDto.app ?? 'ORG_ADMIN',
-        );
-        await tx.user_settings.create({
-          data: {
-            user_id: user.id,
-            app_type: (createUserDto.app ?? 'ORG_ADMIN') as any,
-            config: adminConfig,
-          },
-        });
-      }
 
-      // Credentials never leave; the lockout stays for the unlock screen
-      return omitUserCredentials(user);
-    });
+        if (mainStoreId) {
+          // CASO A: usuario CON tienda — provisión atómica de la membresía.
+          // El helper crea store_users + user_settings (panel_ui default) +
+          // users.main_store_id. NO pasamos roleName: el rol se asigna aparte
+          // vía assignRole (que a su vez re-provisiona el vínculo de tienda).
+          await this.staffProvisioning.provisionStaffMembership(tx, {
+            userId: user.id,
+            storeId: mainStoreId,
+            organizationId,
+            appType: createUserDto.app ?? 'STORE_ADMIN',
+            setMainStore: true,
+          });
+        } else {
+          // CD7: usuario sin tienda (p.ej. super_admin) — requiere segundo paso
+          // (assignRole + vínculo de tienda). No forzamos store_users.
+          const adminConfig = await this.defaultPanelUIService.generatePanelUI(
+            createUserDto.app ?? 'ORG_ADMIN',
+          );
+          await tx.user_settings.create({
+            data: {
+              user_id: user.id,
+              app_type: (createUserDto.app ?? 'ORG_ADMIN') as any,
+              config: adminConfig,
+            },
+          });
+        }
+
+        // Credentials never leave; the lockout stays for the unlock screen
+        return omitUserCredentials(user);
+      },
+    );
+    // Carrera: un create concurrente aún puede chocar con users_username_key.
+    return creation.catch((error: unknown) =>
+      this.usernames.rethrowAsConflict(error),
+    );
+  }
+
+  /** Disponibilidad en vivo para los modales crear/editar de super-admin. */
+  checkUsernameAvailability(username: string, excludeUserId?: number) {
+    return this.usernames.checkAvailability(username, { excludeUserId });
   }
 
   async findAll(query: UserQueryDto) {
@@ -265,6 +283,12 @@ export class UsersService {
         }
       }
     }
+    if (typeof updateUserDto.username === 'string') {
+      updateData.username = normalizeUsername(updateUserDto.username);
+      await this.usernames.assertAvailable(updateData.username, {
+        excludeUserId: id,
+      });
+    }
     if (updateUserDto.password) {
       updateData.password = await bcrypt.hash(updateUserDto.password, 10);
     }
@@ -289,7 +313,7 @@ export class UsersService {
       }
     }
 
-    const updatedUser = await this.prisma.users.update({
+    const update = this.prisma.users.update({
       where: { id },
       data: sanitizedData,
       include: {
@@ -301,6 +325,9 @@ export class UsersService {
         },
       },
     });
+    const updatedUser = await update.catch((error: unknown) =>
+      this.usernames.rethrowAsConflict(error),
+    );
 
     // Credentials never leave; the lockout stays for the unlock screen
     return omitUserCredentials(updatedUser);
