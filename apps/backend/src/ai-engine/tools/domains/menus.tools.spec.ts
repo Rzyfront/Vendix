@@ -217,6 +217,42 @@ describe('menus.tools · K-12 recipe / K-13 menu / K-14 BCG / K-15 production', 
 
   // ─── K-12 manage_recipe ───────────────────────────────────────────
   describe('manage_recipe', () => {
+    it('(conv-314) sin reversión: restore no está en el catálogo y una llamada inventada no revive nada', async () => {
+      const restore = jest.fn();
+      const softDelete = jest.fn();
+      const tools = recipeTools({ restore, softDelete });
+      const tool = getTool(tools, 'manage_recipe');
+      expect((tool.parameters as any).properties.action.enum).not.toContain(
+        'restore',
+      );
+      expect(tool.description).not.toMatch(/restore|restaur/i);
+      const preview = await tool.preview!(
+        { action: 'restore', recipe_id: 21 },
+        CONTEXT as any,
+      );
+      expect(preview.status).toBe('error');
+      const answer = await run(tools, 'manage_recipe', {
+        action: 'restore',
+        recipe_id: 21,
+      });
+      expect(answer.error ?? answer.mensaje ?? JSON.stringify(answer)).toContain(
+        'inválida',
+      );
+      expect(restore).not.toHaveBeenCalled();
+
+      const del = await tool.preview!(
+        { action: 'delete', recipe_id: 21 },
+        CONTEXT as any,
+      );
+      expect(del.target).toContain('Eliminar');
+      expect(del.message).toBe('Esta acción no se puede deshacer.');
+      const done = await run(tools, 'manage_recipe', {
+        action: 'delete',
+        recipe_id: 21,
+      });
+      expect(JSON.stringify(done)).not.toMatch(/restaur/i);
+    });
+
     it('(b) happy set-items: preview nombra el plato y delega (snapshot)', async () => {
       const replaceItems = jest.fn().mockResolvedValue({});
       const findOne = jest

@@ -199,7 +199,9 @@ export function createPricingTools(deps: PricingToolDeps): RegisteredTool[] {
 
   // ─── O-12 manage_price_tiers ──────────────────────────────────────────
 
-  type TierAction = 'create' | 'update' | 'deactivate' | 'restore';
+  // No `restore`: Vex never revives what was removed (Rafael, conversation
+  // 314). `priceTiersService.restore` stays for the web panel.
+  type TierAction = 'create' | 'update' | 'deactivate';
 
   interface TierChange {
     action: TierAction;
@@ -232,10 +234,10 @@ export function createPricingTools(deps: PricingToolDeps): RegisteredTool[] {
     }
 
     const action = String(args.action ?? '');
-    if (!['create', 'update', 'deactivate', 'restore'].includes(action)) {
+    if (!['create', 'update', 'deactivate'].includes(action)) {
       return writeFailure(
         label,
-        `action "${action}" inválida. Usa create, update, deactivate o restore.`,
+        `action "${action}" inválida. Usa create, update o deactivate.`,
       );
     }
     const tierAction = action as TierAction;
@@ -308,7 +310,7 @@ export function createPricingTools(deps: PricingToolDeps): RegisteredTool[] {
     if (!tierId) {
       return writeFailure(
         label,
-        'price_tier_id inválido: para update, deactivate y restore se necesita el id de la tarifa.',
+        'price_tier_id inválido: para update y deactivate se necesita el id de la tarifa.',
       );
     }
 
@@ -343,32 +345,7 @@ export function createPricingTools(deps: PricingToolDeps): RegisteredTool[] {
             },
           ],
           message:
-            'Los productos que la tenían habilitada dejan de venderse en ella. Reversible con restore.',
-        },
-      };
-    }
-
-    if (tierAction === 'restore') {
-      if (tier.is_active === true) {
-        return writeFailure(
-          targetLabel,
-          'La tarifa ya está activa: no hay nada que restaurar.',
-        );
-      }
-      return {
-        ok: true,
-        value: {
-          action: tierAction,
-          label: targetLabel,
-          tierId,
-          changes: [
-            {
-              field: 'is_active',
-              label: 'Activa',
-              from: false,
-              to: true,
-            },
-          ],
+            'Los productos que la tenían habilitada dejan de venderse en ella. Esta acción no se puede deshacer.',
         },
       };
     }
@@ -393,6 +370,15 @@ export function createPricingTools(deps: PricingToolDeps): RegisteredTool[] {
     if (description !== undefined) dto.description = description;
     if (toWriteNumber(args.discount_percentage) !== null)
       dto.discount_percentage = toWriteNumber(args.discount_percentage);
+    if (args.is_active === true && tier.is_active === false) {
+      // Same rule as the removed `restore`: Vex never revives what was
+      // removed (conversation 314), not even through update.
+      return writeFailure(
+        targetLabel,
+        'La tarifa está desactivada y esa acción no se puede deshacer.',
+        'Crea una tarifa nueva con manage_price_tiers (action create) si la necesitas.',
+      );
+    }
     if (typeof args.is_active === 'boolean') dto.is_active = args.is_active;
     if (typeof args.is_default === 'boolean')
       dto.is_default = args.is_default;
@@ -677,7 +663,7 @@ export function createPricingTools(deps: PricingToolDeps): RegisteredTool[] {
         changes,
         message:
           tier.is_active === false
-            ? `Ojo: la tarifa "${tier.name}" está desactivada; el precio solo aplicará al reactivarla.`
+            ? `Ojo: la tarifa "${tier.name}" está desactivada; el precio no aplicará mientras siga desactivada.`
             : checked.dto.override_price !== undefined &&
                 checked.dto.override_profit_margin !== undefined
               ? 'Mandaste precio y margen juntos: gana el precio y el margen se recalcula solo.'
@@ -776,7 +762,7 @@ export function createPricingTools(deps: PricingToolDeps): RegisteredTool[] {
       return writeFailure(
         tierLabel,
         `La tarifa "${tier.name}" está desactivada y no se puede asignar.`,
-        'Reactívala primero con manage_price_tiers (action restore).',
+        'Elige una tarifa activa o crea una nueva con manage_price_tiers.',
       );
     }
 
@@ -1157,20 +1143,20 @@ export function createPricingTools(deps: PricingToolDeps): RegisteredTool[] {
       domain: 'pricing',
       requiresConfirmation: true,
       description:
-        'Crea (create), edita (update), desactiva (deactivate) o reactiva (restore) tarifas de la tienda: presentaciones de venta como "Bulto x50" (kind sale_unit) o niveles por tipo de cliente como "Mayorista" (kind customer_tier). El precio es descuento porcentual sobre el base salvo que el producto tenga precio propio (eso se fija con set_product_tier_override). Nunca acepta final_price: ese es un calculado de lectura.',
+        'Crea (create), edita (update) o desactiva (deactivate, no se puede deshacer) tarifas de la tienda: presentaciones de venta como "Bulto x50" (kind sale_unit) o niveles por tipo de cliente como "Mayorista" (kind customer_tier). El precio es descuento porcentual sobre el base salvo que el producto tenga precio propio (eso se fija con set_product_tier_override). Nunca acepta final_price: ese es un calculado de lectura.',
       parameters: {
         type: 'object',
         properties: {
           action: {
             type: 'string',
-            enum: ['create', 'update', 'deactivate', 'restore'],
+            enum: ['create', 'update', 'deactivate'],
             description:
-              'create: crear. update: editar. deactivate: desactivar. restore: reactivar.',
+              'create: crear. update: editar. deactivate: desactivar.',
           },
           price_tier_id: {
             type: 'number',
             description:
-              'ID de la tarifa. Obligatorio para update, deactivate y restore.',
+              'ID de la tarifa. Obligatorio para update y deactivate.',
           },
           name: {
             type: 'string',
@@ -1219,7 +1205,7 @@ export function createPricingTools(deps: PricingToolDeps): RegisteredTool[] {
         required: ['action'],
       },
       // Unión de los verbos que cubre (precedente manage_purchase_orders):
-      // create→create, update/restore→update, deactivate→delete.
+      // create→create, update→update, deactivate→delete.
       requiredPermissions: [
         'store:price-tiers:create',
         'store:price-tiers:update',
@@ -1285,11 +1271,7 @@ export function createPricingTools(deps: PricingToolDeps): RegisteredTool[] {
             });
           }
 
-          await priceTiersService.restore(change.tierId!);
-          return JSON.stringify({
-            summary: `${change.label}: reactivada.`,
-            data: { price_tier_id: change.tierId, is_active: true },
-          });
+          return writeToolError(`action "${change.action}" inválida.`);
         } catch (error) {
           const { code, message } = describeWriteError(error);
           return writeToolError(

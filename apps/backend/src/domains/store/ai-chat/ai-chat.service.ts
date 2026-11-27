@@ -60,7 +60,10 @@ import {
   type QuotaAgentKey,
 } from '../subscriptions/services/agent-quota.service';
 import { VexBlockService } from '../vex/services/vex-block.service';
-import { PlanApprovalService } from '../vex/services/plan-approval.service';
+import {
+  PLAN_MAX_AGE_MS,
+  PlanApprovalService,
+} from '../vex/services/plan-approval.service';
 import { VexiConfirmationService } from '../vexi/vexi-confirmation.service';
 import { VexiAttachmentsService } from '../vexi/vexi-attachments.service';
 import { buildVisionImageParts, configSupportsVision } from './vex-vision';
@@ -269,6 +272,43 @@ const VEX_PLAN_STATUSES = [
   'partially_applied',
 ] as const;
 type VexPlanStatus = (typeof VEX_PLAN_STATUSES)[number];
+
+/**
+ * F4: the card the LAST Vex answer left waiting (`metadata.plan.status`
+ * `proposed`), rebuilt in the shape of the `plan_approval` frame. A later
+ * answer without a card means the person already moved on: no live card.
+ */
+export function liveProposedPlan(
+  messages: Array<{ role: string; metadata?: unknown }>,
+): NonNullable<AgentResult['pending_plan']> | null {
+  const last = [...messages].reverse().find((m) => m.role === 'assistant');
+  const plan = (last?.metadata as Record<string, any> | null | undefined)
+    ?.plan;
+  if (
+    !plan ||
+    plan.status !== 'proposed' ||
+    typeof plan.plan_id !== 'string' ||
+    !Array.isArray(plan.steps) ||
+    plan.steps.length === 0
+  )
+    return null;
+  const steps = (plan.steps as Array<Record<string, any>>).map(
+    (step, index) => ({
+      step_id:
+        typeof step.step_id === 'string' ? step.step_id : `s${index + 1}`,
+      order: typeof step.order === 'number' ? step.order : index + 1,
+      tool: String(step.tool ?? ''),
+      arguments:
+        step.arguments && typeof step.arguments === 'object'
+          ? (step.arguments as Record<string, any>)
+          : {},
+      ...(step.preview !== undefined ? { preview: step.preview } : {}),
+      irreversible: step.irreversible === true,
+    }),
+  );
+  if (steps.some((step) => !step.tool)) return null;
+  return { plan_id: plan.plan_id, steps };
+}
 
 /**
  * Lo que un turno Vex produjo y el cierre del turno persiste. Se llena por
@@ -615,7 +655,7 @@ export class AIChatService {
         agentKey ?? 'vexi',
         goal,
         base,
-        { storeMemory },
+        { storeMemory, humanMessage: dto.content },
       );
       const agentResult = await this.aiAgent.runAgent({
         goal,
@@ -1232,6 +1272,7 @@ export class AIChatService {
           speak: intent.speak,
           continuation: !!intent.continuation,
           storeMemory,
+          humanMessage: intent.content ?? undefined,
         },
       );
       if (durableArgs.durable) {
@@ -2230,6 +2271,28 @@ export class AIChatService {
     );
   }
 
+  /**
+   * F4: the card is shown again only if approving it can still succeed: the
+   * server holds hashes for this same `plan_id` and they have not expired
+   * (`PlanApprovalService.approvePlan` checks exactly this). Otherwise a
+   * re-shown card would answer `plan_mismatch`/`plan_expired` forever.
+   */
+  private async isApprovablePlan(
+    conversationId: number,
+    planId: string,
+  ): Promise<boolean> {
+    const record = await this.planState.getStepHashRecord(conversationId);
+    const createdAt = record.created_at
+      ? new Date(record.created_at).getTime()
+      : NaN;
+    return (
+      record.steps.length > 0 &&
+      record.plan_id === planId &&
+      Number.isFinite(createdAt) &&
+      Date.now() - createdAt < PLAN_MAX_AGE_MS
+    );
+  }
+
   /** The same durable plan/context builder for POST and SSE, never Vex hooks in Vexi. */
   private async durableTurnArgs(
     conversation: ConversationWithMessages,
@@ -2241,6 +2304,11 @@ export class AIChatService {
       continuation?: boolean;
       /** F4 T31: "Memoria de la tienda" block from `buildVexSnapshot`. */
       storeMemory?: string;
+      /**
+       * F4: what the person typed, before block-selection or design context
+       * is appended to `goal`. Only this text is read as «hazlo»/«sí».
+       */
+      humanMessage?: string;
     } = {},
   ) {
     if (!this.durableSessions)
@@ -2249,6 +2317,31 @@ export class AIChatService {
       throw new BadRequestException(
         'No está disponible el circuito de aprobación de este agente.',
       );
+    // F4 (conversation 314): «hazlo»/«sí» while the card still waits shows
+    // that card again. The objective is not opened, so its proposal is not
+    // withdrawn; without a real `proposed` effect it is a normal turn.
+    if (
+      agentKey === VEX_AGENT_KEY &&
+      !options.continuation &&
+      options.humanMessage
+    ) {
+      const livePlan = liveProposedPlan(conversation.messages);
+      if (
+        livePlan &&
+        (await this.durableSessions.keepsLiveCard(
+          conversation.id,
+          agentKey,
+          options.humanMessage,
+        )) &&
+        (await this.isApprovablePlan(conversation.id, livePlan.plan_id))
+      )
+        return {
+          durable: undefined,
+          conversation_id: conversation.id,
+          messages: [] as AIMessage[],
+          reshow_plan: livePlan,
+        };
+    }
     const session = await this.durableSessions.open(
       conversation.id,
       agentKey,

@@ -49,6 +49,8 @@ describe('D0 50-case corpus terminal smoke (synthetic, no live adjudication)', (
                   : { data: testCase.expectedFacts };
       const normalized = normalizeToolResult(raw, {
         evidenceRef: `tool_call:synthetic-${testCase.id}`,
+        // A proposal flag is protocol only on a write tool.
+        write: testCase.expectedOutcome === 'awaiting_approval',
       });
       const source = async function* (): AsyncGenerator<
         AIStreamChunk,

@@ -247,6 +247,11 @@ export interface ToolPreview {
   status: 'ok' | 'warning' | 'error';
   /** Human-readable subject of the change: "Coca Cola 1L", not "#4821". */
   target: string;
+  /**
+   * Optional action phrase for the closing sentence («Eliminar 14
+   * productos»); `describePendingPlan` prefers it over `target`.
+   */
+  label?: string;
   changes: Array<{ field: string; label: string; from: unknown; to: unknown }>;
   /** Why this cannot proceed, or what the user should watch out for. */
   message?: string;

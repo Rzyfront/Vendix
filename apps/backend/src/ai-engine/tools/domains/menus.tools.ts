@@ -57,8 +57,9 @@ const RECIPE_ACTIONS = [
   'update-item',
   'remove-item',
   'delete',
-  'restore',
 ];
+// No `restore`: Vex never revives what was deleted (Rafael, conversation 314).
+// `recipesService.restore` stays for the web panel.
 
 const MENU_ACTIONS = [
   'create-menu',
@@ -192,7 +193,7 @@ export function createRecipeTools(deps: RecipeToolDeps): RegisteredTool[] {
       version: '1',
       domain: 'menus',
       description:
-        'Crea y edita recetas (BOM) de platos preparados: create (cabecera para un producto), update (rendimiento/merma/notas), set-items (reemplaza todos los insumos), add-item/update-item/remove-item (líneas sueltas) y delete/restore (borrado suave). Lee PRIMERO el plato y los insumos con get_product (por nombre humano). Cantidades en unidades enteras mínimas (gramos/ml/unidades): los decimales se rechazan. Un insumo que cierre un ciclo de sub-recetas se rechaza con RECIPE_CYCLE_DETECTED.',
+        'Crea y edita recetas (BOM) de platos preparados: create (cabecera para un producto), update (rendimiento/merma/notas), set-items (reemplaza todos los insumos), add-item/update-item/remove-item (líneas sueltas) y delete (eliminar la receta; no se puede deshacer). Lee PRIMERO el plato y los insumos con get_product (por nombre humano). Cantidades en unidades enteras mínimas (gramos/ml/unidades): los decimales se rechazan. Un insumo que cierre un ciclo de sub-recetas se rechaza con RECIPE_CYCLE_DETECTED.',
       parameters: {
         type: 'object',
         properties: {
@@ -200,7 +201,7 @@ export function createRecipeTools(deps: RecipeToolDeps): RegisteredTool[] {
             type: 'string',
             enum: RECIPE_ACTIONS,
             description:
-              'create, update, set-items, add-item, update-item, remove-item, delete o restore.',
+              'create, update, set-items, add-item, update-item, remove-item o delete.',
           },
           recipe_id: {
             type: 'number',
@@ -334,18 +335,19 @@ export function createRecipeTools(deps: RecipeToolDeps): RegisteredTool[] {
           const recipe = await recipesService.findOne(recipeId);
           const label = recipeLabel(recipe);
 
-          if (action === 'delete' || action === 'restore') {
+          if (action === 'delete') {
             return {
               status: 'warning',
-              target: `${action === 'delete' ? 'Borrado' : 'Restauración'} — ${label}`,
+              target: `Eliminar — ${label}`,
               changes: [
                 {
                   field: 'deleted',
                   label: 'Receta',
-                  from: action === 'delete' ? 'activa' : 'borrada',
-                  to: action === 'delete' ? 'borrada' : 'activa',
+                  from: 'activa',
+                  to: 'eliminada',
                 },
               ],
+              message: 'Esta acción no se puede deshacer.',
               domain: 'menus',
             };
           }
@@ -495,6 +497,10 @@ export function createRecipeTools(deps: RecipeToolDeps): RegisteredTool[] {
       handler: async (args, context) => {
         if (!context.store_id) return noStore('la gestión de recetas');
         const action = String(args.action ?? '');
+        if (!RECIPE_ACTIONS.includes(action))
+          return guidedError(
+            `action "${action}" inválida. Usa ${RECIPE_ACTIONS.join(', ')}.`,
+          );
 
         try {
           if (action === 'create') {
@@ -541,14 +547,7 @@ export function createRecipeTools(deps: RecipeToolDeps): RegisteredTool[] {
           if (action === 'delete') {
             await recipesService.softDelete(recipeId);
             return JSON.stringify({
-              resumen: `${label}: receta borrada (suave, restaurable).`,
-              recipe_id: recipeId,
-            });
-          }
-          if (action === 'restore') {
-            await recipesService.restore(recipeId);
-            return JSON.stringify({
-              resumen: `${label}: receta restaurada.`,
+              resumen: `${label}: receta eliminada.`,
               recipe_id: recipeId,
             });
           }
