@@ -41,15 +41,21 @@ Como propietaria o administradora de una tienda en el panel de Vendix, quiero co
 ## Tasks
 | ID | S# | Ruta | Estado | Commit |
 |----|----|------|--------|--------|
-| T1 | S6, S7 | inline | pendiente | — |
-| T2 | S3 (backend) | inline | pendiente | — |
-| T3 | S5 | inline | pendiente | — |
-| T4 | S1, S3 (UI) | inline | pendiente | — |
-| T5 | S2, S3 (avatar) | inline | pendiente | — |
-| T6 | S8 verificación, PR, reporte | inline | pendiente | — |
+| T1 | S6, S7 | inline | hecho | c4f9f3ccf |
+| T2 | S3 (backend) | inline | hecho | 8ad01c531 |
+| T3 | S5 | inline | hecho | 832c45144 |
+| T4 | S1, S3 (UI), S7 (textos superadmin) | inline | hecho | fd3865897, 24cd4a960 |
+| T5 | S2, S3 (avatar) | inline | hecho | 99a6e6ad2 |
+| T6 | S8 verificación, PR, reporte | inline + verificador independiente | hecho | fcc7db973 (skills) |
 
 Ruta: todo inline (sin trigger de escritor: las unidades dependen entre sí por `floating_avatar` y la Mac no admite tests en paralelo). Riesgo: item 1 (migración que muta filas) e item 2 (guards de `/store/vexi/*`).
 
 ## Log
 - L1 (2026-11-27) Encargo de Rafael (verbatim en `/Users/rzy/.openclaw/tmp/encargos/agentes-admin/brief.md`): «Implementación completa… F4 · Módulo de agentes del admin de tienda a pantalla completa… F5 · Flags… F6 · Datos y compatibilidad…».
 - 2026-11-27 Mapa: Vex consume `/store/vexi/{confirmations/apply,voice/*,objectives,attachments}` y hoy esos endpoints exigen `vexi.enabled`; apagar Vexi sin cambiar el guard rompería a Vex → S6 cambia el guard a `vex.enabled`. La fila global `ai_agents.vexi` no se desactiva: el chat público la usa.
+- 2026-11-27 T1: `ai-chat.internal-vexi-retired.spec.ts` 10/10, `agent-runtime-config.status.spec.ts` 13/13, `ai-chat.controller.cost.spec.ts` 3/3 (jest con config isolatedModules + stub de nodemailer: `test:path` se queda sin memoria en esta Mac).
+- 2026-11-27 T2: `default-store-settings.spec.ts` 6/6.
+- 2026-11-27 T3: dry-run en PGlite con 7 filas representativas (true, false, sin bloque, NULL, array, bloque raro, "true" texto): solo cambia la fila con `enabled: true` booleano; segunda corrida sin cambios; la reversa documentada restaura exacto. No había Docker/Postgres local.
+- 2026-11-27 T4/T5: `vex-settings.component.spec.ts` 4/4 (JIT y `--aot`). Capturas escritorio/móvil (karma + Playwright con Chrome del sistema; MCP de Playwright no conectó y Docker apagado): sin scroll horizontal, Vex antes que Vexi, sin «Usar Vexi», avatar con `href=/admin/vex`. Se quitaron del snapshot reglas CSS globales filtradas por otros componentes en el bundle de karma (`.bg-surface{width:100%|100vw}`).
+- 2026-11-27 Tipos: backend `tsc` del programa completo (tsconfig.check con typeRoots en /tmp por `@types/yauzl` vacío) → solo los 6 errores de entorno de siempre (aws-sdk sns/sqs, nodemailer, mailparser, `public_token`), ninguno en archivos del cambio. Frontend `ngc -p tsconfig.app.json` (strictTemplates) → 0 errores; probado que detecta un error de plantilla inyectado.
+- 2026-11-27 Verificador independiente (items 1 y 2): S1–S8 pasan, sin bloqueantes. Advertencias: `confirmations/apply` aún aceptaría un token vigente de un hilo viejo de Vexi (TTL corto, sin inferencia); quedan código muerto (`vexi-dock`, store `vexi`) y `vexi.enabled` inerte en el DTO para limpiar después; falta un spec que pruebe el cableado del controlador.
