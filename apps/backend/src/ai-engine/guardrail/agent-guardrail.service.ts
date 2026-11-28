@@ -68,7 +68,8 @@ export interface GuardrailInput {
   subject: string;
   message: string;
   /** Recent turns, oldest first; only the last `context_messages` are sent. */
-  history?: ReadonlyArray<{ role: string; content: string | null }>;
+  /** Only text contents are used (multimodal parts are skipped). */
+  history?: ReadonlyArray<{ role: string; content?: unknown }>;
   surface?: GuardrailSurface;
   /** Monthly counter charged with the guardrail tokens; null = not charged. */
   quotaAgent?: 'vex' | 'vexi' | null;
@@ -433,11 +434,16 @@ export class AgentGuardrailService {
     scope: string,
   ): AIMessage[] {
     const recent = (input.history ?? [])
-      .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.content)
+      .filter(
+        (m): m is { role: string; content: string } =>
+          (m.role === 'user' || m.role === 'assistant') &&
+          typeof m.content === 'string' &&
+          m.content.trim().length > 0,
+      )
       .slice(-s.classifier.contextMessages)
       .map(
         (m) =>
-          `[${m.role === 'user' ? 'persona' : AGENT_NAMES[input.agent]}] ${clip(m.content ?? '', MAX_HISTORY_CHARS)}`,
+          `[${m.role === 'user' ? 'persona' : AGENT_NAMES[input.agent]}] ${clip(m.content, MAX_HISTORY_CHARS)}`,
       );
     const user: AIMessage = {
       role: 'user',
