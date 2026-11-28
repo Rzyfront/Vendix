@@ -396,7 +396,12 @@ export class StoreUserManagementService {
     if (typeof dto.username === 'string') {
       const username = normalizeUsername(dto.username);
       update_data.username = username;
-      await this.usernames.assertAvailable(username, { excludeUserId: userId });
+      // Unchanged username (forms always send it): nothing to check.
+      if (username !== user.username) {
+        await this.usernames.assertAvailable(username, {
+          excludeUserId: userId,
+        });
+      }
     }
 
     if (dto.first_name) {
@@ -431,10 +436,20 @@ export class StoreUserManagementService {
     return updated_user;
   }
 
-  /** Live availability for the store create/edit user modals. */
-  checkUsernameAvailability(username: string, excludeUserId?: number) {
+  /**
+   * Live availability for the store create/edit user modals. `excludeUserId`
+   * only applies to a user of this store: an outside id is ignored, so the
+   * answer never reveals who owns a username in another tenant.
+   */
+  async checkUsernameAvailability(username: string, excludeUserId?: number) {
+    const visible = excludeUserId
+      ? await this.prisma.store_users.findFirst({
+          where: { user_id: excludeUserId },
+          select: { id: true },
+        })
+      : null;
     return this.usernames.checkAvailability(username, {
-      excludeUserId,
+      excludeUserId: visible ? excludeUserId : undefined,
       pattern: STORE_USERNAME_PATTERN,
     });
   }

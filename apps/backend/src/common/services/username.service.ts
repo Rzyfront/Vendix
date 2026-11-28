@@ -7,6 +7,7 @@ import {
   isUsernameFormatValid,
   isUsernameUniqueViolation,
   normalizeUsername,
+  usernameEquals,
 } from '../utils/username.util';
 
 export interface UsernameAvailability {
@@ -25,7 +26,8 @@ interface UsernameLookupOptions {
  *
  * Uses `GlobalPrismaService.withoutScope()` on purpose: the unique index spans
  * every tenant, so a tenant-scoped lookup would miss the real collision.
- * Comparison is case-insensitive over the trimmed value.
+ * Comparison is case-insensitive over the trimmed value, with ILIKE wildcards
+ * escaped (`usernameEquals`).
  */
 @Injectable()
 export class UsernameService {
@@ -38,7 +40,7 @@ export class UsernameService {
     const db: any = opts?.client ?? this.prismaService.withoutScope();
     const match = await db.users.findFirst({
       where: {
-        username: { equals: normalizeUsername(username), mode: 'insensitive' },
+        username: usernameEquals(username),
         ...(opts?.excludeUserId ? { id: { not: opts.excludeUserId } } : {}),
       },
       select: { id: true },

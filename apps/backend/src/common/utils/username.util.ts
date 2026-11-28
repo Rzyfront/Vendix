@@ -20,6 +20,16 @@ export function normalizeUsername(raw: string | null | undefined): string {
 }
 
 /**
+ * Case-insensitive Prisma filter for `users.username`. PostgreSQL implements
+ * Prisma's insensitive equality with ILIKE, so '\\', '%' and '_' are escaped to
+ * stay literal (same contract as `emailEquals`).
+ */
+export function usernameEquals(username: string) {
+  const literal = normalizeUsername(username).replace(/[\\%_]/g, '\\$&');
+  return { equals: literal, mode: 'insensitive' as const };
+}
+
+/**
  * Validates the shape of an already-normalized username: 3–50 characters and,
  * when given, the context pattern (store DTO is stricter than org/superadmin).
  */

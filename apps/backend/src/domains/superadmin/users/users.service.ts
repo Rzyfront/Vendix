@@ -285,9 +285,12 @@ export class UsersService {
     }
     if (typeof updateUserDto.username === 'string') {
       updateData.username = normalizeUsername(updateUserDto.username);
-      await this.usernames.assertAvailable(updateData.username, {
-        excludeUserId: id,
-      });
+      // Unchanged username (forms always send it): nothing to check.
+      if (updateData.username !== user.username) {
+        await this.usernames.assertAvailable(updateData.username, {
+          excludeUserId: id,
+        });
+      }
     }
     if (updateUserDto.password) {
       updateData.password = await bcrypt.hash(updateUserDto.password, 10);

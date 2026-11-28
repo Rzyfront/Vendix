@@ -94,7 +94,7 @@ describe('StoreUserManagementService username uniqueness', () => {
 
       expectUsernameTaken(error);
       expect(globalUsers.findFirst).toHaveBeenCalledWith({
-        where: { username: { equals: 'Vendix_Demo', mode: 'insensitive' } },
+        where: { username: { equals: 'Vendix\\_Demo', mode: 'insensitive' } },
         select: { id: true },
       });
       expect(prisma.users.create).not.toHaveBeenCalled();
@@ -150,7 +150,10 @@ describe('StoreUserManagementService username uniqueness', () => {
     beforeEach(() => {
       jest
         .spyOn(service, 'findOne')
-        .mockResolvedValue({ roles: [{ name: 'employee' }] } as never);
+        .mockResolvedValue({
+          username: 'actual_user',
+          roles: [{ name: 'employee' }],
+        } as never);
       prisma.users.update.mockImplementation(({ data }) =>
         Promise.resolve({ id: 7, username: data.username }),
       );
@@ -166,7 +169,7 @@ describe('StoreUserManagementService username uniqueness', () => {
       expectUsernameTaken(error);
       expect(globalUsers.findFirst).toHaveBeenCalledWith({
         where: {
-          username: { equals: 'vendix_demo', mode: 'insensitive' },
+          username: { equals: 'vendix\\_demo', mode: 'insensitive' },
           id: { not: 7 },
         },
         select: { id: true },
@@ -178,6 +181,16 @@ describe('StoreUserManagementService username uniqueness', () => {
       await expect(
         service.update(7, { username: 'mi_usuario' }),
       ).resolves.toMatchObject({ username: 'mi_usuario' });
+    });
+
+    it('does not check availability when the username did not change', async () => {
+      // A wildcard/case "twin" exists, but editing other fields must still save.
+      globalUsers.findFirst.mockResolvedValue({ id: 55 });
+
+      await expect(
+        service.update(7, { username: ' actual_user ', phone: '3001234567' }),
+      ).resolves.toMatchObject({ username: 'actual_user' });
+      expect(globalUsers.findFirst).not.toHaveBeenCalled();
     });
 
     it('turns a racing P2002 into 409', async () => {
@@ -202,6 +215,7 @@ describe('StoreUserManagementService username uniqueness', () => {
         service.checkUsernameAvailability('vendix_demo'),
       ).resolves.toEqual({ available: false, reason: 'taken' });
 
+      prisma.store_users.findFirst.mockResolvedValueOnce({ id: 70 });
       await expect(
         service.checkUsernameAvailability('mi_usuario', 7),
       ).resolves.toEqual({ available: true });
@@ -210,6 +224,39 @@ describe('StoreUserManagementService username uniqueness', () => {
           where: expect.objectContaining({ id: { not: 7 } }),
         }),
       );
+    });
+
+    it('ignores exclude_user_id of a user outside this store', async () => {
+      prisma.store_users.findFirst.mockResolvedValue(null);
+      globalUsers.findFirst.mockResolvedValue({ id: 900 });
+
+      await expect(
+        service.checkUsernameAvailability('ajeno_user', 900),
+      ).resolves.toEqual({ available: false, reason: 'taken' });
+      expect(prisma.store_users.findFirst).toHaveBeenCalledWith({
+        where: { user_id: 900 },
+        select: { id: true },
+      });
+      expect(globalUsers.findFirst).toHaveBeenCalledWith({
+        where: {
+          username: { equals: 'ajeno\\_user', mode: 'insensitive' },
+        },
+        select: { id: true },
+      });
+    });
+
+    it('excludes a user of this store (store-scoped lookup)', async () => {
+      prisma.store_users.findFirst.mockResolvedValue({ id: 70 });
+
+      await service.checkUsernameAvailability('mi_usuario', 7);
+
+      expect(globalUsers.findFirst).toHaveBeenCalledWith({
+        where: {
+          username: { equals: 'mi\\_usuario', mode: 'insensitive' },
+          id: { not: 7 },
+        },
+        select: { id: true },
+      });
     });
 
     it('applies the store DTO format (letters, digits, underscore)', async () => {

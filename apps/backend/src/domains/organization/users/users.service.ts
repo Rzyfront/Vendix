@@ -433,9 +433,12 @@ export class UsersService {
     }
     if (typeof updateUserDto.username === 'string') {
       updateData.username = normalizeUsername(updateUserDto.username);
-      await this.usernames.assertAvailable(updateData.username, {
-        excludeUserId: id,
-      });
+      // Unchanged username (forms always send it): nothing to check.
+      if (updateData.username !== user.username) {
+        await this.usernames.assertAvailable(updateData.username, {
+          excludeUserId: id,
+        });
+      }
     }
     if (updateUserDto.password) {
       updateData.password = await bcrypt.hash(updateUserDto.password, 10);
@@ -450,9 +453,21 @@ export class UsersService {
     );
   }
 
-  /** Disponibilidad en vivo para los modales crear/editar de organización. */
-  checkUsernameAvailability(username: string, excludeUserId?: number) {
-    return this.usernames.checkAvailability(username, { excludeUserId });
+  /**
+   * Disponibilidad en vivo para los modales crear/editar de organización.
+   * `excludeUserId` solo aplica a un usuario de esta organización: un id ajeno
+   * se ignora para no revelar quién tiene un username en otro tenant.
+   */
+  async checkUsernameAvailability(username: string, excludeUserId?: number) {
+    const visible = excludeUserId
+      ? await this.prisma.users.findFirst({
+          where: { id: excludeUserId },
+          select: { id: true },
+        })
+      : null;
+    return this.usernames.checkAvailability(username, {
+      excludeUserId: visible ? excludeUserId : undefined,
+    });
   }
 
   async remove(id: number) {

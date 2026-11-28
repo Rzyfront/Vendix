@@ -26,6 +26,7 @@ describe('UsersService', () => {
   let prismaService: OrganizationPrismaService;
   let auditService: AuditService;
   let emailService: EmailService;
+  let testingModule: TestingModule;
 
   const mockPrismaService = {
     users: {
@@ -106,6 +107,7 @@ describe('UsersService', () => {
           provide: UsernameService,
           useValue: {
             assertAvailable: jest.fn(),
+            checkAvailability: jest.fn().mockResolvedValue({ available: true }),
             generateUnique: jest.fn().mockResolvedValue('generated_user'),
             rethrowAsConflict: jest.fn((error: unknown) => {
               throw error;
@@ -129,6 +131,7 @@ describe('UsersService', () => {
       ],
     }).compile();
 
+    testingModule = module;
     service = module.get<UsersService>(UsersService);
     prismaService = module.get<OrganizationPrismaService>(
       OrganizationPrismaService,
@@ -259,6 +262,74 @@ describe('UsersService', () => {
       const [, sentToken] = mockEmailService.sendInvitationEmail.mock.calls[0];
       expect(sentToken).toEqual(expect.any(String));
       expect(result).toEqual({ user_id: expect.any(Number) });
+    });
+  });
+
+  describe('username', () => {
+    let usernames: {
+      assertAvailable: jest.Mock;
+      checkAvailability: jest.Mock;
+    };
+
+    beforeEach(() => {
+      usernames = testingModule.get(UsernameService);
+      mockPrismaService.users.findFirst.mockReset();
+      mockPrismaService.users.update.mockResolvedValue(mockUser);
+    });
+
+    it('does not check availability when editing without changing the username', async () => {
+      mockPrismaService.users.findFirst.mockResolvedValue({
+        ...mockUser,
+        username: 'john_doe',
+        user_roles: [{ roles: { name: 'employee' } }],
+      });
+
+      await service.update(1, { username: ' john_doe ', first_name: 'Juan' });
+
+      expect(usernames.assertAvailable).not.toHaveBeenCalled();
+      expect(mockPrismaService.users.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ username: 'john_doe' }),
+        }),
+      );
+    });
+
+    it('checks availability (excluding the edited user) when the username changes', async () => {
+      mockPrismaService.users.findFirst.mockResolvedValue({
+        ...mockUser,
+        username: 'john_doe',
+        user_roles: [{ roles: { name: 'employee' } }],
+      });
+
+      await service.update(1, { username: 'john_nuevo' });
+
+      expect(usernames.assertAvailable).toHaveBeenCalledWith('john_nuevo', {
+        excludeUserId: 1,
+      });
+    });
+
+    it('ignores exclude_user_id of a user outside this organization', async () => {
+      mockPrismaService.users.findFirst.mockResolvedValue(null);
+
+      await service.checkUsernameAvailability('ajeno_user', 900);
+
+      expect(mockPrismaService.users.findFirst).toHaveBeenCalledWith({
+        where: { id: 900 },
+        select: { id: true },
+      });
+      expect(usernames.checkAvailability).toHaveBeenCalledWith('ajeno_user', {
+        excludeUserId: undefined,
+      });
+    });
+
+    it('excludes a user of this organization', async () => {
+      mockPrismaService.users.findFirst.mockResolvedValue({ id: 1 });
+
+      await service.checkUsernameAvailability('john_doe', 1);
+
+      expect(usernames.checkAvailability).toHaveBeenCalledWith('john_doe', {
+        excludeUserId: 1,
+      });
     });
   });
 

@@ -25,7 +25,7 @@ describe('UsernameService', () => {
         { available: true },
       );
       expect(users.findFirst).toHaveBeenCalledWith({
-        where: { username: { equals: 'juan_perez', mode: 'insensitive' } },
+        where: { username: { equals: 'juan\\_perez', mode: 'insensitive' } },
         select: { id: true },
       });
     });
@@ -47,8 +47,28 @@ describe('UsernameService', () => {
       ).resolves.toEqual({ available: true });
       expect(users.findFirst).toHaveBeenCalledWith({
         where: {
-          username: { equals: 'juan_perez', mode: 'insensitive' },
+          username: { equals: 'juan\\_perez', mode: 'insensitive' },
           id: { not: 7 },
+        },
+        select: { id: true },
+      });
+    });
+
+    it('keeps ILIKE wildcards literal: juan_perez never matches juanXperez', async () => {
+      users.findFirst.mockResolvedValue(null);
+
+      await service.isTaken('juan_perez');
+      await service.isTaken('50%_off\\x');
+
+      // Escaped `_` / `%` / `\\` stay literal under ILIKE, so `juanXperez`
+      // (or `juan.perez`) is not reported as the same username.
+      expect(users.findFirst).toHaveBeenNthCalledWith(1, {
+        where: { username: { equals: 'juan\\_perez', mode: 'insensitive' } },
+        select: { id: true },
+      });
+      expect(users.findFirst).toHaveBeenNthCalledWith(2, {
+        where: {
+          username: { equals: '50\\%\\_off\\\\x', mode: 'insensitive' },
         },
         select: { id: true },
       });
