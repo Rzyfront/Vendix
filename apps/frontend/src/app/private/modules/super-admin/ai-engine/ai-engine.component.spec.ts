@@ -122,3 +122,97 @@ describe('AIEngineComponent — errores de probar/guardar se quedan en la pantal
     expectNoGlobalCat();
   });
 });
+
+/**
+ * apps-sistema-voz: las apps que el backend resuelve por clave (`is_system`)
+ * se pueden editar o apagar, pero no borrar. La acción «Eliminar» queda
+ * deshabilitada con la etiqueta «Del sistema» y un tooltip que lo explica.
+ */
+describe('AIEngineComponent — apps del sistema no se borran desde el panel', () => {
+  let component: AIEngineComponent;
+  let dialog: { confirm: jasmine.Spy };
+  let toast: jasmine.SpyObj<ToastService>;
+
+  const systemApp = {
+    id: 5,
+    key: 'vexi_voice_tts',
+    name: 'Agentes — Voz: dictado (TTS)',
+    is_system: true,
+  } as AIEngineApp;
+  const customApp = {
+    id: 99,
+    key: 'mi_app',
+    name: 'Mi app',
+    is_system: false,
+  } as AIEngineApp;
+
+  beforeEach(async () => {
+    dialog = { confirm: jasmine.createSpy('confirm').and.resolveTo(false) };
+    toast = jasmine.createSpyObj<ToastService>('ToastService', [
+      'success',
+      'error',
+      'warning',
+      'info',
+    ]);
+
+    await TestBed.configureTestingModule({
+      imports: [AIEngineComponent],
+      providers: [
+        provideZonelessChangeDetection(),
+        provideMockStore(),
+        { provide: AIEngineService, useValue: {} },
+        { provide: ToastService, useValue: toast },
+        { provide: DialogService, useValue: dialog },
+      ],
+    })
+      .overrideComponent(AIEngineComponent, {
+        set: { template: '', imports: [] },
+      })
+      .compileComponents();
+
+    component = TestBed.createComponent(AIEngineComponent).componentInstance;
+  });
+
+  function deleteAction() {
+    const action = component.appTableActions.find((a) =>
+      ['trash-2', 'lock'].includes(
+        typeof a.icon === 'function' ? a.icon(customApp) : (a.icon ?? ''),
+      ),
+    );
+    expect(action).withContext('acción de borrar').toBeDefined();
+    return action!;
+  }
+
+  it('app del sistema: «Del sistema», deshabilitada y con tooltip', () => {
+    const action = deleteAction();
+    const label = action.label as (item: AIEngineApp) => string;
+    const tooltip = action.tooltip as (item: AIEngineApp) => string;
+
+    expect(label(systemApp)).toBe('Del sistema');
+    expect(action.disabled!(systemApp)).toBeTrue();
+    expect(tooltip(systemApp)).toBe(
+      'La usa el sistema: puedes editarla o apagarla, pero no borrarla',
+    );
+  });
+
+  it('app personalizada: sigue mostrando «Eliminar» habilitado', () => {
+    const action = deleteAction();
+    const label = action.label as (item: AIEngineApp) => string;
+
+    expect(label(customApp)).toBe('Eliminar');
+    expect(action.disabled!(customApp)).toBeFalse();
+  });
+
+  it('confirmDeleteApp de una app del sistema no abre el diálogo de borrado', () => {
+    component.confirmDeleteApp(systemApp);
+
+    expect(dialog.confirm).not.toHaveBeenCalled();
+    expect(toast.info).toHaveBeenCalled();
+  });
+
+  it('la columna Origen etiqueta la app como «Del sistema»', () => {
+    const column = component.appTableColumns.find((c) => c.key === 'is_system');
+    expect(column?.transform?.(true)).toBe('Del sistema');
+    expect(column?.transform?.(false)).toBe('Personalizada');
+  });
+});

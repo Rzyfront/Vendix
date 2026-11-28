@@ -285,6 +285,11 @@ export interface AIEngineApp {
   is_active: boolean;
   metadata?: Record<string, any>;
   ai_feature_category?: AIFeatureCategory;
+  /**
+   * Set by the backend: the system resolves this app by key, so it can be
+   * edited or turned off but never deleted (409 AI_APP_006).
+   */
+  is_system?: boolean;
   created_at?: string;
   updated_at?: string;
 }

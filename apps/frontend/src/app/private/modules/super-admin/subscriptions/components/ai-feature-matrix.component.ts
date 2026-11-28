@@ -249,9 +249,9 @@ export class AiFeatureMatrixComponent {
     },
     {
       key: 'realtime_voice',
-      label: 'Modo voz de Vexi',
+      label: 'Modo voz de los agentes',
       description:
-        'Habilita hablarle a Vexi y que responda en voz: dictado, chat por voz y sesiones de voz en vivo.',
+        'Habilita hablarle al agente (Vex o Vexi) y que responda en voz: dictado, chat por voz y sesiones de voz en vivo.',
       capField: 'monthly_voice_seconds_cap',
       capLabel: 'Segundos de voz al mes',
       capHelp:

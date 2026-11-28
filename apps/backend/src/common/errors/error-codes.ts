@@ -2534,6 +2534,11 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Config model_type does not match app model_type',
   },
+  AI_APP_006: {
+    code: 'AI_APP_006',
+    httpStatus: 409,
+    devMessage: 'System AI application cannot be deleted',
+  },
 
   // AI Queue
   AI_QUEUE_001: {
