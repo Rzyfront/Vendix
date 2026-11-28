@@ -426,9 +426,10 @@ describe('AgentGuardrailService', () => {
       expect(third.action !== 'pass' && third.reply).toContain(
         'vuelvo a estar disponible en 2 minutos',
       );
-      expect(redis.ops).toContain(
-        `set ${AgentGuardrailService.cooldownKey('vex', 's5:u9')} 86400`,
-      );
+      // The key holds `<start>:<length>` and lives exactly that length.
+      const key = AgentGuardrailService.cooldownKey('vex', 's5:u9');
+      expect(redis.ops).toContain(`set ${key} 120`);
+      expect(redis.store.get(key)).toMatch(/^\d+:120$/);
       run.mockClear();
       await expect(
         service.check(input({ message: '¿cuánto vendí hoy?' })),
@@ -447,7 +448,7 @@ describe('AgentGuardrailService', () => {
       // Paused 61 s ago with a 2-minute pause: 59 s left → «1 minuto».
       redis.store.set(
         AgentGuardrailService.cooldownKey('vex', 's5:u9'),
-        String(Date.now() - 61_000),
+        `${Date.now() - 61_000}:120`,
       );
       const decision = await service.check(input());
       expect(decision).toMatchObject({ action: 'cooldown' });
@@ -467,7 +468,7 @@ describe('AgentGuardrailService', () => {
         [classifierRow({ metadata: { ...AGENT_GUARDRAIL_APPLICATION.metadata, cooldown_seconds: 0 } })],
         run,
       );
-      lifted.redis.store.set(key, String(Date.now()));
+      lifted.redis.store.set(key, `${Date.now()}:120`);
       await expect(lifted.service.check(input())).resolves.toMatchObject({
         action: 'pass',
         verdict: 'in_scope',
@@ -477,8 +478,81 @@ describe('AgentGuardrailService', () => {
         [classifierRow({ metadata: { ...AGENT_GUARDRAIL_APPLICATION.metadata, cooldown_seconds: 60 } })],
         run,
       );
-      shorter.redis.store.set(key, String(Date.now() - 90_000));
+      shorter.redis.store.set(key, `${Date.now() - 90_000}:120`);
       await expect(shorter.service.check(input())).resolves.toMatchObject({
+        action: 'pass',
+      });
+      // Shortened to 1 min: a pause started 30 s ago keeps its 30 s left.
+      const running = build(
+        [classifierRow({ metadata: { ...AGENT_GUARDRAIL_APPLICATION.metadata, cooldown_seconds: 60 } })],
+        run,
+      );
+      running.redis.store.set(key, `${Date.now() - 30_000}:120`);
+      const still = await running.service.check(input());
+      expect(still).toMatchObject({ action: 'cooldown' });
+      expect(still.action !== 'pass' && still.reply).toContain('1 minuto.');
+    });
+
+    it('raising cooldown_seconds neither revives finished pauses nor lengthens running ones (N1)', async () => {
+      const key = AgentGuardrailService.cooldownKey('vex', 's5:u9');
+      const run = jest
+        .fn()
+        .mockResolvedValue(answer('{"verdict":"in_scope","confidence":0.9}'));
+      const raised = () =>
+        build(
+          [classifierRow({ metadata: { ...AGENT_GUARDRAIL_APPLICATION.metadata, cooldown_seconds: 600 } })],
+          run,
+        );
+      // A 2-min pause that ended 3 min ago stays over after raising to 10 min.
+      const finished = raised();
+      finished.redis.store.set(key, `${Date.now() - 300_000}:120`);
+      await expect(finished.service.check(input())).resolves.toMatchObject({
+        action: 'pass',
+        verdict: 'in_scope',
+      });
+      // A 2-min pause started 61 s ago still ends at its original time
+      // (59 s left → «1 minuto»), not 9 min later.
+      const running = raised();
+      running.redis.store.set(key, `${Date.now() - 61_000}:120`);
+      const decision = await running.service.check(input());
+      expect(decision).toMatchObject({ action: 'cooldown' });
+      expect(decision.action !== 'pass' && decision.reply).toContain(
+        'disponible en 1 minuto.',
+      );
+    });
+
+    it('legacy keys (start time only) use the current length capped at the default pause', async () => {
+      const key = AgentGuardrailService.cooldownKey('vex', 's5:u9');
+      const run = jest
+        .fn()
+        .mockResolvedValue(answer('{"verdict":"in_scope","confidence":0.9}'));
+      const at = (seconds: number) =>
+        build(
+          [classifierRow({ metadata: { ...AGENT_GUARDRAIL_APPLICATION.metadata, cooldown_seconds: seconds } })],
+          run,
+        );
+      // Raised to 10 min: a legacy pause from 5 min ago is not revived.
+      const old = at(600);
+      old.redis.store.set(key, String(Date.now() - 300_000));
+      await expect(old.service.check(input())).resolves.toMatchObject({
+        action: 'pass',
+      });
+      // Within the default 2 min it is still honoured.
+      const recent = at(600);
+      recent.redis.store.set(key, String(Date.now() - 30_000));
+      await expect(recent.service.check(input())).resolves.toMatchObject({
+        action: 'cooldown',
+      });
+      // Lowered to 1 min: the shorter current value wins.
+      const lowered = at(60);
+      lowered.redis.store.set(key, String(Date.now() - 90_000));
+      await expect(lowered.service.check(input())).resolves.toMatchObject({
+        action: 'pass',
+      });
+      // Garbage never pauses.
+      const broken = at(600);
+      broken.redis.store.set(key, 'nope:abc');
+      await expect(broken.service.check(input())).resolves.toMatchObject({
         action: 'pass',
       });
     });
