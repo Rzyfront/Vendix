@@ -42,7 +42,7 @@ describe('AgentRuntimeConfigService.getAgentStatuses', () => {
   it('on when plan includes and store enabled', async () => {
     setup(true, true, [row('vex', true), row('vexi', true)], {
       vex: { enabled: true },
-      vexi: { enabled: true },
+      vexi_public: { enabled: true },
     });
     const [vex, vexi] = await service.getAgentStatuses(5);
     expect(vex).toEqual({
@@ -65,8 +65,18 @@ describe('AgentRuntimeConfigService.getAgentStatuses', () => {
     expect(vex.reason).toBe('El plan de la tienda no incluye Vex.');
     expect(vexi.state).toBe('off_by_store');
     expect(vexi.reason).toBe(
-      'La tienda apagó Vexi en Ajustes → Agentes IA.',
+      'La tienda no ha publicado a Vexi en sus apps públicas (Ajustes → Agentes IA).',
     );
+  });
+
+  it('vexi reads the public switch: the retired internal vexi.enabled opens nothing', async () => {
+    setup(true, true, [row('vex', true), row('vexi', true)], {
+      vex: { enabled: true },
+      vexi: { enabled: true },
+    });
+    const [, vexi] = await service.getAgentStatuses(5);
+    expect(vexi.state).toBe('off_by_store');
+    expect(vexi.store_enabled).toBe(false);
   });
 
   it('plan precedence over store switch', async () => {
@@ -88,7 +98,7 @@ describe('AgentRuntimeConfigService.getAgentStatuses', () => {
     );
   });
 
-  const bothOn = { vex: { enabled: true }, vexi: { enabled: true } };
+  const bothOn = { vex: { enabled: true }, vexi_public: { enabled: true } };
 
   it('a suspended or blocked subscription is not «on»: the gate blocks it first', async () => {
     setup(true, true, [row('vex', true), row('vexi', true)], bothOn, 'suspended');

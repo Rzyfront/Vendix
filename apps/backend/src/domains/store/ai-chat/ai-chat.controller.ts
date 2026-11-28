@@ -82,6 +82,7 @@ export class AIChatController {
   @UseGuards(AiAccessGuard)
   @RequireAIFeature('conversations')
   async createConversation(@Body() dto: CreateConversationDto) {
+    await this.chatService.assertInternalVexiRetired(null, dto);
     const conversation = await this.chatService.createConversation(dto);
     return this.responseService.success(conversation, 'Conversation created');
   }
@@ -128,6 +129,7 @@ export class AIChatController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: SendMessageDto,
   ) {
+    await this.chatService.assertInternalVexiRetired(id, dto);
     const result = await this.chatService.sendMessage(id, dto);
     return this.responseService.success(result, 'Message sent');
   }
@@ -147,6 +149,7 @@ export class AIChatController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: StreamIntentDto,
   ) {
+    await this.chatService.assertInternalVexiRetired(id, {});
     const streamId = await this.chatService.createStreamIntent(id, dto);
     return this.responseService.success(
       {
