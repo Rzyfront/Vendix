@@ -5,30 +5,30 @@ import { RequestContextService } from '../../../../common/context/request-contex
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 
 /**
- * Refuses every Vexi endpoint unless the store switched the assistant on.
+ * Opens the shared agent-engine endpoints under `/store/vexi/*` (confirmations,
+ * read-aloud voice, objectives, attachments, ui-result, tasks, activity) only
+ * when the store switched **Vex** on.
  *
- * The switch is enforced here as well as in the router and the sidebar because
- * hiding a UI is not disabling a feature: without this, a store that never
- * enabled Vexi could still be driven through it with a bare `curl`, spending
- * the store's own AI quota.
+ * History: these routes were born for the internal Vexi dock and opened with
+ * `settings.vexi.enabled`. The internal Vexi is retired (Vexi now only serves
+ * customers in the public apps, through `ecommerce/vexi-public`, which never
+ * touches these routes), and Vex is the agent that still consumes them. So the
+ * switch that opens them is `settings.vex.enabled`; the old `vexi.enabled`
+ * opens nothing anymore. Without this, a store with Vex on but Vexi off would
+ * get a Vex whose approvals and read-aloud voice fail.
  *
- * Absent setting means DISABLED. Vexi writes to the merchant's own data —
- * products, stock, customers, orders — so letting it answer has to be a
- * decision an owner or admin took on purpose for this store, never something a
- * tenant inherits from a default it was never shown. Only an explicit `true`
- * opens the endpoints; a missing `vexi` block, a store with no settings row and
- * an explicit `false` all fail closed and are indistinguishable from here.
- *
- * `StoreSettingsFacade.vexiEnabled()` has to apply this exact rule. If the
- * frontend is the more permissive of the two, the dock mounts and then talks to
- * endpoints that reject it — a broken assistant instead of an absent one.
+ * Absent setting means DISABLED: only an explicit `true` opens the endpoints.
+ * The routes write to the merchant's own data, so it has to be a decision an
+ * owner or admin took on purpose.
  *
  * Reads the store id from `req.user` and queries with an explicit `store_id`
  * filter rather than going through `SettingsService`. Guards run *before* the
  * interceptor that populates the AsyncLocalStorage request context, so anything
  * that resolves the tenant from ALS throws `STORE_CONTEXT_001` here for every
- * request — the switch would stop being a switch and become an outage. Same
- * constraint `StoreOperationsGuard` works around.
+ * request. Same constraint `StoreOperationsGuard` works around.
+ *
+ * `/store/vexi/voice/confirmations/*` (mobile app) keeps bypassing this guard
+ * through `VexiSurfaceEnabledGuard`.
  */
 @Injectable()
 export class VexiEnabledGuard implements CanActivate {
@@ -52,12 +52,12 @@ export class VexiEnabledGuard implements CanActivate {
       select: { settings: true },
     });
 
-    const settings = row?.settings as { vexi?: { enabled?: boolean } } | null;
+    const settings = row?.settings as { vex?: { enabled?: boolean } } | null;
 
-    if (settings?.vexi?.enabled !== true) {
+    if (settings?.vex?.enabled !== true) {
       throw new VendixHttpException(
         ErrorCodes.AI_AGENT_004,
-        'Vexi está desactivado para esta tienda. Un propietario o administrador puede volver a activarlo en Configuración → Vexi.',
+        'Vex está desactivado para esta tienda. Un propietario o administrador puede activarlo en Configuración → Agentes IA.',
       );
     }
 

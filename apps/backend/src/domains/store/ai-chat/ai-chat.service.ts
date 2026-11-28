@@ -265,6 +265,8 @@ export interface ResolvedChatAgent {
  * sigue el camino exacto de hoy.
  */
 const VEX_AGENT_KEY = 'vex';
+/** Clave del Vexi interno, retirado del admin (ver `assertInternalVexiRetired`). */
+const INTERNAL_VEXI_AGENT_KEY = 'vexi';
 
 /**
  * Puntero que el mensaje del agente guarda por cada bloque del turno: lo
@@ -2118,6 +2120,38 @@ export class AIChatService {
     const raw = (conversation.metadata as Record<string, unknown> | null)
       ?.agent_key;
     return typeof raw === 'string' && raw.trim() ? raw : null;
+  }
+
+  /**
+   * El Vexi interno (dock del admin) está retirado: Vexi solo atiende a los
+   * clientes en las apps públicas (`ecommerce/vexi-public`, que no pasa por
+   * acá) y el trabajo de la tienda es de Vex. Se aplica en el borde HTTP de
+   * `store/ai-chat` (crear hilo, mensaje, stream-intent) para que un hilo de
+   * Vexi —nuevo o histórico— ya no pueda correr un turno. Leer el historial
+   * (`GET conversations[/:id]`) sigue abierto: queda solo de lectura.
+   *
+   * Con `conversationId` decide con el agente del hilo (y el override del
+   * mensaje); sin él, con lo que el hilo nuevo resolvería.
+   */
+  async assertInternalVexiRetired(
+    conversationId: number | null,
+    dto: { agent_key?: string; app_key?: string },
+  ): Promise<void> {
+    let agentKey: string | null;
+    if (conversationId === null) {
+      agentKey =
+        dto.agent_key ??
+        (!dto.app_key || dto.app_key === 'chat_assistant' ? 'vexi' : null);
+    } else {
+      const conversation = await this.getConversation(conversationId);
+      agentKey = this.turnAgentKey(conversation, dto.agent_key);
+    }
+    if (agentKey === INTERNAL_VEXI_AGENT_KEY) {
+      throw new VendixHttpException(
+        ErrorCodes.AI_AGENT_007,
+        'Vexi ahora solo atiende a tus clientes en tus apps públicas. Para el trabajo de la tienda usa Vex.',
+      );
+    }
   }
 
   /** Aplica el agente configurable solo al chat por defecto, sin migrar hilos. */

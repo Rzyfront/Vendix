@@ -68,4 +68,16 @@ describe('store settings defaults', () => {
       mergeStoreSettingsWithDefaults({ vexi_public: { enabled: true } } as any).vexi_public?.enabled,
     ).toBe(true);
   });
+
+  // agentes-admin S3: the floating Vex avatar ships off and keeps a stored Vex on.
+  it('keeps vex.floating_avatar off by default without touching vex.enabled', () => {
+    expect(getPersistableDefaultStoreSettings().vex?.floating_avatar).toBe(false);
+    const existing = mergeStoreSettingsWithDefaults({ vex: { enabled: true } } as any);
+    expect(existing.vex?.enabled).toBe(true);
+    expect(existing.vex?.floating_avatar ?? false).toBe(false);
+    expect(
+      mergeStoreSettingsWithDefaults({ vex: { enabled: true, floating_avatar: true } } as any)
+        .vex?.floating_avatar,
+    ).toBe(true);
+  });
 });

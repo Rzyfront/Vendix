@@ -73,7 +73,7 @@ export const vexAccessGuard: CanActivateFn = async () => {
 
   if (!settingsFacade.vexEnabled()) {
     toast.info(DISABLED_MESSAGE);
-    router.navigateByUrl('/admin/settings/ai-agents?tab=vex');
+    router.navigateByUrl('/admin/settings/ai-agents');
     return false;
   }
 

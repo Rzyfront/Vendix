@@ -21,7 +21,8 @@ import type { TenantAgentStatus } from './tenant-agent-status.interface';
 
 /**
  * Tarjeta «Agentes IA» de la ficha de tienda: encendido o apagado de Vex y
- * Vexi con el motivo. El texto lo calcula el servidor, el mismo que ve el
+ * Vexi con el motivo. Vexi es solo el agente público (`vexi_public`): el Vexi
+ * interno del panel está retirado. El texto lo calcula el servidor, el mismo que ve el
  * dueño de la tienda, así que aquí no se reinterpreta nada.
  */
 @Component({
@@ -41,7 +42,8 @@ import type { TenantAgentStatus } from './tenant-agent-status.interface';
         <header class="min-w-0">
           <h2 class="text-base font-semibold text-text-primary">Agentes IA</h2>
           <p class="mt-0.5 text-xs text-text-secondary">
-            Por qué Vex y Vexi están encendidos o apagados en esta tienda.
+            Por qué Vex (agente del panel) y Vexi (agente de las apps
+            públicas) están encendidos o apagados en esta tienda.
           </p>
         </header>
 

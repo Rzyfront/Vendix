@@ -5184,6 +5184,15 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'No agent turn is awaiting this UI result',
   },
+  /**
+   * 410: the staff (internal) Vexi assistant was retired. Vexi now only
+   * serves customers in the public apps; staff work goes through Vex.
+   */
+  AI_AGENT_007: {
+    code: 'AI_AGENT_007',
+    httpStatus: 410,
+    devMessage: 'The internal Vexi assistant is retired; use Vex',
+  },
 
   // AI Embeddings
   AI_EMBED_001: {

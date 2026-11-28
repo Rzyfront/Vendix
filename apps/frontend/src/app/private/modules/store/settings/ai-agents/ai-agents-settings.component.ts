@@ -1,146 +1,115 @@
-import { Component, inject, signal } from '@angular/core';
-import { ActivatedRoute, Router } from '@angular/router';
+import { Component, inject } from '@angular/core';
 
-import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { StatsComponent } from '../../../../../shared/components/index';
+import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
+import { SubscriptionAccessService } from '../../../../../core/services/subscription-access.service';
 import { VexiSettingsComponent } from '../vexi/vexi-settings.component';
 import { VexSettingsComponent } from './vex-settings.component';
 import { AgentHistoryComponent } from './history/agent-history.component';
 import { StoreMemoryComponent } from './memory/store-memory.component';
 
-type AiAgentsTab = 'vexi' | 'vex' | 'history';
-
 /**
- * "Agentes IA" settings page (`/admin/settings/ai-agents`).
+ * "Agentes IA" settings page (`/admin/settings/ai-agents`), agentes-admin S1.
  *
- * Tab container over the per-agent settings: Vexi (the in-app assistant) and
- * Vex (the fullscreen business agent). Deep-linkable via `?tab=vex`; anything
- * else — including the legacy `/admin/settings/vexi` redirect, which lands
- * here without a query param — opens the Vexi tab.
+ * A standard full-width store module, like the other settings screens: the
+ * stats row on top (sticky on mobile) and one card per section below — no
+ * tabs, side panel, modal or floating element. Vex, the store's main agent,
+ * comes first with all its settings; Vexi, now only the public agent of the
+ * store's apps, comes below; then the store memory and the history.
  *
- * The whole page is gated by `aiAgentsSettingsGuard` (owner/admin): both tabs
- * flip store-wide switches, so there is no per-tab role split.
+ * Old deep links (`?tab=vex`, `?tab=history`, the `/admin/settings/vexi`
+ * redirect) still land here: everything is on one page now.
+ *
+ * Gated by `aiAgentsSettingsGuard` (owner/admin): every switch here is
+ * store-wide, and the backend re-checks the role.
  */
 @Component({
   selector: 'app-ai-agents-settings',
   standalone: true,
   imports: [
-    IconComponent,
+    StatsComponent,
     VexiSettingsComponent,
     VexSettingsComponent,
     AgentHistoryComponent,
     StoreMemoryComponent,
   ],
   template: `
-    <div class="w-full" [class.max-w-3xl]="activeTab() !== 'history'">
-      <div class="mb-6">
-        <h1 class="text-3xl font-bold text-[var(--color-text-primary)] mb-2">Agentes IA</h1>
-        <p class="text-[var(--color-text-secondary)]">
-          Los asistentes de inteligencia artificial de tu tienda. Cada uno se
-          activa por separado; solo el propietario y los administradores lo
-          encienden, y aquí queda el historial de lo que hicieron.
-        </p>
-      </div>
-
+    <div class="w-full space-y-4">
+      <!-- Stats: sticky on mobile, static on desktop -->
       <div
-        class="flex gap-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-secondary)] p-1 mb-6"
-        role="tablist"
-        aria-label="Agentes IA"
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+        data-testid="ai-agents-stats"
       >
-        <button
-          type="button"
-          role="tab"
-          [attr.aria-selected]="activeTab() === 'vexi'"
-          [attr.tabindex]="activeTab() === 'vexi' ? 0 : -1"
-          (click)="selectTab('vexi')"
-          class="flex-1 inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-semibold transition-colors"
-          [class.bg-surface]="activeTab() === 'vexi'"
-          [class.shadow-sm]="activeTab() === 'vexi'"
-          [class.text-[var(--color-text-primary)]]="activeTab() === 'vexi'"
-          [class.text-[var(--color-text-secondary)]]="activeTab() !== 'vexi'"
-          [class.hover:text-[var(--color-text-primary)]]="activeTab() !== 'vexi'"
-        >
-          <app-icon name="bot" [size]="16" />
-          Vexi
-        </button>
-        <button
-          type="button"
-          role="tab"
-          [attr.aria-selected]="activeTab() === 'vex'"
-          [attr.tabindex]="activeTab() === 'vex' ? 0 : -1"
-          (click)="selectTab('vex')"
-          class="flex-1 inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-semibold transition-colors"
-          [class.bg-surface]="activeTab() === 'vex'"
-          [class.shadow-sm]="activeTab() === 'vex'"
-          [class.text-[var(--color-text-primary)]]="activeTab() === 'vex'"
-          [class.text-[var(--color-text-secondary)]]="activeTab() !== 'vex'"
-          [class.hover:text-[var(--color-text-primary)]]="activeTab() !== 'vex'"
-        >
-          <app-icon name="sparkles" [size]="16" />
-          Vex
-        </button>
-        <button
-          type="button"
-          role="tab"
-          [attr.aria-selected]="activeTab() === 'history'"
-          [attr.tabindex]="activeTab() === 'history' ? 0 : -1"
-          (click)="selectTab('history')"
-          class="flex-1 inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-semibold transition-colors"
-          [class.bg-surface]="activeTab() === 'history'"
-          [class.shadow-sm]="activeTab() === 'history'"
-          [class.text-[var(--color-text-primary)]]="activeTab() === 'history'"
-          [class.text-[var(--color-text-secondary)]]="activeTab() !== 'history'"
-          [class.hover:text-[var(--color-text-primary)]]="activeTab() !== 'history'"
-        >
-          <app-icon name="history" [size]="16" />
-          Historial
-        </button>
+        <app-stats
+          title="Vex"
+          [value]="vexEnabled() ? 'Activo' : 'Apagado'"
+          smallText="Tu agente principal"
+          iconName="sparkles"
+          iconBgColor="bg-purple-100"
+          iconColor="text-purple-600"
+        ></app-stats>
+        <app-stats
+          title="Avatar de Vex"
+          [value]="floatingAvatarVisible() ? 'Visible' : 'Oculto'"
+          smallText="Acceso rápido en el panel"
+          iconName="user"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-600"
+        ></app-stats>
+        <app-stats
+          title="Vexi público"
+          [value]="vexiPublicEnabled() ? 'Publicado' : 'Apagado'"
+          smallText="En tus apps públicas"
+          iconName="message-circle"
+          iconBgColor="bg-green-100"
+          iconColor="text-green-600"
+        ></app-stats>
+        <app-stats
+          title="Plan"
+          [value]="planIncludesVex() ? 'Incluye a Vex' : 'Sin Vex'"
+          smallText="Según tu suscripción"
+          iconName="credit-card"
+          iconBgColor="bg-amber-100"
+          iconColor="text-amber-600"
+        ></app-stats>
       </div>
 
-      @if (activeTab() === 'vexi') {
-        <div role="tabpanel" aria-label="Configuración de Vexi">
-          <app-vexi-settings />
-        </div>
-      } @else if (activeTab() === 'vex') {
-        <div role="tabpanel" aria-label="Configuración de Vex">
-          <app-vex-settings />
-        </div>
-      } @else {
-        <div role="tabpanel" aria-label="Historial de los agentes">
-          <app-agent-history />
-        </div>
-      }
+      <section aria-label="Configuración de Vex">
+        <app-vex-settings />
+      </section>
+
+      <section aria-label="Configuración de Vexi">
+        <app-vexi-settings />
+      </section>
 
       <app-store-memory />
+
+      <section aria-labelledby="ai-agents-history-title" class="space-y-2">
+        <div class="px-1">
+          <h2
+            id="ai-agents-history-title"
+            class="text-lg font-semibold text-[var(--color-text-primary)]"
+          >
+            Historial
+          </h2>
+          <p class="text-sm text-[var(--color-text-secondary)]">
+            Lo que hicieron tus agentes y las conversaciones con tus clientes.
+          </p>
+        </div>
+        <app-agent-history />
+      </section>
     </div>
   `,
-  styles: [
-    `
-      :host {
-        display: block;
-        width: 100%;
-      }
-    `,
-  ],
+  styles: [':host { display: block; width: 100%; }'],
 })
 export class AiAgentsSettingsComponent {
-  private readonly route = inject(ActivatedRoute);
-  private readonly router = inject(Router);
+  private readonly settingsFacade = inject(StoreSettingsFacade);
+  private readonly subscriptionAccess = inject(SubscriptionAccessService);
 
-  readonly activeTab = signal<AiAgentsTab>(
-    ((tab) => (tab === 'vex' || tab === 'history' ? tab : 'vexi'))(
-      this.route.snapshot.queryParamMap.get('tab'),
-    ),
-  );
-
-  selectTab(tab: AiAgentsTab): void {
-    if (tab === this.activeTab()) return;
-    this.activeTab.set(tab);
-    // `vexi` is the default tab and keeps a clean URL; `vex` and `history` persist
-    // the query param so the link stays shareable.
-    void this.router.navigate([], {
-      relativeTo: this.route,
-      queryParams: { tab: tab === 'vexi' ? null : tab },
-      queryParamsHandling: 'merge',
-    });
-  }
+  readonly vexEnabled = this.settingsFacade.vexEnabled;
+  /** What the layout really shows: the flag AND Vex on. */
+  readonly floatingAvatarVisible = this.settingsFacade.vexFloatingAvatar;
+  readonly vexiPublicEnabled = this.settingsFacade.vexiPublicEnabled;
+  /** Plan gate, read-only. Fails closed until the matrix hydrates. */
+  readonly planIncludesVex = this.subscriptionAccess.canUseAI('vex_agent');
 }
