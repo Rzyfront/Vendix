@@ -3048,10 +3048,6 @@ export class AIChatService {
   }
 
   /**
-   * T22: compacts a long Vex thread (never throws). Returns the conversation
-   * with the fresh summary applied, and the chat frame when it compacted.
-   */
-  /**
    * Pre-turn guardrail (`AgentGuardrailService`) for every store-admin chat
    * turn: Vex text and voice, and the app design chat (same entry). The scope
    * is the store's administration (`vex`); tokens go to the turn agent's own
@@ -3082,6 +3078,10 @@ export class AIChatService {
     return decision.action === 'pass' ? null : decision;
   }
 
+  /**
+   * T22: compacts a long Vex thread (never throws). Returns the conversation
+   * with the fresh summary applied, and the chat frame when it compacted.
+   */
   private async compactVexHistory(
     conversation: ConversationWithMessages,
     agentKey: string | undefined | null,
