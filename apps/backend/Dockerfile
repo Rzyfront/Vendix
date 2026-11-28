@@ -44,6 +44,7 @@ COPY --from=builder /app/prisma.config.ts ./
 # Seeds run with tsx inside this image and import these files from src/.
 COPY --from=builder /app/src/common/constants/lodging-roles.constant.ts ./src/common/constants/
 COPY --from=builder /app/src/domains/store/subscriptions/types/ai-capabilities.ts ./src/domains/store/subscriptions/types/
+COPY --from=builder /app/src/ai-engine/tools/agent-tool-catalog.ts ./src/ai-engine/tools/
 # Environment files are NOT copied - secrets are loaded from AWS Secrets Manager in production
 EXPOSE 3000
 # Un solo entrypoint para los dos roles del backend (QUI-674). `main.ts` lee
