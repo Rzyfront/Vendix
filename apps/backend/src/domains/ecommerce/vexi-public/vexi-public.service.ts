@@ -466,8 +466,12 @@ export class VexiPublicService {
 
   /**
    * A guardrail infraction weighs more than a message: adds `penalty` hits to
-   * the session and IP minute windows that `hit()` already opened (same keys,
-   * same TTL). Best-effort: the reply was already decided.
+   * the session and IP minute windows. The window `hit()` opened may have
+   * expired while the guardrail ran, in which case INCRBY recreates the key
+   * WITHOUT a TTL; the TTL is read in the same transaction and restored
+   * (`-1` = no expiry), so a counter can never outlive its window.
+   * Works on any Redis version (no `EXPIRE … NX`). Best-effort: the reply
+   * was already decided.
    */
   private async penalize(
     sessionId: number,
@@ -475,12 +479,21 @@ export class VexiPublicService {
     penalty: number,
   ): Promise<void> {
     if (!(penalty > 0)) return;
+    const keys = [
+      `vexi_public:msg:sess:${sessionId}`,
+      `vexi_public:msg:ip:${sha256(ip)}`,
+    ];
     try {
-      await this.redis
-        .multi()
-        .incrby(`vexi_public:msg:sess:${sessionId}`, penalty)
-        .incrby(`vexi_public:msg:ip:${sha256(ip)}`, penalty)
-        .exec();
+      const tx = this.redis.multi();
+      for (const key of keys) tx.incrby(key, penalty).ttl(key);
+      const results = await tx.exec();
+      await Promise.all(
+        keys.map((key, i) =>
+          Number(results?.[i * 2 + 1]?.[1]) === -1
+            ? this.redis.expire(key, 60)
+            : null,
+        ),
+      );
     } catch (error) {
       this.logger.warn(`Public Vexi penalty skipped: ${(error as Error).message}`);
     }
@@ -499,9 +512,12 @@ export class VexiPublicService {
   ): Promise<void> {
     let current: number;
     try {
-      const results = await this.redis.multi().incr(key).exec();
+      const results = await this.redis.multi().incr(key).ttl(key).exec();
       current = Number(results?.[0]?.[1]);
-      if (current === 1) await this.redis.expire(key, windowSeconds);
+      // New window, or a key that lost its TTL (`-1`): (re)arm the expiry so
+      // a counter can never block a visitor beyond its window.
+      if (current === 1 || Number(results?.[1]?.[1]) === -1)
+        await this.redis.expire(key, windowSeconds);
     } catch (error) {
       this.logger.warn(`Public Vexi limiter unavailable: ${(error as Error).message}`);
       throw new VendixHttpException(ErrorCodes.VEXI_PUBLIC_UNAVAILABLE);

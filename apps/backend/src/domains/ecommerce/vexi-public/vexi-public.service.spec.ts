@@ -19,30 +19,50 @@ const TOKEN = 'tok-abc';
 
 function fakeRedis() {
   const counters = new Map<string, number>();
+  // Seconds left per key; a key in `counters` but not here has no TTL (-1),
+  // exactly what INCR/INCRBY leave on a key they create.
+  const ttls = new Map<string, number>();
+  const expire = jest.fn(async (key: string, seconds: number) => {
+    ttls.set(key, seconds);
+    return 1;
+  });
   return {
     counters,
+    ttls,
+    /** Simulates the window expiring: Redis drops the key and its TTL. */
+    expireNow: (key: string) => {
+      counters.delete(key);
+      ttls.delete(key);
+    },
     multi: () => {
-      const ops: string[] = [];
+      const ops: Array<{ key: string; by?: number }> = [];
       const chain = {
         incr: (key: string) => {
-          ops.push(`${key}|1`);
+          ops.push({ key, by: 1 });
           return chain;
         },
         incrby: (key: string, by: number) => {
-          ops.push(`${key}|${by}`);
+          ops.push({ key, by });
+          return chain;
+        },
+        ttl: (key: string) => {
+          ops.push({ key });
           return chain;
         },
         exec: async () =>
-          ops.map((op) => {
-            const [key, by] = op.split('|');
-            const next = (counters.get(key) ?? 0) + Number(by);
+          ops.map(({ key, by }) => {
+            if (by === undefined) {
+              if (!counters.has(key)) return [null, -2];
+              return [null, ttls.get(key) ?? -1];
+            }
+            const next = (counters.get(key) ?? 0) + by;
             counters.set(key, next);
             return [null, next];
           }),
       };
       return chain;
     },
-    expire: jest.fn().mockResolvedValue(1),
+    expire,
     ttl: jest.fn().mockResolvedValue(42),
   };
 }
@@ -371,9 +391,16 @@ describe('VexiPublicService (Vexi público F2)', () => {
 
     it('Redis down fails closed (unmetered spend is worse than a refused turn)', async () => {
       const { service, redis, runAgent } = build();
-      (redis as any).multi = () => ({
-        incr: () => ({ exec: async () => { throw new Error('down'); } }),
-      });
+      (redis as any).multi = () => {
+        const chain: any = {
+          incr: () => chain,
+          ttl: () => chain,
+          exec: async () => {
+            throw new Error('down');
+          },
+        };
+        return chain;
+      };
       await expect(send(service)).rejects.toMatchObject({
         response: { error_code: 'VEXI_PUBLIC_UNAVAILABLE' },
       });
@@ -468,6 +495,36 @@ describe('VexiPublicService — guardarraíl previo al turno', () => {
     await expect(send(service)).rejects.toMatchObject({
       response: { error_code: 'VEXI_PUBLIC_RATE_LIMITED' },
     });
+  });
+
+  it('si la ventana vence mientras corre el guardarraíl, la penalización no deja llaves sin vencimiento', async () => {
+    const sessKey = 'vexi_public:msg:sess:7';
+    const ipKey = `vexi_public:msg:ip:${sha('203.0.113.9')}`;
+    const { service, redis } = build({
+      guardrail: {
+        check: jest.fn().mockImplementation(async () => {
+          // hit() already opened both windows; they lapse before penalize().
+          redis.expireNow(sessKey);
+          redis.expireNow(ipKey);
+          return REDIRECT;
+        }),
+      },
+    });
+    await send(service);
+    expect(redis.counters.get(sessKey)).toBe(REDIRECT.rate_penalty);
+    expect(redis.ttls.get(sessKey)).toBe(60);
+    expect(redis.ttls.get(ipKey)).toBe(60);
+  });
+
+  it('una llave que ya perdió su TTL se vuelve a armar en el siguiente mensaje', async () => {
+    const sessKey = 'vexi_public:msg:sess:7';
+    const ipKey = `vexi_public:msg:ip:${sha('203.0.113.9')}`;
+    const { service, redis } = build();
+    redis.counters.set(ipKey, 5); // legacy key left without expiry
+    redis.counters.set(sessKey, 2);
+    await send(service);
+    expect(redis.ttls.get(ipKey)).toBe(60);
+    expect(redis.ttls.get(sessKey)).toBe(60);
   });
 
   it('pass (o guardarraíl apagado): el turno corre igual que hoy', async () => {
