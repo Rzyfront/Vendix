@@ -59,15 +59,19 @@ Rama `feat/agentes-guardarrail` (desde `origin/develop`). Entrega: commits peque
 
 | ID | S# | Ruta | Estado | Commit |
 |----|----|------|--------|--------|
-| T1 | S1, S6 | inline | pendiente | — |
-| T2 | S3–S8 (servicio + traza) | inline | pendiente | — |
-| T3 | S9, S10 (Vex: stream, POST, voz, diseño) | inline | pendiente | — |
-| T4 | S5, S9 (Vexi público + penalización) | inline | pendiente | — |
-| T5 | S2 (modal del panel) | inline | pendiente | — |
-| T6 | Verificación, skills, push, PR, reporte | inline | pendiente | — |
+| T1 | S1, S6 | inline | hecho | c14802b62 |
+| T2 | S3–S8 (servicio + traza) | inline | hecho | 1df6a127d |
+| T3 | S9, S10 (Vex: stream, POST, voz, diseño) | inline | hecho | 606c15f29 |
+| T4 | S5, S9 (Vexi público + penalización) | inline | hecho | bc72a39c2 |
+| T5 | S2 (modal del panel) | inline | hecho | a7e4b495f |
+| T6 | Verificación, skills, push, PR, reporte | inline | hecho | c5ebe6e74, 18f223da6 |
 
 Ruta: todo inline (sin trigger de escritor: T3/T4 dependen del contrato de T2 y la Mac no admite escritores con tests en paralelo).
 
 ## Log
 - L1 (2026-11-27) Encargo de Rafael: «Diseño + implementación… # Problema 1 — El clasificador no se ve en ningún lado… # Problema 2 — Guardarraíl de uso inadecuado… # Reglas…» (texto completo en el encargo de la sesión; extractos verbatim en S1–S10).
 - 2026-11-27 Mapa (explorador): Vex texto/voz/diseño entran por `AIChatService.executeMessageStream` (stream) y `sendMessage` (POST); Vexi público por `VexiPublicService.sendMessage` (sin SSE). `AIEngineService.run` mide y registra por app; sin traza activa en el punto de enganche, por eso el guardarraíl abre la suya. La otra sesión (`feat/agentes-admin-vex-principal`) toca `ai-chat.service.ts` en otra zona (`assertInternalVexiRetired`); este cambio solo inserta dentro de `executeMessageStream`/`sendMessage`.
+- 2026-11-27 Specs (config jest scratch `isolatedModules`, uno por invocación, esperando a que no hubiera otro jest): `agent-guardrail.service.spec.ts` 20/20; `ai-chat.guardrail.spec.ts` 6/6 (dos fallos iniciales del propio stub: superficie `apps_design` y retorno del generador; corregidos en el spec); `vexi-public.service.spec.ts` 19/19 (16 previos + 3); regresión `agent-trace.service.spec.ts` 19/19, `ai-chat.conversation-title.spec.ts` 11/11, `ai-chat.vex-design.spec.ts` 6/6. Frontend (`ng test --aot`): `ai-engine-app-modal.agent-settings.spec.ts` 3/3, `ai-engine-app-modal.concurrency.spec.ts` 1/1. RED no observado antes de implementar (specs escritos junto al código).
+- 2026-11-27 Hallazgo corregido en T5: el modal guardaba «Reintentos = 0» como 3 (`Number(0) || 3`) y reemplazaba `rate_limit`/`retry_config` enteros; ahora 0 se respeta y las claves ajenas se conservan.
+- 2026-11-27 Mirror Engram: pendiente (sin herramienta Engram en esta sesión).
+- 2026-11-27 Typecheck backend (`tsconfig.check.json` completo, typeRoots en /tmp): 1 error propio (`history` no aceptaba `AIMessage[]` multimodal) corregido en 18f223da6; quedan solo los 6 errores de entorno de base (mailparser, aws-sdk sqs/sns, nodemailer, `public_token` de Prisma desactualizado), ninguno en archivos del cambio. Frontend `ngc -p tsconfig.buildcheck.json`: exit 0, sin errores ni avisos en el modal.
