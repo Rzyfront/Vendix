@@ -57,6 +57,32 @@ const AGENT_SETTINGS_TITLES: Record<AgentSettingsKind, string> = {
 
 type JsonRecord = Record<string, unknown>;
 
+/**
+ * Ranges `AgentGuardrailService` accepts (it clamps anything outside). The
+ * modal rejects out-of-range values so what super admin sees is what runs.
+ */
+interface AgentFieldRange {
+  control: string;
+  label: string;
+  min: number;
+  max: number;
+  integer: boolean;
+}
+const AGENT_FIELD_RANGES: Partial<Record<AgentSettingsKind, AgentFieldRange[]>> = {
+  agent_guardrail: [
+    { control: 'min_confidence', label: 'Confianza mínima', min: 0, max: 1, integer: false },
+    { control: 'strikes_before_cooldown', label: 'Infracciones antes de la pausa', min: 1, max: 20, integer: true },
+    { control: 'cooldown_minutes', label: 'Minutos de pausa', min: 0, max: 1440, integer: false },
+    { control: 'timeout_ms', label: 'Tiempo máximo', min: 200, max: 5000, integer: true },
+    { control: 'context_messages', label: 'Mensajes de contexto', min: 0, max: 12, integer: true },
+    { control: 'public_rate_penalty', label: 'Penalización en Vexi público', min: 0, max: 10, integer: true },
+  ],
+  agent_guardrail_responder: [
+    { control: 'timeout_ms', label: 'Tiempo máximo', min: 200, max: 5000, integer: true },
+    { control: 'max_chars', label: 'Largo máximo', min: 80, max: 1000, integer: true },
+  ],
+};
+
 function asRecord(value: unknown): JsonRecord {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? { ...(value as JsonRecord) }
@@ -395,7 +421,7 @@ function asRecord(value: unknown): JsonRecord {
                   ></app-input>
                   <app-input
                     formControlName="strikes_before_cooldown"
-                    label="Infracciones seguidas antes de la pausa"
+                    label="Infracciones seguidas antes de la pausa (1 a 20)"
                     type="number"
                     placeholder="3"
                     [control]="form.get('agent.strikes_before_cooldown')"
@@ -403,15 +429,15 @@ function asRecord(value: unknown): JsonRecord {
                   ></app-input>
                   <app-input
                     formControlName="cooldown_minutes"
-                    label="Minutos de pausa (0 = sin pausa)"
+                    label="Minutos de pausa (0 a 1440; 0 = sin pausa)"
                     type="number"
-                    placeholder="10"
+                    placeholder="2"
                     [control]="form.get('agent.cooldown_minutes')"
                     [disabled]="isSubmitting()"
                   ></app-input>
                   <app-input
                     formControlName="timeout_ms"
-                    label="Tiempo máximo (ms)"
+                    label="Tiempo máximo de la clasificación (200 a 5000 ms)"
                     type="number"
                     placeholder="1500"
                     [control]="form.get('agent.timeout_ms')"
@@ -419,7 +445,7 @@ function asRecord(value: unknown): JsonRecord {
                   ></app-input>
                   <app-input
                     formControlName="context_messages"
-                    label="Mensajes previos de contexto"
+                    label="Mensajes previos de contexto (0 a 12)"
                     type="number"
                     placeholder="4"
                     [control]="form.get('agent.context_messages')"
@@ -427,7 +453,7 @@ function asRecord(value: unknown): JsonRecord {
                   ></app-input>
                   <app-input
                     formControlName="public_rate_penalty"
-                    label="Penalización extra en Vexi público"
+                    label="Penalización extra en Vexi público (0 a 10)"
                     type="number"
                     placeholder="1"
                     [control]="form.get('agent.public_rate_penalty')"
@@ -460,15 +486,25 @@ function asRecord(value: unknown): JsonRecord {
                   El alcance describe lo que cada agente sí atiende (vacío = el
                   texto por defecto). Si el modelo duda, falla o tarda más del
                   tiempo máximo, el mensaje sigue normal. Un mensaje en tema
-                  reinicia la racha.
+                  reinicia la racha. Cada mensaje espera esta revisión antes de
+                  que responda el agente. Para levantar las pausas activas, pon
+                  0 minutos (aplica en menos de un minuto).
                 </p>
+              }
+
+              @if (agentRangeErrors().length) {
+                <ul class="text-xs text-red-600 space-y-0.5" role="alert">
+                  @for (error of agentRangeErrors(); track error) {
+                    <li>{{ error }}</li>
+                  }
+                </ul>
               }
 
               @if (kind === 'agent_guardrail_responder') {
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <app-input
                     formControlName="timeout_ms"
-                    label="Tiempo máximo (ms)"
+                    label="Tiempo máximo de la respuesta (200 a 5000 ms)"
                     type="number"
                     placeholder="1500"
                     [control]="form.get('agent.timeout_ms')"
@@ -476,7 +512,7 @@ function asRecord(value: unknown): JsonRecord {
                   ></app-input>
                   <app-input
                     formControlName="max_chars"
-                    label="Largo máximo de la respuesta (caracteres)"
+                    label="Largo máximo de la respuesta (80 a 1000 caracteres)"
                     type="number"
                     placeholder="400"
                     [control]="form.get('agent.max_chars')"
@@ -647,7 +683,8 @@ function asRecord(value: unknown): JsonRecord {
               isSubmitting() ||
               modelTypeMismatch() ||
               speedOutOfRange() ||
-              volOutOfRange()
+              volOutOfRange() ||
+              agentRangeErrors().length > 0
             "
             [loading]="isSubmitting()"
           >
@@ -728,6 +765,26 @@ export class AIEngineAppModalComponent implements OnChanges {
   currentModelType = signal<AIModelType | null>('text');
   private currentSpeed = signal<number | null>(null);
   private currentVol = signal<number | null>(null);
+  /** Mirror of the `agent` group (a `computed` cannot read a FormGroup). */
+  private agentValues = signal<JsonRecord>({});
+
+  /** One message per typed agent field outside the range its service accepts. */
+  agentRangeErrors = computed<string[]>(() => {
+    const kind = this.agentSettingsKind();
+    const ranges = kind ? AGENT_FIELD_RANGES[kind] : undefined;
+    if (!ranges) return [];
+    const values = this.agentValues();
+    const errors: string[] = [];
+    for (const r of ranges) {
+      const n = this.toFiniteNumber(values[r.control]);
+      if (n === null) continue;
+      if (n < r.min || n > r.max || (r.integer && !Number.isInteger(n)))
+        errors.push(
+          `${r.label}: debe ser ${r.integer ? 'un entero ' : ''}entre ${r.min} y ${r.max}.`,
+        );
+    }
+    return errors;
+  });
 
   selectedConfigModelType = computed<AIModelType | null>(() => {
     const id = this.currentConfigId();
@@ -928,6 +985,11 @@ export class AIEngineAppModalComponent implements OnChanges {
         this.currentSpeed.set(this.toFiniteNumber(speed));
       });
 
+    this.form
+      .get('agent')
+      ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((values: JsonRecord) => this.agentValues.set(values ?? {}));
+
     // Un `computed()` no reacciona a un FormControl, así que el valor se espeja
     // en una señal como ya se hace con la velocidad.
     this.form
@@ -1004,7 +1066,12 @@ export class AIEngineAppModalComponent implements OnChanges {
   }
 
   onSubmit(): void {
-    if (this.form.invalid || this.speedOutOfRange() || this.volOutOfRange()) {
+    if (
+      this.form.invalid ||
+      this.speedOutOfRange() ||
+      this.volOutOfRange() ||
+      this.agentRangeErrors().length > 0
+    ) {
       return;
     }
 

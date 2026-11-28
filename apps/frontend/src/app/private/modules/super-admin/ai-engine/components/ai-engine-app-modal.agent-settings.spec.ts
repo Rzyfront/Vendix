@@ -81,6 +81,56 @@ describe('AIEngineAppModalComponent agent settings', () => {
     );
   });
 
+  it('guardrail: out-of-range values are rejected with the accepted range, never saved', () => {
+    const { component, fixture, emitted } = open({
+      key: 'agent_guardrail',
+      retry_config: { maxRetries: 0, timeout_ms: 1500 },
+      metadata: { min_confidence: 0.6 },
+    });
+    component.form.get('agent').patchValue({
+      timeout_ms: '6000',
+      strikes_before_cooldown: '0',
+      cooldown_minutes: '2000',
+      context_messages: '2.5',
+      min_confidence: '1.5',
+    });
+    fixture.detectChanges();
+    expect(component.agentRangeErrors()).toEqual([
+      'Confianza mínima: debe ser entre 0 y 1.',
+      'Infracciones antes de la pausa: debe ser un entero entre 1 y 20.',
+      'Minutos de pausa: debe ser entre 0 y 1440.',
+      'Tiempo máximo: debe ser un entero entre 200 y 5000.',
+      'Mensajes de contexto: debe ser un entero entre 0 y 12.',
+    ]);
+    expect(document.body.textContent).toContain('Minutos de pausa: debe ser entre 0 y 1440.');
+    component.onSubmit();
+    expect(emitted.length).toBe(0);
+
+    component.form.get('agent').patchValue({
+      timeout_ms: '5000',
+      strikes_before_cooldown: '1',
+      cooldown_minutes: '0',
+      context_messages: '3',
+      min_confidence: '1',
+    });
+    expect(component.agentRangeErrors()).toEqual([]);
+    component.onSubmit();
+    expect(emitted.length).toBe(1);
+    expect(emitted[0].metadata.cooldown_seconds).toBe(0);
+  });
+
+  it('responder: timeout and length outside their range are rejected', () => {
+    const { component, emitted } = open({
+      key: 'agent_guardrail_responder',
+      retry_config: { timeout_ms: 1500 },
+      metadata: { max_chars: 400 },
+    });
+    component.form.get('agent').patchValue({ timeout_ms: '6000', max_chars: '50' });
+    expect(component.agentRangeErrors().length).toBe(2);
+    component.onSubmit();
+    expect(emitted.length).toBe(0);
+  });
+
   it('vex classifier: adapter, timeouts and turn cap land in their own columns', () => {
     const { component, emitted } = open({
       key: 'vex_classifier',
