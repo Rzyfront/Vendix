@@ -636,7 +636,8 @@ export class AgentGuardrailService {
       if (!Number.isFinite(original) || original <= 0) return 0;
       const length = Math.min(original, s.classifier.cooldownSeconds);
       const left = Math.ceil((startedAt + length * 1000 - Date.now()) / 1000);
-      return left > 0 ? left : 0;
+      // A start time in the future (clock skew) must not stretch the pause.
+      return left > 0 ? Math.min(left, length) : 0;
     } catch {
       return 0;
     }
