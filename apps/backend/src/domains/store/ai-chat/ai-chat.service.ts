@@ -124,6 +124,11 @@ import {
   TITLE_TIMEOUT_MS,
 } from './conversation-title.service';
 import { VexClassifierService } from '../../../ai-engine/vex-classifier.service';
+import {
+  AgentGuardrailService,
+  GuardrailDecision,
+  GuardrailSurface,
+} from '../../../ai-engine/guardrail/agent-guardrail.service';
 
 /**
  * Conversation state key for the tie-breaker reading of the person's reply
@@ -265,6 +270,32 @@ export interface ResolvedChatAgent {
  * sigue el camino exacto de hoy.
  */
 const VEX_AGENT_KEY = 'vex';
+
+/** A turn the guardrail answered instead of the agent. */
+type GuardrailCut = Exclude<GuardrailDecision, { action: 'pass' }>;
+
+/** What the assistant row keeps of a guardrail cut: enums only, no text. */
+function guardrailMark(cut: GuardrailCut) {
+  return {
+    action: cut.action,
+    verdict: cut.verdict,
+    reply_source: cut.reply_source,
+  };
+}
+
+/**
+ * Tokens a full answer of this conversation usually costs: the mean of the
+ * previous assistant rows that recorded tokens. `null` when there are none.
+ */
+function averageAnswerTokens(
+  messages: ReadonlyArray<{ role: string; tokens_used?: number | null }>,
+): number | null {
+  const values = messages
+    .filter((m) => m.role === 'assistant' && (m.tokens_used ?? 0) > 0)
+    .map((m) => m.tokens_used as number);
+  if (!values.length) return null;
+  return Math.round(values.reduce((a, b) => a + b, 0) / values.length);
+}
 
 /**
  * Puntero que el mensaje del agente guarda por cada bloque del turno: lo
@@ -410,6 +441,9 @@ export class AIChatService {
     // Tie-breaker classifier (Vex only). Optional-final like the rest:
     // without it (or with `vex_classifier` off) the turn is unchanged.
     @Optional() private readonly classifier?: VexClassifierService,
+    // Pre-turn guardrail (Vex text, voice and app design). Optional-final:
+    // without it (or with `agent_guardrail` off) the turn is unchanged.
+    @Optional() private readonly guardrail?: AgentGuardrailService,
   ) {}
 
   async createConversation(
@@ -608,8 +642,17 @@ export class AIChatService {
     // turno de Vex denegado no deje una pregunta huérfana en el hilo.
     const agentKey = this.turnAgentKey(conversation, dto.agent_key);
     await this.assertVexTurnAccess(agentKey);
-    conversation = (await this.compactVexHistory(conversation, agentKey))
-      .conversation;
+    // Guardarraíl previo al turno: fuera de tema/abuso se responde con una
+    // redirección y no corren ni el modelo principal ni las tools.
+    const guardCut = await this.guardTurn(
+      conversation,
+      dto.content,
+      agentKey,
+      'text',
+    );
+    if (!guardCut)
+      conversation = (await this.compactVexHistory(conversation, agentKey))
+        .conversation;
 
     // Save user message
     await this.prisma.ai_messages.create({
@@ -650,7 +693,11 @@ export class AIChatService {
     let vexPlan: VexTurnCollection['plan'] = null;
     let vexToolsUsed: Array<{ name: string; args: any; result: string }> = [];
 
-    if (agentEnabled) {
+    if (guardCut) {
+      responseContent = guardCut.reply;
+      tokensUsed = guardCut.tokens;
+      turnCostUsd = guardCut.cost_usd;
+    } else if (agentEnabled) {
       // Use Agent Loop with tools.
       //
       // `system_prompt` is deliberately NOT forwarded: with `app_key` set the
@@ -759,10 +806,11 @@ export class AIChatService {
         content: responseContent,
         tokens_used: tokensUsed,
         cost_usd: turnCostUsd,
-        ...(vexMetadata || execution || objective || turnBudget
+        ...(vexMetadata || execution || objective || turnBudget || guardCut
           ? {
               metadata: {
                 ...vexMetadata,
+                ...(guardCut ? { guardrail: guardrailMark(guardCut) } : {}),
                 ...(execution ? { execution } : {}),
                 ...(objective ? { objective } : {}),
                 ...(turnBudget ? { context_budget: turnBudget } : {}),
@@ -1175,9 +1223,24 @@ export class AIChatService {
       yield { type: 'error', error: (err as Error).message };
       return;
     }
+    // Guardarraíl previo al turno (Vex texto, voz y diseño de apps): fuera de
+    // tema/abuso se responde con una redirección breve y no corren ni el
+    // modelo principal, ni las tools, ni la compactación, ni el título. Las
+    // continuaciones no traen texto de la persona. Apagado o con cualquier
+    // falla devuelve `null` y el turno sigue igual que siempre.
+    const guardCut = intent.continuation
+      ? null
+      : await this.guardTurn(
+          conversation,
+          intent.content,
+          agentKey,
+          intent.design_context ? 'design' : intent.speak ? 'voice' : 'text',
+        );
     // T22: hilos largos de Vex se resumen antes de armar la ventana; el frame
     // le avisa a la UI («Resumí la conversación anterior»).
-    const compaction = await this.compactVexHistory(conversation, agentKey);
+    const compaction = guardCut
+      ? { conversation, frame: null }
+      : await this.compactVexHistory(conversation, agentKey);
     conversation = compaction.conversation;
     if (compaction.frame) yield compaction.frame;
     const chatAgent = await this.resolveChatAgent(agentKey);
@@ -1217,6 +1280,7 @@ export class AIChatService {
     const titleTask =
       vexTurn &&
       this.titles &&
+      !guardCut &&
       conversation.messages.length === 0 &&
       !intent.continuation &&
       intent.content
@@ -1228,6 +1292,7 @@ export class AIChatService {
     if (
       vexTurn &&
       this.classifier &&
+      !guardCut &&
       !intent.continuation &&
       intent.content &&
       conversation.messages.length > 0
@@ -1241,7 +1306,15 @@ export class AIChatService {
     // second set of frames with the same constraint.
     let doneChunk: AIStreamChunk | null = null;
 
-    if (agentEnabled) {
+    if (guardCut) {
+      // Same frames as a plain answer: text, spoken when the turn speaks, and
+      // a held `done` carrying the guardrail's own cost (persisted, never sent).
+      fullContent = guardCut.reply;
+      totalTokens = guardCut.tokens;
+      yield { type: 'text', content: fullContent };
+      voice?.push(fullContent);
+      doneChunk = { type: 'done', cost_usd: guardCut.cost_usd };
+    } else if (agentEnabled) {
       // The stream used to call `runStream()` with no tools regardless of
       // `agent_enabled`, so simply opening the SSE connection turned the agent
       // off — the same question answered with data over POST and with a shrug
@@ -1565,6 +1638,7 @@ export class AIChatService {
       // Convive con los bloques/plan de Vex en el mismo objeto.
       const metadata = {
         ...{ stream_id: streamId },
+        ...(guardCut ? { guardrail: guardrailMark(guardCut) } : {}),
         ...(pendingProposal ? { pending_confirmation: pendingProposal } : {}),
         ...(pendingContinuation
           ? { pending_continuation: true, pending_text: fullContent }
@@ -2956,6 +3030,37 @@ export class AIChatService {
    * T22: compacts a long Vex thread (never throws). Returns the conversation
    * with the fresh summary applied, and the chat frame when it compacted.
    */
+  /**
+   * Pre-turn guardrail (`AgentGuardrailService`) for every store-admin chat
+   * turn: Vex text and voice, and the app design chat (same entry). The scope
+   * is the store's administration (`vex`); tokens go to the turn agent's own
+   * counter. `null` = the turn goes on as always (off, in scope, unclear,
+   * low confidence or any failure: fail-open).
+   */
+  private async guardTurn(
+    conversation: ConversationWithMessages,
+    content: string | undefined,
+    agentKey: string | null | undefined,
+    surface: GuardrailSurface,
+  ): Promise<GuardrailCut | null> {
+    if (!this.guardrail || !content?.trim()) return null;
+    const decision = await this.guardrail.check({
+      agent: 'vex',
+      subject: `s${conversation.store_id}:u${conversation.user_id}`,
+      message: content,
+      history: conversation.messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+      })),
+      surface,
+      quotaAgent:
+        agentKey === VEX_AGENT_KEY ? 'vex' : agentKey === 'vexi' ? 'vexi' : null,
+      conversationId: conversation.id,
+      tokensSavedEstimate: averageAnswerTokens(conversation.messages),
+    });
+    return decision.action === 'pass' ? null : decision;
+  }
+
   private async compactVexHistory(
     conversation: ConversationWithMessages,
     agentKey: string | undefined | null,
