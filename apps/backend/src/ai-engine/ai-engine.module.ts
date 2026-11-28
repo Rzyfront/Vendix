@@ -26,6 +26,7 @@ import { AgentRuntimeConfigService } from './agent-runtime-config.service';
 import { AILoggingService } from './ai-logging.service';
 import { AgentTraceService } from './observability/agent-trace.service';
 import { VexClassifierService } from './vex-classifier.service';
+import { AgentGuardrailService } from './guardrail/agent-guardrail.service';
 import { AIQueueModule } from './queue/ai-queue.module';
 import { AIStreamController } from './ai-stream.controller';
 import { AIAgentService } from './ai-agent.service';
@@ -150,9 +151,12 @@ import { RequestContextService } from '../common/context/request-context.service
     ConversationCompactorService,
     // Vex tie-breaker classifier: optional opinion, never replaces text.
     VexClassifierService,
+    // Pre-turn guardrail of Vex/Vexi: fail-open, off until configured.
+    AgentGuardrailService,
   ],
   exports: [
     VexClassifierService,
+    AgentGuardrailService,
     AgentObjectiveRepository,
     AgentTaskContextService,
     AgentEvidenceService,
