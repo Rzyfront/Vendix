@@ -22,6 +22,12 @@ import { AgentQuotaService } from '../../domains/store/subscriptions/services/ag
  * and the main model is never called. Consecutive infractions lead to a
  * temporary cooldown.
  *
+ * Latency: the classification is awaited BEFORE the main model, so every
+ * guarded turn (in scope too) waits for it — typically a few hundred ms with
+ * a fast model, at most the classifier's `timeout_ms`. On a cut the responder
+ * runs after it, in series, with its own `timeout_ms`: worst case for a cut
+ * is the sum of both (1.5 s + 1.5 s with the defaults).
+ *
  * Fail-OPEN on purpose: inactive rows, no config/model, timeout, provider
  * error, invalid answer, Redis down, `unclear` or low confidence — the turn
  * goes on exactly as without the guardrail. It never throws.
@@ -29,14 +35,24 @@ import { AgentQuotaService } from '../../domains/store/subscriptions/services/ag
  * Configuration (super admin › Motor de IA › Aplicaciones), never in code:
  * - `agent_guardrail` (classifier): `is_active` + `config_id` (no config =
  *   off; it never falls back to the engine's default config),
- *   `retry_config.timeout_ms` (whole guardrail budget, 1500 ms), `metadata`
+ *   `retry_config.timeout_ms` (classifier call only, 1500 ms), `metadata`
  *   `{ min_confidence, strikes_before_cooldown, cooldown_seconds,
  *   strike_ttl_seconds, context_messages, public_rate_penalty,
  *   agents: { vex|vexi: { enabled, scope } } }`. A non-empty `system_prompt`
  *   replaces the built-in one (variables `{{agent_name}}`, `{{agent_scope}}`)
  *   and must keep the JSON answer contract.
- * - `agent_guardrail_responder`: same switch/config rule, `retry_config.timeout_ms`,
- *   `metadata { max_chars, templates: { vex|vexi: { off_topic, abuse, cooldown } } }`.
+ * - `agent_guardrail_responder`: same switch/config rule, `retry_config.timeout_ms`
+ *   (responder call only, after the classifier), `metadata { max_chars,
+ *   templates: { vex|vexi: { off_topic, abuse, cooldown } } }`. In the
+ *   cooldown template `{{minutes}}` becomes the time left («2 minutos»).
+ *
+ * Numbers out of range are clamped to the nearest bound (integers rounded);
+ * only non-numbers fall back to the default. The panel rejects them first.
+ *
+ * Cooldown: the key stores when the pause started and its length is read
+ * from the CURRENT `cooldown_seconds` on every message, so super admin can
+ * shorten or lift (0) running pauses from the panel (applies within the 30 s
+ * settings cache).
  *
  * Defaults mirror `prisma/seeds/agent-guardrail.application.ts` (checked by
  * spec). Tokens are charged to the agent's monthly counter, like the rest of
@@ -102,7 +118,7 @@ export const AGENT_GUARDRAIL_DEFAULTS = Object.freeze({
   timeout_ms: 1500,
   min_confidence: 0.6,
   strikes_before_cooldown: 3,
-  cooldown_seconds: 600,
+  cooldown_seconds: 120,
   strike_ttl_seconds: 3600,
   context_messages: 4,
   public_rate_penalty: 1,
@@ -125,7 +141,7 @@ export const AGENT_GUARDRAIL_TEMPLATES: Readonly<
     abuse:
       'Con eso no te puedo ayudar. Si necesitas algo de tu tienda en Vendix, aquí estoy.',
     cooldown:
-      'Vamos a hacer una pausa de unos minutos en este chat. Cuando vuelvas, te ayudo con lo que necesites de tu tienda.',
+      'Hagamos una pausa en este chat: vuelvo a estar disponible en {{minutes}}. Entonces te ayudo con lo que necesites de tu tienda.',
   },
   vexi: {
     off_topic:
@@ -133,7 +149,7 @@ export const AGENT_GUARDRAIL_TEMPLATES: Readonly<
     abuse:
       'Con eso no te puedo ayudar. Si quieres, te cuento sobre nuestros productos, pedidos o reservas.',
     cooldown:
-      'Vamos a hacer una pausa de unos minutos. Después con gusto te ayudo con productos, pedidos o reservas de la tienda.',
+      'Hagamos una pausa: vuelvo a estar disponible en {{minutes}}. Después con gusto te ayudo con productos, pedidos o reservas de la tienda.',
   },
 });
 
@@ -149,6 +165,8 @@ const MAX_MESSAGE_CHARS = 1_500;
 const MAX_HISTORY_CHARS = 400;
 const MAX_SCOPE_CHARS = 2_000;
 const MAX_TEMPLATE_CHARS = 600;
+/** Longest pause super admin can set (and the cooldown key's lifetime). */
+const MAX_COOLDOWN_SECONDS = 86_400;
 
 export const CLASSIFIER_SYSTEM_PROMPT = `Eres el guardarraíl de {{agent_name}}, un asistente de una tienda en Vendix. Antes de que {{agent_name}} responda, clasificas el MENSAJE NUEVO de la persona según el alcance de {{agent_name}}.
 
@@ -207,23 +225,26 @@ function record(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-/** Integer within [min, max]; anything else (null, text, NaN) → default. */
-function intIn(value: unknown, min: number, max: number, fallback: number): number {
-  return typeof value === 'number' &&
-    Number.isInteger(value) &&
-    value >= min &&
-    value <= max
-    ? value
+/**
+ * Number clamped to [min, max]; out-of-range values take the nearest bound
+ * (never the default, which could be far from what super admin typed).
+ * Non-numbers (null, text, NaN) → default.
+ */
+function numIn(value: unknown, min: number, max: number, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.min(max, Math.max(min, value))
     : fallback;
 }
 
-function numIn(value: unknown, min: number, max: number, fallback: number): number {
-  return typeof value === 'number' &&
-    Number.isFinite(value) &&
-    value >= min &&
-    value <= max
-    ? value
-    : fallback;
+/** Like `numIn`, rounded to an integer. */
+function intIn(value: unknown, min: number, max: number, fallback: number): number {
+  return Math.round(numIn(value, min, max, fallback));
+}
+
+/** «1 minuto», «2 minutos»: whole minutes left, never 0. */
+function minutesText(seconds: number): string {
+  const minutes = Math.max(1, Math.ceil(seconds / 60));
+  return minutes === 1 ? '1 minuto' : `${minutes} minutos`;
 }
 
 function textOr(value: unknown, max: number, fallback: string): string {
@@ -333,8 +354,12 @@ export class AgentGuardrailService {
         this.trace ? this.trace.run(span ?? root, work) : work();
       decision = await inTrace(async (): Promise<GuardrailDecision> => {
         // A cooldown answers without spending any model.
-        if (s.classifier.cooldownSeconds > 0 && (await this.inCooldown(input)))
-          return this.cut('cooldown', 'cooldown', input, s, null, 0);
+        const left =
+          s.classifier.cooldownSeconds > 0
+            ? await this.cooldownLeft(input, s)
+            : 0;
+        if (left > 0)
+          return this.cut('cooldown', 'cooldown', input, s, null, 0, left);
 
         const call = await this.call(
           AGENT_GUARDRAIL_APP_KEY,
@@ -374,7 +399,15 @@ export class AgentGuardrailService {
           strikes >= s.classifier.strikesBeforeCooldown
         ) {
           await this.startCooldown(input, s);
-          return this.cut('cooldown', answer.verdict, input, s, null, strikes);
+          return this.cut(
+            'cooldown',
+            answer.verdict,
+            input,
+            s,
+            null,
+            strikes,
+            s.classifier.cooldownSeconds,
+          );
         }
         const reply = await this.respond(input, s, answer.verdict);
         tokens += tokensOf(reply.response);
@@ -408,13 +441,18 @@ export class AgentGuardrailService {
     s: GuardrailSettings,
     modelReply: string | null,
     strikes: number,
+    cooldownLeftSeconds = 0,
   ): GuardrailDecision {
     const kind: TemplateKind =
       action === 'cooldown' ? 'cooldown' : verdict === 'abuse' ? 'abuse' : 'off_topic';
+    const template = s.templates[input.agent][kind].replace(
+      /\{\{\s*minutes\s*\}\}/g,
+      minutesText(cooldownLeftSeconds),
+    );
     return {
       action,
       verdict,
-      reply: modelReply ?? s.templates[input.agent][kind],
+      reply: modelReply ?? template,
       reply_source: modelReply ? 'model' : 'template',
       strikes,
       // The cooldown notice itself costs nothing; only infractions count.
@@ -565,16 +603,29 @@ export class AgentGuardrailService {
     return `agent_guardrail:cooldown:${agent}:${subject}`;
   }
 
-  private async inCooldown(input: GuardrailInput): Promise<boolean> {
-    if (!this.redis) return false;
+  /**
+   * Seconds left of this subject's pause, measured against the CURRENT
+   * `cooldown_seconds` (the key holds the start time), so lowering it in the
+   * panel shortens running pauses and 0 lifts them. 0 = not paused.
+   */
+  private async cooldownLeft(
+    input: GuardrailInput,
+    s: GuardrailSettings,
+  ): Promise<number> {
+    if (!this.redis) return 0;
     try {
-      return Boolean(
-        await this.redis.exists(
+      const startedAt = Number(
+        await this.redis.get(
           AgentGuardrailService.cooldownKey(input.agent, input.subject),
         ),
       );
+      if (!Number.isFinite(startedAt) || startedAt <= 0) return 0;
+      const left = Math.ceil(
+        (startedAt + s.classifier.cooldownSeconds * 1000 - Date.now()) / 1000,
+      );
+      return left > 0 ? left : 0;
     } catch {
-      return false;
+      return 0;
     }
   }
 
@@ -616,11 +667,14 @@ export class AgentGuardrailService {
     try {
       await this.redis
         .multi()
+        // Value = start time; the length is re-read on every message (see
+        // `cooldownLeft`). The key lives for the longest pause allowed so
+        // raising the length in the panel also applies to running pauses.
         .set(
           AgentGuardrailService.cooldownKey(input.agent, input.subject),
-          '1',
+          String(Date.now()),
           'EX',
-          s.classifier.cooldownSeconds,
+          MAX_COOLDOWN_SECONDS,
         )
         .del(AgentGuardrailService.strikesKey(input.agent, input.subject))
         .exec();
@@ -694,7 +748,7 @@ export class AgentGuardrailService {
           timeoutMs: intIn(retry.timeout_ms, 200, 5000, d.timeout_ms),
           minConfidence: numIn(meta.min_confidence, 0, 1, d.min_confidence),
           strikesBeforeCooldown: intIn(meta.strikes_before_cooldown, 1, 20, d.strikes_before_cooldown),
-          cooldownSeconds: intIn(meta.cooldown_seconds, 0, 86_400, d.cooldown_seconds),
+          cooldownSeconds: intIn(meta.cooldown_seconds, 0, MAX_COOLDOWN_SECONDS, d.cooldown_seconds),
           strikeTtlSeconds: intIn(meta.strike_ttl_seconds, 60, 604_800, d.strike_ttl_seconds),
           contextMessages: intIn(meta.context_messages, 0, 12, d.context_messages),
           publicRatePenalty: intIn(meta.public_rate_penalty, 0, 10, d.public_rate_penalty),

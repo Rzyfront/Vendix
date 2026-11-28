@@ -9,8 +9,8 @@ import { ai_model_type_enum } from '@prisma/client';
  *
  * This file must not import anything from `src/`: seeds run with tsx inside
  * the production image, which only copies a few `src/` files (see #1438).
- * `agent-guardrail.application.spec.ts` checks these defaults against the
- * services that read them.
+ * `src/ai-engine/guardrail/agent-guardrail.service.spec.ts` checks these
+ * defaults against the service that reads them.
  */
 
 /** `VexClassifierService` (`src/ai-engine/vex-classifier.service.ts`). */
@@ -55,13 +55,17 @@ export const AGENT_GUARDRAIL_APPLICATION = {
   max_tokens: 60,
   is_active: false,
   rate_limit: null,
-  // `maxRetries` is the engine's own retry; `timeout_ms` is the guardrail's
-  // whole budget (past it the turn goes on normally).
+  // `maxRetries` is the engine's own retry; `timeout_ms` bounds the
+  // classifier call only (past it the turn goes on normally). Every guarded
+  // turn waits for it before the main model; on a cut the responder runs
+  // after it with its own `timeout_ms`, so a cut can take up to the sum.
   retry_config: { maxRetries: 0, timeout_ms: 1500 },
   metadata: {
     min_confidence: 0.6,
     strikes_before_cooldown: 3,
-    cooldown_seconds: 600,
+    // 2 min: Vex's user is a paying owner; anonymous Vexi visitors are also
+    // bounded by the per-minute limiter. 0 lifts running pauses.
+    cooldown_seconds: 120,
     strike_ttl_seconds: 3600,
     context_messages: 4,
     public_rate_penalty: 1,
@@ -82,7 +86,7 @@ export const AGENT_GUARDRAIL_DEFAULT_TEMPLATES = {
     abuse:
       'Con eso no te puedo ayudar. Si necesitas algo de tu tienda en Vendix, aquí estoy.',
     cooldown:
-      'Vamos a hacer una pausa de unos minutos en este chat. Cuando vuelvas, te ayudo con lo que necesites de tu tienda.',
+      'Hagamos una pausa en este chat: vuelvo a estar disponible en {{minutes}}. Entonces te ayudo con lo que necesites de tu tienda.',
   },
   vexi: {
     off_topic:
@@ -90,7 +94,7 @@ export const AGENT_GUARDRAIL_DEFAULT_TEMPLATES = {
     abuse:
       'Con eso no te puedo ayudar. Si quieres, te cuento sobre nuestros productos, pedidos o reservas.',
     cooldown:
-      'Vamos a hacer una pausa de unos minutos. Después con gusto te ayudo con productos, pedidos o reservas de la tienda.',
+      'Hagamos una pausa: vuelvo a estar disponible en {{minutes}}. Después con gusto te ayudo con productos, pedidos o reservas de la tienda.',
   },
 } as const;
 

@@ -55,7 +55,7 @@ function fakeRedis() {
   const redis: any = {
     store,
     ops,
-    exists: jest.fn(async (k: string) => (store.has(k) ? 1 : 0)),
+    get: jest.fn(async (k: string) => store.get(k) ?? null),
     del: jest.fn(async (k: string) => {
       ops.push(`del ${k}`);
       return store.delete(k) ? 1 : 0;
@@ -268,7 +268,7 @@ describe('AgentGuardrailService', () => {
       redis.multi = jest.fn(() => {
         throw new Error('redis down');
       });
-      redis.exists = jest.fn().mockRejectedValue(new Error('redis down'));
+      redis.get = jest.fn().mockRejectedValue(new Error('redis down'));
       const { service } = build(
         [classifierRow()],
         jest
@@ -414,13 +414,20 @@ describe('AgentGuardrailService', () => {
       const third = await service.check(input());
       expect(first).toMatchObject({ action: 'redirect', strikes: 1 });
       expect(second).toMatchObject({ action: 'redirect', strikes: 2 });
+      // The notice says how long the pause lasts (2 min by default).
       expect(third).toMatchObject({
         action: 'cooldown',
         strikes: 3,
-        reply: AGENT_GUARDRAIL_TEMPLATES.vex.cooldown,
+        reply: AGENT_GUARDRAIL_TEMPLATES.vex.cooldown.replace(
+          '{{minutes}}',
+          '2 minutos',
+        ),
       });
+      expect(third.action !== 'pass' && third.reply).toContain(
+        'vuelvo a estar disponible en 2 minutos',
+      );
       expect(redis.ops).toContain(
-        `set ${AgentGuardrailService.cooldownKey('vex', 's5:u9')} 600`,
+        `set ${AgentGuardrailService.cooldownKey('vex', 's5:u9')} 86400`,
       );
       run.mockClear();
       await expect(
@@ -432,6 +439,48 @@ describe('AgentGuardrailService', () => {
         tokens: 0,
       });
       expect(run).not.toHaveBeenCalled();
+    });
+
+    it('the notice shows the time actually left of the pause', async () => {
+      const run = jest.fn();
+      const { service, redis } = build([classifierRow()], run);
+      // Paused 61 s ago with a 2-minute pause: 59 s left → «1 minuto».
+      redis.store.set(
+        AgentGuardrailService.cooldownKey('vex', 's5:u9'),
+        String(Date.now() - 61_000),
+      );
+      const decision = await service.check(input());
+      expect(decision).toMatchObject({ action: 'cooldown' });
+      expect(decision.action !== 'pass' && decision.reply).toContain(
+        'disponible en 1 minuto.',
+      );
+      expect(run).not.toHaveBeenCalled();
+    });
+
+    it('super admin lifts or shortens running pauses from the panel (current cooldown_seconds)', async () => {
+      const key = AgentGuardrailService.cooldownKey('vex', 's5:u9');
+      const run = jest
+        .fn()
+        .mockResolvedValue(answer('{"verdict":"in_scope","confidence":0.9}'));
+      // 0 = no pause: a running one is lifted at once.
+      const lifted = build(
+        [classifierRow({ metadata: { ...AGENT_GUARDRAIL_APPLICATION.metadata, cooldown_seconds: 0 } })],
+        run,
+      );
+      lifted.redis.store.set(key, String(Date.now()));
+      await expect(lifted.service.check(input())).resolves.toMatchObject({
+        action: 'pass',
+        verdict: 'in_scope',
+      });
+      // Shortened to 1 min: a pause started 90 s ago is already over.
+      const shorter = build(
+        [classifierRow({ metadata: { ...AGENT_GUARDRAIL_APPLICATION.metadata, cooldown_seconds: 60 } })],
+        run,
+      );
+      shorter.redis.store.set(key, String(Date.now() - 90_000));
+      await expect(shorter.service.check(input())).resolves.toMatchObject({
+        action: 'pass',
+      });
     });
 
     it('streaks are per subject and expire with strike_ttl_seconds', async () => {
@@ -446,6 +495,32 @@ describe('AgentGuardrailService', () => {
       expect(redis.ops).toContain(
         `expire ${AgentGuardrailService.strikesKey('vex', 'a')} 3600`,
       );
+    });
+  });
+
+  describe('settings out of range (M2)', () => {
+    it('are clamped to the nearest bound, not replaced by the default', async () => {
+      const run = jest
+        .fn()
+        .mockResolvedValue(answer('{"verdict":"off_topic","confidence":0.95}'));
+      // min_confidence 1.5 → 1 (default 0.6 would cut at 0.95);
+      // strikes_before_cooldown 0 → 1 (default 3 would only redirect).
+      const highBar = build(
+        [classifierRow({ metadata: { ...AGENT_GUARDRAIL_APPLICATION.metadata, min_confidence: 1.5 } })],
+        run,
+      );
+      await expect(highBar.service.check(input())).resolves.toMatchObject({
+        action: 'pass',
+        reason: 'low_confidence',
+      });
+      const firstStrike = build(
+        [classifierRow({ metadata: { ...AGENT_GUARDRAIL_APPLICATION.metadata, strikes_before_cooldown: 0 } })],
+        run,
+      );
+      await expect(firstStrike.service.check(input())).resolves.toMatchObject({
+        action: 'cooldown',
+        strikes: 1,
+      });
     });
   });
 
