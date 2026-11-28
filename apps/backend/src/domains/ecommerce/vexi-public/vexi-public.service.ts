@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type Redis from 'ioredis';
 import { REDIS_CLIENT } from '../../../common/redis/redis.module';
@@ -11,6 +11,7 @@ import { ErrorCodeEntry, ErrorCodes } from '../../../common/errors/error-codes';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { AIAgentService } from '../../../ai-engine/ai-agent.service';
+import { AgentGuardrailService } from '../../../ai-engine/guardrail/agent-guardrail.service';
 import type { AIMessage } from '../../../ai-engine/interfaces/ai-provider.interface';
 import {
   VEXI_AGENT_KEY,
@@ -124,6 +125,9 @@ export class VexiPublicService {
     private readonly subscriptionAccess: SubscriptionAccessService,
     private readonly quota: AgentQuotaService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    // Pre-turn guardrail. Optional-final: without it (or with
+    // `agent_guardrail` off) the turn is unchanged.
+    @Optional() private readonly guardrail?: AgentGuardrailService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -247,7 +251,7 @@ export class VexiPublicService {
         where: { session_id: session.id },
         orderBy: { created_at: 'desc' },
         take: VEXI_PUBLIC_LIMITS.historyMessages,
-        select: { role: true, content: true },
+        select: { role: true, content: true, tokens_used: true },
       });
       const messages: AIMessage[] = history
         .reverse()
@@ -259,6 +263,41 @@ export class VexiPublicService {
       await this.ecommercePrisma.vexi_public_messages.create({
         data: { session_id: session.id, store_id: store.id, role: 'user', content: text },
       });
+
+      // Pre-turn guardrail: off-topic/abuse gets a short redirect and neither
+      // the main model nor the storefront tools run; each infraction also
+      // counts against this visitor's per-minute limits. Off or failing →
+      // `pass` and the turn is unchanged. Its own tokens are charged to
+      // Vexi's counter by the guardrail.
+      const guard = this.guardrail
+        ? await this.guardrail.check({
+            agent: 'vexi',
+            subject: `sess:${session.id}`,
+            message: text,
+            history: messages,
+            surface: 'public',
+            quotaAgent: VEXI_AGENT_KEY,
+            conversationId: session.id,
+            tokensSavedEstimate: averageAnswerTokens(history),
+          })
+        : null;
+      if (guard && guard.action !== 'pass') {
+        await this.penalize(session.id, visitor.ip, guard.rate_penalty);
+        await this.ecommercePrisma.vexi_public_messages.create({
+          data: {
+            session_id: session.id,
+            store_id: store.id,
+            role: 'assistant',
+            content: guard.reply,
+            tokens_used: guard.tokens,
+          },
+        });
+        await this.ecommercePrisma.vexi_public_sessions.update({
+          where: { id: session.id },
+          data: { message_count: { increment: 1 }, last_message_at: new Date() },
+        });
+        return { reply: guard.reply, cards: [] };
+      }
 
       const appContext = await this.describeContext(dto.context);
       const cards: StorefrontCard[] = [];
@@ -426,6 +465,28 @@ export class VexiPublicService {
   }
 
   /**
+   * A guardrail infraction weighs more than a message: adds `penalty` hits to
+   * the session and IP minute windows that `hit()` already opened (same keys,
+   * same TTL). Best-effort: the reply was already decided.
+   */
+  private async penalize(
+    sessionId: number,
+    ip: string,
+    penalty: number,
+  ): Promise<void> {
+    if (!(penalty > 0)) return;
+    try {
+      await this.redis
+        .multi()
+        .incrby(`vexi_public:msg:sess:${sessionId}`, penalty)
+        .incrby(`vexi_public:msg:ip:${sha256(ip)}`, penalty)
+        .exec();
+    } catch (error) {
+      this.logger.warn(`Public Vexi penalty skipped: ${(error as Error).message}`);
+    }
+  }
+
+  /**
    * Fixed-window counter. Fail-CLOSED on Redis errors: these limits bound the
    * store's AI spend on an anonymous endpoint, so an unmetered turn is worse
    * than a refused one.
@@ -496,4 +557,15 @@ export class VexiPublicService {
     }
     return parts.length ? parts.join(' ') : 'Sin contexto.';
   }
+}
+
+/** Mean tokens of the previous answers of this session (`null` if none). */
+function averageAnswerTokens(
+  rows: ReadonlyArray<{ role: string; tokens_used?: number | null }>,
+): number | null {
+  const values = rows
+    .filter((r) => r.role === 'assistant' && (r.tokens_used ?? 0) > 0)
+    .map((r) => r.tokens_used as number);
+  if (!values.length) return null;
+  return Math.round(values.reduce((a, b) => a + b, 0) / values.length);
 }
