@@ -78,6 +78,9 @@ export function usernameAvailabilityValidator(
 
 export const USERNAME_TAKEN_MESSAGE = 'No disponible, elige otro';
 export const USERNAME_INVALID_MESSAGE =
+  'Nombre de usuario no válido. Usa de 3 a 50 caracteres.';
+/** Store panel: its DTO also restricts the characters (`^[a-zA-Z0-9_]+$`). */
+export const USERNAME_INVALID_MESSAGE_STORE =
   'Nombre de usuario no válido. Usa de 3 a 50 caracteres (letras, números y guion bajo).';
 
 export interface UsernameFieldState {
@@ -99,6 +102,7 @@ export function createUsernameFieldState(
   control: AbstractControl,
   originalValue: () => string | null | undefined = () => null,
   injector?: Injector,
+  invalidMessage: string = USERNAME_INVALID_MESSAGE,
 ): UsernameFieldState {
   // Counter bumps on every value/status emission so the computeds below
   // re-read the (non-signal) control state.
@@ -123,7 +127,7 @@ export function createUsernameFieldState(
   const error = computed(() => {
     version();
     if (control.hasError('usernameTaken')) return USERNAME_TAKEN_MESSAGE;
-    if (control.hasError('usernameInvalid')) return USERNAME_INVALID_MESSAGE;
+    if (control.hasError('usernameInvalid')) return invalidMessage;
     return null;
   });
 

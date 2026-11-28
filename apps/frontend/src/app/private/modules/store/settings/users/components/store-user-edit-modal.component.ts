@@ -56,6 +56,7 @@ import {
   UsernameFieldState,
   createUsernameFieldState,
   usernameAvailabilityValidator,
+  USERNAME_INVALID_MESSAGE_STORE,
 } from '../../../../../../shared/utils/username-availability.validator';
 import {
   Role,
@@ -915,6 +916,8 @@ export class StoreUserEditModalComponent implements OnChanges {
     this.usernameState = createUsernameFieldState(
       this.infoForm.controls['username'],
       () => this.userDetail()?.username,
+      undefined,
+      USERNAME_INVALID_MESSAGE_STORE,
     );
 
     // A taken username (409 USER_USERNAME_TAKEN) is flagged on the field; the

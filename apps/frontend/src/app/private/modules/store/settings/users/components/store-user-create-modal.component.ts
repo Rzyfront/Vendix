@@ -29,6 +29,7 @@ import { StoreUsersManagementService } from '../services/store-users-management.
 import {
   createUsernameFieldState,
   usernameAvailabilityValidator,
+  USERNAME_INVALID_MESSAGE_STORE,
 } from '../../../../../../shared/utils/username-availability.validator';
 
 /**
@@ -244,6 +245,9 @@ export class StoreUserCreateModalComponent {
 
     this.usernameState = createUsernameFieldState(
       this.userForm.controls['username'],
+      () => null,
+      undefined,
+      USERNAME_INVALID_MESSAGE_STORE,
     );
 
     // Éxito: limpiar, cerrar y avisar al padre. El toast y la recarga de lista
