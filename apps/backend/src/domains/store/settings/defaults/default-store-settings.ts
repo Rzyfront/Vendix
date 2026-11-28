@@ -629,8 +629,11 @@ export function getDefaultStoreSettings(): StoreSettings {
     // to every store that never persisted the block — and `updateSettings`
     // would stamp it into the row on the next unrelated save. Vex and Vexi
     // are independent: enabling one never enables the other.
+    // `floating_avatar` (agentes-admin S3): the admin avatar that only links to
+    // /admin/vex. Off by default, like the agent itself.
     vex: {
       enabled: false,
+      floating_avatar: false,
     },
 
     // Vexi público (F2) — the customer-facing chat on the store's public apps.
