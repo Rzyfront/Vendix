@@ -21,6 +21,8 @@ metadata:
 
 # Vendix Vexi Agent
 
+> **Status (agentes-admin, 2026-11):** the internal admin Vexi (dock) is retired. Vexi only runs in the public apps (`ecommerce/vexi-public`, switch `vexi_public.enabled`). Staff turns resolving to `vexi` are refused (`AI_AGENT_007`); the engine pieces below (registry, bridge, confirmations, attachments, UI loop) are still the shared machinery Vex uses.
+
 ## Source of Truth
 
 - `apps/backend/src/ai-engine/ai-agent.service.ts` — loop; clientSide tools block on the browser.
