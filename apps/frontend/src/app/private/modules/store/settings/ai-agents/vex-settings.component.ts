@@ -44,7 +44,6 @@ type VexSwitch = 'enabled' | 'floating_avatar';
   ],
   template: `
     <app-card
-      [responsive]="true"
       [showHeader]="true"
       data-testid="vex-settings-section"
     >
@@ -78,7 +77,6 @@ type VexSwitch = 'enabled' | 'floating_avatar';
 
       <div class="space-y-4">
         <div
-          class="rounded-lg border border-[var(--color-border)] p-4"
           role="group"
           aria-label="Usar Vex"
           [attr.aria-describedby]="reason() ? 'vex-reason' : null"
@@ -102,7 +100,6 @@ type VexSwitch = 'enabled' | 'floating_avatar';
         </div>
 
         <div
-          class="rounded-lg border border-[var(--color-border)] p-4"
           role="group"
           aria-label="Avatar flotante de Vex"
           data-testid="vex-floating-avatar-setting"

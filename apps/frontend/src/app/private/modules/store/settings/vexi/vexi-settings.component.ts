@@ -41,7 +41,6 @@ import { AgentUsageMetersComponent } from '../ai-agents/agent-usage-meters.compo
   ],
   template: `
     <app-card
-      [responsive]="true"
       [showHeader]="true"
       data-testid="vexi-settings-section"
     >
@@ -65,7 +64,6 @@ import { AgentUsageMetersComponent } from '../ai-agents/agent-usage-meters.compo
 
       <div class="space-y-4">
         <div
-          class="rounded-lg border border-[var(--color-border)] p-4"
           role="group"
           aria-label="Vexi en tus apps públicas"
           data-testid="vexi-public-setting"
