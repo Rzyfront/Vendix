@@ -1602,9 +1602,12 @@ Devuelve SOLO este JSON:
     },
     {
       key: 'vexi_voice_stt',
-      name: 'Vexi — Voz: transcripción (STT)',
+      // Compartida por los agentes (Vex y Vexi). Solo cambia el nombre
+      // visible: la `key` sigue siendo `vexi_voice_stt` porque el código la
+      // busca por clave (VOICE_STT_APP_KEY).
+      name: 'Agentes — Voz: transcripción (STT)',
       description:
-        'Convierte el turno hablado del usuario en texto para que lo procese el agente de chat',
+        'Convierte el turno hablado del usuario en texto para que lo procese el agente',
       output_format: 'text',
       model_type: 'transcription' as ai_model_type_enum,
       // `runTranscription()` no arma prompt: el audio viaja en
@@ -1620,9 +1623,12 @@ Devuelve SOLO este JSON:
     },
     {
       key: 'vexi_voice_tts',
-      name: 'Vexi — Voz: dictado (TTS)',
+      // Compartida por los agentes (Vex y Vexi). Solo cambia el nombre
+      // visible: la `key` sigue siendo `vexi_voice_tts` porque el código la
+      // busca por clave (VOICE_TTS_APP_KEY).
+      name: 'Agentes — Voz: dictado (TTS)',
       description:
-        'Sintetiza en audio cada segmento de la respuesta de Vexi para el modo voz',
+        'Sintetiza en audio cada segmento de la respuesta del agente para el modo voz',
       output_format: 'text',
       model_type: 'speech' as ai_model_type_enum,
       temperature: null,

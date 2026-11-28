@@ -30,7 +30,7 @@ const AI_FEATURE_LABELS: Record<string, string> = {
   tool_agents: 'Agentes con herramientas',
   rag_embeddings: 'RAG y embeddings',
   async_queue: 'Jobs IA asíncronos',
-  realtime_voice: 'Modo voz de Vexi',
+  realtime_voice: 'Modo voz de los agentes',
   vex_agent: 'Vex (agente)',
 };
 
