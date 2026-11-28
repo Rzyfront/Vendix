@@ -241,6 +241,42 @@ describe('Guardarraíl en el chat de la tienda — stream (texto, voz, diseño)'
     expect(t.service.uiChannel.releaseTurn).toHaveBeenCalledWith('stream-1');
   });
 
+  it('primer mensaje cortado: el siguiente turno real sí genera el título del hilo', async () => {
+    const t = build({ action: 'pass', verdict: 'in_scope' });
+    t.service.streamIntents.consume.mockResolvedValue(
+      intent({ content: '¿cuánto vendí hoy?' }),
+    );
+    t.service.getConversation.mockResolvedValue({
+      ...conversation(),
+      title: null,
+      messages: [
+        { id: 1, role: 'user', content: 'escríbeme un poema', tokens_used: 0 },
+        {
+          id: 2,
+          role: 'assistant',
+          content: REDIRECT.reply,
+          tokens_used: 90,
+          metadata: { guardrail: { action: 'redirect', verdict: 'off_topic' } },
+        },
+      ],
+    });
+    await RequestContextService.run(context, () =>
+      collect(t.service.executeMessageStream(11, 'stream-1')),
+    );
+    expect(t.titles.start).toHaveBeenCalledWith(11, '¿cuánto vendí hoy?', expect.any(Number));
+  });
+
+  it('hilo con un turno real previo: no se regenera el título', async () => {
+    const t = build({ action: 'pass', verdict: 'in_scope' });
+    t.service.streamIntents.consume.mockResolvedValue(
+      intent({ content: '¿y ayer?' }),
+    );
+    await RequestContextService.run(context, () =>
+      collect(t.service.executeMessageStream(11, 'stream-1')),
+    );
+    expect(t.titles.start).not.toHaveBeenCalled();
+  });
+
   it('chat de diseño de apps: comparte la entrada y se clasifica como superficie design', async () => {
     const t = build({ action: 'pass', verdict: 'in_scope' });
     t.service.streamIntents.consume.mockResolvedValue(

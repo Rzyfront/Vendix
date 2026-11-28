@@ -284,6 +284,26 @@ function guardrailMark(cut: GuardrailCut) {
 }
 
 /**
+ * True while the thread holds only guardrail cuts (user row + marked
+ * assistant row each), i.e. no real turn yet. Titles are generated on the
+ * first real turn, so a thread whose opening message was cut still gets one.
+ */
+function noRealTurnYet(
+  messages: ReadonlyArray<{ role: string; metadata?: unknown }>,
+): boolean {
+  const answers = messages.filter((m) => m.role === 'assistant');
+  return (
+    messages.length === answers.length * 2 &&
+    answers.every(
+      (m) =>
+        !!m.metadata &&
+        typeof m.metadata === 'object' &&
+        'guardrail' in (m.metadata as Record<string, unknown>),
+    )
+  );
+}
+
+/**
  * Tokens a full answer of this conversation usually costs: the mean of the
  * previous assistant rows that recorded tokens. `null` when there are none.
  */
@@ -828,7 +848,7 @@ export class AIChatService {
     });
 
     // Auto-generate title if first message
-    if (conversation.messages.length === 0 && !conversation.title) {
+    if (!guardCut && noRealTurnYet(conversation.messages) && !conversation.title) {
       const autoTitle = dto.content.substring(0, 80);
       await this.prisma.ai_conversations.update({
         where: { id: conversationId },
@@ -1274,14 +1294,15 @@ export class AIChatService {
     const vexTurn: VexTurnCollection | null =
       agentKey === VEX_AGENT_KEY ? { blocks: new Map(), plan: null } : null;
     let vexPlan: VexTurnCollection['plan'] = null;
-    // Título generado: solo hilos de Vex, solo el primer turno. Arranca ya, en
+    // Título generado: solo hilos de Vex, solo el primer turno real (los cortes
+    // del guardarraíl no cuentan, ver `noRealTurnYet`). Arranca ya, en
     // paralelo al modelo, y su promesa nunca rechaza (ver el servicio).
     const titleDeadline = Date.now() + TITLE_TIMEOUT_MS;
     const titleTask =
       vexTurn &&
       this.titles &&
       !guardCut &&
-      conversation.messages.length === 0 &&
+      noRealTurnYet(conversation.messages) &&
       !intent.continuation &&
       intent.content
         ? this.titles.start(conversationId, intent.content, TITLE_TIMEOUT_MS)
@@ -1748,7 +1769,7 @@ export class AIChatService {
 
     // Vex genera su título arriba (`titleTask`); Vexi y los hilos legacy
     // conservan el primer mensaje recortado.
-    if (!vexTurn) {
+    if (!vexTurn && !guardCut) {
       await this.applyLegacyTitle(conversation, intent.content);
     }
 
@@ -1825,7 +1846,7 @@ export class AIChatService {
     conversation: ConversationWithMessages,
     content: string | undefined,
   ): Promise<void> {
-    if (conversation.messages.length === 0 && !conversation.title && content) {
+    if (noRealTurnYet(conversation.messages) && !conversation.title && content) {
       await this.prisma.ai_conversations.update({
         where: { id: conversation.id },
         data: { title: content.substring(0, 80) },
