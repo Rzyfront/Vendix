@@ -33,7 +33,7 @@ import { StoreSettingsFacade } from '../../../core/store/store-settings/store-se
 import { SubscriptionBannerComponent } from '../../../shared/components/subscription-banner/subscription-banner.component';
 import { FiscalObligationBannerComponent } from '../../../shared/components/fiscal-obligation-banner/fiscal-obligation-banner.component';
 import { PaywallOutletComponent } from '../../../shared/components/ai-paywall-modal/paywall-outlet.component';
-import { VexiDockComponent } from '../../../shared/components/vexi-dock/vexi-dock.component';
+import { VexFloatingAvatarComponent } from '../../../shared/components/vex-floating-avatar/vex-floating-avatar.component';
 import { PullToRefreshDirective } from '../../../shared/directives/pull-to-refresh.directive';
 import { FiscalGateOutletComponent } from '../../../core/components/fiscal-gate-outlet.component';
 import { PlanPaywallOutletComponent } from '../../../core/components/plan-paywall-outlet.component';
@@ -70,7 +70,7 @@ import { map, distinctUntilChanged, skip, switchMap, filter, startWith } from 'r
     WeeklyReportBannerComponent,
     WeeklyReportStoriesComponent,
     ArrivalBannerComponent,
-    VexiDockComponent,
+    VexFloatingAvatarComponent,
     PullToRefreshDirective,
   ],
   template: `
@@ -265,12 +265,10 @@ import { map, distinctUntilChanged, skip, switchMap, filter, startWith } from 'r
     <app-plan-paywall-outlet />
     <app-industry-paywall-outlet />
 
-    <!-- Vexi: chat al tocar, voz en tiempo real al mantener presionado.
-         Tres condiciones deciden si llega a montarse (ver showVexiDock): un
-         dock presente contra endpoints que responden 403 o "plan sin IA" se
-         lee como una avería, no como un ajuste. -->
-    @if (showVexiDock()) {
-      <app-vexi-dock />
+    <!-- Avatar flotante de Vex (agentes-admin S3): no es un chat, solo
+         lleva a /admin/vex. El Vexi interno ya no existe en el admin. -->
+    @if (showVexFloatingAvatar()) {
+      <app-vex-floating-avatar />
     }
   `,
   styleUrls: ['./store-admin-layout.component.scss'],
@@ -303,51 +301,17 @@ export class StoreAdminLayoutComponent {
   });
 
   /**
-   * Vexi's store-wide master switch. Fails closed: the facade reads
-   * `vexi.enabled === true`, so an ABSENT setting means OFF. A store only gets
-   * the assistant once someone turned it on on purpose.
+   * Floating Vex avatar (agentes-admin S3). It replaces the retired internal
+   * Vexi dock, but it is only a link to `/admin/vex`. Mounted when the store
+   * turned the avatar on (`vex.floating_avatar`, off by default) with Vex on,
+   * for owner/admin only — the same audience `vexAccessGuard` lets in — and
+   * never over the POS, whose bottom-right corner holds the checkout actions.
    */
-  readonly vexiEnabled = this.storeSettingsFacade.vexiEnabled;
-
-  /**
-   * Whether the Vexi dock is mounted at all. Three conditions, every one of
-   * them necessary — when any fails the dock simply is not rendered: no
-   * message, no placeholder, no reserved space. A visible dock that answers
-   * 403 or "plan sin IA" on the first message reads as a broken product, not
-   * as a setting the store has not paid for.
-   *
-   * 1. The store-wide master switch, EXPLICITLY on. Absence is off, so the
-   *    dock is never mounted on the mere lack of a setting.
-   *
-   * 2. Role owner/admin. `VexiController` and the write side of
-   *    `AIChatController` are `@Roles(OWNER, ADMIN)`. This layout is shared by
-   *    every store user, so a cashier or salesperson used to see the dock and
-   *    get a 403 on everything it touched. The predicate mirrors
-   *    `vexiSettingsGuard` exactly (role-only, no permission fallback: the
-   *    assistant writes across the whole store, so a broad
-   *    `store:settings:update` must not buy access) which keeps one single
-   *    definition of "who commands Vexi" across guard, sidebar entry and dock.
-   *
-   * 3. A plan with conversational AI. The turn goes through `AiAccessGuard` +
-   *    `@RequireAIFeature('streaming_chat')`; on the `Starter` plan that flag
-   *    is `false`, so the dock would open only for the first message to die
-   *    with a paywall. `featureMatrix` starts as `{}` (the facade's
-   *    `initialValue`), so while the subscription request is still in flight
-   *    `canUseFeature` is false and the dock stays unmounted — it appears once
-   *    there is certainty and never flashes in the wrong direction.
-   */
-  readonly showVexiDock = computed<boolean>(
+  readonly showVexFloatingAvatar = computed<boolean>(
     () =>
-      this.vexiEnabled() &&
-      (this.authFacade.isOwner() ||
-        this.authFacade.isAdmin() ||
-        this.authFacade.hasAnyRole([
-          'owner',
-          'admin',
-          'STORE_OWNER',
-          'ORG_OWNER',
-        ])) &&
-      this.subscriptionFacade.canUseFeature('streaming_chat'),
+      this.storeSettingsFacade.vexFloatingAvatar() &&
+      !this.isPosRoute() &&
+      (this.authFacade.isOwner() || this.authFacade.isAdmin()),
   );
 
   /**

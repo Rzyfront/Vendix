@@ -39,7 +39,7 @@ type ExtendedStoreSettings = StoreSettings & {
    * with its typed frontend mirror; then this moves to the interface next to
    * `VexiSettings` and this line goes away.
    */
-  vex?: { enabled?: boolean } | null;
+  vex?: { enabled?: boolean; floating_avatar?: boolean } | null;
 };
 
 @Injectable({ providedIn: 'root' })
@@ -174,5 +174,15 @@ export class StoreSettingsFacade {
    */
   readonly vexEnabled = computed<boolean>(
     () => this.settings()?.vex?.enabled === true,
+  );
+
+  /**
+   * Floating Vex avatar (agentes-admin S3): only an explicit `true` shows it,
+   * and only while Vex itself is on — an avatar that links to a view the
+   * guard refuses would read as broken.
+   */
+  readonly vexFloatingAvatar = computed<boolean>(
+    () =>
+      this.vexEnabled() && this.settings()?.vex?.floating_avatar === true,
   );
 }
