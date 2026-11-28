@@ -5,6 +5,7 @@ import { of } from 'rxjs';
 import { map, switchMap, catchError, withLatestFrom } from 'rxjs/operators';
 import { ToastService } from '../../../../../../../shared/components/index';
 import { StoreRolesService } from '../../../roles/services/store-roles.service';
+import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
 import { StoreUsersManagementService } from '../../services/store-users-management.service';
 import * as StoreUsersActions from '../actions/store-users.actions';
 import { selectStoreUsersState } from '../selectors/store-users.selectors';
@@ -100,10 +101,15 @@ export class StoreUsersEffects {
             return StoreUsersActions.createUserSuccess({ user: response });
           }),
           catchError((error) => {
-            this.toastService.error(error.error?.message || 'Error al crear usuario');
+            // A taken username is shown inline on the field, not as a toast.
+            const errorCode = parseApiError(error).errorCode;
+            if (errorCode !== 'USER_USERNAME_TAKEN') {
+              this.toastService.error(error.error?.message || 'Error al crear usuario');
+            }
             return of(
               StoreUsersActions.createUserFailure({
                 error: error.error?.message || 'Error creating user',
+                error_code: errorCode,
               }),
             );
           }),
@@ -122,10 +128,15 @@ export class StoreUsersEffects {
             return StoreUsersActions.updateUserSuccess({ user: response });
           }),
           catchError((error) => {
-            this.toastService.error(error.error?.message || 'Error al actualizar usuario');
+            // A taken username is shown inline on the field, not as a toast.
+            const errorCode = parseApiError(error).errorCode;
+            if (errorCode !== 'USER_USERNAME_TAKEN') {
+              this.toastService.error(error.error?.message || 'Error al actualizar usuario');
+            }
             return of(
               StoreUsersActions.updateUserFailure({
                 error: error.error?.message || 'Error updating user',
+                error_code: errorCode,
               }),
             );
           }),

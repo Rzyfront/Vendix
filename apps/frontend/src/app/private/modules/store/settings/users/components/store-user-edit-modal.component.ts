@@ -22,6 +22,7 @@ import {
   Validators,
 } from '@angular/forms';
 import { Store } from '@ngrx/store';
+import { Actions, ofType } from '@ngrx/effects';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import {
   InputComponent,
@@ -51,6 +52,12 @@ import {
   getRoleNotAssignableReason,
 } from '../../../../../../shared/constants/role-scope.constant';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
+import {
+  UsernameFieldState,
+  createUsernameFieldState,
+  usernameAvailabilityValidator,
+  USERNAME_INVALID_MESSAGE_STORE,
+} from '../../../../../../shared/utils/username-availability.validator';
 import {
   Role,
   StoreUser,
@@ -228,12 +235,20 @@ interface RoleScopeGroup {
                       [control]="infoForm.get('email')"
                     />
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <app-input
-                        formControlName="username"
-                        label="Username"
-                        placeholder="juan_perez"
-                        [control]="infoForm.get('username')"
-                      />
+                      <div>
+                        <app-input
+                          formControlName="username"
+                          label="Username"
+                          placeholder="juan_perez"
+                          [control]="infoForm.get('username')"
+                          [error]="usernameState.error() ?? undefined"
+                        />
+                        @if (usernameState.pending()) {
+                          <p class="mt-1 text-sm text-[var(--color-text-secondary)]" aria-live="polite">Verificando…</p>
+                        } @else if (usernameState.available()) {
+                          <p class="mt-1 text-sm text-[var(--color-success)]" aria-live="polite">Disponible</p>
+                        }
+                      </div>
                       <app-input
                         formControlName="phone"
                         label="Telefono"
@@ -775,6 +790,8 @@ export class StoreUserEditModalComponent implements OnChanges {
   ];
 
   infoForm: FormGroup;
+  readonly usernameState: UsernameFieldState;
+  private readonly actions$ = inject(Actions);
   passwordForm: FormGroup;
   carrierTariffForm: FormGroup;
 
@@ -878,9 +895,45 @@ export class StoreUserEditModalComponent implements OnChanges {
       first_name: ['', [Validators.required, Validators.maxLength(100)]],
       last_name: ['', [Validators.required, Validators.maxLength(100)]],
       email: ['', [Validators.required, Validators.email]],
-      username: [''],
+      // Default `updateOn: 'change'` on purpose: live feedback while typing.
+      username: [
+        '',
+        [],
+        [
+          usernameAvailabilityValidator(
+            (username, excludeId) =>
+              this.storeUsersService.checkUsernameAvailability(username, excludeId),
+            {
+              originalValue: () => this.userDetail()?.username,
+              excludeUserId: () => this.user()?.id,
+            },
+          ),
+        ],
+      ],
       phone: [''],
     });
+
+    this.usernameState = createUsernameFieldState(
+      this.infoForm.controls['username'],
+      () => this.userDetail()?.username,
+      undefined,
+      USERNAME_INVALID_MESSAGE_STORE,
+    );
+
+    // A taken username (409 USER_USERNAME_TAKEN) is flagged on the field; the
+    // effect skips the generic toast for it.
+    this.actions$
+      .pipe(
+        ofType(StoreUsersActions.updateUserFailure),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe(({ error_code }) => {
+        if (error_code === 'USER_USERNAME_TAKEN') {
+          const control = this.infoForm.controls['username'];
+          control.setErrors({ usernameTaken: true });
+          control.markAsTouched();
+        }
+      });
 
     this.passwordForm = this.fb.group(
       {
@@ -979,7 +1032,7 @@ export class StoreUserEditModalComponent implements OnChanges {
 
   saveInfo(): void {
     const currentUser = this.user();
-    if (this.infoForm.invalid || !currentUser) return;
+    if (this.infoForm.invalid || this.infoForm.pending || !currentUser) return;
     this.store.dispatch(
       StoreUsersActions.updateUser({
         id: currentUser.id,
@@ -1286,7 +1339,11 @@ export class StoreUserEditModalComponent implements OnChanges {
     if (!this.canManageUsers()) return true;
     switch (this.activeTab()) {
       case 'info':
-        return this.infoForm.invalid || this.detailLoading();
+        return (
+          this.infoForm.invalid ||
+          this.usernameState.pending() ||
+          this.detailLoading()
+        );
       case 'security':
         return this.passwordForm.invalid || this.detailLoading();
       case 'carrier_tariff':

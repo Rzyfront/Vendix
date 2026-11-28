@@ -23,6 +23,7 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { UserRole } from '../../auth/enums/user-role.enum';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { ResponseService } from 'src/common/responses/response.service';
+import { UsernameAvailabilityQueryDto } from '@common/dto/username-availability-query.dto';
 
 @ApiTags('Admin Users')
 @Controller('superadmin/users')
@@ -55,6 +56,17 @@ export class UsersController {
       result.meta.limit,
       'Users retrieved successfully',
     );
+  }
+
+  // Declared before `:id` so the literal segment wins the route.
+  @Get('username-availability')
+  @ApiOperation({ summary: 'Check whether a username is free' })
+  async usernameAvailability(@Query() query: UsernameAvailabilityQueryDto) {
+    const result = await this.usersService.checkUsernameAvailability(
+      query.username,
+      query.exclude_user_id,
+    );
+    return this.responseService.success(result);
   }
 
   @Get('dashboard')

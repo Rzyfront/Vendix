@@ -1003,6 +1003,13 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Invalid user state for this operation',
   },
+  // `users.username` is globally @unique. Surfaced explicitly (pre-check and
+  // P2002 safety net) so panels never leak a Prisma P2002 as a 500.
+  USER_USERNAME_TAKEN: {
+    code: 'USER_USERNAME_TAKEN',
+    httpStatus: 409,
+    devMessage: 'Ese nombre de usuario ya está en uso',
+  },
   ORG_STORE_001: {
     code: 'ORG_STORE_001',
     httpStatus: 404,

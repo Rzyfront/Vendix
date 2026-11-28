@@ -21,6 +21,11 @@ import {
   PasswordRequirementsComponent,
   ToastService} from '../../../../../shared/components/index';
 import { passwordPolicyValidator } from '../../../../../core/utils/password-policy';
+import { parseApiError } from '../../../../../core/utils/parse-api-error';
+import {
+  createUsernameFieldState,
+  usernameAvailabilityValidator,
+} from '../../../../../shared/utils/username-availability.validator';
 import { UsersService } from '../services/users.service';
 import { User, UpdateUserDto, UserState } from '../interfaces/user.interface';
 
@@ -72,14 +77,22 @@ import { User, UpdateUserDto, UserState } from '../interfaces/user.interface';
             [disabled]="isUpdating"
           ></app-input>
 
-          <app-input
-            formControlName="username"
-            label="Nombre de Usuario"
-            placeholder="juanperez"
-            [required]="true"
-            [control]="userForm.get('username')"
-            [disabled]="isUpdating"
-          ></app-input>
+          <div>
+            <app-input
+              formControlName="username"
+              label="Nombre de Usuario"
+              placeholder="juanperez"
+              [required]="true"
+              [control]="userForm.get('username')"
+              [disabled]="isUpdating"
+              [error]="usernameState.error() ?? undefined"
+            ></app-input>
+            @if (usernameState.pending()) {
+              <p class="mt-1 text-sm text-[var(--color-text-secondary)]" aria-live="polite">Verificando…</p>
+            } @else if (usernameState.available()) {
+              <p class="mt-1 text-sm text-[var(--color-success)]" aria-live="polite">Disponible</p>
+            }
+          </div>
 
           <app-input
             formControlName="email"
@@ -253,7 +266,7 @@ import { User, UpdateUserDto, UserState } from '../interfaces/user.interface';
         <app-button
           variant="primary"
           (clicked)="onSubmit()"
-          [disabled]="userForm.invalid || isUpdating"
+          [disabled]="userForm.invalid || usernameState.pending() || isUpdating"
           [loading]="isUpdating"
         >
           Actualizar Usuario
@@ -289,6 +302,17 @@ export class UserEditModalComponent implements OnInit, OnChanges {
         Validators.minLength(3),
         Validators.maxLength(50),
       ],
+      // Default `updateOn: 'change'` on purpose: live feedback while typing.
+      [
+        usernameAvailabilityValidator(
+          (username, excludeId) =>
+            this.usersService.checkUsernameAvailability(username, excludeId),
+          {
+            originalValue: () => this.user()?.username,
+            excludeUserId: () => this.user()?.id,
+          },
+        ),
+      ],
     ],
     email: [
       '',
@@ -297,6 +321,11 @@ export class UserEditModalComponent implements OnInit, OnChanges {
     organization_id: [null, [Validators.required]],
     password: ['', [passwordPolicyValidator]],
     state: [UserState.ACTIVE]});
+
+  readonly usernameState = createUsernameFieldState(
+    this.userForm.get('username')!,
+    () => this.user()?.username,
+  );
 
   isUpdating: boolean = false;
   UserState = UserState;
@@ -329,7 +358,12 @@ ngOnInit(): void {
   }
 onSubmit(): void {
     const currentUser = this.user();
-    if (this.userForm.invalid || this.isUpdating || !currentUser) {
+    if (
+      this.userForm.invalid ||
+      this.userForm.pending ||
+      this.isUpdating ||
+      !currentUser
+    ) {
       return;
     }
 
@@ -352,6 +386,12 @@ onSubmit(): void {
         },
         error: (error: any) => {
           this.isUpdating = false;
+          if (parseApiError(error).errorCode === 'USER_USERNAME_TAKEN') {
+            const control = this.userForm.get('username');
+            control?.setErrors({ usernameTaken: true });
+            control?.markAsTouched();
+            return;
+          }
           this.toastService.error('Error al actualizar el usuario');
           console.error('Error updating user:', error);
         }});

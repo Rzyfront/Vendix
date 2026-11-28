@@ -29,6 +29,7 @@ import { OnboardingService } from '../organization/onboarding/onboarding.service
 import { DefaultPanelUIService } from '../../common/services/default-panel-ui.service';
 import { toTitleCase } from '@common/utils/format.util';
 import { emailEquals, normalizeEmail } from '@common/utils/email.util';
+import { generateUniqueUsername } from '@common/utils/username.util';
 import { mergeUserConfigPanelUi } from '../../common/utils/panel-ui-merge.util';
 import { buildActiveUserRolesWhere } from '@common/utils/role-scope.util';
 import { omitSensitiveUserFields } from '@common/utils/safe-user-select.util';
@@ -4099,25 +4100,13 @@ export class AuthService {
     return 'other';
   }
 
-  // Generar username único basado en email
+  // Generar username único basado en email (≤ 50 caracteres, ver username.util)
   private async generateUniqueUsername(email: string): Promise<string> {
-    const baseUsername = email.split('@')[0];
-    let username = baseUsername;
-    let counter = 1;
-
-    // Verificar si el username ya existe
-    while (await this.prismaService.users.findFirst({ where: { username } })) {
-      username = `${baseUsername}${counter}`;
-      counter++;
-      // Límite de seguridad para evitar bucles infinitos
-      if (counter > 100) {
-        // Si hay demasiadas colisiones, agregar timestamp
-        username = `${baseUsername}_${Date.now()}`;
-        break;
-      }
-    }
-
-    return username;
+    return generateUniqueUsername(
+      email.split('@')[0],
+      async (username) =>
+        !!(await this.prismaService.users.findFirst({ where: { username } })),
+    );
   }
 
   private generateTemporaryPassword(): string {

@@ -20,6 +20,7 @@ import { AuditResource } from '../../../common/audit/audit.service';
 import * as bcrypt from 'bcrypt';
 import { toTitleCase } from '@common/utils/format.util';
 import { emailEquals, normalizeEmail } from '@common/utils/email.util';
+import { generateUniqueUsername } from '@common/utils/username.util';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { computeNitDv, normalizeNit } from '../../../common/utils/nit.util';
@@ -480,32 +481,18 @@ export class CustomersService {
   /**
    * Genera un username único. Cuando hay email, deriva el base del local-part;
    * si no hay email, usa un seed alternativo (documento o nombre) y, en última
-   * instancia, `cliente`. El contador del while garantiza unicidad real contra
-   * la tabla `users`.
+   * instancia, `cliente`. El contador garantiza unicidad real contra la tabla
+   * `users` y el resultado cabe en `@db.VarChar(50)`.
    */
   private async generateUniqueUsername(seed: string | null): Promise<string> {
     const rawBase = seed ? seed.split('@')[0] : '';
-    // Eliminar caracteres especiales
-    let baseUsername = rawBase.replace(/[^a-zA-Z0-9]/g, '');
-    if (!baseUsername) {
-      baseUsername = 'cliente';
-    }
-
-    let username = baseUsername;
-    let counter = 1;
-
-    while (true) {
-      const existingUser = await this.prisma.users.findUnique({
-        where: { username },
-      });
-
-      if (!existingUser) {
-        return username;
-      }
-
-      username = `${baseUsername}${counter}`;
-      counter++;
-    }
+    // Eliminar caracteres especiales; tope de 50 caracteres en username.util.
+    return generateUniqueUsername(
+      rawBase.replace(/[^a-zA-Z0-9]/g, ''),
+      async (username) =>
+        !!(await this.prisma.users.findUnique({ where: { username } })),
+      'cliente',
+    );
   }
 
   private generateTemporaryPassword(length = 10): string {

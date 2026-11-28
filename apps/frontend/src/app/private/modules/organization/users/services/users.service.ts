@@ -10,6 +10,7 @@ import {
 import { tap, shareReplay } from 'rxjs/operators';
 import { toObservable } from '@angular/core/rxjs-interop';
 import { environment } from '../../../../../../environments/environment';
+import type { UsernameAvailability } from '../../../../../../app/shared/utils/username-availability.validator';
 import {
   User,
   CreateUserDto,
@@ -357,5 +358,19 @@ export class UsersService {
           return throwError(() => error);
         }),
       );
+  }
+
+  /** Live username availability check. `excludeUserId` skips the user being edited. */
+  checkUsernameAvailability(
+    username: string,
+    excludeUserId?: number,
+  ): Observable<UsernameAvailability> {
+    let params = new HttpParams().set('username', username);
+    if (excludeUserId !== undefined) {
+      params = params.set('exclude_user_id', String(excludeUserId));
+    }
+    return this.http
+      .get<{ data: UsernameAvailability }>(`${this.apiUrl}/organization/users/username-availability`, { params })
+      .pipe(map((res) => res.data));
   }
 }
