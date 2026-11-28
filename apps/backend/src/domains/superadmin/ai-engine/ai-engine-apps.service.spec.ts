@@ -4,6 +4,7 @@ import {
   AI_APP_TEST_TIMEOUT_MS,
 } from './ai-engine-apps.service';
 import { agentDeadlineContext } from '../../../ai-engine/tasks/agent-deadline';
+import { VendixHttpException } from '../../../common/errors';
 
 describe('AIEngineAppsService', () => {
   let service: AIEngineAppsService;
@@ -545,6 +546,70 @@ describe('AIEngineAppsService', () => {
         expect.objectContaining({
           where: expect.objectContaining({ model_type: 'image' }),
         }),
+      );
+    });
+  });
+
+  describe('remove: las aplicaciones del sistema no se borran', () => {
+    let deleteMock: jest.Mock;
+
+    beforeEach(() => {
+      deleteMock = jest.fn();
+      (prisma.ai_engine_applications as any).delete = deleteMock;
+    });
+
+    it.each(['vexi_voice_tts', 'vexi_voice_stt', 'vex_assistant'])(
+      'rechaza borrar %s con 409 AI_APP_006 y no toca la fila',
+      async (key) => {
+        prisma.ai_engine_applications.findUnique.mockResolvedValueOnce({
+          ...app,
+          key,
+        });
+
+        const error = await service.remove(10).catch((e) => e);
+
+        expect(error).toBeInstanceOf(VendixHttpException);
+        expect(error.getStatus()).toBe(409);
+        expect(error.getResponse()).toEqual(
+          expect.objectContaining({
+            error_code: 'AI_APP_006',
+            message:
+              'Esta aplicación la usa el sistema; puedes editarla o apagarla, pero no borrarla',
+          }),
+        );
+        expect(deleteMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it('borra una aplicación que no es del sistema', async () => {
+      prisma.ai_engine_applications.findUnique.mockResolvedValueOnce(app);
+
+      await service.remove(10);
+
+      expect(deleteMock).toHaveBeenCalledWith({ where: { id: 10 } });
+    });
+
+    it('sigue respondiendo 404 cuando la aplicación no existe', async () => {
+      prisma.ai_engine_applications.findUnique.mockResolvedValueOnce(null);
+
+      const error = await service.remove(10).catch((e) => e);
+
+      expect(error.getStatus()).toBe(404);
+      expect(deleteMock).not.toHaveBeenCalled();
+    });
+
+    it('findOne marca is_system según la clave', async () => {
+      prisma.ai_engine_applications.findUnique.mockResolvedValueOnce({
+        ...app,
+        key: 'vexi_voice_tts',
+      });
+      await expect(service.findOne(10)).resolves.toEqual(
+        expect.objectContaining({ is_system: true }),
+      );
+
+      prisma.ai_engine_applications.findUnique.mockResolvedValueOnce(app);
+      await expect(service.findOne(10)).resolves.toEqual(
+        expect.objectContaining({ is_system: false }),
       );
     });
   });

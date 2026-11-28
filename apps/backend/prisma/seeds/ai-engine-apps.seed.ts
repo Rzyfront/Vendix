@@ -6,6 +6,10 @@ import { DATA_COLLECTION_TEMPLATE_BUILDER_APPLICATION } from './data-collection-
 import { WORKFLOW_DOCUMENT_EXTRACT_APPLICATION } from './workflow-document-extract.application';
 import { WORKFLOW_AI_STEP_APPLICATION } from './workflow-ai-step.application';
 import { WORKFLOW_INSIGHTS_SUMMARY_APPLICATION } from './workflow-insights-summary.application';
+import {
+  AGENT_SETTINGS_ONLY_APPLICATIONS,
+  AGENT_SETTINGS_ONLY_APP_KEYS,
+} from './agent-guardrail.application';
 
 export interface SeedAIEngineAppsResult {
   appsCreated: number;
@@ -149,6 +153,8 @@ Example D — a line with "IBUA $65/u" in an "Otros imp." column (value per unit
     WORKFLOW_DOCUMENT_EXTRACT_APPLICATION,
     WORKFLOW_AI_STEP_APPLICATION,
     WORKFLOW_INSIGHTS_SUMMARY_APPLICATION,
+    // Vex tie-breaker classifier and agent guardrail: inactive, no config.
+    ...AGENT_SETTINGS_ONLY_APPLICATIONS,
     {
       key: 'invoice_ocr_ingredient',
       ai_feature_category: 'async_queue',
@@ -1602,9 +1608,12 @@ Devuelve SOLO este JSON:
     },
     {
       key: 'vexi_voice_stt',
-      name: 'Vexi — Voz: transcripción (STT)',
+      // Compartida por los agentes (Vex y Vexi). Solo cambia el nombre
+      // visible: la `key` sigue siendo `vexi_voice_stt` porque el código la
+      // busca por clave (VOICE_STT_APP_KEY).
+      name: 'Agentes — Voz: transcripción (STT)',
       description:
-        'Convierte el turno hablado del usuario en texto para que lo procese el agente de chat',
+        'Convierte el turno hablado del usuario en texto para que lo procese el agente',
       output_format: 'text',
       model_type: 'transcription' as ai_model_type_enum,
       // `runTranscription()` no arma prompt: el audio viaja en
@@ -1620,9 +1629,12 @@ Devuelve SOLO este JSON:
     },
     {
       key: 'vexi_voice_tts',
-      name: 'Vexi — Voz: dictado (TTS)',
+      // Compartida por los agentes (Vex y Vexi). Solo cambia el nombre
+      // visible: la `key` sigue siendo `vexi_voice_tts` porque el código la
+      // busca por clave (VOICE_TTS_APP_KEY).
+      name: 'Agentes — Voz: dictado (TTS)',
       description:
-        'Sintetiza en audio cada segmento de la respuesta de Vexi para el modo voz',
+        'Sintetiza en audio cada segmento de la respuesta del agente para el modo voz',
       output_format: 'text',
       model_type: 'speech' as ai_model_type_enum,
       temperature: null,
@@ -1822,6 +1834,7 @@ Genera el JSON de la landing page por defecto siguiendo el esquema exacto del sy
           system_prompt: app.system_prompt,
           prompt_template: app.prompt_template,
           retry_config: (app as any).retry_config ?? undefined,
+          rate_limit: (app as any).rate_limit ?? undefined,
           ai_feature_category: (app as any).ai_feature_category ?? null,
           metadata: (app as any).metadata ?? undefined,
         },
@@ -2093,7 +2106,11 @@ async function linkTextAppsWhenNoDefault(
     ]);
     const textAppKeys = apps
       .filter(
-        (app) => app.model_type === 'text' && !VISION_APP_KEYS.has(app.key),
+        (app) =>
+          app.model_type === 'text' &&
+          !VISION_APP_KEYS.has(app.key) &&
+          // Off until super admin picks their model (agent-guardrail.application).
+          !AGENT_SETTINGS_ONLY_APP_KEYS.has(app.key),
       )
       .map((app) => app.key);
 

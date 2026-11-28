@@ -185,6 +185,12 @@ export interface VexSettings {
    * `=== true`.
    */
   enabled?: boolean;
+  /**
+   * Floating Vex avatar in the admin (agentes-admin S3). Not a chat: tapping it
+   * navigates to `/admin/vex`. Off by default; read through
+   * `StoreSettingsFacade.vexFloatingAvatar()`.
+   */
+  floating_avatar?: boolean;
 }
 
 /**

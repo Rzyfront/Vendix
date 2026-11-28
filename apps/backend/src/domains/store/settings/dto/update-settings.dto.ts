@@ -55,6 +55,16 @@ export class VexSettingsDto {
   @IsOptional()
   @IsBoolean()
   enabled?: boolean;
+
+  @ApiProperty({
+    example: false,
+    required: false,
+    description:
+      'Muestra un avatar flotante de Vex en el panel. No es un chat: al tocarlo lleva a /admin/vex. Apagado por defecto.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  floating_avatar?: boolean;
 }
 
 /**

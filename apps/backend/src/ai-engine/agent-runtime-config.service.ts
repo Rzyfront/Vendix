@@ -107,6 +107,12 @@ const AGENT_LABELS: Record<RuntimeAgentKey, 'Vex' | 'Vexi'> = {
   vexi: 'Vexi',
 };
 
+/** Store setting whose `enabled` is the agent's store switch. */
+const STORE_SWITCH_KEY: Record<RuntimeAgentKey, 'vex' | 'vexi_public'> = {
+  vex: 'vex',
+  vexi: 'vexi_public',
+};
+
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
 
@@ -582,7 +588,11 @@ export class AgentRuntimeConfigService {
         (r) => r.agent_key === agentKey && r.capability_key === 'agent',
       );
       const plan_includes = planRow?.enabled === true;
-      const block = (settings as Record<string, unknown>)[agentKey];
+      // Vexi only exists in the public apps now (the internal dock is
+      // retired), so its store switch is `vexi_public`, not `vexi`.
+      const block = (settings as Record<string, unknown>)[
+        STORE_SWITCH_KEY[agentKey]
+      ];
       const store_enabled = isRecord(block) && block.enabled === true;
 
       // Same order as the gate: the subscription state blocks before the
@@ -613,7 +623,10 @@ export class AgentRuntimeConfigService {
         state,
         plan_includes,
         store_enabled,
-        reason: agentStatusReason(state, label, resolved.state),
+        reason:
+          agentKey === 'vexi' && state === 'off_by_store'
+            ? 'La tienda no ha publicado a Vexi en sus apps públicas (Ajustes → Agentes IA).'
+            : agentStatusReason(state, label, resolved.state),
       };
     });
   }

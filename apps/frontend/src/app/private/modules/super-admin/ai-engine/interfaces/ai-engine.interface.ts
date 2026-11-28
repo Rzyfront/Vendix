@@ -278,11 +278,18 @@ export interface AIEngineApp {
   temperature?: number;
   max_tokens?: number;
   output_format: OutputFormat;
-  rate_limit?: { maxRequests: number; windowSeconds: number };
-  retry_config?: { maxRetries: number; delayMs: number };
+  // Other keys (e.g. `max_calls_per_turn`, `timeout_ms`) belong to services
+  // that read their own row; the modal keeps them when saving.
+  rate_limit?: { maxRequests?: number; windowSeconds?: number; [key: string]: unknown };
+  retry_config?: { maxRetries?: number; delayMs?: number; [key: string]: unknown };
   is_active: boolean;
   metadata?: Record<string, any>;
   ai_feature_category?: AIFeatureCategory;
+  /**
+   * Set by the backend: the system resolves this app by key, so it can be
+   * edited or turned off but never deleted (409 AI_APP_006).
+   */
+  is_system?: boolean;
   created_at?: string;
   updated_at?: string;
 }
@@ -298,8 +305,10 @@ export interface CreateAIAppDto {
   temperature?: number;
   max_tokens?: number;
   output_format?: OutputFormat;
-  rate_limit?: { maxRequests: number; windowSeconds: number };
-  retry_config?: { maxRetries: number; delayMs: number };
+  // Other keys (e.g. `max_calls_per_turn`, `timeout_ms`) belong to services
+  // that read their own row; the modal keeps them when saving.
+  rate_limit?: { maxRequests?: number; windowSeconds?: number; [key: string]: unknown };
+  retry_config?: { maxRetries?: number; delayMs?: number; [key: string]: unknown };
   is_active?: boolean;
   metadata?: Record<string, any>;
   ai_feature_category: AIFeatureCategory;

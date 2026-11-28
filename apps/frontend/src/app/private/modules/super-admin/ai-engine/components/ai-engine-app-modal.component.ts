@@ -37,6 +37,58 @@ import {
   SelectorOption,
 } from '../../../../../shared/components/index';
 
+/**
+ * Apps whose backend service reads its own keys from `metadata`,
+ * `retry_config` and `rate_limit` (instead of the engine's generic ones). The
+ * modal edits those keys with typed fields and merges them into the row.
+ */
+const AGENT_SETTINGS_KINDS = [
+  'vex_classifier',
+  'agent_guardrail',
+  'agent_guardrail_responder',
+] as const;
+type AgentSettingsKind = (typeof AGENT_SETTINGS_KINDS)[number];
+
+const AGENT_SETTINGS_TITLES: Record<AgentSettingsKind, string> = {
+  vex_classifier: 'Clasificador de Vex',
+  agent_guardrail: 'Guardarraíl: cuándo cortar',
+  agent_guardrail_responder: 'Guardarraíl: respuesta al infractor',
+};
+
+type JsonRecord = Record<string, unknown>;
+
+/**
+ * Ranges `AgentGuardrailService` accepts (it clamps anything outside). The
+ * modal rejects out-of-range values so what super admin sees is what runs.
+ */
+interface AgentFieldRange {
+  control: string;
+  label: string;
+  min: number;
+  max: number;
+  integer: boolean;
+}
+const AGENT_FIELD_RANGES: Partial<Record<AgentSettingsKind, AgentFieldRange[]>> = {
+  agent_guardrail: [
+    { control: 'min_confidence', label: 'Confianza mínima', min: 0, max: 1, integer: false },
+    { control: 'strikes_before_cooldown', label: 'Infracciones antes de la pausa', min: 1, max: 20, integer: true },
+    { control: 'cooldown_minutes', label: 'Minutos de pausa', min: 0, max: 1440, integer: false },
+    { control: 'timeout_ms', label: 'Tiempo máximo', min: 200, max: 5000, integer: true },
+    { control: 'context_messages', label: 'Mensajes de contexto', min: 0, max: 12, integer: true },
+    { control: 'public_rate_penalty', label: 'Penalización en Vexi público', min: 0, max: 10, integer: true },
+  ],
+  agent_guardrail_responder: [
+    { control: 'timeout_ms', label: 'Tiempo máximo', min: 200, max: 5000, integer: true },
+    { control: 'max_chars', label: 'Largo máximo', min: 80, max: 1000, integer: true },
+  ],
+};
+
+function asRecord(value: unknown): JsonRecord {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? { ...(value as JsonRecord) }
+    : {};
+}
+
 @Component({
   selector: 'app-ai-engine-app-modal',
   standalone: true,
@@ -96,14 +148,24 @@ import {
           <!-- Config selector -->
           <app-selector
             label="Configuracion de IA"
-            placeholder="Usar configuracion por defecto"
+            [placeholder]="
+              agentSettingsKind()
+                ? 'Sin modelo (apagado)'
+                : 'Usar configuracion por defecto'
+            "
             [options]="configOptions()"
             [formControl]="$any(form.get('config_id'))"
             [disabled]="isSubmitting()"
           ></app-selector>
           <p class="text-xs text-text-secondary -mt-2">
-            Si no seleccionas una, se usara la configuracion marcada como
-            default.
+            @if (agentSettingsKind()) {
+              Elige la configuracion con el modelo y la clave (cualquier modelo
+              de OpenRouter dado de alta en Configuraciones). Sin
+              configuracion queda apagada: nunca usa la de por defecto.
+            } @else {
+              Si no seleccionas una, se usara la configuracion marcada como
+              default.
+            }
           </p>
 
           <!-- Model Type -->
@@ -287,6 +349,201 @@ import {
             </div>
           }
 
+          <!-- Agent settings: typed fields for apps whose service reads its
+               own keys in metadata / retry_config / rate_limit (no JSON). -->
+          @if (agentSettingsKind(); as kind) {
+            <div
+              formGroupName="agent"
+              class="space-y-3 rounded-lg border border-border p-3"
+            >
+              <h4 class="text-sm font-medium text-text-primary">
+                {{ agentSettingsTitle() }}
+              </h4>
+
+              @if (kind === 'vex_classifier') {
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <app-selector
+                    label="Adaptador"
+                    [options]="classifierAdapterOptions"
+                    [formControl]="$any(form.get('agent.adapter'))"
+                    [disabled]="isSubmitting()"
+                  ></app-selector>
+                  <app-input
+                    formControlName="min_confidence"
+                    label="Confianza mínima (0 a 1)"
+                    type="number"
+                    placeholder="0"
+                    [control]="form.get('agent.min_confidence')"
+                    [disabled]="isSubmitting()"
+                  ></app-input>
+                  <app-input
+                    formControlName="max_calls_per_turn"
+                    label="Llamadas máximas por turno"
+                    type="number"
+                    placeholder="3"
+                    [control]="form.get('agent.max_calls_per_turn')"
+                    [disabled]="isSubmitting()"
+                  ></app-input>
+                  <app-input
+                    formControlName="timeout_ms"
+                    label="Tiempo máximo por llamada (ms)"
+                    type="number"
+                    placeholder="800"
+                    [control]="form.get('agent.timeout_ms')"
+                    [disabled]="isSubmitting()"
+                  ></app-input>
+                  <app-input
+                    formControlName="total_timeout_ms"
+                    label="Tiempo máximo total (ms)"
+                    type="number"
+                    placeholder="1200"
+                    [control]="form.get('agent.total_timeout_ms')"
+                    [disabled]="isSubmitting()"
+                  ></app-input>
+                </div>
+                <p class="text-xs text-text-secondary">
+                  Automático usa la API de decisiones solo con modelos que la
+                  admiten y chat con cualquier otro. Con modelos de chat deja
+                  la confianza mínima en 0 (no la reportan). Vacío = valor por
+                  defecto.
+                </p>
+              }
+
+              @if (kind === 'agent_guardrail') {
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <app-input
+                    formControlName="min_confidence"
+                    label="Confianza mínima para cortar (0 a 1)"
+                    type="number"
+                    placeholder="0.6"
+                    [control]="form.get('agent.min_confidence')"
+                    [disabled]="isSubmitting()"
+                  ></app-input>
+                  <app-input
+                    formControlName="strikes_before_cooldown"
+                    label="Infracciones seguidas antes de la pausa (1 a 20)"
+                    type="number"
+                    placeholder="3"
+                    [control]="form.get('agent.strikes_before_cooldown')"
+                    [disabled]="isSubmitting()"
+                  ></app-input>
+                  <app-input
+                    formControlName="cooldown_minutes"
+                    label="Minutos de pausa (0 a 1440; 0 = sin pausa)"
+                    type="number"
+                    placeholder="2"
+                    [control]="form.get('agent.cooldown_minutes')"
+                    [disabled]="isSubmitting()"
+                  ></app-input>
+                  <app-input
+                    formControlName="timeout_ms"
+                    label="Tiempo máximo de la clasificación (200 a 5000 ms)"
+                    type="number"
+                    placeholder="1500"
+                    [control]="form.get('agent.timeout_ms')"
+                    [disabled]="isSubmitting()"
+                  ></app-input>
+                  <app-input
+                    formControlName="context_messages"
+                    label="Mensajes previos de contexto (0 a 12)"
+                    type="number"
+                    placeholder="4"
+                    [control]="form.get('agent.context_messages')"
+                    [disabled]="isSubmitting()"
+                  ></app-input>
+                  <app-input
+                    formControlName="public_rate_penalty"
+                    label="Penalización extra en Vexi público (0 a 10)"
+                    type="number"
+                    placeholder="1"
+                    [control]="form.get('agent.public_rate_penalty')"
+                    [disabled]="isSubmitting()"
+                  ></app-input>
+                </div>
+                @for (agent of guardrailAgents; track agent.key) {
+                  <div class="space-y-1">
+                    <label class="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        [formControlName]="agent.key + '_enabled'"
+                        class="rounded border-gray-300 text-primary focus:ring-primary"
+                      />
+                      <span class="text-sm text-text-primary">
+                        Revisar los mensajes de {{ agent.label }}
+                      </span>
+                    </label>
+                    <textarea
+                      [formControlName]="agent.key + '_scope'"
+                      rows="3"
+                      [placeholder]="agent.scopePlaceholder"
+                      class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary
+                             placeholder:text-text-secondary focus:outline-none focus:ring-2 focus:ring-primary/20
+                             focus:border-primary disabled:opacity-50 resize-y"
+                    ></textarea>
+                  </div>
+                }
+                <p class="text-xs text-text-secondary">
+                  El alcance describe lo que cada agente sí atiende (vacío = el
+                  texto por defecto). Si el modelo duda, falla o tarda más del
+                  tiempo máximo, el mensaje sigue normal. Un mensaje en tema
+                  reinicia la racha. Cada mensaje espera esta revisión antes de
+                  que responda el agente. Para levantar las pausas activas, pon
+                  0 minutos (aplica en menos de un minuto). Subir los minutos
+                  solo aplica a las pausas nuevas.
+                </p>
+              }
+
+              @if (agentRangeErrors().length) {
+                <ul class="text-xs text-red-600 space-y-0.5" role="alert">
+                  @for (error of agentRangeErrors(); track error) {
+                    <li>{{ error }}</li>
+                  }
+                </ul>
+              }
+
+              @if (kind === 'agent_guardrail_responder') {
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <app-input
+                    formControlName="timeout_ms"
+                    label="Tiempo máximo de la respuesta (200 a 5000 ms)"
+                    type="number"
+                    placeholder="1500"
+                    [control]="form.get('agent.timeout_ms')"
+                    [disabled]="isSubmitting()"
+                  ></app-input>
+                  <app-input
+                    formControlName="max_chars"
+                    label="Largo máximo de la respuesta (80 a 1000 caracteres)"
+                    type="number"
+                    placeholder="400"
+                    [control]="form.get('agent.max_chars')"
+                    [disabled]="isSubmitting()"
+                  ></app-input>
+                </div>
+                @for (field of responderTemplateFields; track field.control) {
+                  <div class="space-y-1">
+                    <label class="block text-sm font-medium text-text-primary">
+                      {{ field.label }}
+                    </label>
+                    <textarea
+                      [formControlName]="field.control"
+                      rows="2"
+                      [placeholder]="field.placeholder"
+                      class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary
+                             placeholder:text-text-secondary focus:outline-none focus:ring-2 focus:ring-primary/20
+                             focus:border-primary disabled:opacity-50 resize-y"
+                    ></textarea>
+                  </div>
+                }
+                <p class="text-xs text-text-secondary">
+                  Textos fijos que se usan cuando este modelo está apagado,
+                  falla o se pasa del largo máximo (vacío = texto por defecto).
+                  El aviso de pausa siempre es texto fijo.
+                </p>
+              }
+            </div>
+          }
+
           <!-- System Prompt -->
           <div class="space-y-1">
             <label class="block text-sm font-medium text-text-primary">
@@ -427,7 +684,8 @@ import {
               isSubmitting() ||
               modelTypeMismatch() ||
               speedOutOfRange() ||
-              volOutOfRange()
+              volOutOfRange() ||
+              agentRangeErrors().length > 0
             "
             [loading]="isSubmitting()"
           >
@@ -458,6 +716,49 @@ export class AIEngineAppModalComponent implements OnChanges {
 
   configOptions = signal<SelectorOption[]>([]);
 
+  /** Key of the app being edited/created, mirrored for `computed`. */
+  private currentKey = signal<string>('');
+
+  agentSettingsKind = computed<AgentSettingsKind | null>(() => {
+    const key = this.currentKey();
+    return (AGENT_SETTINGS_KINDS as readonly string[]).includes(key)
+      ? (key as AgentSettingsKind)
+      : null;
+  });
+
+  agentSettingsTitle = computed<string>(() => {
+    const kind = this.agentSettingsKind();
+    return kind ? AGENT_SETTINGS_TITLES[kind] : '';
+  });
+
+  classifierAdapterOptions: SelectorOption[] = [
+    { value: 'auto', label: 'Automático' },
+    { value: 'decisions', label: 'API de decisiones' },
+    { value: 'chat', label: 'Chat' },
+  ];
+
+  guardrailAgents = [
+    {
+      key: 'vex',
+      label: 'Vex (administración de la tienda)',
+      scopePlaceholder: 'Alcance de Vex. Vacío = operación y administración de la tienda en Vendix.',
+    },
+    {
+      key: 'vexi',
+      label: 'Vexi (clientes en las apps públicas)',
+      scopePlaceholder: 'Alcance de Vexi. Vacío = atención y venta de la tienda: catálogo, pedidos, reservas, peticiones.',
+    },
+  ] as const;
+
+  responderTemplateFields = [
+    { control: 'vex_off_topic', label: 'Vex · fuera de tema', placeholder: 'Vacío = texto por defecto' },
+    { control: 'vex_abuse', label: 'Vex · uso inadecuado', placeholder: 'Vacío = texto por defecto' },
+    { control: 'vex_cooldown', label: 'Vex · aviso de pausa', placeholder: 'Vacío = texto por defecto' },
+    { control: 'vexi_off_topic', label: 'Vexi · fuera de tema', placeholder: 'Vacío = texto por defecto' },
+    { control: 'vexi_abuse', label: 'Vexi · uso inadecuado', placeholder: 'Vacío = texto por defecto' },
+    { control: 'vexi_cooldown', label: 'Vexi · aviso de pausa', placeholder: 'Vacío = texto por defecto' },
+  ] as const;
+
   // Reactive state for the type-mismatch check between app.model_type and
   // selected config.model_type. We mirror form values into signals so the
   // template can use a `computed` without zone-driven change detection.
@@ -465,6 +766,26 @@ export class AIEngineAppModalComponent implements OnChanges {
   currentModelType = signal<AIModelType | null>('text');
   private currentSpeed = signal<number | null>(null);
   private currentVol = signal<number | null>(null);
+  /** Mirror of the `agent` group (a `computed` cannot read a FormGroup). */
+  private agentValues = signal<JsonRecord>({});
+
+  /** One message per typed agent field outside the range its service accepts. */
+  agentRangeErrors = computed<string[]>(() => {
+    const kind = this.agentSettingsKind();
+    const ranges = kind ? AGENT_FIELD_RANGES[kind] : undefined;
+    if (!ranges) return [];
+    const values = this.agentValues();
+    const errors: string[] = [];
+    for (const r of ranges) {
+      const n = this.toFiniteNumber(values[r.control]);
+      if (n === null) continue;
+      if (n < r.min || n > r.max || (r.integer && !Number.isInteger(n)))
+        errors.push(
+          `${r.label}: debe ser ${r.integer ? 'un entero ' : ''}entre ${r.min} y ${r.max}.`,
+        );
+    }
+    return errors;
+  });
 
   selectedConfigModelType = computed<AIModelType | null>(() => {
     const id = this.currentConfigId();
@@ -613,9 +934,36 @@ export class AIEngineAppModalComponent implements OnChanges {
       vol: [null as number | null],
       max_concurrency: [null as number | null],
     }),
+    agent: this.fb.group({
+      adapter: ['auto'],
+      min_confidence: [null as number | null],
+      timeout_ms: [null as number | null],
+      total_timeout_ms: [null as number | null],
+      max_calls_per_turn: [null as number | null],
+      strikes_before_cooldown: [null as number | null],
+      cooldown_minutes: [null as number | null],
+      context_messages: [null as number | null],
+      public_rate_penalty: [null as number | null],
+      vex_enabled: [true],
+      vex_scope: [''],
+      vexi_enabled: [true],
+      vexi_scope: [''],
+      max_chars: [null as number | null],
+      vex_off_topic: [''],
+      vex_abuse: [''],
+      vex_cooldown: [''],
+      vexi_off_topic: [''],
+      vexi_abuse: [''],
+      vexi_cooldown: [''],
+    }),
   });
 
   constructor() {
+    this.form
+      .get('key')
+      ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((key: string | null) => this.currentKey.set(key ?? ''));
+
     this.form
       .get('config_id')
       ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
@@ -637,6 +985,11 @@ export class AIEngineAppModalComponent implements OnChanges {
       .subscribe((speed: unknown) => {
         this.currentSpeed.set(this.toFiniteNumber(speed));
       });
+
+    this.form
+      .get('agent')
+      ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((values: JsonRecord) => this.agentValues.set(values ?? {}));
 
     // Un `computed()` no reacciona a un FormControl, así que el valor se espeja
     // en una señal como ya se hace con la velocidad.
@@ -703,6 +1056,8 @@ export class AIEngineAppModalComponent implements OnChanges {
       this.currentConfigId.set(a.config_id?.toString() || null);
       this.currentSpeed.set(this.toFiniteNumber(speech['speed']));
       this.currentVol.set(this.toFiniteNumber(speech['vol']));
+      this.currentKey.set(a.key);
+      this.patchAgentSettings(a);
       // Disable key editing on existing apps
       this.form.get('key')?.disable();
     } else if (this.isOpen() && !this.app()) {
@@ -712,7 +1067,12 @@ export class AIEngineAppModalComponent implements OnChanges {
   }
 
   onSubmit(): void {
-    if (this.form.invalid || this.speedOutOfRange() || this.volOutOfRange()) {
+    if (
+      this.form.invalid ||
+      this.speedOutOfRange() ||
+      this.volOutOfRange() ||
+      this.agentRangeErrors().length > 0
+    ) {
       return;
     }
 
@@ -733,18 +1093,25 @@ export class AIEngineAppModalComponent implements OnChanges {
       is_active: raw.is_active,
     };
 
-    // Build rate_limit object if any value provided
+    // Build rate_limit object if any value provided. The column is replaced
+    // whole on save, so keys other services read (e.g. `max_calls_per_turn`)
+    // are carried through.
     if (raw.rate_limit_max != null || raw.rate_limit_window != null) {
       data.rate_limit = {
+        ...asRecord(this.app()?.rate_limit),
         maxRequests: Number(raw.rate_limit_max) || 100,
         windowSeconds: Number(raw.rate_limit_window) || 60,
       };
     }
 
-    // Build retry_config object if any value provided
+    // Build retry_config object if any value provided (same carry-through,
+    // e.g. the classifier's `timeout_ms`).
     if (raw.retry_max != null || raw.retry_delay != null) {
       data.retry_config = {
-        maxRetries: Number(raw.retry_max) || 3,
+        ...asRecord(this.app()?.retry_config),
+        // 0 is a valid value (no retries); only empty means the default.
+        maxRetries:
+          this.toFiniteNumber(raw.retry_max) ?? 3,
         delayMs: Number(raw.retry_delay) || 1000,
       };
     }
@@ -753,6 +1120,8 @@ export class AIEngineAppModalComponent implements OnChanges {
     if (metadata) {
       data.metadata = metadata;
     }
+
+    this.applyAgentSettings(data, raw.agent);
 
     this.submit.emit(data);
   }
@@ -827,6 +1196,107 @@ export class AIEngineAppModalComponent implements OnChanges {
     return Object.keys(existing).length ? existing : undefined;
   }
 
+  /** Loads the typed fields of an agent-settings app from its JSON columns. */
+  private patchAgentSettings(a: AIEngineApp): void {
+    const meta = asRecord(a.metadata);
+    const retry = asRecord(a.retry_config);
+    const rate = asRecord(a.rate_limit);
+    const agents = asRecord(meta['agents']);
+    const vex = asRecord(agents['vex']);
+    const vexi = asRecord(agents['vexi']);
+    const templates = asRecord(meta['templates']);
+    const tVex = asRecord(templates['vex']);
+    const tVexi = asRecord(templates['vexi']);
+    const num = (v: unknown) => this.toFiniteNumber(v);
+    const text = (v: unknown) => (typeof v === 'string' ? v : '');
+    const cooldown = num(meta['cooldown_seconds']);
+    this.form.get('agent')?.reset({
+      adapter: text(meta['adapter']) || 'auto',
+      min_confidence: num(meta['min_confidence']),
+      timeout_ms: num(retry['timeout_ms']),
+      total_timeout_ms: num(retry['total_timeout_ms']),
+      max_calls_per_turn: num(rate['max_calls_per_turn']),
+      strikes_before_cooldown: num(meta['strikes_before_cooldown']),
+      cooldown_minutes: cooldown === null ? null : cooldown / 60,
+      context_messages: num(meta['context_messages']),
+      public_rate_penalty: num(meta['public_rate_penalty']),
+      vex_enabled: vex['enabled'] !== false,
+      vex_scope: text(vex['scope']),
+      vexi_enabled: vexi['enabled'] !== false,
+      vexi_scope: text(vexi['scope']),
+      max_chars: num(meta['max_chars']),
+      vex_off_topic: text(tVex['off_topic']),
+      vex_abuse: text(tVex['abuse']),
+      vex_cooldown: text(tVex['cooldown']),
+      vexi_off_topic: text(tVexi['off_topic']),
+      vexi_abuse: text(tVexi['abuse']),
+      vexi_cooldown: text(tVexi['cooldown']),
+    });
+  }
+
+  /**
+   * Writes the typed fields of an agent-settings app into `metadata`,
+   * `retry_config` and `rate_limit`, merged over what the row (or the generic
+   * fields above) already hold. An empty field removes its key, so the
+   * service applies its default; keys this form does not know survive.
+   */
+  private applyAgentSettings(data: any, agent: any): void {
+    const kind = this.agentSettingsKind();
+    if (!kind || !agent) return;
+    const metadata = asRecord(data.metadata ?? this.app()?.metadata);
+    const retry = asRecord(data.retry_config ?? this.app()?.retry_config);
+    const rate = asRecord(data.rate_limit ?? this.app()?.rate_limit);
+    const setNum = (target: JsonRecord, key: string, value: unknown) => {
+      const n = this.toFiniteNumber(value);
+      if (n === null) delete target[key];
+      else target[key] = n;
+    };
+    const setText = (target: JsonRecord, key: string, value: unknown) => {
+      const t = typeof value === 'string' ? value.trim() : '';
+      if (t) target[key] = t;
+      else delete target[key];
+    };
+
+    if (kind === 'vex_classifier') {
+      metadata['adapter'] = agent.adapter || 'auto';
+      setNum(metadata, 'min_confidence', agent.min_confidence);
+      setNum(retry, 'timeout_ms', agent.timeout_ms);
+      setNum(retry, 'total_timeout_ms', agent.total_timeout_ms);
+      setNum(rate, 'max_calls_per_turn', agent.max_calls_per_turn);
+      data.rate_limit = rate;
+    } else if (kind === 'agent_guardrail') {
+      setNum(metadata, 'min_confidence', agent.min_confidence);
+      setNum(metadata, 'strikes_before_cooldown', agent.strikes_before_cooldown);
+      const minutes = this.toFiniteNumber(agent.cooldown_minutes);
+      if (minutes === null) delete metadata['cooldown_seconds'];
+      else metadata['cooldown_seconds'] = Math.round(minutes * 60);
+      setNum(metadata, 'context_messages', agent.context_messages);
+      setNum(metadata, 'public_rate_penalty', agent.public_rate_penalty);
+      setNum(retry, 'timeout_ms', agent.timeout_ms);
+      const agents = asRecord(metadata['agents']);
+      for (const key of ['vex', 'vexi']) {
+        const entry = asRecord(agents[key]);
+        entry['enabled'] = agent[`${key}_enabled`] !== false;
+        setText(entry, 'scope', agent[`${key}_scope`]);
+        agents[key] = entry;
+      }
+      metadata['agents'] = agents;
+    } else {
+      setNum(retry, 'timeout_ms', agent.timeout_ms);
+      setNum(metadata, 'max_chars', agent.max_chars);
+      const templates = asRecord(metadata['templates']);
+      for (const key of ['vex', 'vexi']) {
+        const entry = asRecord(templates[key]);
+        for (const kindKey of ['off_topic', 'abuse', 'cooldown'])
+          setText(entry, kindKey, agent[`${key}_${kindKey}`]);
+        templates[key] = entry;
+      }
+      metadata['templates'] = templates;
+    }
+    data.metadata = metadata;
+    data.retry_config = retry;
+  }
+
   private resetForm(): void {
     this.form.reset({
       key: '',
@@ -853,6 +1323,8 @@ export class AIEngineAppModalComponent implements OnChanges {
         max_concurrency: null,
       },
     });
+    this.form.get('agent')?.reset({ adapter: 'auto', vex_enabled: true, vexi_enabled: true });
+    this.currentKey.set('');
     this.currentModelType.set('text');
     this.currentConfigId.set(null);
     this.currentSpeed.set(null);

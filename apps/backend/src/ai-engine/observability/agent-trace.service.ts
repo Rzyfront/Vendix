@@ -30,7 +30,9 @@ export type AgentSpanKind =
   | 'approval_wait'
   | 'verifier'
   /** A call refused before running (e.g. a reversal of a deletion). */
-  | 'tool_denied';
+  | 'tool_denied'
+  /** Pre-turn guardrail (`AgentGuardrailService`): verdict, never the text. */
+  | 'guardrail';
 
 interface TraceIdentity {
   readonly request_id?: string;
@@ -129,6 +131,7 @@ const KINDS = new Set<AgentSpanKind>([
   'approval_wait',
   'verifier',
   'tool_denied',
+  'guardrail',
 ]);
 const HASH_KEYS = new Set([
   'catalog_hash',
@@ -180,6 +183,10 @@ const COUNT_KEYS = new Set([
   // F10/T67: seq of a Code Mode internal call (child span of run_code).
   'call_seq',
   'authorized_tool_count',
+  // Pre-turn guardrail: streak, its own tokens and the main turn avoided.
+  'guardrail_strikes',
+  'guardrail_tokens',
+  'tokens_saved_estimate',
 ]);
 const BOOLEAN_KEYS = new Set([
   'ui_result_known',
@@ -189,6 +196,7 @@ const BOOLEAN_KEYS = new Set([
   'retryable',
   'streaming',
   'full_catalog_fallback',
+  'main_skipped',
 ]);
 const ENUM_KEYS: Record<string, ReadonlySet<string>> = {
   // F10/T60: bytes-based estimate, never provider-observed tokens.
@@ -288,6 +296,30 @@ const ENUM_KEYS: Record<string, ReadonlySet<string>> = {
     'refusal',
     'low_confidence',
     'empty_input',
+  ]),
+  // Pre-turn guardrail (`AgentGuardrailService`): enums only, never text.
+  guardrail_agent: new Set(['vex', 'vexi']),
+  guardrail_verdict: new Set([
+    'in_scope',
+    'off_topic',
+    'abuse',
+    'unclear',
+    'cooldown',
+    'unavailable',
+  ]),
+  guardrail_action: new Set(['pass', 'redirect', 'cooldown']),
+  guardrail_reply_source: new Set(['model', 'template']),
+  guardrail_degradation: new Set([
+    'not_configured',
+    'inactive',
+    'no_model',
+    'agent_disabled',
+    'empty_input',
+    'timeout',
+    'provider_error',
+    'invalid_response',
+    'low_confidence',
+    'config_error',
   ]),
 };
 

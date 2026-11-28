@@ -84,7 +84,9 @@ const SECTION_LABELS: Readonly<Record<string, string>> = {
   reservations: 'Reservas',
   availability: 'Disponibilidad',
   accounting_flows: 'Flujos contables',
-  vexi: 'Vexi',
+  vexi: 'Vexi interno (retirado)',
+  vexi_public: 'Vexi en apps públicas',
+  vex: 'Vex',
   app: 'App (alias legado)',
   _schema_version: 'Versión del esquema',
 };
