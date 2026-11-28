@@ -27,6 +27,7 @@ import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
+import { UsernameAvailabilityQueryDto } from '@common/dto/username-availability-query.dto';
 
 @Controller('store/users')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -69,6 +70,20 @@ export class StoreUsersController {
   @Permissions('store:users:read')
   async getStats() {
     const result = await this.storeUserManagementService.getStats();
+    return this.responseService.success(result);
+  }
+
+  // Declared before `management/:id` so the literal segment wins the route.
+  @Get('management/username-availability')
+  @Permissions('store:users:create', 'store:users:update')
+  async managementUsernameAvailability(
+    @Query() query: UsernameAvailabilityQueryDto,
+  ) {
+    const result =
+      await this.storeUserManagementService.checkUsernameAvailability(
+        query.username,
+        query.exclude_user_id,
+      );
     return this.responseService.success(result);
   }
 

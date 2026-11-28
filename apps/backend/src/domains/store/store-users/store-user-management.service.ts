@@ -31,6 +31,11 @@ import * as bcrypt from 'bcryptjs';
 import { toTitleCase } from '@common/utils/format.util';
 import { emailEquals, normalizeEmail } from '@common/utils/email.util';
 import { SAFE_USER_SELECT } from '@common/utils/safe-user-select.util';
+import { UsernameService } from '@common/services/username.service';
+import {
+  STORE_USERNAME_PATTERN,
+  normalizeUsername,
+} from '@common/utils/username.util';
 
 @Injectable()
 export class StoreUserManagementService {
@@ -39,6 +44,7 @@ export class StoreUserManagementService {
     private defaultPanelUIService: DefaultPanelUIService,
     private staffProvisioning: StaffProvisioningService,
     private userRoleAssignment: UserRoleAssignmentService,
+    private usernames: UsernameService,
   ) {}
 
   /**
@@ -112,10 +118,27 @@ export class StoreUserManagementService {
     const formatted_first_name = toTitleCase(dto.first_name || '');
     const formatted_last_name = toTitleCase(dto.last_name || '');
 
-    // Generate username if not provided
-    const username =
-      dto.username ||
-      `${formatted_first_name.toLowerCase()}_${formatted_last_name.toLowerCase()}_${Date.now()}`;
+    // `users.username` is unique across ALL of Vendix: a typed one must be
+    // free (409 USER_USERNAME_TAKEN otherwise); a generated one is unique and
+    // fits the 50-char column.
+    const requested_username = normalizeUsername(dto.username);
+    let username: string;
+    if (requested_username) {
+      await this.usernames.assertAvailable(requested_username);
+      username = requested_username;
+    } else {
+      const base = [formatted_first_name, formatted_last_name]
+        .map((part) =>
+          part
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, ''),
+        )
+        .filter(Boolean)
+        .join('_');
+      username = await this.usernames.generateUnique(base);
+    }
 
     // El rol es parametrizable (default `employee`). Regla de negocio:
     // `app_type` es MANUAL únicamente — asignar el rol `carrier` NO mueve al
@@ -131,7 +154,7 @@ export class StoreUserManagementService {
     // main_store_id were previously missing here).
     const normalized_phone = dto.phone?.trim() ? dto.phone.trim() : null;
 
-    return this.prisma.withoutScope().$transaction(async (tx) => {
+    const creation = this.prisma.withoutScope().$transaction(async (tx) => {
       const user = await tx.users.create({
         data: {
           first_name: formatted_first_name,
@@ -166,6 +189,11 @@ export class StoreUserManagementService {
 
       return user;
     });
+
+    // Race safety net: a concurrent create can still hit users_username_key.
+    return creation.catch((error: unknown) =>
+      this.usernames.rethrowAsConflict(error),
+    );
   }
 
   async findAll(query: QueryStoreUsersDto) {
@@ -365,6 +393,17 @@ export class StoreUserManagementService {
       }
     }
 
+    if (typeof dto.username === 'string') {
+      const username = normalizeUsername(dto.username);
+      update_data.username = username;
+      // Unchanged username (forms always send it): nothing to check.
+      if (username !== user.username) {
+        await this.usernames.assertAvailable(username, {
+          excludeUserId: userId,
+        });
+      }
+    }
+
     if (dto.first_name) {
       update_data.first_name = toTitleCase(dto.first_name);
     }
@@ -376,7 +415,7 @@ export class StoreUserManagementService {
       update_data.phone = trimmed ? trimmed : null;
     }
 
-    const updated_user = await this.prisma.users.update({
+    const update = this.prisma.users.update({
       where: { id: userId },
       data: update_data,
       select: {
@@ -390,8 +429,29 @@ export class StoreUserManagementService {
         created_at: true,
       },
     });
+    const updated_user = await update.catch((error: unknown) =>
+      this.usernames.rethrowAsConflict(error),
+    );
 
     return updated_user;
+  }
+
+  /**
+   * Live availability for the store create/edit user modals. `excludeUserId`
+   * only applies to a user of this store: an outside id is ignored, so the
+   * answer never reveals who owns a username in another tenant.
+   */
+  async checkUsernameAvailability(username: string, excludeUserId?: number) {
+    const visible = excludeUserId
+      ? await this.prisma.store_users.findFirst({
+          where: { user_id: excludeUserId },
+          select: { id: true },
+        })
+      : null;
+    return this.usernames.checkAvailability(username, {
+      excludeUserId: visible ? excludeUserId : undefined,
+      pattern: STORE_USERNAME_PATTERN,
+    });
   }
 
   async deactivate(userId: number) {

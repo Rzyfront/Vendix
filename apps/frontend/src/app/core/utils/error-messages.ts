@@ -121,6 +121,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   AUTH_CREATE_001: 'Error al crear el usuario.',
   AUTH_VALIDATE_001: 'La validacion de autenticacion fallo.',
   AUTH_DUP_001: 'Ya existe un usuario con este email.',
+  USER_USERNAME_TAKEN: 'Ese nombre de usuario ya está en uso.',
   AUTH_PERM_001: 'No tiene permisos para realizar esta accion.',
   BANK_ACCOUNT_NOT_FOUND: 'No se encontro la cuenta bancaria.',
   BANK_ACCOUNT_DUPLICATE: 'Ya existe una cuenta bancaria con ese numero.',

@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, input, output, signal, DestroyRef } from '@angular/core';
+import { Component, Injector, OnInit, inject, input, output, signal, DestroyRef } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
@@ -26,6 +26,12 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
 import { ImageUploadService } from '../../../../../shared/services/image-upload.service';
 import { dataUrlToFile } from '../../../../../shared/utils/data-url.util';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
+import { parseApiError } from '../../../../../core/utils/parse-api-error';
+import {
+  UsernameFieldState,
+  createUsernameFieldState,
+  usernameAvailabilityValidator,
+} from '../../../../../shared/utils/username-availability.validator';
 import {
   DOCUMENT_TYPE_SELECT_OPTIONS,
   toDocumentTypeCode,
@@ -72,15 +78,23 @@ import {
             [disabled]="isCreating()"
           ></app-input>
 
-          <app-input
-            formControlName="username"
-            label="Nombre de Usuario *"
-            placeholder="juanperez"
-            [required]="true"
-            [control]="userForm.get('username')"
-            [disabled]="isCreating()"
-            helpText="Mínimo 3 caracteres, solo letras, números y guiones bajos"
-          ></app-input>
+          <div>
+            <app-input
+              formControlName="username"
+              label="Nombre de Usuario *"
+              placeholder="juanperez"
+              [required]="true"
+              [control]="userForm.get('username')"
+              [disabled]="isCreating()"
+              [error]="usernameState.error() ?? undefined"
+              helpText="Mínimo 3 caracteres, solo letras, números y guiones bajos"
+            ></app-input>
+            @if (usernameState.pending()) {
+              <p class="mt-1 text-sm text-[var(--color-text-secondary)]" aria-live="polite">Verificando…</p>
+            } @else if (usernameState.available()) {
+              <p class="mt-1 text-sm text-[var(--color-success)]" aria-live="polite">Disponible</p>
+            }
+          </div>
 
           <app-input
             formControlName="email"
@@ -274,7 +288,7 @@ import {
         <app-button
           variant="primary"
           (clicked)="onSubmit()"
-          [disabled]="userForm.invalid || isCreating()"
+          [disabled]="userForm.invalid || usernameState.pending() || isCreating()"
           [loading]="isCreating()"
         >
           Crear Usuario
@@ -294,6 +308,7 @@ export class UserCreateModalComponent implements OnInit {
   readonly documentTypeOptions = DOCUMENT_TYPE_SELECT_OPTIONS;
 
   private destroyRef = inject(DestroyRef);
+  private injector = inject(Injector);
   private fb = inject(FormBuilder);
   private usersService = inject(UsersService);
   private rolesService = inject(OrgRolesService);
@@ -315,6 +330,7 @@ export class UserCreateModalComponent implements OnInit {
   readonly onUserCreated = output<void>();
 
   userForm!: FormGroup;
+  usernameState!: UsernameFieldState;
   readonly isCreating = signal(false);
   readonly avatarPreview = signal<string | null>(null);
   readonly uploadingAvatar = signal(false);
@@ -338,6 +354,12 @@ export class UserCreateModalComponent implements OnInit {
           Validators.maxLength(50),
           Validators.pattern(/^[a-zA-Z0-9_]+$/),
         ],
+        // Default `updateOn: 'change'` on purpose: live feedback while typing.
+        [
+          usernameAvailabilityValidator((username, excludeId) =>
+            this.usersService.checkUsernameAvailability(username, excludeId),
+          ),
+        ],
       ],
       email: [
         '',
@@ -353,6 +375,12 @@ export class UserCreateModalComponent implements OnInit {
       main_store_id: [null],
       avatar_url: [''],
     });
+
+    this.usernameState = createUsernameFieldState(
+      this.userForm.get('username')!,
+      () => null,
+      this.injector,
+    );
 
     this.loadRoles();
     this.loadStores();
@@ -466,7 +494,11 @@ export class UserCreateModalComponent implements OnInit {
   }
 
   onSubmit(): void {
-    if (this.userForm.invalid || this.isCreating()) {
+    if (
+      this.userForm.invalid ||
+      this.userForm.pending ||
+      this.isCreating()
+    ) {
       Object.keys(this.userForm.controls).forEach((key) => {
         this.userForm.get(key)?.markAsTouched();
       });
@@ -493,6 +525,12 @@ export class UserCreateModalComponent implements OnInit {
         },
         error: (error: unknown) => {
           this.isCreating.set(false);
+          if (parseApiError(error).errorCode === 'USER_USERNAME_TAKEN') {
+            const control = this.userForm.get('username');
+            control?.setErrors({ usernameTaken: true });
+            control?.markAsTouched();
+            return;
+          }
           const message = extractApiErrorMessage(error);
           this.toastService.error(message);
         },
