@@ -72,6 +72,11 @@ import {
   Validators,
 } from '@angular/forms';
 
+/** Label of an app the backend resolves by key (`is_system`). */
+export const SYSTEM_APP_LABEL = 'Del sistema';
+export const SYSTEM_APP_DELETE_TOOLTIP =
+  'La usa el sistema: puedes editarla o apagarla, pero no borrarla';
+
 type ActiveTab =
   | 'configs'
   | 'apps'
@@ -405,6 +410,20 @@ export class AIEngineComponent implements OnInit {
       badgeConfig: { type: 'status', size: 'sm' },
       transform: (value: boolean) => (value ? 'Activo' : 'Inactivo'),
     },
+    {
+      key: 'is_system',
+      label: 'Origen',
+      priority: 3,
+      badge: true,
+      badgeConfig: {
+        type: 'custom',
+        size: 'sm',
+        colorFn: (value: boolean | undefined) =>
+          value ? '#6366f1' : '#9ca3af',
+      },
+      transform: (value: boolean | undefined) =>
+        value ? SYSTEM_APP_LABEL : 'Personalizada',
+    },
   ];
 
   appCardConfig: ItemListCardConfig = {
@@ -425,6 +444,12 @@ export class AIEngineComponent implements OnInit {
         label: 'Formato',
         transform: (value: string) => this.formatOutputFormat(value),
       },
+      {
+        key: 'is_system',
+        label: 'Origen',
+        transform: (value: boolean | undefined) =>
+          value ? SYSTEM_APP_LABEL : 'Personalizada',
+      },
       { key: 'description', label: 'Descripcion' },
     ],
   };
@@ -443,10 +468,19 @@ export class AIEngineComponent implements OnInit {
       variant: 'info',
     },
     {
-      label: 'Eliminar',
-      icon: 'trash-2',
+      // System apps are resolved by key in the backend: deleting one breaks a
+      // live feature, so the action is disabled and explains why (the
+      // backend also refuses it with 409 AI_APP_006).
+      label: (app: AIEngineApp) =>
+        app.is_system ? SYSTEM_APP_LABEL : 'Eliminar',
+      icon: (app: AIEngineApp) => (app.is_system ? 'lock' : 'trash-2'),
       action: (app: AIEngineApp) => this.confirmDeleteApp(app),
-      variant: 'danger',
+      variant: (app: AIEngineApp) => (app.is_system ? 'muted' : 'danger'),
+      disabled: (app: AIEngineApp) => !!app.is_system,
+      tooltip: (app: AIEngineApp) =>
+        app.is_system ? SYSTEM_APP_DELETE_TOOLTIP : 'Eliminar',
+      tooltipComponent: true,
+      tooltipColor: 'default',
     },
   ];
 
@@ -1079,6 +1113,10 @@ export class AIEngineComponent implements OnInit {
   }
 
   confirmDeleteApp(app: AIEngineApp): void {
+    if (app.is_system) {
+      this.toastService.info(SYSTEM_APP_DELETE_TOOLTIP);
+      return;
+    }
     this.dialogService
       .confirm({
         title: 'Eliminar Aplicacion',

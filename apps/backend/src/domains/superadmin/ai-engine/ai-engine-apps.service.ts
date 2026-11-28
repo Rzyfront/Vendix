@@ -8,6 +8,7 @@ import {
   isAgentAbort,
 } from '../../../ai-engine/tasks/agent-deadline';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
+import { isSystemAppKey } from '../../../ai-engine/system-app-keys';
 import { CreateAIAppDto, UpdateAIAppDto, AIAppQueryDto } from './dto';
 
 /**
@@ -209,7 +210,7 @@ export class AIEngineAppsService {
     ]);
 
     return {
-      data,
+      data: data.map((row) => this.withSystemFlag(row)),
       meta: {
         total,
         page: Number(page),
@@ -240,7 +241,17 @@ export class AIEngineAppsService {
       throw new VendixHttpException(ErrorCodes.AI_APP_001);
     }
 
-    return app;
+    return this.withSystemFlag(app);
+  }
+
+  /**
+   * `is_system`: the backend resolves this app by key, so the panel offers
+   * edit / turn off but never delete (see `SYSTEM_AI_APP_KEYS`).
+   */
+  private withSystemFlag<T extends { key: string }>(
+    app: T,
+  ): T & { is_system: boolean } {
+    return { ...app, is_system: isSystemAppKey(app.key) };
   }
 
   async update(id: number, dto: UpdateAIAppDto) {
@@ -341,6 +352,13 @@ export class AIEngineAppsService {
 
     if (!existing) {
       throw new VendixHttpException(ErrorCodes.AI_APP_001);
+    }
+
+    if (isSystemAppKey(existing.key)) {
+      throw new VendixHttpException(
+        ErrorCodes.AI_APP_006,
+        'Esta aplicación la usa el sistema; puedes editarla o apagarla, pero no borrarla',
+      );
     }
 
     await this.prisma.ai_engine_applications.delete({ where: { id } });
