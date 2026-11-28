@@ -19,6 +19,9 @@ export const SYSTEM_AI_APP_KEYS: ReadonlySet<string> = new Set([
   'vex_title_generator',
   'vexi_storefront',
   'chat_assistant',
+  // Misuse guardrail (classifier + canned responder) in front of Vex/Vexi.
+  'agent_guardrail',
+  'agent_guardrail_responder',
   // Voice shared by the agents.
   'vexi_voice_tts',
   'vexi_voice_stt',

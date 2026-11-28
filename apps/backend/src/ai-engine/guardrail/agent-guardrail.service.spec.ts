@@ -458,6 +458,20 @@ describe('AgentGuardrailService', () => {
       expect(run).not.toHaveBeenCalled();
     });
 
+    it('a start time in the future (clock skew) never shows more than the pause length', async () => {
+      const { service, redis } = build([classifierRow()], jest.fn());
+      // 2-minute pause stamped 10 min ahead: at most «2 minutos», not 12.
+      redis.store.set(
+        AgentGuardrailService.cooldownKey('vex', 's5:u9'),
+        `${Date.now() + 600_000}:120`,
+      );
+      const decision = await service.check(input());
+      expect(decision).toMatchObject({ action: 'cooldown' });
+      expect(decision.action !== 'pass' && decision.reply).toContain(
+        'disponible en 2 minutos.',
+      );
+    });
+
     it('super admin lifts or shortens running pauses from the panel (current cooldown_seconds)', async () => {
       const key = AgentGuardrailService.cooldownKey('vex', 's5:u9');
       const run = jest

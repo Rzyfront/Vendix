@@ -489,7 +489,7 @@ function asRecord(value: unknown): JsonRecord {
                   reinicia la racha. Cada mensaje espera esta revisión antes de
                   que responda el agente. Para levantar las pausas activas, pon
                   0 minutos (aplica en menos de un minuto). Subir los minutos
-                  solo alarga las pausas nuevas.
+                  solo aplica a las pausas nuevas.
                 </p>
               }
 
