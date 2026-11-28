@@ -488,7 +488,8 @@ function asRecord(value: unknown): JsonRecord {
                   tiempo máximo, el mensaje sigue normal. Un mensaje en tema
                   reinicia la racha. Cada mensaje espera esta revisión antes de
                   que responda el agente. Para levantar las pausas activas, pon
-                  0 minutos (aplica en menos de un minuto).
+                  0 minutos (aplica en menos de un minuto). Subir los minutos
+                  solo alarga las pausas nuevas.
                 </p>
               }
 

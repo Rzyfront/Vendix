@@ -49,10 +49,11 @@ import { AgentQuotaService } from '../../domains/store/subscriptions/services/ag
  * Numbers out of range are clamped to the nearest bound (integers rounded);
  * only non-numbers fall back to the default. The panel rejects them first.
  *
- * Cooldown: the key stores when the pause started and its length is read
- * from the CURRENT `cooldown_seconds` on every message, so super admin can
- * shorten or lift (0) running pauses from the panel (applies within the 30 s
- * settings cache).
+ * Cooldown: the key stores `<start ms>:<length s>` and expires with that
+ * length. Each message uses the SHORTER of that length and the CURRENT
+ * `cooldown_seconds`, so super admin can shorten or lift (0) running pauses
+ * from the panel (applies within the 30 s settings cache), while raising it
+ * never revives finished pauses nor lengthens running ones.
  *
  * Defaults mirror `prisma/seeds/agent-guardrail.application.ts` (checked by
  * spec). Tokens are charged to the agent's monthly counter, like the rest of
@@ -165,7 +166,7 @@ const MAX_MESSAGE_CHARS = 1_500;
 const MAX_HISTORY_CHARS = 400;
 const MAX_SCOPE_CHARS = 2_000;
 const MAX_TEMPLATE_CHARS = 600;
-/** Longest pause super admin can set (and the cooldown key's lifetime). */
+/** Longest pause super admin can set. */
 const MAX_COOLDOWN_SECONDS = 86_400;
 
 export const CLASSIFIER_SYSTEM_PROMPT = `Eres el guardarraíl de {{agent_name}}, un asistente de una tienda en Vendix. Antes de que {{agent_name}} responda, clasificas el MENSAJE NUEVO de la persona según el alcance de {{agent_name}}.
@@ -604,9 +605,16 @@ export class AgentGuardrailService {
   }
 
   /**
-   * Seconds left of this subject's pause, measured against the CURRENT
-   * `cooldown_seconds` (the key holds the start time), so lowering it in the
-   * panel shortens running pauses and 0 lifts them. 0 = not paused.
+   * Seconds left of this subject's pause. 0 = not paused.
+   *
+   * The key holds `<start ms>:<length s>`; the pause lasts the SHORTER of
+   * that length and the current `cooldown_seconds`, so lowering it in the
+   * panel shortens running pauses (0 lifts them) and raising it changes
+   * nothing already started.
+   *
+   * Legacy keys (start time only, written before the length was stored and
+   * kept alive for 24 h) have no known length: they use the current value
+   * capped at the default pause, so a raise cannot revive them either.
    */
   private async cooldownLeft(
     input: GuardrailInput,
@@ -614,15 +622,20 @@ export class AgentGuardrailService {
   ): Promise<number> {
     if (!this.redis) return 0;
     try {
-      const startedAt = Number(
-        await this.redis.get(
-          AgentGuardrailService.cooldownKey(input.agent, input.subject),
-        ),
+      const raw = await this.redis.get(
+        AgentGuardrailService.cooldownKey(input.agent, input.subject),
       );
+      if (!raw) return 0;
+      const [startPart, lengthPart] = raw.split(':');
+      const startedAt = Number(startPart);
+      const original =
+        lengthPart === undefined
+          ? AGENT_GUARDRAIL_DEFAULTS.cooldown_seconds
+          : Number(lengthPart);
       if (!Number.isFinite(startedAt) || startedAt <= 0) return 0;
-      const left = Math.ceil(
-        (startedAt + s.classifier.cooldownSeconds * 1000 - Date.now()) / 1000,
-      );
+      if (!Number.isFinite(original) || original <= 0) return 0;
+      const length = Math.min(original, s.classifier.cooldownSeconds);
+      const left = Math.ceil((startedAt + length * 1000 - Date.now()) / 1000);
       return left > 0 ? left : 0;
     } catch {
       return 0;
@@ -667,14 +680,13 @@ export class AgentGuardrailService {
     try {
       await this.redis
         .multi()
-        // Value = start time; the length is re-read on every message (see
-        // `cooldownLeft`). The key lives for the longest pause allowed so
-        // raising the length in the panel also applies to running pauses.
+        // Value = `<start ms>:<length s>`; it expires with that length, so a
+        // later raise in the panel cannot revive it (see `cooldownLeft`).
         .set(
           AgentGuardrailService.cooldownKey(input.agent, input.subject),
-          String(Date.now()),
+          `${Date.now()}:${s.classifier.cooldownSeconds}`,
           'EX',
-          MAX_COOLDOWN_SECONDS,
+          s.classifier.cooldownSeconds,
         )
         .del(AgentGuardrailService.strikesKey(input.agent, input.subject))
         .exec();
