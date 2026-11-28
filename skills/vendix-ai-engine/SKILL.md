@@ -45,6 +45,13 @@ metadata:
 - Image input: call `run(appKey, {}, [imageMessage])` directly (see the `runByApplicationType` gotcha in `vendix-ai-platform-core`).
 - Applications live in `ai_engine_applications` (super-admin CRUD). `ai_feature_category` is required and drives gate/quota; `metadata.agent_enabled` / `metadata.rag_enabled` drive chat routing and are not edited by the app modal.
 
+- Settings-only apps (`vex_classifier`, `agent_guardrail`, `agent_guardrail_responder`) are seeded inactive with no `config_id` from `prisma/seeds/agent-guardrail.application.ts` (no `src/` imports: the prod image runs seeds with tsx). No config = off; their services never fall back to the default config. The app modal edits their own `metadata`/`retry_config`/`rate_limit` keys with typed fields and merges over the row.
+- A new seed that imports from `src/` must also be copied in `apps/backend/Dockerfile` (#1438).
+
+## Agent guardrail (pre-turn)
+
+`AgentGuardrailService` (`src/ai-engine/guardrail/`) runs before Vex (`ai-chat` stream and POST: text, voice, app design chat) and public Vexi (`vexi-public.service.ts`). Verdict `in_scope|off_topic|abuse|unclear` via `run('agent_guardrail')`; off_topic/abuse answer a redirect from `run('agent_guardrail_responder')` (never sees the user text) or a template, and the main model/tools never run. Strikes and cooldown in Redis (`agent_guardrail:{strikes,cooldown}:<agent>:<subject>`); public Vexi adds `rate_penalty` to its per-minute limits. Fail-open on everything (off, no config, timeout, error, Redis, unclear, low confidence). Tokens go to the agent's counter (`consumeAgentTokens`); span kind `guardrail` (enums only). Not covered: voice confirmations of cards and continuations (no user text).
+
 ## Reference integrations
 
 - Product descriptions: `apps/backend/src/domains/store/products/products.service.ts`.
